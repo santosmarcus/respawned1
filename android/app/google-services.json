@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "790537497506",
+    "project_id": "respawnd1-45021",
+    "storage_bucket": "respawnd1-45021.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:790537497506:android:c4f6983851ca249126e0fb",
+        "android_client_info": {
+          "package_name": "com.dlsu.cap2507.respawnd1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCuO16U6W5K1Wb2L10cm5istT7xjcX82n8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
