@@ -44,6 +44,23 @@ dependencies:
   geolocator: ^14.0.2
   image_picker: ^1.0.7
   flutter_stripe: ^12.3.0  # for PayMongo integration via Stripe
+  google_fonts: ^8.0.2
+
+  # UI
+  lottie: ^3.3.2  # animated illustrations (loading, empty states)
+  cached_network_image: ^3.4.1 # load animal photos from Firebase Storage
+  flutter_svg: ^2.2.3          # SVG icons
+  shimmer:   ^3.0.0            # loading skeleton effect on lists
+
+  # Navigation
+  go_router: ^17.1.0
+
+  # State Management
+  flutter_riverpod: ^3.2.1     # or provider, bloc — pick one and stick to it
+
+  # Forms & Validation
+  flutter_form_builder: ^10.3.0+2
+  form_builder_validators: ^11.3.0
 
 dev_dependencies:
   flutter_test:
@@ -70,6 +87,10 @@ flutter:
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

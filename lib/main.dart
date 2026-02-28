@@ -1,20 +1,20 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const resPAWnd());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class resPAWnd extends StatelessWidget {
+  const resPAWnd({super.key});
 
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        colorScheme: .fromSeed(seedColor: Colors.deepOrange),
-      ),
+      title: 'resPAWnd',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lighTheme,
       home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
@@ -102,6 +102,30 @@ class _MyHomePageState extends State<MyHomePage> {
         tooltip: 'Increment',
         child: const Icon(Icons.add),
       ),
+    );
+  }
+}*/
+
+import 'package:flutter/material.dart';
+import 'app_theme.dart';
+//import 'features/auth/login_screen.dart';
+import 'features/home/home_screen.dart';
+
+
+void main() {
+  runApp(const ResPAWndApp());
+}
+
+class ResPAWndApp extends StatelessWidget {
+  const ResPAWndApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'ResPAWnd',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      home: const HomeScreen(), //replace with login
     );
   }
 }
