@@ -60,7 +60,7 @@ class HomeScreen extends StatelessWidget {
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: const [
+                children: [
                   _QuickActionCard(
                     label: 'Report a\nRescue',
                     color: AppColors.lavenderrspwn,
@@ -87,16 +87,19 @@ class HomeScreen extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                'Active Case',
-                style: Theme.of(context).textTheme.headlineLarge,
+                'Activity',
+                style: GoogleFonts.tiltWarp(fontSize: 16,
+                  fontWeight: FontWeight.normal,
+                  color: AppColors.textPrimary,
+                ),
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
 
             // Case card placeholder
             Card(
-              color: AppColors.slaterspwn,
+              color: AppColors.bgres,
               margin: const EdgeInsets.symmetric(horizontal: 16),
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -108,21 +111,26 @@ class HomeScreen extends StatelessWidget {
                       height: 80,
                       decoration: BoxDecoration(
                         color: AppColors.background,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.textSecondary),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 30),
                     // Case details — fill in when you have real data
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Case #001',
+                          Text('#123ABCD',
                               style: Theme.of(context).textTheme.titleSmall),
                           const SizedBox(height: 4),
+                          Text('February 12, 2026 11:00 AM ',
+                              style: Theme.of(context).textTheme.titleSmallest),
+                          const SizedBox(height: 4),
+                          Text('123 A. B. Street, Pasay, Metro Manila 1234 ',
+                              style: Theme.of(context).textTheme.titleSmallest),
+                          const SizedBox(height: 4),
                           Text('Status: Pending',
-                              style: Theme.of(context).textTheme.bodyMedium),
+                              style: Theme.of(context).textTheme.titleSmallest),
                         ],
                       ),
                     ),
@@ -144,12 +152,14 @@ class _QuickActionCard extends StatelessWidget {
   final String label;
   final Color color;
 
-  const _QuickActionCard({required this.label, required this.color});
+  const _QuickActionCard({required this.label, required this.color, 
+    });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 110,
+      width: 111,
+      height: 139,
       margin: const EdgeInsets.only(right: 12),
       decoration: BoxDecoration(
         color: color,
@@ -157,17 +167,22 @@ class _QuickActionCard extends StatelessWidget {
       ),
       child: Center(
         child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(
+          padding: const EdgeInsetsGeometry.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Spacer(),
+            Text(
             label,
             textAlign: TextAlign.center,
             style: GoogleFonts.tiltWarp(
               fontSize: 14,
-              fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.normal,
               color: AppColors.textPrimary,
             ),
           ),
-        ),
+        ]),
+      ),
       ),
     );
   }
