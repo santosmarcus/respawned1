@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
+import '../rescue/rescue_page.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -64,7 +65,15 @@ class HomeScreen extends StatelessWidget {
                   _QuickActionCard(
                     label: 'Report a\nRescue',
                     color: AppColors.lavenderrspwn,
-                  ),
+                    onTap: (){
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RescuePage(),
+                        ),
+                      );
+                    },
+                    ),
                   _QuickActionCard(
                     label: 'Adopt a\nRescue',
                     color: AppColors.greenrspwn,
@@ -151,13 +160,16 @@ class HomeScreen extends StatelessWidget {
 class _QuickActionCard extends StatelessWidget {
   final String label;
   final Color color;
+  final VoidCallback? onTap;
 
-  const _QuickActionCard({required this.label, required this.color, 
+  const _QuickActionCard({required this.label, required this.color, this.onTap,
     });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
       width: 111,
       height: 139,
       margin: const EdgeInsets.only(right: 12),
@@ -184,6 +196,7 @@ class _QuickActionCard extends StatelessWidget {
         ]),
       ),
       ),
+    ),
     );
   }
 }
