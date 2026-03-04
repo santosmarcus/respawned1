@@ -14,6 +14,7 @@ class AppColors {
 
   static const Color textPrimary = Color(0xFF393207);
   static const Color textSecondary = Color(0xFF7E7D76);
+  static const Color bgres = Color(0xFFE2E5FF);
 }
 
 class AppTheme {
@@ -37,6 +38,7 @@ class AppTheme {
           //Zain
           titleMedium:   GoogleFonts.zain(fontSize: 24, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
           titleSmall:   GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
+          titleSmallest:   GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
         ),
 
         // AppBar
