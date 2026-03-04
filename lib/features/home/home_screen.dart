@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/features/adoption/adoption_page.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
+import '../adoption/adoption_page.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -77,6 +79,12 @@ class HomeScreen extends StatelessWidget {
                   _QuickActionCard(
                     label: 'Adopt a\nRescue',
                     color: AppColors.greenrspwn,
+                    onTap: (){
+                      Navigator.push(context, MaterialPageRoute(
+                          builder: (context) => AdoptionPage(),
+                      ),
+                      );
+                    },
                   ),
                   _QuickActionCard(
                     label: 'Donate or\nSponsor',

@@ -1,8 +1,8 @@
-import 'dart:ffi';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
+import 'package:respawnd1/features/home/home_screen.dart';
 
 class RescuePage extends StatefulWidget {
   const RescuePage({super.key});
@@ -62,7 +62,14 @@ class _RescuePageState extends State<RescuePage> {
             label: 'My Profile',
           ),
         ],
-        onTap: (index) {},
+        onTap: (index) {
+          if (index == 0) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const HomeScreen()),
+            );
+          }
+        },
       ),
       body: SingleChildScrollView(
         child: Column(
