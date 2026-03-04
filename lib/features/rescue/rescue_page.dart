@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
@@ -12,28 +14,31 @@ class RescuePage extends StatefulWidget {
 class _RescuePageState extends State<RescuePage> {
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _conditionController = TextEditingController();
+  final TextEditingController _witnessNameController = TextEditingController();
+  final TextEditingController _witnessNumberController = TextEditingController();
 
   String? _selectedUrgency;
-  bool _willingToCoordinate = false;
-  final List<dynamic> _mediaFiles = [null, null]; // two placeholder slots
+  String? _coordinateChoice;
+  String? _adoptionChoice;
+  final List<dynamic> _mediaFiles = [null, null];
 
   @override
   void dispose() {
     _addressController.dispose();
     _conditionController.dispose();
+    _witnessNameController.dispose();
+    _witnessNumberController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(
           'Report a Stray',
-          style: GoogleFonts.tiltWarp(
-            fontSize: 20,
-            color: AppColors.textPrimary,
-          ),
+          style: Theme.of(context).textTheme.displaySmall,
         ),
         automaticallyImplyLeading: true,
         centerTitle: true,
@@ -82,29 +87,29 @@ class _RescuePageState extends State<RescuePage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF5C842),
+                  color: AppColors.yellowrspwn,
                   borderRadius: BorderRadius.circular(30),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
                 child: Row(
                   children: [
-                    const Icon(Icons.search, size: 20, color: Color(0xFF2B2B2B)),
+                    const Icon(Icons.search, size: 20, color: AppColors.textPrimary),
                     const SizedBox(width: 8),
                     Expanded(
                       child: TextField(
                         controller: _addressController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           hintText: 'Enter Address',
-                          hintStyle: TextStyle(
-                            color: Color(0xFF2B2B2B),
-                            fontSize: 14,
+                          hintStyle: GoogleFonts.zain(
+                            color: AppColors.textSecondary,
+                            fontSize: 16,
                           ),
                           border: InputBorder.none,
                           isDense: true,
                         ),
-                        style: const TextStyle(
-                          color: Color(0xFF2B2B2B),
-                          fontSize: 14,
+                        style: GoogleFonts.zain(
+                          color: AppColors.textPrimary,
+                          fontSize: 16,
                         ),
                       ),
                     ),
@@ -127,14 +132,14 @@ class _RescuePageState extends State<RescuePage> {
                     width: double.infinity,
                     decoration: const BoxDecoration(
                       border: Border(
-                        bottom: BorderSide(color: Color(0xFF2B2B2B), width: 1),
+                        bottom: BorderSide(color: AppColors.textPrimary, width: 1),
                       ),
                     ),
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
                       '123 A. B. Street, Pasay, Metro Manila 1234',
-                      style: GoogleFonts.nunito(
-                        fontSize: 13,
+                      style: GoogleFonts.zain(
+                        fontSize: 14,
                         color: AppColors.textPrimary,
                       ),
                     ),
@@ -173,8 +178,8 @@ class _RescuePageState extends State<RescuePage> {
                 onTap: () {},
                 child: Text(
                   'Scan for NFC or QR',
-                  style: GoogleFonts.nunito(
-                    fontSize: 13,
+                  style: GoogleFonts.zain(
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary,
                     decoration: TextDecoration.underline,
@@ -191,7 +196,7 @@ class _RescuePageState extends State<RescuePage> {
               thickness: 1,
               indent: 16,
               endIndent: 16,
-              color: Color(0xFFCCCCCC),
+              color: AppColors.slaterspwn,
             ),
 
             const SizedBox(height: 20),
@@ -204,10 +209,7 @@ class _RescuePageState extends State<RescuePage> {
                 children: [
                   Text(
                     'Details:',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      color: AppColors.textPrimary,
-                    ),
+                    style: Theme.of(context).textTheme.displaySmall,
                   ),
 
                   const SizedBox(height: 18),
@@ -219,21 +221,21 @@ class _RescuePageState extends State<RescuePage> {
                     controller: _conditionController,
                     decoration: InputDecoration(
                       hintText: 'Enter condition',
-                      hintStyle: GoogleFonts.nunito(
-                        color: Colors.grey,
-                        fontSize: 13,
+                      hintStyle: GoogleFonts.zain(
+                        color: AppColors.textSecondary,
+                        fontSize: 14,
                       ),
                       enabledBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF2B2B2B), width: 1),
+                        borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
                       ),
                       focusedBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF2B2B2B), width: 1.5),
+                        borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
                       ),
                       isDense: true,
                       contentPadding: const EdgeInsets.only(bottom: 8),
                     ),
-                    style: GoogleFonts.nunito(
-                      fontSize: 13,
+                    style: GoogleFonts.zain(
+                      fontSize: 14,
                       color: AppColors.textPrimary,
                     ),
                   ),
@@ -256,17 +258,17 @@ class _RescuePageState extends State<RescuePage> {
                       Expanded(
                         child: Text(
                           'Would you be willing to coordinate with the shelter to assist in the rescue?',
-                          style: GoogleFonts.nunito(
+                          style: GoogleFonts.zain(
                             fontWeight: FontWeight.w600,
-                            fontSize: 14,
+                            fontSize: 16,
                             color: AppColors.textPrimary,
                           ),
                         ),
                       ),
                       const SizedBox(width: 4),
-                      Text(
+                      const Text(
                         '*',
-                        style: GoogleFonts.nunito(
+                        style: TextStyle(
                           color: Colors.red,
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -281,11 +283,11 @@ class _RescuePageState extends State<RescuePage> {
                         width: 20,
                         height: 20,
                         child: Checkbox(
-                          value: _willingToCoordinate,
-                          onChanged: (val) =>
-                              setState(() => _willingToCoordinate = val ?? false),
-                          activeColor: const Color(0xFF2B2B2B),
-                          side: const BorderSide(color: Color(0xFF2B2B2B), width: 1.5),
+                          value: _coordinateChoice == 'yes',
+                          onChanged: (val) => setState(()
+                            => _coordinateChoice = 'yes'),
+                          activeColor: AppColors.textPrimary,
+                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(2),
                           ),
@@ -295,8 +297,163 @@ class _RescuePageState extends State<RescuePage> {
                       const SizedBox(width: 8),
                       Text(
                         'Yes, I would.',
-                        style: GoogleFonts.nunito(
-                          fontSize: 13,
+                        style: GoogleFonts.zain(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: Checkbox(
+                          value: _coordinateChoice == 'no',
+                          onChanged: (val) =>
+                              setState(() => _coordinateChoice = 'no'),
+                          activeColor: AppColors.textPrimary,
+                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'No, but I can refer you to witnesses who can assist.',
+                        style: GoogleFonts.zain(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_coordinateChoice == 'no') ...[
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _witnessNameController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter name of witness',
+                        hintStyle: GoogleFonts.zain(
+                          color: AppColors.textSecondary,
+                          fontSize: 14,
+                        ),
+                        enabledBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+                        ),
+                        focusedBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.only(bottom: 8),
+                      ),
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _witnessNumberController,
+                      keyboardType: TextInputType.phone,
+                      decoration: InputDecoration(
+                        hintText: 'Enter mobile number of witness',
+                        hintStyle: GoogleFonts.zain(
+                          color: AppColors.textSecondary,
+                          fontSize: 14,
+                        ),
+                        enabledBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+                        ),
+                        focusedBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.only(bottom: 8),
+                      ),
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                    ),
+                  ],
+
+                  // Willing to adopt
+                  const SizedBox(height: 20,),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Would you like to adopt the animal once rescued?',
+                          style: GoogleFonts.zain(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        '*',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8,),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: Checkbox(
+                          value: _adoptionChoice == 'yes',
+                          onChanged: (val) => setState(()
+                          => _adoptionChoice = 'yes'),
+                          activeColor: AppColors.textPrimary,
+                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Yes, I would.',
+                        style: GoogleFonts.zain(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: Checkbox(
+                          value: _adoptionChoice == 'no',
+                          onChanged: (val) =>
+                              setState(() => _adoptionChoice = 'no'),
+                          activeColor: AppColors.textPrimary,
+                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'No.',
+                        style: GoogleFonts.zain(
+                          fontSize: 14,
                           color: AppColors.textPrimary,
                         ),
                       ),
@@ -316,8 +473,8 @@ class _RescuePageState extends State<RescuePage> {
                 child: ElevatedButton(
                   onPressed: _handleSubmit,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFF5C842),
-                    foregroundColor: const Color(0xFF2B2B2B),
+                    backgroundColor: AppColors.yellowrspwn,
+                    foregroundColor: AppColors.textPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30),
@@ -328,7 +485,7 @@ class _RescuePageState extends State<RescuePage> {
                     'Submit Report',
                     style: GoogleFonts.tiltWarp(
                       fontSize: 16,
-                      color: const Color(0xFF2B2B2B),
+                      color: AppColors.textPrimary,
                     ),
                   ),
                 ),
@@ -348,9 +505,9 @@ class _RescuePageState extends State<RescuePage> {
       children: [
         Text(
           text,
-          style: GoogleFonts.nunito(
+          style: GoogleFonts.zain(
             fontWeight: FontWeight.w700,
-            fontSize: 14,
+            fontSize: 16,
             color: AppColors.textPrimary,
           ),
         ),
@@ -358,7 +515,11 @@ class _RescuePageState extends State<RescuePage> {
           const SizedBox(width: 4),
           const Text(
             '*',
-            style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              color: Colors.red,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ],
@@ -374,11 +535,11 @@ class _RescuePageState extends State<RescuePage> {
         width: 80,
         height: 80,
         decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFF2B2B2B), width: 1.5),
+          border: Border.all(color: AppColors.textPrimary, width: 1.5),
           borderRadius: BorderRadius.circular(8),
         ),
         child: const Center(
-          child: Icon(Icons.add, size: 28, color: Color(0xFF2B2B2B)),
+          child: Icon(Icons.add, size: 28, color: AppColors.textPrimary),
         ),
       ),
     );
@@ -397,8 +558,8 @@ class _RescuePageState extends State<RescuePage> {
               child: Checkbox(
                 value: _selectedUrgency == label,
                 onChanged: (val) => setState(() => _selectedUrgency = label),
-                activeColor: const Color(0xFF2B2B2B),
-                side: const BorderSide(color: Color(0xFF2B2B2B), width: 1.5),
+                activeColor: AppColors.textPrimary,
+                side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(2),
                 ),
@@ -408,8 +569,8 @@ class _RescuePageState extends State<RescuePage> {
             const SizedBox(width: 8),
             Text(
               label,
-              style: GoogleFonts.nunito(
-                fontSize: 13,
+              style: GoogleFonts.zain(
+                fontSize: 14,
                 color: AppColors.textPrimary,
               ),
             ),
@@ -420,8 +581,6 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   void _handleSubmit() {
-    // TODO: validate and submit form
-    final address = _addressController.text.trim();
     final condition = _conditionController.text.trim();
 
     if (condition.isEmpty || _selectedUrgency == null) {
@@ -434,7 +593,6 @@ class _RescuePageState extends State<RescuePage> {
       return;
     }
 
-    // Proceed with submission logic
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Report submitted successfully!'),
