@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/home/home_screen.dart';
 import '../../app_theme.dart';
 import 'adoption_page.dart';
+import 'package:respawnd1/features/adoption/adoption_process.dart';
 
 // Extended detail data
 class _AnimalDetail {
@@ -352,7 +353,13 @@ class _AnimalPageState extends State<AnimalPage> {
                     height: 52,
                     child: ElevatedButton(
                       onPressed: () {
-                        // TODO: navigate to adoption form
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                AdoptionProcess(animal: animal),
+                          ),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.yellowrspwn,
