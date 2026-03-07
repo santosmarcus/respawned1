@@ -106,13 +106,20 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }*/
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/firebase_options.dart';
 import 'app_theme.dart';
-//import 'features/auth/login_screen.dart';
+import 'features/userauth/login_screen.dart';
 import 'features/home/home_screen.dart';
 
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const ResPAWndApp());
 }
 
@@ -125,7 +132,33 @@ class ResPAWndApp extends StatelessWidget {
       title: 'ResPAWnd',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const HomeScreen(), //replace with login
+      home: const AuthWrapper(), // ← use this instead of LoginScreen directly
+    );
+  }
+}
+
+// Automatically routes user based on login state
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Still loading
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        // Logged in → go to home
+        if (snapshot.hasData) {
+          return const HomeScreen();
+        }
+        // Not logged in → go to login
+        return const LoginScreen();
+      },
     );
   }
 }
