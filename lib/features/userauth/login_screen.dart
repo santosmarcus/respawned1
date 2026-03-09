@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../app_theme.dart';
-import '../../core/repos/auth_service.dart';
+import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:respawnd1/features/home/home_screen.dart';
+import 'package:respawnd1/features/userauth/signup_screen.dart';
+
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -29,13 +32,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // Login logic
   Future<void> _handleLogin() async {
-    // Clear previous error
+    FocusScope.of(context).unfocus();
     setState(() {
       _errorMessage = null;
       _isLoading = true;
     });
 
-    // Basic validation
     if (_emailController.text.trim().isEmpty ||
         _passwordController.text.trim().isEmpty) {
       setState(() {
@@ -50,35 +52,47 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // AuthWrapper in main.dart will automatically navigate to HomeScreen
-      // when Firebase auth state changes — no manual navigation needed
+      // Success — AuthWrapper handles navigation, don't setState here
 
     } on FirebaseAuthException catch (e) {
-      setState(() {
-        // Convert Firebase error codes to readable messages
-        switch (e.code) {
-          case 'user-not-found':
-            _errorMessage = 'No account found with this email.';
-            break;
-          case 'wrong-password':
-            _errorMessage = 'Incorrect password. Please try again.';
-            break;
-          case 'invalid-email':
-            _errorMessage = 'Please enter a valid email address.';
-            break;
-          case 'user-disabled':
-            _errorMessage = 'This account has been disabled.';
-            break;
-          case 'too-many-requests':
-            _errorMessage = 'Too many attempts. Please try again later.';
-            break;
-          default:
-            _errorMessage = 'Login failed. Please try again.';
-        }
-      });
-    } finally {
-      setState(() => _isLoading = false);
+      String message;
+      switch (e.code) {
+        case 'user-not-found':
+        case 'wrong-password':
+        case 'invalid-credential':        // ← new Firebase error code
+        case 'INVALID_LOGIN_CREDENTIALS': // ← another variant
+          message = 'Incorrect email or password.';
+          break;
+        case 'invalid-email':
+          message = 'Please enter a valid email address.';
+          break;
+        case 'user-disabled':
+          message = 'This account has been disabled.';
+          break;
+        case 'too-many-requests':
+          message = 'Too many attempts. Please try again later.';
+          break;
+        default:
+          message = 'Login failed (${e.code})'; // show code so you can debug
+      }
+      // Only setState on error
+      if (mounted) {
+        setState(() {
+          _errorMessage = message;
+          _isLoading = false;
+        });
+      }
+
+    } catch (e) {
+      // Catch any non-Firebase errors
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Unexpected error: $e';
+          _isLoading = false;
+        });
+      }
     }
+    // ← NO finally block — it was causing setState after successful login
   }
 
   @override
@@ -197,7 +211,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       recognizer: TapGestureRecognizer()
                         ..onTap = () {
-                          // TODO: Navigate to register screen
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SignUpScreen()),
+                          );
                         },
                     ),
                   ],
@@ -205,9 +222,111 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               const SizedBox(height: 32),
+
+              // Divider
+              Row(
+                children: [
+                  const Expanded(child: Divider(color: AppColors.textSecondary)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('or', style: Theme.of(context).textTheme.bodyMedium),
+                  ),
+                  const Expanded(child: Divider(color: AppColors.textSecondary)),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+// Google button
+              _SocialButton(
+                label: 'Continue with Google',
+                icon: 'assets/icons/Google__G__logo.svg', // add a google icon to assets
+                onTap: () async {
+                  try {
+                    await _authService.signInWithGoogle();
+                    // AuthWrapper handles navigation automatically
+                  } catch (e) {
+                    setState(() => _errorMessage = 'Google sign-in failed.');
+                  }
+                },
+              ),
+
+              const SizedBox(height: 12),
+
+// Facebook button
+              /*_SocialButton(
+                label: 'Continue with Facebook',
+                icon: 'assets/icons/facebook.png',
+                onTap: () async {
+                  try {
+                    await _authService.signInWithFacebook();
+                  } catch (e) {
+                    setState(() => _errorMessage = 'Facebook sign-in failed.');
+                  }
+                },
+              ),
+
+              const SizedBox(height: 12),*/
+
+// Phone button — uncomment when PhoneLoginScreen is ready
+// _SocialButton(
+//   label: 'Continue with Phone',
+//   iconData: Icons.phone_outlined,
+//   onTap: () {
+//     Navigator.push(context,
+//       MaterialPageRoute(builder: (_) => const PhoneLoginScreen()));
+//   },
+// ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SocialButton extends StatelessWidget {
+  final String label;
+  final String? icon;
+  //final IconData? iconData;
+  final VoidCallback onTap;
+
+  const _SocialButton({
+    required this.label,
+    required this.onTap,
+    this.icon,
+    //this.iconData,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        //fixedSize: Size(MediaQuery.of(context).size.width * 0.85, 50),
+        fixedSize: const Size(double.infinity, 50),
+        side: const BorderSide(color: AppColors.textSecondary),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+        backgroundColor: Colors.white,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (icon != null)
+            Image.asset(icon!, width: 22, height: 22),
+          //else if (iconData != null)
+            //Icon(iconData, size: 22, color: AppColors.textPrimary),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
       ),
     );
   }

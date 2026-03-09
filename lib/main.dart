@@ -106,13 +106,15 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }*/
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:respawnd1/firebase_options.dart';
-import 'app_theme.dart';
-import 'features/userauth/login_screen.dart';
-import 'features/home/home_screen.dart';
+import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/features/userauth/login_screen.dart';
+import 'package:respawnd1/features/home/home_screen.dart';
+import 'package:respawnd1/features/userauth/onboard_screen.dart';
 
 
 void main() async {
@@ -120,6 +122,7 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await FirebaseAuth.instance.signOut();
   runApp(const ResPAWndApp());
 }
 
@@ -152,12 +155,37 @@ class AuthWrapper extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        // Logged in → go to home
-        if (snapshot.hasData) {
-          return const HomeScreen();
+
+        // Not logged in
+        if (!snapshot.hasData) {
+          return const LoginScreen();
         }
-        // Not logged in → go to login
-        return const LoginScreen();
+
+        // Logged in — check if they need onboarding
+        return FutureBuilder<DocumentSnapshot>(
+          future: FirebaseFirestore.instance
+              .collection('users')
+              .doc(snapshot.data!.uid)
+              .get(),
+          builder: (context, userSnapshot) {
+            if (userSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            final data = userSnapshot.data?.data() as Map<String, dynamic>?;
+            final role = data?['role'] ?? '';
+
+            // New user or social sign-in with no role yet
+            if (role.isEmpty) {
+              return const OnboardingRoleScreen();
+            }
+
+            // Existing user with role — go to home
+            return const HomeScreen();
+          },
+        );
       },
     );
   }
