@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 void main() {
   runApp(const MyApp());
@@ -176,7 +177,7 @@ class _LSState extends State<Login> {
                     ),
                     backgroundColor: Color(0xFFFFD95E),
                     foregroundColor: Colors.black,
-                    textStyle: const TextStyle(
+                    textStyle: GoogleFonts.tiltWarp(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
@@ -198,7 +199,7 @@ class _LSState extends State<Login> {
                     ),
                     backgroundColor: Color(0xFFFFD95E),
                     foregroundColor: Colors.black,
-                    textStyle: const TextStyle(
+                    textStyle: GoogleFonts.tiltWarp(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
@@ -213,3 +214,4 @@ class _LSState extends State<Login> {
     );
   }
 }
+
