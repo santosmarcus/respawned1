@@ -36,9 +36,9 @@ class AppTheme {
           displaySmall:  GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold,   color: AppColors.textPrimary),
           headlineLarge:  GoogleFonts.tiltWarp(fontSize: 24, fontWeight: FontWeight.normal,   color: AppColors.textPrimary),
           //Zain
-          titleMedium:   GoogleFonts.zain(fontSize: 24, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
-          titleSmall:   GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
-          titleSmallest:   GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
+          titleLarge:   GoogleFonts.zain(fontSize: 24, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
+          titleMedium:   GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
+          titleSmall:   GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w500,   color: AppColors.textPrimary),
         ),
 
         // AppBar

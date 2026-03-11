@@ -4,9 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
-import 'package:respawnd1/features/home/home_screen.dart';
-import 'package:respawnd1/features/userauth/forgotpass_screen.dart';
-import 'package:respawnd1/features/userauth/role_screen.dart';
+//import 'package:respawnd1/features/home/home_screen.dart';
+//import 'package:respawnd1/features/userauth/forgotpass_screen.dart';
+import 'package:respawnd1/features/userauth/details_screen.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/userauth/onboard_screen.dart';
 
@@ -18,7 +18,7 @@ class SignUpScreen extends StatefulWidget {
 }
 
 class _SignUpScreenState extends State<SignUpScreen> {
-  final _nameController     = TextEditingController();
+  //final _nameController     = TextEditingController();
   final _emailController    = TextEditingController();
   final _passwordController = TextEditingController();
   final _authService        = AuthService();
@@ -29,7 +29,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
+    //_nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -38,7 +38,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   Future<void> _handleSignUp() async {
     setState(() { _errorMessage = null; _isLoading = true; });
 
-    if (_nameController.text.trim().isEmpty ||
+    if (/*_nameController.text.trim().isEmpty ||*/
         _emailController.text.trim().isEmpty ||
         _passwordController.text.trim().isEmpty) {
       setState(() {
@@ -60,14 +60,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await _authService.createAccount(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
-        name: _nameController.text.trim(),
+        //name: _nameController.text.trim(),
       );
 
       if (mounted) {
         // Go to user type selection after account created
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const OnboardingRoleScreen()),
+          MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -97,13 +97,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
       if (result != null && mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const OnboardingRoleScreen()),
+          MaterialPageRoute(builder: (_) => const /*OnboardingRoleScreen()*/EnterDetailsScreen()),
         );
       }
     } catch (e) {
-      setState(() => _errorMessage = 'Google sign-in failed.');
-    } finally {
-      setState(() => _isLoading = false);
+      setState(() {
+        _errorMessage = 'Google sign-in failed.';
+        _isLoading = false;
+      });
     }
   }
 
@@ -125,15 +126,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
               const SizedBox(height: 32),
 
               // Full name
-              TextFormField(
+              /*TextFormField(
                 controller: _nameController,
                 decoration: const InputDecoration(
                   hintText: 'Enter Full Name',
                   prefixIcon: Icon(Icons.person_outline),
                 ),
-              ),
+              ),*/
 
-              const SizedBox(height: 16),
+              //const SizedBox(height: 16),
 
               // Email
               TextFormField(
