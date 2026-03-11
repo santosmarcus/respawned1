@@ -24,17 +24,19 @@ class AuthService {
   Future<UserCredential> createAccount({
     required String email,
     required String password,
-    required String name,
+    //required String name,
   }) async {
     final credential = await firebaseAuth.createUserWithEmailAndPassword(
         email: email, password: password);
 
-    await credential.user!.updateDisplayName(name);
+    //await credential.user!.updateDisplayName(name);
 
     // CREATE the doc with set() not update()
     await _firestore.collection('users').doc(credential.user!.uid).set({
       'uid': credential.user!.uid,
-      'name': name,
+      'name': '',
+      'firstName': '',
+      'lastName': '',
       'email': email,
       'phone': '',
       'role': '',               // filled during onboarding

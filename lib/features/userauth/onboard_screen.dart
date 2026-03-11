@@ -6,7 +6,20 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/home/home_screen.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
-  const OnboardingRoleScreen({super.key});
+  final String firstName;
+  final String lastName;
+  final String phone;
+
+  // TEMPLATE: add extra params here when you add more fields
+  // final String? address;
+
+  const OnboardingRoleScreen({
+    super.key,
+    required this.firstName,
+    required this.lastName,
+    required this.phone,
+    // this.address,
+  });
 
   @override
   State<OnboardingRoleScreen> createState() => _OnboardingRoleScreenState();
@@ -16,43 +29,53 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
   String? _selectedRole;
   bool _isLoading = false;
 
-  final List<_RoleOption> _roles = [
-    _RoleOption(
+  final List<_UserTypeOption> _options = [
+    _UserTypeOption(
       role: 'general',
-      title: 'General Public',
-      description: 'Report strays, browse adoptions, donate',
-      icon: Icons.people_outline,
+      title: 'General User',
+      description:
+      'Report rescue cases, adopt animals, volunteer in events, donate or sponsor',
       color: AppColors.lavenderrspwn,
     ),
-    _RoleOption(
-      role: 'volunteer',
-      title: 'Volunteer',
-      description: 'Help rescue animals and join events',
-      icon: Icons.volunteer_activism_outlined,
+    _UserTypeOption(
+      role: 'pet_transporter',
+      title: 'Pet Transporter',
+      description:
+      'Safe transports of rescued animals to shelters or clinics, provides progress updates, and ensures comfort during travel.',
       color: AppColors.pinkrspwn,
     ),
-    _RoleOption(
-      role: 'ngo_staff',
-      title: 'NGO Staff',
-      description: 'Manage rescues, animals, and adoptions',
-      icon: Icons.business_outlined,
-      color: AppColors.yellowrspwn,
+    _UserTypeOption(
+      role: 'rescue_volunteer',
+      title: 'Rescue Volunteer',
+      description:
+      'Registered responder who can take on rescue cases when partner organizations are unavailable.',
+      color: AppColors.greenrspwn,
     ),
   ];
 
-  Future<void> _saveRole() async {
+  Future<void> _handleNext() async {
     if (_selectedRole == null) return;
-
     setState(() => _isLoading = true);
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
+      final fullName = '${widget.firstName} ${widget.lastName}';
+
       await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .set({'role': _selectedRole}, SetOptions(merge: true));
+          .set({
+        'uid': uid,
+        'firstName': widget.firstName,
+        'lastName': widget.lastName,
+        'name': fullName,
+        'phone': widget.phone,
+        'role': _selectedRole,
+        // 'address': widget.address ?? '',  // TEMPLATE: uncomment when ready
+        'isVerified': false,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
-      // AuthWrapper will detect role is now set and navigate to HomeScreen
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
@@ -61,17 +84,15 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
         );
       }
     } catch (e) {
-      print('Error saving role: $e'); // ← add this so you can see errors
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      print('Error saving user details: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Welcome to ResPAWnd')),
+      appBar: AppBar(title: const Text('Select User Type')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -80,85 +101,66 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
             children: [
               const SizedBox(height: 32),
 
-              Text(
-                'How will you\nuse the app?',
-                style: Theme.of(context).textTheme.displayLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Choose your role to get the right experience.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
+              Text('Select user\ntype',
+                  style: Theme.of(context).textTheme.displayLarge),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
 
-              // Role selection cards
               Expanded(
                 child: ListView.separated(
-                  itemCount: _roles.length,
+                  itemCount: _options.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
-                    final option = _roles[index];
+                    final option = _options[index];
                     final isSelected = _selectedRole == option.role;
 
                     return GestureDetector(
                       onTap: () =>
                           setState(() => _selectedRole = option.role),
                       child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
+                        duration: const Duration(milliseconds: 180),
+                        height: 130, //TODO fix the size of this
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: isSelected
-                              ? option.color
-                              : AppColors.slaterspwn,
+                          color: option.color,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
                             color: isSelected
                                 ? AppColors.textPrimary
                                 : Colors.transparent,
-                            width: 2,
+                            width: 2.5,
                           ),
                         ),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? Colors.white
-                                    : AppColors.background,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Icon(option.icon,
-                                  color: AppColors.textPrimary, size: 28),
-                            ),
-                            const SizedBox(width: 16),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    option.title,
-                                    style: GoogleFonts.tiltWarp(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.textPrimary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    option.description,
-                                    style: GoogleFonts.zain(
-                                      fontSize: 13,
-                                      color: AppColors.textSecondary,
-                                    ),
-                                  ),
+                                  Text(option.title,
+                                      style: GoogleFonts.tiltWarp(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.textPrimary,
+                                      )),
+                                  const SizedBox(height: 6),
+                                  Text(option.description,
+                                      style: GoogleFonts.zain(
+                                        fontSize: 13,
+                                        color: AppColors.textPrimary
+                                            .withValues(alpha: 0.75),
+                                      )),
                                 ],
                               ),
                             ),
                             if (isSelected)
-                              const Icon(Icons.check_circle,
-                                  color: AppColors.textPrimary),
+                              const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(Icons.check_circle,
+                                    color: AppColors.textPrimary,
+                                    size: 22),
+                              ),
                           ],
                         ),
                       ),
@@ -169,30 +171,26 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
 
               const SizedBox(height: 24),
 
-              // Continue button
-              ElevatedButton(
-                onPressed: _selectedRole == null || _isLoading
-                    ? null
-                    : _saveRole,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  fixedSize:
-                  Size(MediaQuery.of(context).size.width * 0.85, 50),
-                  disabledBackgroundColor:
-                  AppColors.slaterspwn,
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                  height: 22,
-                  width: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: AppColors.textPrimary,
+              Center(
+                child: ElevatedButton(
+                  onPressed: _selectedRole == null || _isLoading
+                      ? null
+                      : _handleNext,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    fixedSize:
+                    Size(MediaQuery.of(context).size.width * 0.55, 50),
+                    disabledBackgroundColor: AppColors.slaterspwn,
                   ),
-                )
-                    : Text(
-                  'Continue',
-                  style: Theme.of(context).textTheme.headlineLarge,
+                  child: _isLoading
+                      ? const SizedBox(
+                      height: 22, width: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: AppColors.textPrimary))
+                      : Text('Next',
+                      style:
+                      Theme.of(context).textTheme.headlineLarge),
                 ),
               ),
 
@@ -205,18 +203,16 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
   }
 }
 
-class _RoleOption {
+class _UserTypeOption {
   final String role;
   final String title;
   final String description;
-  final IconData icon;
   final Color color;
 
-  const _RoleOption({
+  const _UserTypeOption({
     required this.role,
     required this.title,
     required this.description,
-    required this.icon,
     required this.color,
   });
 }

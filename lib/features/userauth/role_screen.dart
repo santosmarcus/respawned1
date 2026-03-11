@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/userauth/name_screen.dart';
+import 'package:respawnd1/features/userauth/details_screen.dart';
 
 class SelectUserTypeScreen extends StatefulWidget {
   const SelectUserTypeScreen({super.key});
@@ -165,4 +165,4 @@ class _UserTypeOption {
     required this.description,
     required this.color,
   });
-}
+}*/
