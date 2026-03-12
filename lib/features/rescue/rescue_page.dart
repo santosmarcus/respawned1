@@ -2,7 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
-import 'package:respawnd1/features/home/home_screen.dart';
+import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:respawnd1/features/rescue/track_case_page.dart';
 
 class RescuePage extends StatefulWidget {
   const RescuePage({super.key});
@@ -20,6 +23,9 @@ class _RescuePageState extends State<RescuePage> {
   String? _selectedUrgency;
   String? _coordinateChoice;
   String? _adoptionChoice;
+  String? _selectedAnimalType;
+  bool _isLoading = false;
+
   final List<dynamic> _mediaFiles = [null, null];
 
   @override
@@ -246,6 +252,16 @@ class _RescuePageState extends State<RescuePage> {
                       color: AppColors.textPrimary,
                     ),
                   ),
+
+                  const SizedBox(height: 20),
+
+                  // Type of Animal
+                  _buildLabel('Type of Animal', required: true),
+                  const SizedBox(height: 8),
+                  _buildCheckboxOption2('Dog', _selectedAnimalType,
+                          (val) => setState(() => _selectedAnimalType = val)),
+                  _buildCheckboxOption2('Cat', _selectedAnimalType,
+                          (val) => setState(() => _selectedAnimalType = val)),
 
                   const SizedBox(height: 20),
 
@@ -478,7 +494,7 @@ class _RescuePageState extends State<RescuePage> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _handleSubmit,
+                  onPressed: _isLoading ? null : _handleSubmit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.yellowrspwn,
                     foregroundColor: AppColors.textPrimary,
@@ -488,15 +504,17 @@ class _RescuePageState extends State<RescuePage> {
                     ),
                     elevation: 0,
                   ),
-                  child: Text(
-                    'Submit Report',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                      height: 22, width: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: AppColors.textPrimary))
+                      : Text('Submit Report',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 16, color: AppColors.textPrimary)),
                 ),
               ),
+
             ),
 
             const SizedBox(height: 32),
@@ -587,7 +605,39 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
-  void _handleSubmit() {
+  Widget _buildCheckboxOption2(
+      String label, String? selected, Function(String) onSelect) {
+    return GestureDetector(
+      onTap: () => onSelect(label),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: Checkbox(
+                value: selected == label,
+                onChanged: (_) => onSelect(label),
+                activeColor: AppColors.textPrimary,
+                side: const BorderSide(
+                    color: AppColors.textPrimary, width: 1.5),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(2)),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(label,
+                style: GoogleFonts.zain(
+                    fontSize: 14, color: AppColors.textPrimary)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /*void _handleSubmit() {
     final condition = _conditionController.text.trim();
 
     if (condition.isEmpty || _selectedUrgency == null) {
@@ -606,5 +656,80 @@ class _RescuePageState extends State<RescuePage> {
         backgroundColor: Colors.green,
       ),
     );
+  }*/
+
+  Future<void> _handleSubmit() async {
+    final condition = _conditionController.text.trim();
+
+    if (condition.isEmpty ||
+        _selectedUrgency == null ||
+        _selectedAnimalType == null ||
+        _coordinateChoice == null ||
+        _adoptionChoice == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please fill in all required fields.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final userData = userDoc.data() as Map<String, dynamic>?;
+
+      final docRef =
+      await FirebaseFirestore.instance.collection('cases').add({
+        'reporterId': uid,
+        'reporterName':
+        '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
+            .trim(),
+        'reporterPhone': userData?['phone'] ?? '',
+        'animalType': _selectedAnimalType,
+        'condition': condition,
+        'urgency': _selectedUrgency,
+        'address': _addressController.text.trim(),
+        'coordinateWithShelter': _coordinateChoice,
+        'witnessName': _witnessNameController.text.trim(),
+        'witnessPhone': _witnessNumberController.text.trim(),
+        'interestedToAdopt': _adoptionChoice,
+        'status': 'pending',
+        'statusHistory': [
+          {
+            'status': 'Rescue case is being reviewed.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'photoUrls': [],
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrackCasePage(caseId: docRef.id),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 }

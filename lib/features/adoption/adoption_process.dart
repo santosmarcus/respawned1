@@ -232,7 +232,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Ready to give a rescue a loving forever home?',
+          'Ready to give a rescue a loving forever generalhome?',
           style: GoogleFonts.zain(
               fontSize: 15,
               fontWeight: FontWeight.w600,
@@ -632,7 +632,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          'The organization will safely deliver your pet to your home. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies.\n\nWe\'re so happy for you and your new best friend!',
+          'The organization will safely deliver your pet to your generalhome. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies.\n\nWe\'re so happy for you and your new best friend!',
           style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
         ),
 
@@ -674,7 +674,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          'After careful review, we feel this may not be the best match at this time.\n\nWe truly appreciate your willingness to give a rescue a loving home, and we encourage you to consider other pets in need — your perfect companion could be waiting!',
+          'After careful review, we feel this may not be the best match at this time.\n\nWe truly appreciate your willingness to give a rescue a loving generalhome, and we encourage you to consider other pets in need — your perfect companion could be waiting!',
           style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
         ),
 

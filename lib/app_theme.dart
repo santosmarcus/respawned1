@@ -15,6 +15,7 @@ class AppColors {
   static const Color textPrimary = Color(0xFF393207);
   static const Color textSecondary = Color(0xFF7E7D76);
   static const Color bgres = Color(0xFFE2E5FF);
+  static const Color surface = Color(0xFFFFFFFF);
 }
 
 class AppTheme {
