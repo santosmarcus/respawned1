@@ -284,7 +284,7 @@ class _DonationSummaryPageState extends State<DonationSummaryPage> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      child: const Text('Make Another Donation'),
+                      child: const Text('Donations'),
                     ),
                   ),
                 ],
