@@ -41,7 +41,7 @@ class MyApp extends StatelessWidget {
         charityName: 'Org 1',
         donationMethod: 'Credit Card ending in **** 5678',
         item: DonationItem(description: 'Campaign 1', amount: 500.00),
-        referenceNumber: 'REF-20240726-12345',
+        referenceNumber: '240726-12345',
         timestamp: DateTime.now(),
       ),
       builder: (BuildContext context, Widget? child) {
@@ -213,7 +213,7 @@ class _DonationSummaryPageState extends State<DonationSummaryPage> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: <Widget>[
                         const Text(
-                          'Reference Number:',
+                          'Reference:',
                           style: TextStyle(fontSize: 12),
                         ),
                         Text(
