@@ -199,7 +199,7 @@ class _RescuePageState extends State<RescuePage> {
               children: [
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
-                  height: 200,
+                  height: 300,
                   decoration: BoxDecoration(
                     color: AppColors.slaterspwn,
                     borderRadius: BorderRadius.circular(20),
