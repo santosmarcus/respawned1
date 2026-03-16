@@ -1,3 +1,4 @@
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -5,9 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
-import 'package:respawnd1/features/home/home_screen.dart';
+import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
+import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
-
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,11 +76,23 @@ class AuthWrapper extends StatelessWidget {
               return const EnterDetailsScreen();
             }
 
-            // Existing user with role — go to home
-            return const HomeScreen();
+            // Existing user with role — route based on role
+            switch (role) {
+              case 'ngo_staff':
+              case 'admin':
+                return const AdminHomeScreen();
+              case 'pet_transporter':
+              case 'rescue_volunteer':
+                return const ServiceHomeScreen();
+              case 'general':
+              default:
+                return const HomeScreen();
+            }
           },
         );
       },
     );
   }
 }
+
+

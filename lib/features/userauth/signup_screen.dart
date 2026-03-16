@@ -4,7 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
-//import 'package:respawnd1/features/home/home_screen.dart';
+//import 'package:respawnd1/features/generalhome/home_screen.dart';
 //import 'package:respawnd1/features/userauth/forgotpass_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
