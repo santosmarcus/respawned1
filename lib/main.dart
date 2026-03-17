@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
@@ -18,6 +19,11 @@ void main() async {
   );
   await FirebaseAuth.instance.signOut();
   runApp(const ResPAWndApp());
+  runApp(
+    const ProviderScope(
+      child: ResPAWndApp(),
+    ),
+  );
 }
 
 class ResPAWndApp extends StatelessWidget {
@@ -52,7 +58,7 @@ class AuthWrapper extends StatelessWidget {
 
         // Not logged in
         if (!snapshot.hasData) {
-          return const LoginScreen();
+          return const HomeScreen(); //LoginScreen(); //For Dev Purposes
         }
 
         // Logged in — check if they need onboarding
