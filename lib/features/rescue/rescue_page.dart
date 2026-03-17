@@ -6,11 +6,10 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/features/home/home_screen.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 
 const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
 
@@ -155,143 +154,6 @@ class _RescuePageState extends State<RescuePage> {
     } catch (_) {}
   }
 
-  //NFC and QR
-  void _showScanOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Scan Animal Tag',
-              style: GoogleFonts.zain(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _scanQR();
-                    },
-                    icon: const Icon(Icons.qr_code),
-                    label: Text('Scan QR', style: GoogleFonts.zain(fontSize: 14)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _scanNFC();
-                    },
-                    icon: const Icon(Icons.nfc),
-                    label: Text('Scan NFC', style: GoogleFonts.zain(fontSize: 14)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _scanQR() async {
-    final result = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const _QRScannerPage(),
-      ),
-    );
-
-    if (result != null && mounted) {
-      _handleScanResult(result);
-    }
-  }
-
-  Future<void> _scanNFC() async {
-    try {
-      final availability = await FlutterNfcKit.nfcAvailability;
-      if (availability != NFCAvailability.available) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('NFC is not available on this device.'),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-        }
-        return;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Hold your device near the NFC tag…'),
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-
-      final tag = await FlutterNfcKit.poll(timeout: const Duration(seconds: 10));
-      await FlutterNfcKit.finish();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        _handleScanResult(tag.id);
-      }
-    } catch (e) {
-      await FlutterNfcKit.finish();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('NFC scan failed: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    }
-  }
-
-  void _handleScanResult(String result) {
-    // Populate the condition field or use however fits your data model
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Tag scanned: $result'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
 //build
   @override
   Widget build(BuildContext context) {
@@ -415,7 +277,7 @@ class _RescuePageState extends State<RescuePage> {
               child: Container(
                 decoration: BoxDecoration(
                   color: AppColors.yellowrspwn,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(30),
                 ),
                 padding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
@@ -528,54 +390,25 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
 
             // Scan NFC / QR
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                    onPressed: _showScanOptions,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ), backgroundColor: AppColors.yellowrspwn,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.qr_code_scanner, size: 18),
-                      const SizedBox(width: 8,),
-                      Text(
-                          'Scan for NFC or QR',
-                          style: GoogleFonts.tiltWarp(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w400,
-                            color: AppColors.textPrimary,
-                          ),
-                      ),
-                    ],
-                    ),
-                      GestureDetector(
-                        onTap: () => _showScanInfo(context),
-                        child: const Icon(Icons.info_outline,
-                            size: 18, color: AppColors.textPrimary),
-                      ),
-
-                ],
-            ),
-              ),
+              child: GestureDetector(
+                onTap: () {},
+                child: Text(
+                  'Scan for NFC or QR',
+                  style: GoogleFonts.zain(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                    decoration: TextDecoration.underline,
                   ),
-            ],
+                ),
               ),
             ),
+
             const SizedBox(height: 24),
 
             // Divider
@@ -597,11 +430,7 @@ class _RescuePageState extends State<RescuePage> {
                 children: [
                   Text(
                     'Details:',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w300,
-                      color: AppColors.textPrimary,
-                    ),
+                    style: Theme.of(context).textTheme.displaySmall,
                   ),
 
                   const SizedBox(height: 18),
@@ -633,6 +462,7 @@ class _RescuePageState extends State<RescuePage> {
                   ),
 
                   const SizedBox(height: 20),
+
                   // Type of Animal
                   _buildLabel('Type of Animal', required: true),
                   const SizedBox(height: 8),
@@ -1110,127 +940,4 @@ class _RescuePageState extends State<RescuePage> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-}
-
-class _QRScannerPage extends StatefulWidget {
-  const _QRScannerPage();
-
-  @override
-  State<_QRScannerPage> createState() => _QRScannerPageState();
-}
-
-class _QRScannerPageState extends State<_QRScannerPage> {
-  final MobileScannerController _controller = MobileScannerController();
-  bool _scanned = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Text(
-          'Scan QR Code',
-          style: GoogleFonts.zain(color: Colors.white),
-        ),
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.flash_on),
-            onPressed: () => _controller.toggleTorch(),
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: (capture) {
-              if (_scanned) return;
-              final barcode = capture.barcodes.firstOrNull;
-              if (barcode?.rawValue != null) {
-                _scanned = true;
-                Navigator.pop(context, barcode!.rawValue);
-              }
-            },
-          ),
-          // Overlay frame
-          Center(
-            child: Container(
-              width: 220,
-              height: 220,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 32,
-            left: 0,
-            right: 0,
-            child: Text(
-              'Align QR code within the frame',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.zain(color: Colors.white70, fontSize: 14),
-            ),
-          ),
-        ],
-      ),
-    );
-
-  }
-}
-void _showScanInfo(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      backgroundColor: AppColors.background,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Row(
-        children: [
-          const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
-          const SizedBox(width: 8),
-          Text(
-            'Scan for NFC or QR code',
-            style: GoogleFonts.zain(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
-      ),
-      content: Text(
-        'This animal may have an ID tag. Scan the NFC or QR code to help identify the owner.',
-        style: GoogleFonts.zain(
-          fontSize: 18,
-          color: AppColors.textSecondary,
-        ),
-      ),
-      actions: [
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
-            ),
-            child: Text('OK', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
-          ),
-        ),
-      ],
-    ),
-  );
 }
