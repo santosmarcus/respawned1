@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
 import 'adoption_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 enum _AdoptionProcess {
   intro,           // 1st step - Lets start
@@ -40,6 +42,46 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   final _addressCtrl = TextEditingController();
   final _reasonCtrl = TextEditingController();
 
+  String? _adoptionId;
+  bool _isSubmitting = false;
+
+  // Appointment
+  DateTime? _appointmentDate;
+  String _appointmentType = 'On-site Visit';
+  String? _appointmentTime;
+
+  // timeslots --- to be changed
+  static const Map<int, List<String>> _timeSlots = {
+    0: ['9:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
+    1: [
+      '9:00 AM',
+      '10:00 AM',
+      '11:00 AM',
+      '1:00 PM',
+      '2:00 PM',
+      '3:00 PM',
+      '4:00 PM'
+    ],
+    2: ['10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM'],
+    3: ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '3:00 PM', '4:00 PM'],
+    4: ['9:00 AM', '10:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
+    5: ['10:00 AM', '11:00 AM', '12:00 PM'],
+    6: [], // Sunday – closed
+  };
+
+  List<String> get _slotsForDate {
+    if (_appointmentDate == null) return [];
+    // weekday: 1=Mon … 7=Sun → convert to 0-based Mon-Sun
+    final dow = (_appointmentDate!.weekday - 1) % 7;
+    return _timeSlots[dow] ?? [];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _prefillFromAccount();
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -65,30 +107,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       case _AdoptionProcess.appReject:
         return 2; // rejected stays at review
     }
-  }
-
-  // Helpers
-  // Appointment
-  DateTime? _appointmentDate;
-  String _appointmentType = 'On-site Visit';
-  String? _appointmentTime;
-
-  // timeslots --- to be changed
-  static const Map<int, List<String>> _timeSlots = {
-    0: ['9:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    1: ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    2: ['10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM'],
-    3: ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '3:00 PM', '4:00 PM'],
-    4: ['9:00 AM', '10:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    5: ['10:00 AM', '11:00 AM', '12:00 PM'],
-    6: [],  // Sunday – closed
-  };
-
-  List<String> get _slotsForDate {
-    if (_appointmentDate == null) return [];
-    // weekday: 1=Mon … 7=Sun → convert to 0-based Mon-Sun
-    final dow = (_appointmentDate!.weekday - 1) % 7;
-    return _timeSlots[dow] ?? [];
   }
 
   Future<void> _pickDate() async {
@@ -117,12 +135,157 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   String _formatDate(DateTime d) =>
       '${_monthName(d.month)} ${d.day}, ${d.year}';
 
-  String _monthName(int m) => const [
-    '', 'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ][m];
+  String _monthName(int m) =>
+      const [
+        '', 'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ][m];
 
 
+  //Firestore Helpers
+  Future<void> _prefillFromAccount() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+
+      final data = doc.data();
+      if (data == null) return;
+
+      setState(() {
+        _nameCtrl.text =
+            '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
+        _phoneCtrl.text =
+            data['phone'] ?? '';
+        _addressCtrl.text =
+            data['address'] ?? '';
+        _emailCtrl.text =
+            FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _submitAdoptionForm() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _isSubmitting = true);
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+
+      final docRef = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .add({
+        'adopterId': uid,
+        'animalId': widget.animal.id, //--- to be changed---
+        'animalName': widget.animal.name, //--- to be changed ---
+        'adopterName': _nameCtrl.text.trim(),
+        'adopterEmail': _emailCtrl.text.trim(),
+        'adopterPhone': _phoneCtrl.text.trim(),
+        'adopterAddress': _addressCtrl.text.trim(),
+        'reason': _reasonCtrl.text.trim(),
+        'status': 'pending_appointment', //--- to be changed when admin view is available---
+        'statusHistory': [
+          {
+            'status': 'Form submitted.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      setState(() {
+        _adoptionId = docRef.id;
+        _step = _AdoptionProcess.bookAppointment;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _saveAppointment() async {
+    if (_adoptionId == null) return;
+    setState(() => _isSubmitting = true);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(_adoptionId).update({
+        'appointmentType': _appointmentType,
+        'appointmentDate': Timestamp.fromDate(_appointmentDate!),
+        'appointmentTime': _appointmentTime,
+        'status': 'under_review',
+        'statusHistory': FieldValue.arrayUnion([{
+          'status': 'Appointment booked.',
+          'timestamp': Timestamp.now(),
+        }
+        ]),
+      });
+
+      setState(() => _step = _AdoptionProcess.appReview);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to book appointment: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _updateStatus(String status,
+      String statusMessage,
+      _AdoptionProcess nextStep,) async {
+    if (_adoptionId == null) return;
+    setState(() => _isSubmitting = true);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(_adoptionId)
+          .update({
+        'status': status,
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': statusMessage,
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+
+      setState(() => _step = nextStep);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+
+  //Build
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -199,7 +362,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // switcher
-
   Widget _buildStepBody() {
     switch (_step) {
       case _AdoptionProcess.intro:
@@ -218,7 +380,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 1st step --- fill out form
-
   Widget _buildIntro() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,7 +393,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Ready to give a rescue a loving forever generalhome?',
+          'Ready to give a rescue a loving forever home?',
           style: GoogleFonts.zain(
               fontSize: 15,
               fontWeight: FontWeight.w600,
@@ -241,7 +402,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 4),
         Text(
           'Fill out this quick form to help us match you with the right rescue and confirm eligibility for adoption.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
         ),
 
         const SizedBox(height: 24),
@@ -251,15 +413,26 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           key: _formKey,
           child: Column(
             children: [
-              _FormField(controller: _nameCtrl, label: 'Full Name', hint: 'Juan dela Cruz'),
+              _FormField(controller: _nameCtrl,
+                label: 'Full Name',
+                hint: ' ',
+                readOnly: true,),
               const SizedBox(height: 12),
-              _FormField(controller: _emailCtrl, label: 'Email', hint: 'juan@email.com',
+              _FormField(controller: _emailCtrl,
+                  label: 'Email',
+                  hint: ' ',
+                  readOnly: true,
                   keyboardType: TextInputType.emailAddress),
               const SizedBox(height: 12),
-              _FormField(controller: _phoneCtrl, label: 'Phone Number', hint: '09XXXXXXXXX',
+              _FormField(controller: _phoneCtrl,
+                  label: 'Phone Number',
+                  hint: ' ',
+                  readOnly: true,
                   keyboardType: TextInputType.phone),
               const SizedBox(height: 12),
-              _FormField(controller: _addressCtrl, label: 'Home Address', hint: '123 Street, City'),
+              _FormField(controller: _addressCtrl,
+                  label: 'Home Address',
+                  hint: ' ',),
               const SizedBox(height: 12),
               _FormField(
                 controller: _reasonCtrl,
@@ -274,12 +447,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 28),
 
         _PrimaryButton(
-          label: "Let's Start",
-          onTap: () {
-            if (_formKey.currentState?.validate() ?? false) {
-              setState(() => _step = _AdoptionProcess.bookAppointment);
-            }
-          },
+          label: _isSubmitting ? 'Submitting...' : "Let's Start",
+          onTap: _isSubmitting ? null : _submitAdoptionForm,
         ),
 
         const SizedBox(height: 24),
@@ -288,7 +457,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 2nd step --- book appointment
-
   Widget _buildBookAppointment() {
     final slots = _slotsForDate;
     final isSunday = _appointmentDate != null &&
@@ -383,65 +551,66 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           Text('Select a date above to see available times.',
               style: GoogleFonts.zain(
                   fontSize: 13, color: AppColors.textSecondary))
-        else if (isSunday || slots.isEmpty)
-          Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.slaterspwn.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              isSunday
-                  ? 'Closed on Sundays — please pick another day.'
-                  : 'No slots available for this date.',
-              style: GoogleFonts.zain(
-                  fontSize: 13, color: AppColors.textSecondary),
-            ),
-          )
         else
-          SizedBox(
-            height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: slots.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, i) {
-                final slot = slots[i];
-                final selected = _appointmentTime == slot;
-                return GestureDetector(
-                  onTap: () => setState(() => _appointmentTime = slot),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? AppColors.greenrspwn
-                          : AppColors.background,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
+          if (isSunday || slots.isEmpty)
+            Container(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.slaterspwn.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                isSunday
+                    ? 'Closed on Sundays — please pick another day.'
+                    : 'No slots available for this date.',
+                style: GoogleFonts.zain(
+                    fontSize: 13, color: AppColors.textSecondary),
+              ),
+            )
+          else
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: slots.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
+                  final slot = slots[i];
+                  final selected = _appointmentTime == slot;
+                  return GestureDetector(
+                    onTap: () => setState(() => _appointmentTime = slot),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
                         color: selected
                             ? AppColors.greenrspwn
-                            : AppColors.slaterspwn,
-                        width: 1.2,
+                            : AppColors.background,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: selected
+                              ? AppColors.greenrspwn
+                              : AppColors.slaterspwn,
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Text(
+                        slot,
+                        style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: AppColors.textPrimary,
+                        ),
                       ),
                     ),
-                    child: Text(
-                      slot,
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
 
         // summary
         if (_appointmentDate != null && _appointmentTime != null) ...[
@@ -459,7 +628,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '$_appointmentType  ·  ${_formatDate(_appointmentDate!)}  ·  $_appointmentTime',
+                    '$_appointmentType  ·  ${_formatDate(
+                        _appointmentDate!)}  ·  $_appointmentTime',
                     style: GoogleFonts.zain(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -474,10 +644,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 28),
 
         _PrimaryButton(
-          label: 'Book',
-          onTap: (_appointmentDate == null || _appointmentTime == null)
+          label: _isSubmitting ? 'Booking...' : 'Book',
+          onTap: (_appointmentDate == null || _appointmentTime == null ||
+              _isSubmitting)
               ? null
-              : () => setState(() => _step = _AdoptionProcess.appReview),
+              : _saveAppointment,
         ),
 
         const SizedBox(height: 24),
@@ -486,7 +657,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 3rd step --- application review
-
   Widget _buildAppReview() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -509,21 +679,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 4),
         Text(
           'Please allow us time to review your form and confirm your appointment. If you need to reschedule, kindly update your meeting date at least 3 days before your appointment.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
         ),
 
         const SizedBox(height: 28),
-        Row(
-          children: [
-            Expanded(
-              child: _PrimaryButton(
-                label: 'Change date',
-                onTap: () async {
-                  await _pickDate();
-                },
-              ),
-            ),
-          ],
+        _PrimaryButton(
+          label: 'Change date',
+          onTap: _isSubmitting ? null : _pickDate,
         ),
 
         const SizedBox(height: 12),
@@ -534,14 +697,23 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             Expanded(
               child: _SecondaryButton(
                 label: 'Approved →',
-                onTap: () => setState(() => _step = _AdoptionProcess.timeToMeet),
+                onTap: _isSubmitting
+                    ? null
+                    : () =>
+                    _updateStatus('appointment_confirmed',
+                      'Application approved. Appointment confirmed.',
+                      _AdoptionProcess.timeToMeet,),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: _SecondaryButton(
                 label: 'Rejected →',
-                onTap: () => setState(() => _step = _AdoptionProcess.appReject),
+                onTap: _isSubmitting
+                    ? null
+                    : () =>
+                    _updateStatus('rejected', 'Application was not approved.',
+                      _AdoptionProcess.appReject,),
               ),
             ),
           ],
@@ -554,7 +726,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 4th step --- meeting
-
   Widget _buildTimeToMeet() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -568,8 +739,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 12),
         Text(
-          'Your adoption application and interview appointment have been confirmed! We are excited to get to know you as a potential adopter for ${widget.animal.name} for today!',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          'Your adoption application and interview appointment have been confirmed! We are excited to get to know you as a potential adopter for ${widget
+              .animal.name} for today!',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
         ),
 
         if (_appointmentDate != null) ...[
@@ -600,8 +773,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 28),
 
         _PrimaryButton(
-          label: 'Adoption Day!',
-          onTap: () => setState(() => _step = _AdoptionProcess.adoptionDay),
+          label: _isSubmitting ? 'Updating...' : 'Adoption Day!',
+          onTap: _isSubmitting
+              ? null
+              : () =>
+              _updateStatus('completed', 'Adoption Completed!',
+                _AdoptionProcess.adoptionDay,),
         ),
 
         const SizedBox(height: 24),
@@ -610,7 +787,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 5th step -- adoption success
-
   Widget _buildAdoptionDay() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -633,7 +809,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 6),
         Text(
           'The organization will safely deliver your pet to your generalhome. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies.\n\nWe\'re so happy for you and your new best friend!',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
         ),
 
         const SizedBox(height: 28),
@@ -652,7 +829,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 5th step --- adoption failed
-
   Widget _buildAppUpdate() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -675,7 +851,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 6),
         Text(
           'After careful review, we feel this may not be the best match at this time.\n\nWe truly appreciate your willingness to give a rescue a loving generalhome, and we encourage you to consider other pets in need — your perfect companion could be waiting!',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
         ),
 
         const SizedBox(height: 28),
@@ -692,7 +869,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 }
 
 // Step tracker widget
-
 class _StepTracker extends StatelessWidget {
   final List<String> labels;
   final int activeIndex;
@@ -777,16 +953,14 @@ class _StepTracker extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Reusable form field
-// ---------------------------------------------------------------------------
-
 class _FormField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final String hint;
   final TextInputType keyboardType;
   final int maxLines;
+  final bool readOnly;
 
   const _FormField({
     required this.controller,
@@ -794,6 +968,7 @@ class _FormField extends StatelessWidget {
     required this.hint,
     this.keyboardType = TextInputType.text,
     this.maxLines = 1,
+    this.readOnly = false,
   });
 
   @override
@@ -814,6 +989,7 @@ class _FormField extends StatelessWidget {
           controller: controller,
           keyboardType: keyboardType,
           maxLines: maxLines,
+          readOnly: readOnly,
           style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
           validator: (v) =>
           (v == null || v.trim().isEmpty) ? 'This field is required' : null,
@@ -822,7 +998,8 @@ class _FormField extends StatelessWidget {
             hintStyle: GoogleFonts.zain(
                 fontSize: 14, color: AppColors.textSecondary),
             filled: true,
-            fillColor: AppColors.yellowrspwn.withOpacity(0.3),
+            fillColor: readOnly
+            ? AppColors.slaterspwn.withOpacity(0.3) : AppColors.yellowrspwn.withOpacity(0.3),
             contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             border: OutlineInputBorder(
@@ -856,6 +1033,7 @@ class _FormField extends StatelessWidget {
   }
 }
 
+
 // buttons
 
 class _PrimaryButton extends StatelessWidget {
@@ -877,7 +1055,7 @@ class _PrimaryButton extends StatelessWidget {
           foregroundColor: AppColors.textPrimary,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(30),
           ),
         ),
         child: Text(
