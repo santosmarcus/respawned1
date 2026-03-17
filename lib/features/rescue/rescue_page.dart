@@ -528,33 +528,54 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 24),
 
             // Scan NFC / QR
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: OutlinedButton.icon(
-                onPressed: _showScanOptions,
-                icon: const Icon(Icons.qr_code_scanner, size: 18),
-                label: Text(
-                  'Scan for NFC or QR',
-                  style: GoogleFonts.zain(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                    onPressed: _showScanOptions,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ), backgroundColor: AppColors.yellowrspwn,
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                    ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.qr_code_scanner, size: 18),
+                      const SizedBox(width: 8,),
+                      Text(
+                          'Scan for NFC or QR',
+                          style: GoogleFonts.tiltWarp(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w400,
+                            color: AppColors.textPrimary,
+                          ),
+                      ),
+                    ],
+                    ),
+                      GestureDetector(
+                        onTap: () => _showScanInfo(context),
+                        child: const Icon(Icons.info_outline,
+                            size: 18, color: AppColors.textPrimary),
+                      ),
+
+                ],
+            ),
+              ),
                   ),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ), backgroundColor: AppColors.yellowrspwn,
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                ),
+            ],
               ),
             ),
-
             const SizedBox(height: 24),
 
             // Divider
@@ -576,7 +597,11 @@ class _RescuePageState extends State<RescuePage> {
                 children: [
                   Text(
                     'Details:',
-                    style: Theme.of(context).textTheme.displaySmall,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w300,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
 
                   const SizedBox(height: 18),
@@ -608,7 +633,6 @@ class _RescuePageState extends State<RescuePage> {
                   ),
 
                   const SizedBox(height: 20),
-
                   // Type of Animal
                   _buildLabel('Type of Animal', required: true),
                   const SizedBox(height: 8),
@@ -1160,5 +1184,53 @@ class _QRScannerPageState extends State<_QRScannerPage> {
         ],
       ),
     );
+
   }
+}
+void _showScanInfo(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      backgroundColor: AppColors.background,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+          const SizedBox(width: 8),
+          Text(
+            'Scan for NFC or QR code',
+            style: GoogleFonts.zain(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
+      ),
+      content: Text(
+        'This animal may have an ID tag. Scan the NFC or QR code to help identify the owner.',
+        style: GoogleFonts.zain(
+          fontSize: 18,
+          color: AppColors.textSecondary,
+        ),
+      ),
+      actions: [
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.yellowrspwn,
+              foregroundColor: AppColors.textPrimary,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
+            ),
+            child: Text('OK', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ],
+    ),
+  );
 }
