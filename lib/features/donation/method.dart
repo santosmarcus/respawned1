@@ -1,30 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'cards.dart';
+import 'review.dart';
+import 'models.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+class DonationMethodSelectionScreen extends StatefulWidget {
+  const DonationMethodSelectionScreen({
+    super.key,
+    required this.organizationName,
+    required this.campaignName,
+    required this.amount,
+  });
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Login(),
-    );
-  }
-}
-
-class Login extends StatefulWidget {
-  const Login({super.key});
+  final String organizationName;
+  final String campaignName;
+  final double amount;
 
   @override
-  State<Login> createState() => _LSState();
+  State<DonationMethodSelectionScreen> createState() => _DonationMethodSelectionScreenState();
 }
 
-class _LSState extends State<Login> {
+class _DonationMethodSelectionScreenState extends State<DonationMethodSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -37,7 +33,7 @@ class _LSState extends State<Login> {
           child: IconButton(
             icon: const Icon(Icons.arrow_back_ios, color: Colors.black),
             onPressed: () {
-              // Placeholder for go back logic              
+              Navigator.of(context).pop();
             },
           ),
         ),
@@ -65,7 +61,12 @@ class _LSState extends State<Login> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    // Placeholder for redirect logic
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DonationCreditCardScreen(),
+                      ),
+                    );
                   },
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 15.0),
@@ -83,75 +84,53 @@ class _LSState extends State<Login> {
                 ),
               ),
               const SizedBox(height: 15),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    // Placeholder for additional button logic
-                  },
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 15.0),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                    ),
-                    backgroundColor: const Color(0xFFFFD95E),
-                    foregroundColor: Colors.black,
-                    textStyle: GoogleFonts.tiltWarp(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  child: const Text('GCash'),
-                ),
-              ),
+              _buildMethodButton(context, 'GCash'),
               const SizedBox(height: 15),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    // Placeholder for additional button logic
-                  },
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 15.0),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                    ),
-                    backgroundColor: const Color(0xFFFFD95E),
-                    foregroundColor: Colors.black,
-                    textStyle: GoogleFonts.tiltWarp(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  child: const Text('PayMaya'),
-                ),
-              ),
+              _buildMethodButton(context, 'PayMaya'),
               const SizedBox(height: 15),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    // Placeholder for additional button logic
-                  },
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 15.0),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                    ),
-                    backgroundColor: const Color(0xFFFFD95E),
-                    foregroundColor: Colors.black,
-                    textStyle: GoogleFonts.tiltWarp(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  child: const Text('PayPal'),
-                ),
-              ),
+              _buildMethodButton(context, 'PayPal'),
               const Spacer(),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildMethodButton(BuildContext context, String methodName) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DonationReviewScreen(
+                params: DonationReviewParams(
+                  organizationName: widget.organizationName,
+                  donationMethod: methodName,
+                  item: DonationItem(
+                    description: widget.campaignName,
+                    amount: widget.amount,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 15.0),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12.0),
+          ),
+          backgroundColor: const Color(0xFFFFD95E),
+          foregroundColor: Colors.black,
+          textStyle: GoogleFonts.tiltWarp(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        child: Text(methodName),
       ),
     );
   }

@@ -1,81 +1,42 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'models.dart';
+import 'amount.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+final donationCampaignProvider = ChangeNotifierProvider.autoDispose.family<DonationCampaignNotifier, Fundraiser>((ref, fundraiser) {
+  return DonationCampaignNotifier(fundraiser: fundraiser);
+});
 
-class CampaignData extends ChangeNotifier {
-  final String title;
-  final String date;
-  final String description;
-  final double fundsReceived;
-  final double targetFunds;
-  final int daysLeft;
-  final List<String> imageUrls;
-  bool isFavorite;
+class DonationCampaignNotifier extends ChangeNotifier {
+  final Fundraiser fundraiser;
 
-  CampaignData({
-    required this.title,
-    required this.date,
-    required this.description,
-    required this.fundsReceived,
-    required this.targetFunds,
-    required this.daysLeft,
-    required this.imageUrls,
-    this.isFavorite = false,
+  DonationCampaignNotifier({
+    required this.fundraiser,
   });
 
   void toggleFavorite() {
-    isFavorite = !isFavorite;
+    fundraiser.isFavorite = !fundraiser.isFavorite;
     notifyListeners();
   }
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class DonationCampaignScreen extends ConsumerStatefulWidget {
+  const DonationCampaignScreen({
+    super.key,
+    required this.fundraiser,
+    required this.organizationName,
+  });
+
+  final Fundraiser fundraiser;
+  final String organizationName;
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Campaign Details',
-      theme: ThemeData(
-        primarySwatch: Colors.yellow,
-        scaffoldBackgroundColor: const Color(0xFFEDEAD8),
-        fontFamily: GoogleFonts.zain().fontFamily,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      home: ChangeNotifierProvider<CampaignData>(
-        create: (BuildContext context) => CampaignData(
-          title: 'Campaign 1',
-          date: 'January 18, 2026',
-          description:
-              'Lorem ipsum dolor sit amet, consectetur adipiscing elit. In dictum tincidunt ullamcorper.',
-          fundsReceived: 2000,
-          targetFunds: 5000,
-          daysLeft: 10,
-          imageUrls: <String>[ //Placeholder images
-            'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-            'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-            'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-          ],
-        ),
-        builder: (BuildContext context, Widget? child) => const CampaignScreen(),
-      ),
-    );
-  }
+  ConsumerState<DonationCampaignScreen> createState() => _DonationCampaignScreenState();
 }
 
-class CampaignScreen extends StatefulWidget {
-  const CampaignScreen({super.key});
-
-  @override
-  State<CampaignScreen> createState() => _CampaignScreenState();
-}
-
-class _CampaignScreenState extends State<CampaignScreen> {
+class _DonationCampaignScreenState extends ConsumerState<DonationCampaignScreen> {
   int _selectedIndex = 0;
 
   void _onItemTapped(int index) {
@@ -86,7 +47,9 @@ class _CampaignScreenState extends State<CampaignScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final CampaignData campaign = Provider.of<CampaignData>(context);
+    final fundraiser = widget.fundraiser;
+    final campaignNotifier = ref.watch(donationCampaignProvider(fundraiser));
+    
     final double screenHeight = MediaQuery.of(context).size.height;
     final double statusBarHeight = MediaQuery.of(context).padding.top;
     const Color kPrimaryColor = Color(0xFFF9D142);
@@ -105,7 +68,7 @@ class _CampaignScreenState extends State<CampaignScreen> {
             left: 0,
             right: 0,
             height: screenHeight * 0.6,
-            child: _ImageCarousel(campaign.imageUrls),
+            child: _DonationImageCarousel(fundraiser.imageUrl),
           ),
           Positioned(
             top: statusBarHeight + 16,
@@ -122,28 +85,24 @@ class _CampaignScreenState extends State<CampaignScreen> {
                   child: IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
                     onPressed: () {
-                      //debugPrint('Test back button');
+                      Navigator.of(context).pop();
                     },
                   ),
                 ),
-                Consumer<CampaignData>(
-                  builder: (BuildContext context, CampaignData data, Widget? child) {
-                    return Container(
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.3),
-                        shape: BoxShape.circle,
-                      ),
-                      child: IconButton(
-                        icon: Icon(
-                          data.isFavorite ? Icons.favorite : Icons.favorite_border,
-                          color: data.isFavorite ? Colors.red : Colors.white,
-                        ),
-                        onPressed: () {
-                          data.toggleFavorite();
-                        },
-                      ),
-                    );
-                  },
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.3),
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      fundraiser.isFavorite ? Icons.favorite : Icons.favorite_border,
+                      color: fundraiser.isFavorite ? Colors.red : Colors.white,
+                    ),
+                    onPressed: () {
+                      campaignNotifier.toggleFavorite();
+                    },
+                  ),
                 ),
               ],
             ),
@@ -153,8 +112,9 @@ class _CampaignScreenState extends State<CampaignScreen> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: _CampaignDetailsCard(
-              campaign: campaign,
+            child: _DonationCampaignDetailsCard(
+              fundraiser: fundraiser,
+              organizationName: widget.organizationName,
               kPrimaryColor: kPrimaryColor,
               kProgressFilledColor: kProgressFilledColor,
               kProgressEmptyColor: kProgressEmptyColor,
@@ -206,40 +166,36 @@ class _CampaignScreenState extends State<CampaignScreen> {
   }
 }
 
-class _ImageCarousel extends StatelessWidget {
-  final List<String> imageUrls;
+class _DonationImageCarousel extends StatelessWidget {
+  final String imageUrl;
 
-  const _ImageCarousel(this.imageUrls);
+  const _DonationImageCarousel(this.imageUrl);
 
   @override
   Widget build(BuildContext context) {
-    return PageView.builder(
-      itemCount: imageUrls.length,
-      itemBuilder: (BuildContext context, int index) {
-        return Image.network(
-          imageUrls[index],
-          fit: BoxFit.cover,
-          loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Center(
-              child: CircularProgressIndicator(
-                value: loadingProgress.expectedTotalBytes != null
-                    ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                    : null,
-              ),
-            );
-          },
-          errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) => const Center(
-            child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
+        if (loadingProgress == null) return child;
+        return Center(
+          child: CircularProgressIndicator(
+            value: loadingProgress.expectedTotalBytes != null
+                ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                : null,
           ),
         );
       },
+      errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) => const Center(
+        child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+      ),
     );
   }
 }
 
-class _CampaignDetailsCard extends StatelessWidget {
-  final CampaignData campaign;
+class _DonationCampaignDetailsCard extends StatelessWidget {
+  final Fundraiser fundraiser;
+  final String organizationName;
   final Color kPrimaryColor;
   final Color kProgressFilledColor;
   final Color kProgressEmptyColor;
@@ -247,8 +203,9 @@ class _CampaignDetailsCard extends StatelessWidget {
   final Color kSubtitleColor;
   final Color kIconColor;
 
-  const _CampaignDetailsCard({
-    required this.campaign,
+  const _DonationCampaignDetailsCard({
+    required this.fundraiser,
+    required this.organizationName,
     required this.kPrimaryColor,
     required this.kProgressFilledColor,
     required this.kProgressEmptyColor,
@@ -259,7 +216,7 @@ class _CampaignDetailsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double progress = campaign.targetFunds > 0 ? campaign.fundsReceived / campaign.targetFunds : 0.0;
+    final double progress = fundraiser.targetAmount > 0 ? fundraiser.currentAmount / fundraiser.targetAmount : 0.0;
 
     return Container(
       decoration: BoxDecoration(
@@ -283,7 +240,7 @@ class _CampaignDetailsCard extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    campaign.title,
+                    fundraiser.name,
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
@@ -298,7 +255,7 @@ class _CampaignDetailsCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              campaign.date,
+              'Active Campaign',
               style: TextStyle(
                 fontSize: 12,
                 color: kSubtitleColor,
@@ -306,7 +263,7 @@ class _CampaignDetailsCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              campaign.description,
+              fundraiser.description,
               style: TextStyle(
                 fontSize: 14,
                 color: kSubtitleColor,
@@ -340,7 +297,7 @@ class _CampaignDetailsCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  '₱${campaign.fundsReceived.toStringAsFixed(0)}',
+                  '₱${fundraiser.currentAmount.toStringAsFixed(0)}',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
@@ -354,21 +311,21 @@ class _CampaignDetailsCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                _StatItem(
+                _DonationStatItem(
                   label: 'Funds received',
                   value: '${(progress * 100).toStringAsFixed(0)}%',
                   valueColor: kTextColor,
                   labelColor: kSubtitleColor,
                 ),
-                _StatItem(
+                _DonationStatItem(
                   label: 'Target funds',
-                  value: '₱${campaign.targetFunds.toStringAsFixed(0)}',
+                  value: '₱${fundraiser.targetAmount.toStringAsFixed(0)}',
                   valueColor: kTextColor,
                   labelColor: kSubtitleColor,
                 ),
-                _StatItem(
+                _DonationStatItem(
                   label: 'Days left',
-                  value: campaign.daysLeft.toString(),
+                  value: fundraiser.daysLeft.toString(),
                   valueColor: kTextColor,
                   labelColor: kSubtitleColor,
                 ),
@@ -378,7 +335,15 @@ class _CampaignDetailsCard extends StatelessWidget {
             Center(
               child: ElevatedButton(
                 onPressed: () {
-                  //debugPrint('Test donate button');
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DonationAmountScreen(
+                        organizationName: organizationName,
+                        campaignName: fundraiser.name,
+                      ),
+                    ),
+                  );
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kPrimaryColor,
@@ -406,13 +371,13 @@ class _CampaignDetailsCard extends StatelessWidget {
   }
 }
 
-class _StatItem extends StatelessWidget {
+class _DonationStatItem extends StatelessWidget {
   final String label;
   final String value;
   final Color valueColor;
   final Color labelColor;
 
-  const _StatItem({
+  const _DonationStatItem({
     required this.label,
     required this.value,
     required this.valueColor,

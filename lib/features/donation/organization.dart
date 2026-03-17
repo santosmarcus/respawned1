@@ -1,117 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'dart:async';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'models.dart';
+import 'campaign.dart';
 
-class Fundraiser {
-  final String id;
-  final String name;
-  final String description;
-  final String imageUrl;
-  final double targetAmount;
-  double currentAmount;
-  final bool hasFacebook;
-  final bool hasInstagram;
-  final bool hasSpotify;
-  final bool hasEmail;
-  final int daysLeft;
-  bool isFavorite;
+final donationOrganizationDetailProvider = ChangeNotifierProvider((ref) => DonationOrganizationDetailNotifier());
 
-  Fundraiser({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.targetAmount,
-    required this.daysLeft,
-    this.currentAmount = 0.0,
-    this.imageUrl =
-        'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-    this.hasFacebook = true,
-    this.hasInstagram = true,
-    this.hasSpotify = true,
-    this.hasEmail = true,
-    this.isFavorite = false,
-  });
-
-  Fundraiser copyWith({
-    bool? isFavorite,
-    double? currentAmount,
-    int? daysLeft,
-  }) {
-    return Fundraiser(
-      id: id,
-      name: name,
-      description: description,
-      targetAmount: targetAmount,
-      currentAmount: currentAmount ?? this.currentAmount,
-      imageUrl: imageUrl,
-      hasFacebook: hasFacebook,
-      hasInstagram: hasInstagram,
-      hasSpotify: hasSpotify,
-      hasEmail: hasEmail,
-      isFavorite: isFavorite ?? this.isFavorite,
-      daysLeft: daysLeft ?? this.daysLeft,
-    );
-  }
-}
-
-class FirebaseMockService {
-  final List<Fundraiser> _mockFundraisers = <Fundraiser>[
-    Fundraiser(
-      id: '1',
-      name: 'Campaign 1',
-      description: 'Description 1',
-      targetAmount: 5000.0,
-      currentAmount: 2000.0,
-      isFavorite: true,
-      hasSpotify: false,
-      daysLeft: 10,
-    ),
-    Fundraiser(
-      id: '2',
-      name: 'Campaign 2',
-      description: 'Description 2',
-      targetAmount: 10000.0,
-      currentAmount: 2000.0,
-      isFavorite: false,
-      hasFacebook: false,
-      daysLeft: 30,
-    ),
-    Fundraiser(
-      id: '3',
-      name: 'Campaign 3',
-      description: 'Description 3',
-      targetAmount: 2500.0,
-      currentAmount: 2500.0,
-      isFavorite: true,
-      hasEmail: false,
-      daysLeft: 5,
-    ),
-    Fundraiser(
-      id: '4',
-      name: 'Campaign 4',
-      description: 'Description 4',
-      targetAmount: 1500.0,
-      currentAmount: 0.0,
-      isFavorite: false,
-      hasInstagram: false,
-      daysLeft: 7,
-    ),
-  ];
-
-  Future<List<Fundraiser>> fetchFundraisers() async {
-    await Future<void>.delayed(const Duration(seconds: 2));
-    return _mockFundraisers;
-  }
-}
-
-class FundraiserData extends ChangeNotifier {
+class DonationOrganizationDetailNotifier extends ChangeNotifier {
   int _bottomNavIndex = 0;
   List<Fundraiser> _fundraisers = <Fundraiser>[];
   bool _isLoading = true;
   String _searchQuery = '';
 
-  FundraiserData() {
+  DonationOrganizationDetailNotifier() {
     _loadFundraisers();
   }
 
@@ -132,9 +34,28 @@ class FundraiserData extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _fundraisers = await FirebaseMockService().fetchFundraisers();
+      await Future<void>.delayed(const Duration(seconds: 2));
+      _fundraisers = <Fundraiser>[
+        Fundraiser(
+          id: '1',
+          name: 'Campaign 1',
+          description: 'Description 1',
+          targetAmount: 5000.0,
+          currentAmount: 2000.0,
+          isFavorite: true,
+          daysLeft: 10,
+        ),
+        Fundraiser(
+          id: '2',
+          name: 'Campaign 2',
+          description: 'Description 2',
+          targetAmount: 10000.0,
+          currentAmount: 2000.0,
+          isFavorite: false,
+          daysLeft: 30,
+        ),
+      ];
     } catch (e) {
-      // Placeholder for error logging
       _fundraisers = <Fundraiser>[];
     } finally {
       _isLoading = false;
@@ -165,22 +86,24 @@ class FundraiserData extends ChangeNotifier {
   }
 }
 
-class FundraiserScreen extends StatelessWidget {
-  const FundraiserScreen({super.key});
+class DonationFundraiserScreen extends ConsumerWidget {
+  const DonationFundraiserScreen({super.key, required this.organization});
 
-  static const Color _primaryBackgroundColor = Color(0xFFF0EFE0); // Light cream/beige
-  static const Color _darkTextColor = Color(0xFF5D4037); // Dark brown
-  static const Color _yellowAccentColor = Color(0xFFFAE07A); // Yellow for search bar, etc.
-  static const Color _cardBackgroundColor1 = Color(0xFFE8E8D2); // Light cream card
-  static const Color _cardBackgroundColor2 = Color(0xFFB5B3A5); // Light brown/grey card
-  static const Color _lightDarkTextColor = Color(0xFF8B7969); // Slightly lighter dark text for "Php"
+  final Organization organization;
+
+  static const Color _primaryBackgroundColor = Color(0xFFF0EFE0);
+  static const Color _darkTextColor = Color(0xFF5D4037);
+  static const Color _yellowAccentColor = Color(0xFFFAE07A);
+  static const Color _cardBackgroundColor1 = Color(0xFFE8E8D2);
+  static const Color _cardBackgroundColor2 = Color(0xFFB5B3A5);
+  static const Color _lightDarkTextColor = Color(0xFF8B7969);
 
   @override
-  Widget build(BuildContext context) {
-    final FundraiserData fundraiserData = context.watch<FundraiserData>();
-    final int bottomNavIndex = fundraiserData.bottomNavIndex;
-    final bool isLoading = fundraiserData.isLoading;
-    final List<Fundraiser> displayedFundraisers = fundraiserData.fundraisers;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final provider = ref.watch(donationOrganizationDetailProvider);
+    final int bottomNavIndex = provider.bottomNavIndex;
+    final bool isLoading = provider.isLoading;
+    final List<Fundraiser> displayedFundraisers = provider.fundraisers;
 
     return Scaffold(
       backgroundColor: _primaryBackgroundColor,
@@ -197,11 +120,12 @@ class FundraiserScreen extends StatelessWidget {
                     icon: const Icon(Icons.arrow_back_ios,
                         color: _darkTextColor, size: 24),
                     onPressed: () {
+                      Navigator.of(context).pop();
                     },
                   ),
                   Expanded(
                     child: Text(
-                      'Org 1',
+                      organization.name,
                       textAlign: TextAlign.center,
                       style: GoogleFonts.tiltWarp(
                         fontSize: 28,
@@ -223,7 +147,7 @@ class FundraiserScreen extends StatelessWidget {
                 child: Column(
                   children: <Widget>[
                     Text(
-                      'Location: Place, Region',
+                      'Location: ${organization.location}',
                       style: GoogleFonts.zain(
                           fontSize: 14, color: _darkTextColor),
                     ),
@@ -233,7 +157,7 @@ class FundraiserScreen extends StatelessWidget {
                           fontSize: 14, color: _darkTextColor),
                     ),
                     Text(
-                      'example.com',
+                      organization.website,
                       style: GoogleFonts.zain(
                           fontSize: 14, color: _darkTextColor),
                     ),
@@ -262,7 +186,7 @@ class FundraiserScreen extends StatelessWidget {
                         ),
                         style: GoogleFonts.zain(color: _darkTextColor),
                         onChanged: (String value) =>
-                            fundraiserData.setSearchQuery(value),
+                            provider.setSearchQuery(value),
                       ),
                     ),
                   ),
@@ -297,14 +221,27 @@ class FundraiserScreen extends StatelessWidget {
                             index % 2 == 0 ? _cardBackgroundColor1 : _cardBackgroundColor2;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 15.0),
-                          child: FundraiserCard(
-                            fundraiser: fundraiser,
-                            onToggleFavorite: (String frId) =>
-                                fundraiserData.toggleFavorite(frId),
-                            cardBackgroundColor: cardColor,
-                            darkTextColor: _darkTextColor,
-                            lightDarkTextColor: _lightDarkTextColor,
-                            yellowAccentColor: _yellowAccentColor,
+                          child: GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => DonationCampaignScreen(
+                                    fundraiser: fundraiser,
+                                    organizationName: organization.name,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: DonationFundraiserCard(
+                              fundraiser: fundraiser,
+                              onToggleFavorite: (String frId) =>
+                                  provider.toggleFavorite(frId),
+                              cardBackgroundColor: cardColor,
+                              darkTextColor: _darkTextColor,
+                              lightDarkTextColor: _lightDarkTextColor,
+                              yellowAccentColor: _yellowAccentColor,
+                            ),
                           ),
                         );
                       }),
@@ -315,7 +252,7 @@ class FundraiserScreen extends StatelessWidget {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: bottomNavIndex,
-        onTap: (int index) => fundraiserData.setBottomNavIndex(index),
+        onTap: (int index) => provider.setBottomNavIndex(index),
         backgroundColor: _yellowAccentColor,
         selectedItemColor: _darkTextColor,
         unselectedItemColor: _darkTextColor.withOpacity(0.6),
@@ -339,8 +276,9 @@ class FundraiserScreen extends StatelessWidget {
     );
   }
 }
-class FundraiserCard extends StatelessWidget {
-  const FundraiserCard({
+
+class DonationFundraiserCard extends StatelessWidget {
+  const DonationFundraiserCard({
     required this.fundraiser,
     required this.onToggleFavorite,
     required this.cardBackgroundColor,
@@ -388,7 +326,18 @@ class FundraiserCard extends StatelessWidget {
                   color: cardBackgroundColor,
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(20.0),
-                    bottom: Radius.circular(0),
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20.0),
+                  ),
+                  child: Image.network(
+                    fundraiser.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => const Center(
+                      child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                    ),
                   ),
                 ),
               ),
@@ -401,7 +350,7 @@ class FundraiserCard extends StatelessWidget {
                     fundraiser.isFavorite
                         ? Icons.favorite
                         : Icons.favorite_border,
-                    color: darkTextColor,
+                    color: Colors.red,
                     size: 24,
                   ),
                 ),
@@ -477,58 +426,4 @@ class FundraiserCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Fundraiser App',
-      theme: ThemeData(
-        primarySwatch: Colors.brown,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        textTheme: GoogleFonts.zainTextTheme().copyWith(
-          displayLarge:
-              GoogleFonts.tiltWarp(fontSize: 57, fontWeight: FontWeight.bold),
-          displayMedium:
-              GoogleFonts.tiltWarp(fontSize: 45, fontWeight: FontWeight.bold),
-          displaySmall:
-              GoogleFonts.tiltWarp(fontSize: 36, fontWeight: FontWeight.bold),
-          headlineLarge:
-              GoogleFonts.tiltWarp(fontSize: 32, fontWeight: FontWeight.bold),
-          headlineMedium:
-              GoogleFonts.tiltWarp(fontSize: 28, fontWeight: FontWeight.bold),
-          headlineSmall:
-              GoogleFonts.tiltWarp(fontSize: 24, fontWeight: FontWeight.bold),
-          titleLarge:
-              GoogleFonts.tiltWarp(fontSize: 22, fontWeight: FontWeight.bold),
-          titleMedium:
-              GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold),
-          titleSmall:
-              GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-          labelLarge:
-              GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-          labelMedium:
-              GoogleFonts.tiltWarp(fontSize: 12, fontWeight: FontWeight.bold),
-          labelSmall:
-              GoogleFonts.tiltWarp(fontSize: 11, fontWeight: FontWeight.bold),
-          bodyLarge: GoogleFonts.zain(fontSize: 16),
-          bodyMedium: GoogleFonts.zain(fontSize: 14),
-          bodySmall: GoogleFonts.zain(fontSize: 12),
-        ),
-      ),
-      home: ChangeNotifierProvider<FundraiserData>(
-        create: (BuildContext context) => FundraiserData(),
-        builder: (BuildContext context, Widget? child) =>
-            const FundraiserScreen(),
-      ),
-    );
-  }
-}
-
-void main() {
-  runApp(const MyApp());
 }

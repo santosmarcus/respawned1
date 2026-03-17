@@ -1,26 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'models.dart';
+import 'addcard.dart';
 
-enum CardType { visa, mastercard, other }
+final donationUserCardsProvider = ChangeNotifierProvider((ref) => DonationUserCardsNotifier());
 
-class CreditCard {
-  final CardType cardType;
-  final String cardNumberLastFour;
-  final String cardHolderName;
-  final String expiryDate;
-  final Color backgroundColor;
-
-  CreditCard({
-    required this.cardType,
-    required this.cardNumberLastFour,
-    required this.cardHolderName,
-    required this.expiryDate,
-    required this.backgroundColor,
-  });
-}
-
-class CreditCardData extends ChangeNotifier {
+class DonationUserCardsNotifier extends ChangeNotifier {
   int _bottomNavIndex = 0;
   final List<CreditCard> _creditCards;
   static const Color _uniformCardBackgroundColor = Colors.white;
@@ -55,9 +42,8 @@ class CreditCardData extends ChangeNotifier {
     ),
   ];
 
-  CreditCardData()
-      : _creditCards = _initialCreditCards,
-        super();
+  DonationUserCardsNotifier()
+      : _creditCards = List<CreditCard>.from(_initialCreditCards);
 
   int get bottomNavIndex => _bottomNavIndex;
   List<CreditCard> get creditCards => List<CreditCard>.from(_creditCards);
@@ -75,8 +61,8 @@ class CreditCardData extends ChangeNotifier {
   }
 }
 
-class CreditCardScreen extends StatelessWidget {
-  const CreditCardScreen({super.key});
+class DonationCreditCardScreen extends ConsumerWidget {
+  const DonationCreditCardScreen({super.key});
 
   static const Color _primaryBackgroundColor = Color(0xFFF0EFE0);
   static const Color _darkTextColor = Color(0xFF5D4037);
@@ -84,10 +70,10 @@ class CreditCardScreen extends StatelessWidget {
   static const Color _lightDarkTextColor = Color(0xFF8B7969);
 
   @override
-  Widget build(BuildContext context) {
-    final CreditCardData creditCardData = context.watch<CreditCardData>();
-    final int bottomNavIndex = creditCardData.bottomNavIndex;
-    final List<CreditCard> displayedCreditCards = creditCardData.creditCards;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cardsNotifier = ref.watch(donationUserCardsProvider);
+    final int bottomNavIndex = cardsNotifier.bottomNavIndex;
+    final List<CreditCard> displayedCreditCards = cardsNotifier.creditCards;
     return Scaffold(
       backgroundColor: _primaryBackgroundColor,
       body: SafeArea(
@@ -103,7 +89,7 @@ class CreditCardScreen extends StatelessWidget {
                     icon: const Icon(Icons.arrow_back_ios,
                         color: _darkTextColor, size: 24),
                     onPressed: () {
-                      // Placeholder for navigation
+                      Navigator.of(context).pop();
                     },
                   ),
                   Expanded(
@@ -125,7 +111,7 @@ class CreditCardScreen extends StatelessWidget {
                 children: displayedCreditCards.map<Widget>((CreditCard card) {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 10.0),
-                    child: CreditCardWidget(
+                    child: DonationCreditCardWidget(
                       creditCard: card,
                       darkTextColor: _darkTextColor,
                       lightDarkTextColor: _lightDarkTextColor,
@@ -137,8 +123,11 @@ class CreditCardScreen extends StatelessWidget {
               Center(
                 child: FilledButton.icon(
                   onPressed: () {
-                    // Placeholder redirect
-                    // Navigator.push(context, MaterialPageRoute(builder: (context) => page2()));
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) => const DonationAddCardScreen(),
+                      ),
+                    );
                   },
                   icon: const Icon(Icons.add_card, color: _darkTextColor),
                   label: Text(
@@ -164,7 +153,7 @@ class CreditCardScreen extends StatelessWidget {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: bottomNavIndex,
-        onTap: (int index) => creditCardData.setBottomNavIndex(index),
+        onTap: (int index) => cardsNotifier.setBottomNavIndex(index),
         backgroundColor: _yellowAccentColor,
         selectedItemColor: _darkTextColor,
         unselectedItemColor: _darkTextColor.withOpacity(0.6),
@@ -189,8 +178,8 @@ class CreditCardScreen extends StatelessWidget {
   }
 }
 
-class CreditCardWidget extends StatelessWidget {
-  const CreditCardWidget({
+class DonationCreditCardWidget extends StatelessWidget {
+  const DonationCreditCardWidget({
     required this.creditCard,
     required this.darkTextColor,
     required this.lightDarkTextColor,
@@ -318,58 +307,4 @@ class CreditCardWidget extends StatelessWidget {
       ),
     );
   }
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Credit Card Manager',
-      theme: ThemeData(
-        primarySwatch: Colors.brown,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        textTheme: GoogleFonts.zainTextTheme().copyWith(
-          displayLarge:
-              GoogleFonts.tiltWarp(fontSize: 57, fontWeight: FontWeight.bold),
-          displayMedium:
-              GoogleFonts.tiltWarp(fontSize: 45, fontWeight: FontWeight.bold),
-          displaySmall:
-              GoogleFonts.tiltWarp(fontSize: 36, fontWeight: FontWeight.bold),
-          headlineLarge:
-              GoogleFonts.tiltWarp(fontSize: 32, fontWeight: FontWeight.bold),
-          headlineMedium:
-              GoogleFonts.tiltWarp(fontSize: 28, fontWeight: FontWeight.bold),
-          headlineSmall:
-              GoogleFonts.tiltWarp(fontSize: 24, fontWeight: FontWeight.bold),
-          titleLarge:
-              GoogleFonts.tiltWarp(fontSize: 22, fontWeight: FontWeight.bold),
-          titleMedium:
-              GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold),
-          titleSmall:
-              GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-          labelLarge:
-              GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-          labelMedium:
-              GoogleFonts.tiltWarp(fontSize: 12, fontWeight: FontWeight.bold),
-          labelSmall:
-              GoogleFonts.tiltWarp(fontSize: 11, fontWeight: FontWeight.bold),
-          bodyLarge: GoogleFonts.zain(fontSize: 16),
-          bodyMedium: GoogleFonts.zain(fontSize: 14),
-          bodySmall: GoogleFonts.zain(fontSize: 12),
-        ),
-      ),
-      home: ChangeNotifierProvider<CreditCardData>(
-        create: (BuildContext context) => CreditCardData(),
-        builder: (BuildContext context, Widget? child) =>
-            const CreditCardScreen(),
-      ),
-    );
-  }
-}
-
-void main() {
-  runApp(const MyApp());
 }

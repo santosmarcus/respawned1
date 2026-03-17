@@ -1,22 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'models.dart';
 
-enum CardType { visa, mastercard, other }
+final creditCardDataProvider = ChangeNotifierProvider.autoDispose<CreditCardData>((ref) => CreditCardData());
 
-extension CardTypeExtension on CardType {
-  String get name {
-    switch (this) {
-      case CardType.visa:
-        return 'Visa';
-      case CardType.mastercard:
-        return 'Mastercard';
-      case CardType.other:
-        return 'Other';
-    }
-  }
-}
 class CreditCardData with ChangeNotifier {
   final TextEditingController _cardNumberController = TextEditingController();
   final TextEditingController _expiryMonthController = TextEditingController();
@@ -57,7 +47,7 @@ class CreditCardData with ChangeNotifier {
     _cardHolderNameController
         .addListener(() => updateCardHolderName(_cardHolderNameController.text));
   }
-  
+
   String? _validateCardNumber(String? value) {
     if (value == null || value.isEmpty) {
       return 'Please enter a card number';
@@ -221,91 +211,12 @@ class CreditCardNumberInputFormatter extends TextInputFormatter {
   }
 }
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class DonationAddCardScreen extends ConsumerWidget {
+  const DonationAddCardScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider<CreditCardData>(
-      create: (BuildContext context) => CreditCardData(),
-      builder: (BuildContext context, Widget? child) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          primarySwatch: Colors.blue,
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12.0),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12.0),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12.0),
-              borderSide: const BorderSide(
-                color: Colors.blueAccent,
-                width: 2,
-              ),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12.0),
-              borderSide: const BorderSide(
-                color: Colors.red,
-                width: 2,
-              ),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12.0),
-              borderSide: const BorderSide(
-                color: Colors.redAccent,
-                width: 2,
-              ),
-            ),
-            labelStyle: GoogleFonts.zain(fontSize: 16, color: Colors.black),
-            hintStyle: GoogleFonts.zain(fontSize: 16, color: Colors.grey[400]),
-            errorStyle: GoogleFonts.zain(fontSize: 12, color: Colors.red),
-            contentPadding:
-                const EdgeInsets.symmetric(vertical: 10.0, horizontal: 12.0),
-          ),
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 15.0),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12.0),
-              ),
-              backgroundColor: const Color(0xFFFFD95E),
-              foregroundColor: Colors.black,
-              textStyle: GoogleFonts.tiltWarp(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          textSelectionTheme: const TextSelectionThemeData(
-            cursorColor: Colors.blueAccent,
-            selectionColor: Colors.blueAccent,
-            selectionHandleColor: Colors.blueAccent,
-          ),
-        ),
-        home: const AddCreditCardScreen(),
-      ),
-    );
-  }
-}
-
-class AddCreditCardScreen extends StatelessWidget {
-  const AddCreditCardScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final CreditCardData creditCardData = context.watch<CreditCardData>();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final CreditCardData creditCardData = ref.watch(creditCardDataProvider);
     const Color scaffoldBackgroundColor = Color(0xFFF0EADC);
 
     return Scaffold(
@@ -343,11 +254,11 @@ class AddCreditCardScreen extends StatelessWidget {
             children: <Widget>[
               const SizedBox(height: 15),
               DropdownButtonFormField<CardType>(
-                value: creditCardData.cardType,
-                decoration: InputDecoration(
+                initialValue: creditCardData.cardType,
+                decoration: const InputDecoration(
                   labelText: 'Card Type',
                   prefixIcon:
-                      const Icon(Icons.credit_card_sharp, color: Colors.grey),
+                      Icon(Icons.credit_card_sharp, color: Colors.grey),
                 ),
                 items: CardType.values.map<DropdownMenuItem<CardType>>(
                   (CardType type) {
@@ -448,7 +359,7 @@ class AddCreditCardScreen extends StatelessWidget {
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (BuildContext context) =>
-                              const CardVerificationScreen(),
+                              const DonationCardVerificationScreen(),
                         ),
                       );
                     } else {
@@ -472,12 +383,11 @@ class AddCreditCardScreen extends StatelessWidget {
   }
 }
 
-class CardVerificationScreen extends StatelessWidget {
-  const CardVerificationScreen({super.key});
+class DonationCardVerificationScreen extends StatelessWidget {
+  const DonationCardVerificationScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Placeholder for external card verification script
     const Color scaffoldBackgroundColor = Color(0xFFF0EADC);
 
     return Scaffold(

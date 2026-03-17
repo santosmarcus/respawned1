@@ -1,58 +1,48 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'models.dart';
 
-class DonationItem {
-  final String description;
-  final double amount;
+final donationReviewProvider = ChangeNotifierProvider.autoDispose.family<DonationReviewNotifier, DonationReviewParams>((ref, params) {
+  return DonationReviewNotifier(
+    organizationName: params.organizationName,
+    donationMethod: params.donationMethod,
+    item: params.item,
+  );
+});
 
-  DonationItem({required this.description, required this.amount});
+class DonationReviewParams {
+  final String organizationName;
+  final String donationMethod;
+  final DonationItem item;
+
+  DonationReviewParams({
+    required this.organizationName,
+    required this.donationMethod,
+    required this.item,
+  });
 }
 
-class DonationData extends ChangeNotifier {
-  final String charityName;
+class DonationReviewNotifier extends ChangeNotifier {
+  final String organizationName;
   final String donationMethod;
   final DonationItem item;
   final double totalAmount;
 
-  DonationData({
-    required this.charityName,
+  DonationReviewNotifier({
+    required this.organizationName,
     required this.donationMethod,
     required this.item,
   }) : totalAmount = item.amount;
 }
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider<DonationData>(
-      create: (BuildContext context) => DonationData(
-        charityName: 'Org 1',
-        donationMethod: 'Credit Card ending in **** 5678',
-        item: DonationItem(description: 'Campaign 1', amount: 500),
-      ),
-      builder: (BuildContext context, Widget? child) {
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          home: DonationReviewPage(),
-        );
-      },
-    );
-  }
-}
-
-class SectionCard extends StatelessWidget {
+class DonationReviewSectionCard extends StatelessWidget {
   final String title;
   final IconData icon;
   final List<Widget> children;
 
-  const SectionCard({
+  const DonationReviewSectionCard({
     super.key,
     required this.title,
     required this.icon,
@@ -93,17 +83,14 @@ class SectionCard extends StatelessWidget {
   }
 }
 
-class DonationReviewPage extends StatefulWidget {
-  const DonationReviewPage({super.key});
+class DonationReviewScreen extends ConsumerWidget {
+  const DonationReviewScreen({super.key, required this.params});
+
+  final DonationReviewParams params;
 
   @override
-  State<DonationReviewPage> createState() => _DonationReviewPageState();
-}
-
-class _DonationReviewPageState extends State<DonationReviewPage> {
-  @override
-  Widget build(BuildContext context) {
-    final DonationData donation = Provider.of<DonationData>(context);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final donation = ref.watch(donationReviewProvider(params));
 
     return Scaffold(
       backgroundColor: const Color(0xFFF0EADC),
@@ -113,7 +100,7 @@ class _DonationReviewPageState extends State<DonationReviewPage> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            // Placeholder to redirect to previous screen
+            Navigator.of(context).pop();
           },
           color: Colors.black,
         ),
@@ -133,18 +120,18 @@ class _DonationReviewPageState extends State<DonationReviewPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              SectionCard(
+              DonationReviewSectionCard(
                 title: 'Organization',
                 icon: Icons.volunteer_activism_outlined,
                 children: <Widget>[
                   Text(
-                    donation.charityName,
+                    donation.organizationName,
                     style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
               const SizedBox(height: 18),
-              SectionCard(
+              DonationReviewSectionCard(
                 title: 'Donation Details',
                 icon: Icons.attach_money_outlined,
                 children: <Widget>[
@@ -192,7 +179,7 @@ class _DonationReviewPageState extends State<DonationReviewPage> {
                 ],
               ),
               const SizedBox(height: 18),
-              SectionCard(
+              DonationReviewSectionCard(
                 title: 'Payment Info',
                 icon: Icons.payment_outlined,
                 children: <Widget>[

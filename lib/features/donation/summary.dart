@@ -1,16 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:intl/intl.dart';
+import 'models.dart';
 
-class DonationItem {
-  final String description;
-  final double amount;
+final donationSummaryProvider = ChangeNotifierProvider.autoDispose.family<DonationSummaryNotifier, DonationSummaryParams>((ref, params) {
+  return DonationSummaryNotifier(
+    charityName: params.charityName,
+    donationMethod: params.donationMethod,
+    item: params.item,
+    referenceNumber: params.referenceNumber,
+    timestamp: params.timestamp,
+  );
+});
 
-  DonationItem({required this.description, required this.amount});
+class DonationSummaryParams {
+  final String charityName;
+  final String donationMethod;
+  final DonationItem item;
+  final String referenceNumber;
+  final DateTime timestamp;
+
+  DonationSummaryParams({
+    required this.charityName,
+    required this.donationMethod,
+    required this.item,
+    required this.referenceNumber,
+    required this.timestamp,
+  });
 }
 
-class DonationData extends ChangeNotifier {
+class DonationSummaryNotifier extends ChangeNotifier {
   final String charityName;
   final String donationMethod;
   final DonationItem item;
@@ -18,7 +39,7 @@ class DonationData extends ChangeNotifier {
   final DateTime timestamp;
   final double totalAmount;
 
-  DonationData({
+  DonationSummaryNotifier({
     required this.charityName,
     required this.donationMethod,
     required this.item,
@@ -27,39 +48,12 @@ class DonationData extends ChangeNotifier {
   }) : totalAmount = item.amount;
 }
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider<DonationData>(
-      create: (BuildContext context) => DonationData(
-        charityName: 'Org 1',
-        donationMethod: 'Credit Card ending in **** 5678',
-        item: DonationItem(description: 'Campaign 1', amount: 500.00),
-        referenceNumber: '240726-12345',
-        timestamp: DateTime.now(),
-      ),
-      builder: (BuildContext context, Widget? child) {
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          home: DonationSummaryPage(),
-        );
-      },
-    );
-  }
-}
-
-class SectionCard extends StatelessWidget {
+class DonationSummarySectionCard extends StatelessWidget {
   final String title;
   final IconData icon;
   final List<Widget> children;
 
-  const SectionCard({
+  const DonationSummarySectionCard({
     super.key,
     required this.title,
     required this.icon,
@@ -100,17 +94,22 @@ class SectionCard extends StatelessWidget {
   }
 }
 
-class DonationSummaryPage extends StatefulWidget {
-  const DonationSummaryPage({super.key});
+class DonationSummaryScreen extends ConsumerWidget {
+  const DonationSummaryScreen({super.key});
 
   @override
-  State<DonationSummaryPage> createState() => _DonationSummaryPageState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Note: Same as CampaignScreen, params would usually come from navigation or another provider.
+    // Providing dummy params to keep the code structure.
+    final dummyParams = DonationSummaryParams(
+      charityName: 'Sample Charity',
+      donationMethod: 'Credit Card',
+      item: DonationItem(description: 'Sample Donation', amount: 100.0),
+      referenceNumber: 'REF123456',
+      timestamp: DateTime.now(),
+    );
 
-class _DonationSummaryPageState extends State<DonationSummaryPage> {
-  @override
-  Widget build(BuildContext context) {
-    final DonationData donation = Provider.of<DonationData>(context);
+    final donation = ref.watch(donationSummaryProvider(dummyParams));
 
     return Scaffold(
       backgroundColor: const Color(0xFFF0EADC),
@@ -133,7 +132,7 @@ class _DonationSummaryPageState extends State<DonationSummaryPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              SectionCard(
+              DonationSummarySectionCard(
                 title: 'Organization',
                 icon: Icons.volunteer_activism_outlined,
                 children: <Widget>[
@@ -144,7 +143,7 @@ class _DonationSummaryPageState extends State<DonationSummaryPage> {
                 ],
               ),
               const SizedBox(height: 18),
-              SectionCard(
+              DonationSummarySectionCard(
                 title: 'Donation Details',
                 icon: Icons.attach_money_outlined,
                 children: <Widget>[
@@ -192,7 +191,7 @@ class _DonationSummaryPageState extends State<DonationSummaryPage> {
                 ],
               ),
               const SizedBox(height: 18),
-              SectionCard(
+              DonationSummarySectionCard(
                 title: 'Payment Info',
                 icon: Icons.payment_outlined,
                 children: <Widget>[
@@ -203,7 +202,7 @@ class _DonationSummaryPageState extends State<DonationSummaryPage> {
                 ],
               ),
               const SizedBox(height: 18),
-              SectionCard(
+              DonationSummarySectionCard(
                 title: 'Confirmation Details',
                 icon: Icons.receipt_long_outlined,
                 children: <Widget>[
@@ -269,8 +268,8 @@ class _DonationSummaryPageState extends State<DonationSummaryPage> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () {
-                        // Placeholder for making another donation
-                        debugPrint('Make Another Donation pressed');
+                        // Placeholder for navigating back to donation list
+                        Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
                       },
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14.0),

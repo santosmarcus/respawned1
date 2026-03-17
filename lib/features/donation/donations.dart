@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'dart:async';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'models.dart';
+import 'organization.dart';
 
-class FirebaseMockService {
+class DonationFirebaseMockService {
   final List<Organization> _mockOrganizations = <Organization>[
     Organization(
       id: '1',
@@ -53,61 +55,21 @@ class FirebaseMockService {
   }
 }
 
-enum BasicFilters { topRated, nearMe, favorites }
+enum DonationBasicFilters { topRated, nearMe, favorites }
 
-class Organization {
-  final String id;
-  final String name;
-  final String location;
-  final String website;
-  final String imageUrl;
-  final bool hasFacebook;
-  final bool hasInstagram;
-  final bool hasSpotify;
-  final bool hasEmail;
-  bool isFavorite;
+final donationListProvider = ChangeNotifierProvider((ref) => DonationListNotifier());
 
-  Organization({
-    required this.id,
-    required this.name,
-    required this.location,
-    required this.website,
-    this.imageUrl =
-        'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-    this.hasFacebook = true,
-    this.hasInstagram = true,
-    this.hasSpotify = true,
-    this.hasEmail = true,
-    this.isFavorite = false,
-  });
-
-  Organization copyWith({bool? isFavorite}) {
-    return Organization(
-      id: id,
-      name: name,
-      location: location,
-      website: website,
-      imageUrl: imageUrl,
-      hasFacebook: hasFacebook,
-      hasInstagram: hasInstagram,
-      hasSpotify: hasSpotify,
-      hasEmail: hasEmail,
-      isFavorite: isFavorite ?? this.isFavorite,
-    );
-  }
-}
-
-class DonationData extends ChangeNotifier {
-  BasicFilters _selectedCategory = BasicFilters.topRated;
+class DonationListNotifier extends ChangeNotifier {
+  DonationBasicFilters _selectedCategory = DonationBasicFilters.topRated;
   int _bottomNavIndex = 0;
   List<Organization> _organizations = <Organization>[];
   bool _isLoading = true;
 
-  DonationData() {
+  DonationListNotifier() {
     _loadOrganizations();
   }
 
-  BasicFilters get selectedCategory => _selectedCategory;
+  DonationBasicFilters get selectedCategory => _selectedCategory;
   int get bottomNavIndex => _bottomNavIndex;
   List<Organization> get organizations => _organizations;
   bool get isLoading => _isLoading;
@@ -116,9 +78,8 @@ class DonationData extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _organizations = await FirebaseMockService().fetchOrganizations();
+      _organizations = await DonationFirebaseMockService().fetchOrganizations();
     } catch (e) {
-      // Placeholder for error logging
       _organizations = <Organization>[];
     } finally {
       _isLoading = false;
@@ -126,7 +87,7 @@ class DonationData extends ChangeNotifier {
     }
   }
 
-  void setSelectedCategory(BasicFilters category) {
+  void setSelectedCategory(DonationBasicFilters category) {
     if (_selectedCategory != category) {
       _selectedCategory = category;
       notifyListeners();
@@ -151,8 +112,8 @@ class DonationData extends ChangeNotifier {
   }
 }
 
-class DonationScreen extends StatelessWidget {
-  const DonationScreen({super.key});
+class DonationsScreen extends ConsumerWidget {
+  const DonationsScreen({super.key});
 
   static const Color _primaryBackgroundColor = Color(0xFFF5F0E1);
   static const Color _darkTextColor = Color(0xFF5D4037);
@@ -165,14 +126,14 @@ class DonationScreen extends StatelessWidget {
   static const Color _bottomNavBarColor = Color(0xFFFFD54F);
 
   @override
-  Widget build(BuildContext context) {
-    final DonationData donationData = context.watch<DonationData>();
-    final BasicFilters selectedCategory = donationData.selectedCategory;
-    final int bottomNavIndex = donationData.bottomNavIndex;
-    final bool isLoading = donationData.isLoading;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final donationNotifier = ref.watch(donationListProvider);
+    final DonationBasicFilters selectedCategory = donationNotifier.selectedCategory;
+    final int bottomNavIndex = donationNotifier.bottomNavIndex;
+    final bool isLoading = donationNotifier.isLoading;
     final List<Organization> displayedOrganizations =
-        donationData.organizations.where((Organization org) {
-      if (selectedCategory == BasicFilters.favorites) {
+        donationNotifier.organizations.where((Organization org) {
+      if (selectedCategory == DonationBasicFilters.favorites) {
         return org.isFavorite;
       }
       return true;
@@ -236,31 +197,31 @@ class DonationScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: <Widget>[
-                  _CategoryButton(
+                  _DonationCategoryButton(
                     text: 'Top Rated',
-                    category: BasicFilters.topRated,
-                    isSelected: selectedCategory == BasicFilters.topRated,
+                    category: DonationBasicFilters.topRated,
+                    isSelected: selectedCategory == DonationBasicFilters.topRated,
                     selectedColor: _buttonActiveColor,
-                    onSelected: (BasicFilters category) =>
-                        donationData.setSelectedCategory(category),
+                    onSelected: (DonationBasicFilters category) =>
+                        donationNotifier.setSelectedCategory(category),
                     darkTextColor: _darkTextColor,
                   ),
-                  _CategoryButton(
+                  _DonationCategoryButton(
                     text: 'Near Me',
-                    category: BasicFilters.nearMe,
-                    isSelected: selectedCategory == BasicFilters.nearMe,
+                    category: DonationBasicFilters.nearMe,
+                    isSelected: selectedCategory == DonationBasicFilters.nearMe,
                     selectedColor: _buttonNearMeColor,
-                    onSelected: (BasicFilters category) =>
-                        donationData.setSelectedCategory(category),
+                    onSelected: (DonationBasicFilters category) =>
+                        donationNotifier.setSelectedCategory(category),
                     darkTextColor: _darkTextColor,
                   ),
-                  _CategoryButton(
+                  _DonationCategoryButton(
                     text: 'Favorites',
-                    category: BasicFilters.favorites,
-                    isSelected: selectedCategory == BasicFilters.favorites,
+                    category: DonationBasicFilters.favorites,
+                    isSelected: selectedCategory == DonationBasicFilters.favorites,
                     selectedColor: _buttonFavoritesColor,
-                    onSelected: (BasicFilters category) =>
-                        donationData.setSelectedCategory(category),
+                    onSelected: (DonationBasicFilters category) =>
+                        donationNotifier.setSelectedCategory(category),
                     darkTextColor: _darkTextColor,
                   ),
                 ],
@@ -280,14 +241,24 @@ class DonationScreen extends StatelessWidget {
                           .map<Widget>((Organization organization) {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 15.0),
-                          child: OrganizationCard(
-                            organization: organization,
-                            onToggleFavorite: (String orgId) =>
-                                donationData.toggleFavorite(orgId),
-                            cardBackgroundColor: _cardBackgroundColor,
-                            cardImagePlaceholderColor:
-                                _cardImagePlaceholderColor,
-                            darkTextColor: _darkTextColor,
+                          child: GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => DonationFundraiserScreen(organization: organization),
+                                ),
+                              );
+                            },
+                            child: DonationOrganizationCard(
+                              organization: organization,
+                              onToggleFavorite: (String orgId) =>
+                                  donationNotifier.toggleFavorite(orgId),
+                              cardBackgroundColor: _cardBackgroundColor,
+                              cardImagePlaceholderColor:
+                                  _cardImagePlaceholderColor,
+                              darkTextColor: _darkTextColor,
+                            ),
                           ),
                         );
                       }).toList(),
@@ -298,7 +269,7 @@ class DonationScreen extends StatelessWidget {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: bottomNavIndex,
-        onTap: (int index) => donationData.setBottomNavIndex(index),
+        onTap: (int index) => donationNotifier.setBottomNavIndex(index),
         backgroundColor: _bottomNavBarColor,
         selectedItemColor: _darkTextColor,
         unselectedItemColor: _darkTextColor.withOpacity(0.6),
@@ -322,8 +293,8 @@ class DonationScreen extends StatelessWidget {
   }
 }
 
-class _CategoryButton extends StatelessWidget {
-  const _CategoryButton({
+class _DonationCategoryButton extends StatelessWidget {
+  const _DonationCategoryButton({
     required this.text,
     required this.category,
     required this.isSelected,
@@ -333,10 +304,10 @@ class _CategoryButton extends StatelessWidget {
   });
 
   final String text;
-  final BasicFilters category;
+  final DonationBasicFilters category;
   final bool isSelected;
   final Color selectedColor;
-  final ValueChanged<BasicFilters> onSelected;
+  final ValueChanged<DonationBasicFilters> onSelected;
   final Color darkTextColor;
 
   @override
@@ -379,8 +350,8 @@ class _CategoryButton extends StatelessWidget {
   }
 }
 
-class OrganizationCard extends StatelessWidget {
-  const OrganizationCard({
+class DonationOrganizationCard extends StatelessWidget {
+  const DonationOrganizationCard({
     required this.organization,
     required this.onToggleFavorite,
     required this.cardBackgroundColor,
@@ -509,57 +480,4 @@ class OrganizationCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Donation',
-      theme: ThemeData(
-        primarySwatch: Colors.brown,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        textTheme: GoogleFonts.zainTextTheme().copyWith(
-          displayLarge:
-              GoogleFonts.tiltWarp(fontSize: 57, fontWeight: FontWeight.bold),
-          displayMedium:
-              GoogleFonts.tiltWarp(fontSize: 45, fontWeight: FontWeight.bold),
-          displaySmall:
-              GoogleFonts.tiltWarp(fontSize: 36, fontWeight: FontWeight.bold),
-          headlineLarge:
-              GoogleFonts.tiltWarp(fontSize: 32, fontWeight: FontWeight.bold),
-          headlineMedium:
-              GoogleFonts.tiltWarp(fontSize: 28, fontWeight: FontWeight.bold),
-          headlineSmall:
-              GoogleFonts.tiltWarp(fontSize: 24, fontWeight: FontWeight.bold),
-          titleLarge:
-              GoogleFonts.tiltWarp(fontSize: 22, fontWeight: FontWeight.bold),
-          titleMedium:
-              GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold),
-          titleSmall:
-              GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-          labelLarge:
-              GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-          labelMedium:
-              GoogleFonts.tiltWarp(fontSize: 12, fontWeight: FontWeight.bold),
-          labelSmall:
-              GoogleFonts.tiltWarp(fontSize: 11, fontWeight: FontWeight.bold),
-          bodyLarge: GoogleFonts.zain(fontSize: 16),
-          bodyMedium: GoogleFonts.zain(fontSize: 14),
-          bodySmall: GoogleFonts.zain(fontSize: 12),
-        ),
-      ),
-      home: ChangeNotifierProvider<DonationData>(
-        create: (BuildContext context) => DonationData(),
-        builder: (BuildContext context, Widget? child) =>
-            const DonationScreen(),
-      ),
-    );
-  }
-}
-void main() {
-  runApp(const MyApp());
 }

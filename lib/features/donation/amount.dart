@@ -1,31 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'method.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+class DonationAmountScreen extends StatefulWidget {
+  const DonationAmountScreen({
+    super.key,
+    required this.organizationName,
+    required this.campaignName,
+  });
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: DonationAmountInput(),
-    );
-  }
-}
-
-class DonationAmountInput extends StatefulWidget {
-  const DonationAmountInput({super.key});
+  final String organizationName;
+  final String campaignName;
 
   @override
-  State<DonationAmountInput> createState() => _DonationAmountInputState();
+  State<DonationAmountScreen> createState() => _DonationAmountScreenState();
 }
 
-class _DonationAmountInputState extends State<DonationAmountInput> {
+class _DonationAmountScreenState extends State<DonationAmountScreen> {
   final TextEditingController _amountEditor = TextEditingController();
   String? _amountErr;
 
@@ -55,13 +47,16 @@ class _DonationAmountInputState extends State<DonationAmountInput> {
     });
 
     if (_amountErr == null) {
-      // Placeholder for validation logic
-      //print('Donation Amount entered: PHP ${_amountEditor.text}');
-      // Placeholder for redirect logic
-      // Navigator.push(
-      //   context,
-      //   MaterialPageRoute(builder: (context) => const page2()),
-      // );
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DonationMethodSelectionScreen(
+            organizationName: widget.organizationName,
+            campaignName: widget.campaignName,
+            amount: double.parse(_amountEditor.text),
+          ),
+        ),
+      );
     }
   }
 
@@ -69,6 +64,14 @@ class _DonationAmountInputState extends State<DonationAmountInput> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF0EADC),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(30.0),
@@ -87,9 +90,9 @@ class _DonationAmountInputState extends State<DonationAmountInput> {
               const SizedBox(height: 25),
               TextField(
                 controller: _amountEditor,
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 inputFormatters: <TextInputFormatter>[
-                  FilteringTextInputFormatter.digitsOnly,
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                 ],
                 decoration: InputDecoration(
                   labelText: 'Donation Amount',
