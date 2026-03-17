@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/home/home_screen.dart';
+import 'package:respawnd1/features/generalhome/home_screen.dart';
 import '../../app_theme.dart';
 import 'animal_page.dart';
 

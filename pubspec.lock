@@ -427,6 +427,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_nfc_kit:
+    dependency: "direct main"
+    description:
+      name: flutter_nfc_kit
+      sha256: a2b324785173930f1b5afac8b190637d612593b994ecfd0a5334b72a841b9298
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.6.2"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
@@ -750,7 +758,7 @@ packages:
     source: hosted
     version: "0.15.6"
   http:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: http
       sha256: "87721a4a50b19c7f1d49001e51409bddc46303966ce89a65af4f4e6004896412"
@@ -949,6 +957,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.0"
+  mobile_scanner:
+    dependency: "direct main"
+    description:
+      name: mobile_scanner
+      sha256: d234581c090526676fd8fab4ada92f35c6746e3fb4f05a399665d75a399fb760
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.2.3"
   native_toolchain_c:
     dependency: transitive
     description:
@@ -957,6 +973,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.17.5"
+  ndef:
+    dependency: transitive
+    description:
+      name: ndef
+      sha256: "198ba3798e80cea381648569d84059dbba64cd140079fb7b0d9c3f1e0f5973f3"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.0"
   node_preamble:
     dependency: transitive
     description:
@@ -1362,6 +1386,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.0"
+  universal_platform:
+    dependency: transitive
+    description:
+      name: universal_platform
+      sha256: "64e16458a0ea9b99260ceb5467a214c1f298d647c659af1bff6d3bf82536b1ec"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   uuid:
     dependency: transitive
     description:

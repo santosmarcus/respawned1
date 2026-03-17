@@ -1,8 +1,18 @@
-
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
-import 'package:respawnd1/features/home/home_screen.dart';
+import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
+
+const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
 
 class RescuePage extends StatefulWidget {
   const RescuePage({super.key});
@@ -20,10 +30,27 @@ class _RescuePageState extends State<RescuePage> {
   String? _selectedUrgency;
   String? _coordinateChoice;
   String? _adoptionChoice;
+  String? _selectedAnimalType;
+  bool _isLoading = false;
+
   final List<dynamic> _mediaFiles = [null, null];
+
+
+  // Google Maps
+  GoogleMapController? _mapController;
+  LatLng _pinnedLocation = const LatLng(14.5995, 120.9842); // default: Manila
+  String _pinnedAddress = 'Fetching location…';
+  bool _loadingLocation = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCurrentLocation();
+  }
 
   @override
   void dispose() {
+    _mapController?.dispose();
     _addressController.dispose();
     _conditionController.dispose();
     _witnessNameController.dispose();
@@ -31,6 +58,241 @@ class _RescuePageState extends State<RescuePage> {
     super.dispose();
   }
 
+  //Geolocation
+  Future<void> _fetchCurrentLocation() async {
+    setState(() => _loadingLocation = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _setError('Location services are disabled.');
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _setError('Location permission denied.');
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      final latLng = LatLng(pos.latitude, pos.longitude);
+      await _updatePin(latLng);
+    } catch (e) {
+      _setError('Could not get location.');
+    }
+  }
+
+  void _setError(String msg) {
+    setState(() {
+      _loadingLocation = false;
+      _pinnedAddress = msg;
+    });
+  }
+
+  // Reverse-geocode a LatLng → human-readable address via Geocoding API
+  Future<void> _updatePin(LatLng pos) async {
+    setState(() {
+      _pinnedLocation = pos;
+      _pinnedAddress = 'Resolving address…';
+    });
+
+    _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: pos, zoom: 17),
+      ),
+    );
+
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+            '?latlng=${pos.latitude},${pos.longitude}'
+            '&key=$_mapsApiKey',
+      );
+      final res = await http.get(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['results'] != null && data['results'].isNotEmpty) {
+          final address =
+              data['results'][0]['formatted_address'] as String? ?? '';
+          setState(() => _pinnedAddress = address);
+        } else {
+          setState(() => _pinnedAddress =
+          '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}');
+        }
+      }
+    } catch (_) {
+      setState(() => _pinnedAddress =
+      '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}');
+    } finally {
+      setState(() => _loadingLocation = false);
+    }
+  }
+
+  // Forward-geocode a typed address → LatLng
+  Future<void> _geocodeAddress(String address) async {
+    if (address.trim().isEmpty) return;
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+            '?address=${Uri.encodeComponent(address)}'
+            '&key=$_mapsApiKey',
+      );
+      final res = await http.get(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['results'] != null && data['results'].isNotEmpty) {
+          final loc = data['results'][0]['geometry']['location'];
+          final latLng = LatLng(loc['lat'] as double, loc['lng'] as double);
+          await _updatePin(latLng);
+        }
+      }
+    } catch (_) {}
+  }
+
+  //NFC and QR
+  void _showScanOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Scan Animal Tag',
+              style: GoogleFonts.zain(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _scanQR();
+                    },
+                    icon: const Icon(Icons.qr_code),
+                    label: Text('Scan QR', style: GoogleFonts.zain(fontSize: 14)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _scanNFC();
+                    },
+                    icon: const Icon(Icons.nfc),
+                    label: Text('Scan NFC', style: GoogleFonts.zain(fontSize: 14)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _scanQR() async {
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const _QRScannerPage(),
+      ),
+    );
+
+    if (result != null && mounted) {
+      _handleScanResult(result);
+    }
+  }
+
+  Future<void> _scanNFC() async {
+    try {
+      final availability = await FlutterNfcKit.nfcAvailability;
+      if (availability != NFCAvailability.available) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('NFC is not available on this device.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Hold your device near the NFC tag…'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+
+      final tag = await FlutterNfcKit.poll(timeout: const Duration(seconds: 10));
+      await FlutterNfcKit.finish();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        _handleScanResult(tag.id);
+      }
+    } catch (e) {
+      await FlutterNfcKit.finish();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('NFC scan failed: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  void _handleScanResult(String result) {
+    // Populate the condition field or use however fits your data model
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Tag scanned: $result'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+//build
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -77,17 +339,75 @@ class _RescuePageState extends State<RescuePage> {
           children: [
             const SizedBox(height: 16),
 
-            // Photo/Map Placeholder
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              height: 180,
-              decoration: BoxDecoration(
-                color: AppColors.slaterspwn,
-                borderRadius: BorderRadius.circular(20),
-              ),
+            //Map
+            Stack(
+              children: [
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  height: 300,
+                  decoration: BoxDecoration(
+                    color: AppColors.slaterspwn,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  clipBehavior: Clip.hardEdge,
+                  child: GoogleMap(
+                    onMapCreated: (ctrl) => _mapController = ctrl,
+                    initialCameraPosition: CameraPosition(
+                      target: _pinnedLocation,
+                      zoom: 15,
+                    ),
+                    onTap: _updatePin,
+                    markers: {
+                      Marker(
+                        markerId: const MarkerId('rescue_pin'),
+                        position: _pinnedLocation,
+                        infoWindow: const InfoWindow(title: 'Rescue Location'),
+                      ),
+                    },
+                    myLocationEnabled: true,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    mapToolbarEnabled: false,
+                  ),
+                ),
+
+                // Locate-me FAB overlay
+                Positioned(
+                  bottom: 10,
+                  right: 26,
+                  child: GestureDetector(
+                    onTap: _fetchCurrentLocation,
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: AppColors.yellowrspwn,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.15),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: _loadingLocation
+                          ? const Padding(
+                        padding: EdgeInsets.all(9),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.textPrimary,
+                        ),
+                      )
+                          : const Icon(Icons.my_location,
+                          size: 20, color: AppColors.textPrimary),
+                    ),
+                  ),
+                ),
+              ],
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
             // Address Search Bar
             Padding(
@@ -95,18 +415,20 @@ class _RescuePageState extends State<RescuePage> {
               child: Container(
                 decoration: BoxDecoration(
                   color: AppColors.yellowrspwn,
-                  borderRadius: BorderRadius.circular(30),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
                 child: Row(
                   children: [
-                    const Icon(Icons.search, size: 20, color: AppColors.textPrimary),
+                    const Icon(Icons.search,
+                        size: 20, color: AppColors.textPrimary),
                     const SizedBox(width: 8),
                     Expanded(
                       child: TextField(
                         controller: _addressController,
                         decoration: InputDecoration(
-                          hintText: 'Enter Address',
+                          hintText: 'Search address…',
                           hintStyle: GoogleFonts.zain(
                             color: AppColors.textSecondary,
                             fontSize: 16,
@@ -118,16 +440,24 @@ class _RescuePageState extends State<RescuePage> {
                           color: AppColors.textPrimary,
                           fontSize: 16,
                         ),
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: _geocodeAddress,
                       ),
+                    ),
+                    GestureDetector(
+                      onTap: () =>
+                          _geocodeAddress(_addressController.text),
+                      child: const Icon(Icons.arrow_forward_ios,
+                          size: 16, color: AppColors.textPrimary),
                     ),
                   ],
                 ),
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
-            // Pinned Location
+            // Pinned location display
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
@@ -139,17 +469,39 @@ class _RescuePageState extends State<RescuePage> {
                     width: double.infinity,
                     decoration: const BoxDecoration(
                       border: Border(
-                        bottom: BorderSide(color: AppColors.textPrimary, width: 1),
+                        bottom: BorderSide(
+                            color: AppColors.textPrimary, width: 1),
                       ),
                     ),
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      '123 A. B. Street, Pasay, Metro Manila 1234',
-                      style: GoogleFonts.zain(
-                        fontSize: 14,
-                        color: AppColors.textPrimary,
-                      ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.location_on_outlined,
+                            size: 16, color: AppColors.textSecondary),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: _loadingLocation
+                              ? const LinearProgressIndicator(
+                            minHeight: 2,
+                            color: AppColors.greenrspwn,
+                            backgroundColor: AppColors.slaterspwn,
+                          )
+                              : Text(
+                            _pinnedAddress,
+                            style: GoogleFonts.zain(
+                              fontSize: 14,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Tap the map to manually adjust the pin.',
+                    style: GoogleFonts.zain(
+                        fontSize: 11, color: AppColors.textSecondary),
                   ),
                 ],
               ),
@@ -176,25 +528,54 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 24),
 
             // Scan NFC / QR
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GestureDetector(
-                onTap: () {},
-                child: Text(
-                  'Scan for NFC or QR',
-                  style: GoogleFonts.zain(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                    decoration: TextDecoration.underline,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                    onPressed: _showScanOptions,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ), backgroundColor: AppColors.yellowrspwn,
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                    ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.qr_code_scanner, size: 18),
+                      const SizedBox(width: 8,),
+                      Text(
+                          'Scan for NFC or QR',
+                          style: GoogleFonts.tiltWarp(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w400,
+                            color: AppColors.textPrimary,
+                          ),
+                      ),
+                    ],
+                    ),
+                      GestureDetector(
+                        onTap: () => _showScanInfo(context),
+                        child: const Icon(Icons.info_outline,
+                            size: 18, color: AppColors.textPrimary),
+                      ),
+
+                ],
+            ),
+              ),
                   ),
-                ),
+            ],
               ),
             ),
-
             const SizedBox(height: 24),
 
             // Divider
@@ -216,7 +597,11 @@ class _RescuePageState extends State<RescuePage> {
                 children: [
                   Text(
                     'Details:',
-                    style: Theme.of(context).textTheme.displaySmall,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w300,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
 
                   const SizedBox(height: 18),
@@ -246,6 +631,15 @@ class _RescuePageState extends State<RescuePage> {
                       color: AppColors.textPrimary,
                     ),
                   ),
+
+                  const SizedBox(height: 20),
+                  // Type of Animal
+                  _buildLabel('Type of Animal', required: true),
+                  const SizedBox(height: 8),
+                  _buildCheckboxOption2('Dog', _selectedAnimalType,
+                          (val) => setState(() => _selectedAnimalType = val)),
+                  _buildCheckboxOption2('Cat', _selectedAnimalType,
+                          (val) => setState(() => _selectedAnimalType = val)),
 
                   const SizedBox(height: 20),
 
@@ -478,7 +872,7 @@ class _RescuePageState extends State<RescuePage> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _handleSubmit,
+                  onPressed: _isLoading ? null : _handleSubmit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.yellowrspwn,
                     foregroundColor: AppColors.textPrimary,
@@ -488,15 +882,17 @@ class _RescuePageState extends State<RescuePage> {
                     ),
                     elevation: 0,
                   ),
-                  child: Text(
-                    'Submit Report',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                      height: 22, width: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: AppColors.textPrimary))
+                      : Text('Submit Report',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 16, color: AppColors.textPrimary)),
                 ),
               ),
+
             ),
 
             const SizedBox(height: 32),
@@ -587,7 +983,39 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
-  void _handleSubmit() {
+  Widget _buildCheckboxOption2(
+      String label, String? selected, Function(String) onSelect) {
+    return GestureDetector(
+      onTap: () => onSelect(label),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: Checkbox(
+                value: selected == label,
+                onChanged: (_) => onSelect(label),
+                activeColor: AppColors.textPrimary,
+                side: const BorderSide(
+                    color: AppColors.textPrimary, width: 1.5),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(2)),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(label,
+                style: GoogleFonts.zain(
+                    fontSize: 14, color: AppColors.textPrimary)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /*void _handleSubmit() {
     final condition = _conditionController.text.trim();
 
     if (condition.isEmpty || _selectedUrgency == null) {
@@ -606,5 +1034,203 @@ class _RescuePageState extends State<RescuePage> {
         backgroundColor: Colors.green,
       ),
     );
+  }*/
+
+  Future<void> _handleSubmit() async {
+    final condition = _conditionController.text.trim();
+
+    if (condition.isEmpty ||
+        _selectedUrgency == null ||
+        _selectedAnimalType == null ||
+        _coordinateChoice == null ||
+        _adoptionChoice == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please fill in all required fields.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final userData = userDoc.data() as Map<String, dynamic>?;
+
+      final docRef =
+      await FirebaseFirestore.instance.collection('cases').add({
+        'reporterId': uid,
+        'reporterName':
+        '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
+            .trim(),
+        'reporterPhone': userData?['phone'] ?? '',
+        'animalType': _selectedAnimalType,
+        'condition': condition,
+        'urgency': _selectedUrgency,
+        'address': _addressController.text.trim(),
+        'coordinateWithShelter': _coordinateChoice,
+        'witnessName': _witnessNameController.text.trim(),
+        'witnessPhone': _witnessNumberController.text.trim(),
+        'interestedToAdopt': _adoptionChoice,
+        'status': 'pending',
+        'statusHistory': [
+          {
+            'status': 'Rescue case is being reviewed.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'photoUrls': [],
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrackCasePage(caseId: docRef.id),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
+}
+
+class _QRScannerPage extends StatefulWidget {
+  const _QRScannerPage();
+
+  @override
+  State<_QRScannerPage> createState() => _QRScannerPageState();
+}
+
+class _QRScannerPageState extends State<_QRScannerPage> {
+  final MobileScannerController _controller = MobileScannerController();
+  bool _scanned = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: Text(
+          'Scan QR Code',
+          style: GoogleFonts.zain(color: Colors.white),
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on),
+            onPressed: () => _controller.toggleTorch(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: (capture) {
+              if (_scanned) return;
+              final barcode = capture.barcodes.firstOrNull;
+              if (barcode?.rawValue != null) {
+                _scanned = true;
+                Navigator.pop(context, barcode!.rawValue);
+              }
+            },
+          ),
+          // Overlay frame
+          Center(
+            child: Container(
+              width: 220,
+              height: 220,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 32,
+            left: 0,
+            right: 0,
+            child: Text(
+              'Align QR code within the frame',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(color: Colors.white70, fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+
+  }
+}
+void _showScanInfo(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      backgroundColor: AppColors.background,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+          const SizedBox(width: 8),
+          Text(
+            'Scan for NFC or QR code',
+            style: GoogleFonts.zain(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
+      ),
+      content: Text(
+        'This animal may have an ID tag. Scan the NFC or QR code to help identify the owner.',
+        style: GoogleFonts.zain(
+          fontSize: 18,
+          color: AppColors.textSecondary,
+        ),
+      ),
+      actions: [
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.yellowrspwn,
+              foregroundColor: AppColors.textPrimary,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
+            ),
+            child: Text('OK', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ],
+    ),
+  );
 }

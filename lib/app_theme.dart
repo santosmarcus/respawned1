@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  static const Color background = Color(0xFFF0EADC);
+  static const Color background = Color(0xFFFBF9F4);
 
 
   static const Color yellowrspwn = Color(0xFFFFD95E);
@@ -15,6 +15,7 @@ class AppColors {
   static const Color textPrimary = Color(0xFF393207);
   static const Color textSecondary = Color(0xFF7E7D76);
   static const Color bgres = Color(0xFFE2E5FF);
+  static const Color surface = Color(0xFFFFFFFF);
 }
 
 class AppTheme {

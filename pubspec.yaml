@@ -45,6 +45,7 @@ dependencies:
   image_picker: ^1.0.7
   flutter_stripe: ^12.3.0  # for PayMongo integration via Stripe
   google_fonts: ^8.0.2
+  http: ^1.6.0
   #sign in
   google_sign_in: ^6.2.1
   flutter_facebook_auth: ^7.1.5
@@ -64,6 +65,10 @@ dependencies:
   # Forms & Validation
   flutter_form_builder: ^10.3.0+2
   form_builder_validators: ^11.3.0
+
+  #Scan NFC and QR
+  mobile_scanner: ^5.0.0      # QR scanning
+  flutter_nfc_kit: ^3.3.0     # NFC scanning
 
 dev_dependencies:
   flutter_test:
