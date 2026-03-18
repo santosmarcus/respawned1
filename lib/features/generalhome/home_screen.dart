@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
+import 'package:respawnd1/features/generalhome/user_profile.dart';
+import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -34,7 +36,15 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
         onTap: (index) {
-          // TODO: navigation
+          if (index == 1) {
+            Navigator.pushReplacement(
+              context, MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            );
+          } else if (index == 2) {
+            Navigator.pushReplacement(
+              context, MaterialPageRoute(builder: (_) => const UserProfile()),
+            );
+          }
         },
       ),
       body: SingleChildScrollView(
