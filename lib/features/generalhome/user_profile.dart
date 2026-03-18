@@ -1,9 +1,11 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+import 'package:respawnd1/features/userauth/login_screen.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -13,6 +15,85 @@ class UserProfile extends StatefulWidget {
 }
 
 class _UserProfileState extends State<UserProfile> {
+
+  //Firebase Helper
+  final User? _user = FirebaseAuth.instance.currentUser;
+
+  String _displayName = '';
+  String _phone = '';
+  bool _loading = true;
+
+  @override
+  void initState(){
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async{
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+
+      final data = doc.data();
+      if (data == null) return;
+
+      setState(() {
+        _displayName =
+            '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
+        _phone =
+            data['phone'] ?? '';
+      });
+    }catch (e){
+      setState(() {
+        _displayName = _user?.displayName ?? ' ';
+        _phone = _user?.phoneNumber ?? _user?.email ?? '';
+      });
+    } finally{
+      if(mounted) setState(() =>
+        _loading = false);
+      }
+    }
+
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+        context:context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.background,
+          title: Text(
+            'Log Out',
+            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
+          ),
+          content: Text(
+            'Are you sure you want to log out?',
+            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text('Cancel',
+                  style: GoogleFonts.zain(color: AppColors.textPrimary)),
+            ),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text('Log out', style: GoogleFonts.zain(color: Colors.redAccent)),
+            ),
+          ],
+        ),
+    );
+      if (confirmed == true){
+        await FirebaseAuth.instance.signOut();
+        if(mounted){
+          Navigator.of(
+              context, rootNavigator: true).pushAndRemoveUntil(
+              MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false,);
+        }
+      } //to be fixed
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,13 +128,18 @@ class _UserProfileState extends State<UserProfile> {
               MaterialPageRoute(builder: (_) => const NotificationsScreen()),
             );
           }
-        }
+        },
         ),
-      body: SingleChildScrollView(
+
+        body: _loading
+        ? const Center(
+        child: CircularProgressIndicator(color: AppColors.greenrspwn))
+        : SingleChildScrollView(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 24),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+    const SizedBox(height: 35),
 
             Center(
               child: Column(
@@ -66,11 +152,11 @@ class _UserProfileState extends State<UserProfile> {
                     child: const Icon(Icons.person, size: 44, color: AppColors.textSecondary,),
                   ),
                   const SizedBox(height: 10),
-                  Text('User Name', //to be changed
+                  Text(_displayName,
                   style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary,),
                   ),
                   const SizedBox(height: 2,),
-                  Text('+63 982320384', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary,),
+                  Text(_phone, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary,),
                   ),
                 ],
               ),
@@ -135,7 +221,7 @@ class _UserProfileState extends State<UserProfile> {
 
             Center(
               child: TextButton(
-                  onPressed: () {},//TODO:
+                  onPressed: _logout,//TODO:
                   child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: Colors.redAccent,
                   ),
                   ),
