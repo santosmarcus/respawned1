@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -95,7 +97,7 @@ class _RescuePageState extends State<RescuePage> {
     });
   }
 
-  // Reverse-geocode a LatLng → human-readable address via Geocoding API
+  // Reverse-geocode from LatLng to address --- still not working
   Future<void> _updatePin(LatLng pos) async {
     setState(() {
       _pinnedLocation = pos;
@@ -137,18 +139,28 @@ class _RescuePageState extends State<RescuePage> {
   // Forward-geocode a typed address → LatLng
   Future<void> _geocodeAddress(String address) async {
     if (address.trim().isEmpty) return;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+
     try {
       final url = Uri.parse(
         'https://maps.googleapis.com/maps/api/geocode/json'
             '?address=${Uri.encodeComponent(address)}'
             '&key=$_mapsApiKey',
       );
+
       final res = await http.get(url);
+      final data = jsonDecode(res.body);
+
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data['results'] != null && data['results'].isNotEmpty) {
+        if (data['status'] == 'OK' && data['results'].isNotEmpty) {
           final loc = data['results'][0]['geometry']['location'];
-          final latLng = LatLng(loc['lat'] as double, loc['lng'] as double);
+          final latLng = LatLng(
+              (loc['lat'] as num).toDouble(),
+              (loc['lng'] as num).toDouble(),);
+
+          _addressController.text = data['results'][0]['formatted_address'];
+
           await _updatePin(latLng);
         }
       }
@@ -283,7 +295,6 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   void _handleScanResult(String result) {
-    // Populate the condition field or use however fits your data model
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Tag scanned: $result'),
@@ -331,6 +342,18 @@ class _RescuePageState extends State<RescuePage> {
               MaterialPageRoute(builder: (context) => const HomeScreen()),
             );
           }
+          else if (index == 1) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+            );
+          }
+          else if (index == 2) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const UserProfile()),
+            );
+          }
         },
       ),
       body: SingleChildScrollView(
@@ -371,7 +394,7 @@ class _RescuePageState extends State<RescuePage> {
                   ),
                 ),
 
-                // Locate-me FAB overlay
+                // Locate-me button
                 Positioned(
                   bottom: 10,
                   right: 26,
@@ -1014,27 +1037,6 @@ class _RescuePageState extends State<RescuePage> {
       ),
     );
   }
-
-  /*void _handleSubmit() {
-    final condition = _conditionController.text.trim();
-
-    if (condition.isEmpty || _selectedUrgency == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in all required fields.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Report submitted successfully!'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }*/
 
   Future<void> _handleSubmit() async {
     final condition = _conditionController.text.trim();
