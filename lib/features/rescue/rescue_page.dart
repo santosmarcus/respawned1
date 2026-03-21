@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
@@ -13,8 +14,20 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
+
+//Media
+class _MediaItem {
+  final XFile file;
+  final bool isVideo;
+
+  _MediaItem({
+    required this.file, required this.isVideo
+  });
+}
 
 class RescuePage extends StatefulWidget {
   const RescuePage({super.key});
@@ -35,8 +48,9 @@ class _RescuePageState extends State<RescuePage> {
   String? _selectedAnimalType;
   bool _isLoading = false;
 
-  final List<dynamic> _mediaFiles = [null, null];
-
+  final List<_MediaItem?> _mediaFiles = [null, null, null, null];
+  final ImagePicker _picker = ImagePicker();
+  final List<double?> _uploadProgress = [null, null, null, null];
 
   // Google Maps
   GoogleMapController? _mapController;
@@ -136,7 +150,7 @@ class _RescuePageState extends State<RescuePage> {
     }
   }
 
-  // Forward-geocode a typed address → LatLng
+  // Forward-geocode a typed address to LatLng
   Future<void> _geocodeAddress(String address) async {
     if (address.trim().isEmpty) return;
 
@@ -165,6 +179,153 @@ class _RescuePageState extends State<RescuePage> {
         }
       }
     } catch (_) {}
+  }
+
+  //Media picker
+  Future<void> _pickMedia(int index) async{
+    final action = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: AppColors.background,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        builder: (_) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(
+                        color: AppColors.slaterspwn,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+            const SizedBox(height: 14),
+              Text('Add Photo or Video',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined,
+                    color: AppColors.textPrimary),
+                title: Text('Take a photo',
+                    style: GoogleFonts.zain(
+                        fontSize: 15, color: AppColors.textPrimary)),
+                onTap: () => Navigator.pop(context, 'photo_camera'),
+              ),
+            ListTile(
+                  leading: const Icon(Icons.photo_library_outlined,
+                      color: AppColors.textPrimary),
+                  title: Text('Choose photo from gallery',
+                      style: GoogleFonts.zain(
+                          fontSize: 15, color: AppColors.textPrimary)),
+                  onTap: () => Navigator.pop(context, 'photo_gallery'),
+                ),
+            ListTile(
+                  leading: const Icon(Icons.videocam_outlined,
+                      color: AppColors.textPrimary),
+                  title: Text('Record a video',
+                      style: GoogleFonts.zain(
+                          fontSize: 15, color: AppColors.textPrimary)),
+                  onTap: () => Navigator.pop(context, 'video_camera'),
+                ),
+            ListTile(
+                  leading: const Icon(Icons.video_library_outlined,
+                      color: AppColors.textPrimary),
+                  title: Text('Choose video from gallery',
+                      style: GoogleFonts.zain(
+                          fontSize: 15, color: AppColors.textPrimary)),
+                  onTap: () => Navigator.pop(context, 'video_gallery'),
+                ),
+            if (_mediaFiles[index] != null)
+              ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  title: Text('Remove',
+                      style: GoogleFonts.zain(
+                          fontSize: 15, color: Colors.redAccent)),
+                  onTap: () {
+                    setState(() => _mediaFiles[index] = null);
+                    Navigator.pop(context, 'remove');
+                  },
+              ),
+          ],
+        ),
+      ),
+    );
+
+    if (action == null || action == 'remove') return;
+
+    XFile? file;
+    bool isVideo = false;
+
+    switch (action) {
+      case 'photo_camera':
+        file = await _picker.pickImage(
+            source: ImageSource.camera, imageQuality: 80, maxWidth: 1280);
+        break;
+      case 'photo_gallery':
+        file = await _picker.pickImage(
+            source: ImageSource.gallery, imageQuality: 80, maxWidth: 1280);
+        break;
+      case 'video_camera':
+        file = await _picker.pickVideo(
+            source: ImageSource.camera,
+            maxDuration: const Duration(seconds: 60));
+        isVideo = true;
+        break;
+      case 'video_gallery':
+        file = await _picker.pickVideo(
+            source: ImageSource.gallery,
+            maxDuration: const Duration(seconds: 60));
+        isVideo = true;
+        break;
+    }
+
+    if (file != null && mounted) {
+      setState(() => _mediaFiles[index] = _MediaItem(file: file!, isVideo: isVideo));
+    }
+  }
+
+  // Firebase Storage upload, uploads media slots to firebase storage
+  Future<List<String>> _uploadAllMedia(String caseId) async {
+    final urls = <String>[];
+
+    for (int i = 0; i < _mediaFiles.length; i++) {
+      final item = _mediaFiles[i];
+      if (item == null) continue;
+
+      final ext = item.isVideo ? 'mp4' : 'jpg';
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('cases/$caseId/media_$i.$ext');
+
+      final task = ref.putFile(
+        File(item.file.path),
+        SettableMetadata(
+          contentType: item.isVideo ? 'video/mp4' : 'image/jpeg',
+        ),
+      );
+
+      // Track upload progress for slot
+      task.snapshotEvents.listen((snap) {
+        if (!mounted) return;
+        setState(() {
+          _uploadProgress[i] =
+              snap.bytesTransferred / (snap.totalBytes == 0 ? 1 : snap.totalBytes);
+        });
+      });
+
+      await task;
+      final url = await ref.getDownloadURL();
+      urls.add(url);
+
+      if (mounted) setState(() => _uploadProgress[i] = null);
+    }
+
+    return urls;
   }
 
   //NFC and QR
@@ -540,16 +701,14 @@ class _RescuePageState extends State<RescuePage> {
                 children: [
                   _buildLabel('Include images and videos', required: true),
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      _buildMediaBox(),
-                      const SizedBox(width: 12),
-                      _buildMediaBox(),
+                    Wrap(
+                      spacing: 12,
+                        runSpacing: 12,
+                        children: List.generate(4, (i) => _buildMediaBox(i)),
+                        ),
                     ],
                   ),
-                ],
               ),
-            ),
 
             const SizedBox(height: 24),
 
@@ -952,21 +1111,60 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
-  Widget _buildMediaBox() {
+  Widget _buildMediaBox(int index) {
+    final item = _mediaFiles[index];
+    final progress = _uploadProgress[index];
     return GestureDetector(
-      onTap: () {
-        // TODO: open image picker
-      },
+      onTap: _isLoading ? null: () => _pickMedia(index),
+
       child: Container(
         width: 80,
         height: 80,
         decoration: BoxDecoration(
-          border: Border.all(color: AppColors.textPrimary, width: 1.5),
+          border: Border.all(color: item != null ? AppColors.greenrspwn : AppColors.textPrimary, width: 1.5),
           borderRadius: BorderRadius.circular(8),
+            color: item != null ? AppColors.greenrspwn.withOpacity(0.05) : Colors.transparent,
         ),
-        child: const Center(
-          child: Icon(Icons.add, size: 28, color: AppColors.textPrimary),
-        ),
+
+        clipBehavior: Clip.hardEdge,
+        child: item != null ? Stack(
+          fit: StackFit.expand,
+          children: [
+            item.isVideo ? Container(
+                color: Colors.black87,
+                child: const Center(
+                 child: Icon(Icons.play_circle_outline, size: 28, color: AppColors.textPrimary),
+                        ),
+              )
+                :Image.file(File(item.file.path), fit:BoxFit.cover),
+                  if (progress != null)
+                    Container(
+                    color: Colors.black54,
+                    child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 36, height: 36,
+                              child: CircularProgressIndicator(
+                                value: progress,
+                                strokeWidth: 3,
+                                color: AppColors.yellowrspwn,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text('${(progress * 100).toInt()}%',
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 10)),
+                          ],
+                        ),
+                       ),
+                      ),
+            ],
+        )
+        : const Center(
+        child: Icon(Icons.add, size: 28, color: AppColors.textPrimary)
+      ),
       ),
     );
   }
@@ -1040,6 +1238,7 @@ class _RescuePageState extends State<RescuePage> {
 
   Future<void> _handleSubmit() async {
     final condition = _conditionController.text.trim();
+    final filledCount = _mediaFiles.where((f) => f != null).length;
 
     if (condition.isEmpty ||
         _selectedUrgency == null ||
@@ -1057,6 +1256,15 @@ class _RescuePageState extends State<RescuePage> {
 
     setState(() => _isLoading = true);
 
+    if(filledCount < 2){
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+          Text('Please add at least 1 photo and 1 video.'),
+          backgroundColor: Colors.redAccent));
+      return;
+    }
+
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final userDoc = await FirebaseFirestore.instance
@@ -1065,8 +1273,7 @@ class _RescuePageState extends State<RescuePage> {
           .get();
       final userData = userDoc.data() as Map<String, dynamic>?;
 
-      final docRef =
-      await FirebaseFirestore.instance.collection('cases').add({
+      final docRef = await FirebaseFirestore.instance.collection('cases').add({
         'reporterId': uid,
         'reporterName':
         '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
@@ -1090,6 +1297,13 @@ class _RescuePageState extends State<RescuePage> {
         'photoUrls': [],
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      final photoUrls = await _uploadAllMedia(docRef.id);
+      if(photoUrls.isNotEmpty){
+        await docRef.update({
+          'photoUrls':photoUrls
+        });
+      }
 
       if (mounted) {
         Navigator.pushReplacement(
