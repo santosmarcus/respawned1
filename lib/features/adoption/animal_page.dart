@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
-import '../../app_theme.dart';
+//import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+//import 'package:respawnd1/features/generalhome/user_profile.dart';
+import '../../../app_theme.dart';
+//import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'adoption_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 
@@ -86,8 +88,12 @@ const Map<String, _AnimalDetail> _detailMap = {
 // Animal page
 class AnimalPage extends StatefulWidget {
   final Animal animal;
+  final VoidCallback onFavoriteToggle;
 
-  const AnimalPage({super.key, required this.animal});
+  const AnimalPage({
+    super.key,
+    required this.animal,
+    required this.onFavoriteToggle,});
 
   @override
   State<AnimalPage> createState() => _AnimalPageState();
@@ -124,35 +130,6 @@ class _AnimalPageState extends State<AnimalPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-                  (route) => false,
-            );
-          }
-        },
-      ),
       body: Column(
         children: [
           // photo of animal
@@ -197,7 +174,12 @@ class _AnimalPageState extends State<AnimalPage> {
                 top: MediaQuery.of(context).padding.top + 8,
                 right: 14,
                 child: GestureDetector(
-                  onTap: () => setState(() => _favorited = !_favorited),
+                  onTap: () {
+                    setState(() {
+                      _favorited = !_favorited;
+                    });
+                    widget.onFavoriteToggle();
+                  },
                   child: Icon(
                     _favorited ? Icons.favorite : Icons.favorite_border,
                     size: 26,

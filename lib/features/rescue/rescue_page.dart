@@ -15,7 +15,7 @@ import 'package:http/http.dart' as http;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+//import 'package:firebase_storage/firebase_storage.dart';
 
 const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
 
@@ -290,7 +290,7 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   // Firebase Storage upload, uploads media slots to firebase storage
-  Future<List<String>> _uploadAllMedia(String caseId) async {
+  /*Future<List<String>> _uploadAllMedia(String caseId) async {
     final urls = <String>[];
 
     for (int i = 0; i < _mediaFiles.length; i++) {
@@ -326,7 +326,7 @@ class _RescuePageState extends State<RescuePage> {
     }
 
     return urls;
-  }
+  }*/
 
   //NFC and QR
   void _showScanOptions() {
@@ -1298,12 +1298,12 @@ class _RescuePageState extends State<RescuePage> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      final photoUrls = await _uploadAllMedia(docRef.id);
+     /* final photoUrls = await _uploadAllMedia(docRef.id);
       if(photoUrls.isNotEmpty){
         await docRef.update({
           'photoUrls':photoUrls
         });
-      }
+      }*/
 
       if (mounted) {
         Navigator.pushReplacement(
