@@ -84,7 +84,7 @@ class AuthWrapper extends StatelessWidget {
                 return const AdminHomeScreen();
               case 'pet_transporter':
               case 'rescue_volunteer':
-                return const ServiceHomeScreen();
+                return const ServiceScreen();
               case 'general':
               default:
                 return const HomeScreen();

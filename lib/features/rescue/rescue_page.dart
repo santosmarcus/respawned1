@@ -750,7 +750,6 @@ class _RescuePageState extends State<RescuePage> {
                         child: const Icon(Icons.info_outline,
                             size: 18, color: AppColors.textPrimary),
                       ),
-
                 ],
             ),
               ),
