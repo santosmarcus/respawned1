@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+import 'package:respawnd1/features/userauth/favorite_screen.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 
 class UserProfile extends StatefulWidget {
@@ -170,7 +171,10 @@ class _UserProfileState extends State<UserProfile> {
                   _ProfileTile(
                     icon: Icons.favorite_border,
                     label: 'Favorites',
-                    onTap: (){},
+                    onTap: (){
+                      Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const FavoritesScreen()),);
+                    },
                   ),
                   _ProfileTile(
                     icon: Icons.history,
