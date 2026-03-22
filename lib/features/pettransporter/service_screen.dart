@@ -1,12 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/features/pettransporter/service_filter_sheet.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import '../../../app_theme.dart';
 
 const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
@@ -48,8 +48,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
           actions: [
             IconButton(
                 icon: const Icon(Icons.tune, color: AppColors.textPrimary),
-                onPressed: () {}
-                //tooltip: 'Filter',
+                onPressed: _openFilter,
             ),
           ],
         ),
@@ -213,28 +212,6 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
     return Column(
       children: [
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.greenrspwn,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.greenrspwn, width: 1),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: const BoxDecoration(
-                  color: AppColors.greenrspwn,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-          ),
-        ),
         Expanded(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -288,22 +265,24 @@ class _ServiceScreenState extends State<ServiceScreen> {
           child: SizedBox(
             width: double.infinity,
             height: 50,
-            child: OutlinedButton.icon(
+            child: ElevatedButton.icon(
               onPressed: _goOffline,
-              icon: const Icon(Icons.power_settings_new,
-                  size: 20, color: Colors.redAccent),
+              icon: const Icon(Icons.circle_rounded,
+                  size: 10, color: Colors.green),
               label: Text(
                 'Online',
                 style: GoogleFonts.tiltWarp(
-                  fontSize: 16, color: Colors.redAccent,
+                  fontSize: 16, color: AppColors.textPrimary,
                 ),
               ),
-              style: OutlinedButton.styleFrom(
-                side:
-                const BorderSide(color: Colors.redAccent, width: 1.5),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.background,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 3,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                  borderRadius: BorderRadius.circular(14),
               ),
+            ),
             ),
 
           ),
@@ -389,15 +368,15 @@ class _ServiceScreenState extends State<ServiceScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
   }
-  /*void _openFilter(){
+  void _openFilter(){
     showModalBottomSheet(context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (_) => _ServiceFilterSheet(
+        builder: (_) => ServiceFilterSheet(
           initialRange: _serviceRangeKm,
           onApply: (km) => setState(() => _serviceRangeKm = km),
         ),);
-  }*/
+  }
 
 }
 
