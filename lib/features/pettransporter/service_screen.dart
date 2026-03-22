@@ -48,8 +48,8 @@ class _ServiceScreenState extends State<ServiceScreen> {
           actions: [
             IconButton(
                 icon: const Icon(Icons.tune, color: AppColors.textPrimary),
-                onPressed: _openFilter
-                tooltip: 'Filter',
+                onPressed: () {}
+                //tooltip: 'Filter',
             ),
           ],
         ),
@@ -95,6 +95,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
         },*/
         ),
         body: _isOnline ? _buildOnlineView() : _buildOfflineView(),
+      ),
     );
   }
 
@@ -231,12 +232,6 @@ class _ServiceScreenState extends State<ServiceScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'You are online - ${_serviceRangeKm.toInt()} km service range',
-                  style: GoogleFonts.zain(fontSize: 14, color:AppColors.textPrimary),
-                ),
-              ),
             ],
           ),
         ),
@@ -290,69 +285,69 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children:[
-              Text: 'Service Request',
-                    style: GoogleFonts.tiltWarp(
-                    fontSize: 16, color: AppColors.textPrimary)
-              ),
-              const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  decoration: BoxDecoration(color: AppColors.background,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(
-                    color: AppColors.slaterspwn,
-                    blurRadius: 1,
-                    offset: Offset(0, 3),)
-                  ]
-                  ),
-                    child: Column(
-                      children: [
-                        Text('Waiting for nearby rescue requests...',
-                          style: GoogleFonts.tiltWarp(
-                          fontSize: 16, color: AppColors.slaterspwn)),
-                      ],
-                    ),
-              ),
-            ],
-          ),
-        ),
-
-          const SizedBox(height: 12),
-
-      Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: SizedBox(
             width: double.infinity,
             height: 50,
             child: OutlinedButton.icon(
-                onPressed: _goOffline,
-                icon: const Icon(Icons.power_settings_new,
-                      size: 20, color: Colors.redAccent),
-                label: Text(
-                'Go Offline',
+              onPressed: _goOffline,
+              icon: const Icon(Icons.power_settings_new,
+                  size: 20, color: Colors.redAccent),
+              label: Text(
+                'Online',
                 style: GoogleFonts.tiltWarp(
                   fontSize: 16, color: Colors.redAccent,
                 ),
               ),
-            style: OutlinedButton.styleFrom(
-              side:
+              style: OutlinedButton.styleFrom(
+                side:
                 const BorderSide(color: Colors.redAccent, width: 1.5),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
             ),
 
           ),
+        ),
+
+        const SizedBox(height: 12),
+
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children:[
+              Text( 'Service Request',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 16, color: AppColors.textPrimary)
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                decoration: BoxDecoration(color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [BoxShadow(
+                      color: AppColors.slaterspwn,
+                      blurRadius: 1,
+                      offset: Offset(0, 3),)
+                    ]
+                ),
+                child: Column(
+                  children: [
+                    Text('Waiting for nearby rescue requests...',
+                        style: GoogleFonts.tiltWarp(
+                            fontSize: 16, color: AppColors.slaterspwn)),
+                  ],
+                ),
+              ),
+            ],
           ),
+        ),
           const SizedBox(height: 24),
       ],
     );
   }
-  }
+
 
   Future<void> _goOnline() async {
     setState(() => _loadingLocation = true);
@@ -394,7 +389,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
   }
-  void _openFilter(){
+  /*void _openFilter(){
     showModalBottomSheet(context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
@@ -402,7 +397,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
           initialRange: _serviceRangeKm,
           onApply: (km) => setState(() => _serviceRangeKm = km),
         ),);
-  }
+  }*/
 
 }
 
