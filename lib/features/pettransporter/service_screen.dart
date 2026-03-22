@@ -1,14 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/features/pettransporter/service_filter_sheet.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import '../../../app_theme.dart';
 
+const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
 
 class ServiceScreen extends StatefulWidget{
   const ServiceScreen({super.key});
@@ -20,26 +21,17 @@ class ServiceScreen extends StatefulWidget{
 
 class _ServiceScreenState extends State<ServiceScreen> {
   bool _isOnline = false;
+
+  GoogleMapController? _mapController;
+  double _serviceRangeKm = 100;
   bool _loadingLocation = false;
   LatLng? _currentLocation;
 
-
-  void _goOffline() => setState(() {
-    _isOnline = false;
-    _currentLocation = null;
-  });
-  void _showError(String msg) {
-    if (!mounted) return;
-    setState(() => _loadingLocation = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
+  @override
+  void dispose(){
+    _mapController?.dispose();
+    super.dispose();
   }
-  /* void _openFilter(){
-      showModalBottomSheet(context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) )
-    }*/
 
   @override
   Widget build(BuildContext context) {
@@ -56,13 +48,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
           actions: [
             IconButton(
                 icon: const Icon(Icons.tune, color: AppColors.textPrimary),
-                onPressed: () {}
-              //tooltip: 'Filter',
+                onPressed: _openFilter,
             ),
           ],
         ),
-
-        body: _buildOfflineView(),
 
         bottomNavigationBar: BottomNavigationBar(
           currentIndex: 0,
@@ -104,6 +93,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
           }
         },*/
         ),
+        body: _isOnline ? _buildOnlineView() : _buildOfflineView(),
       ),
     );
   }
@@ -129,7 +119,8 @@ class _ServiceScreenState extends State<ServiceScreen> {
             child: ElevatedButton.icon(
               onPressed: _loadingLocation ? null : _goOnline,
               icon: _loadingLocation ? SizedBox(
-                  width: 18, height: 18,
+                  width: 18,
+                  height: 18,
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: AppColors.textPrimary))
                   : const Icon(Icons.power_settings_new, size: 20,
@@ -216,6 +207,126 @@ class _ServiceScreenState extends State<ServiceScreen> {
     );
   }
 
+  Widget _buildOnlineView(){
+    final center = _currentLocation ?? const LatLng(14.5995, 120.9842);
+
+    return Column(
+      children: [
+        Expanded(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(20),
+                color: AppColors.slaterspwn,),
+            clipBehavior: Clip.hardEdge,
+            child: GoogleMap(
+              onMapCreated: (ctrl) {
+                _mapController = ctrl;
+                if(_currentLocation != null){
+                  ctrl.animateCamera(CameraUpdate.newCameraPosition(
+                      CameraPosition(target: _currentLocation!, zoom: 14),));
+                }
+              },
+              initialCameraPosition:
+                CameraPosition(target: center, zoom: 14),
+                myLocationEnabled: true,
+                myLocationButtonEnabled: true,
+                zoomControlsEnabled: false,
+                mapToolbarEnabled: false,
+                markers: _currentLocation == null ? {}
+                    : {
+                    Marker(
+                      markerId: const MarkerId('my_location'),
+                      position: _currentLocation!,
+                      infoWindow:
+                        const InfoWindow(title: 'Your Location'),
+                    ),
+                },
+              circles: _currentLocation == null
+                  ? {}
+                  : {
+                  Circle(
+                    circleId: const CircleId('service_range'),
+                    center: _currentLocation!,
+                    radius: _serviceRangeKm * 1000,
+                    fillColor:
+                    AppColors.greenrspwn.withOpacity(0.12),
+                    strokeColor: AppColors.greenrspwn,
+                    strokeWidth: 1,
+                  ),
+              },
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: _goOffline,
+              icon: const Icon(Icons.circle_rounded,
+                  size: 10, color: Colors.green),
+              label: Text(
+                'Online',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 16, color: AppColors.textPrimary,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.background,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            ),
+
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children:[
+              Text( 'Service Request',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 16, color: AppColors.textPrimary)
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                decoration: BoxDecoration(color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [BoxShadow(
+                      color: AppColors.slaterspwn,
+                      blurRadius: 1,
+                      offset: Offset(0, 3),)
+                    ]
+                ),
+                child: Column(
+                  children: [
+                    Text('Waiting for nearby rescue requests...',
+                        style: GoogleFonts.tiltWarp(
+                            fontSize: 16, color: AppColors.slaterspwn)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+          const SizedBox(height: 24),
+      ],
+    );
+  }
+
 
   Future<void> _goOnline() async {
     setState(() => _loadingLocation = true);
@@ -246,6 +357,27 @@ class _ServiceScreenState extends State<ServiceScreen> {
       if (mounted) setState(() => _loadingLocation = false);
     }
   }
+
+  void _goOffline() => setState(() {
+    _isOnline = false;
+    _currentLocation = null;
+  });
+  void _showError(String msg) {
+    if (!mounted) return;
+    setState(() => _loadingLocation = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
+  }
+  void _openFilter(){
+    showModalBottomSheet(context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => ServiceFilterSheet(
+          initialRange: _serviceRangeKm,
+          onApply: (km) => setState(() => _serviceRangeKm = km),
+        ),);
+  }
+
 }
 
 

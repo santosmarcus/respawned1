@@ -1259,7 +1259,7 @@ class _RescuePageState extends State<RescuePage> {
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content:
-          Text('Please add at least 1 photo and 1 video.'),
+          Text('Please add at least 2 media files.'),
           backgroundColor: Colors.redAccent));
       return;
     }
@@ -1294,7 +1294,8 @@ class _RescuePageState extends State<RescuePage> {
           }
         ],
         'photoUrls': [],
-        'createdAt': FieldValue.serverTimestamp(),
+        'createdAt': Timestamp.now(),
+        'serverCreatedAt' : FieldValue.serverTimestamp(),
       });
 
      /* final photoUrls = await _uploadAllMedia(docRef.id);
