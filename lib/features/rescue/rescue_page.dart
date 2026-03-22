@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
@@ -15,6 +16,7 @@ import 'package:http/http.dart' as http;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart';
 //import 'package:firebase_storage/firebase_storage.dart';
 
 const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
@@ -133,13 +135,20 @@ class _RescuePageState extends State<RescuePage> {
       final res = await http.get(url);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (data['results'] != null && data['results'].isNotEmpty) {
-          final address =
-              data['results'][0]['formatted_address'] as String? ?? '';
-          setState(() => _pinnedAddress = address);
-        } else {
-          setState(() => _pinnedAddress =
-          '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}');
+
+        if (res.statusCode == 200 && data['status'] == 'OK') {
+          final results = data['results'];
+
+          if (data['results'] != null && results.isNotEmpty) {
+            final address =
+                results[0]['formatted_address'] as String? ?? '';
+            setState(() => _pinnedAddress = address);
+          } else {
+            setState(() =>
+            _pinnedAddress =
+            '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude
+                .toStringAsFixed(5)}');
+          }
         }
       }
     } catch (_) {
@@ -535,6 +544,7 @@ class _RescuePageState extends State<RescuePage> {
                   ),
                   clipBehavior: Clip.hardEdge,
                   child: GoogleMap(
+                    gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
                     onMapCreated: (ctrl) => _mapController = ctrl,
                     initialCameraPosition: CameraPosition(
                       target: _pinnedLocation,
