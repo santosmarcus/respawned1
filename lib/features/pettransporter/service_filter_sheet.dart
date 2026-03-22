@@ -96,7 +96,7 @@ class _ServiceFilterSheetState
 
           const SizedBox(height: 12),
 
-          // Map preview placeholder
+          // Map placeholder
           Container(
             height: 200,
             decoration: BoxDecoration(

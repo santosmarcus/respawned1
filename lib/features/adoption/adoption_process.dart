@@ -40,9 +40,43 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   // Form fields
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
+  final _ageCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _occupationCtrl = TextEditingController();
+
+  //household questions
+  String? _residenceType;
+  String? _ownershipType;
+  bool _allowsPets = false;
+  final _householdNumCtrl = TextEditingController();
+  bool _hasChildren = false;
+
+  //pet experience
+  bool _hadPetsBefore = false;
+  final _previousPetsCtrl = TextEditingController();
+  String? _previousPetOutcome;
+
+  //current pets
+  bool _hasCurrentPets = false;
+  final _currentPetsCtrl = TextEditingController();
+  bool _petsVaccinated = false;
+
+  //lifestyle
+  final _hoursAloneCtrl = TextEditingController();
+  String? _petStayLocation;
+  final _caregiverCtrl = TextEditingController();
+
+  // Financial readiness
+  bool _canCoverVaccines = false;
+  bool _canCoverVet = false;
+  bool _canCoverFood = false;
+
+  // Agreements
+  bool _agreeCare = false;
+  bool _agreeNoAbandon = false;
+  bool _agreeFollowup = false;
   final _reasonCtrl = TextEditingController();
 
   String? _adoptionId;
@@ -182,14 +216,49 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       final docRef = await FirebaseFirestore.instance
           .collection('adoptions')
           .add({
-        'adopterId': uid,
-        'animalId': widget.animal.id, //--- to be changed---
-        'animalName': widget.animal.name, //--- to be changed ---
-        'adopterName': _nameCtrl.text.trim(),
-        'adopterEmail': _emailCtrl.text.trim(),
-        'adopterPhone': _phoneCtrl.text.trim(),
-        'adopterAddress': _addressCtrl.text.trim(),
-        'reason': _reasonCtrl.text.trim(),
+        'personal': {
+          'adopterId': uid,
+          'animalId': widget.animal.id, //--- to be changed---
+          'animalName': widget.animal.name, //--- to be changed ---
+          'adopterName': _nameCtrl.text.trim(),
+          'adopterEmail': _emailCtrl.text.trim(),
+          'adopterAge': _ageCtrl.text.trim(),
+          'adopterPhone': _phoneCtrl.text.trim(),
+          'adopterAddress': _addressCtrl.text.trim(),
+        },
+        'household': {
+          'residenceType': _residenceType,
+          'ownershipType': _ownershipType,
+          'landlordAllowsPets': _allowsPets,
+          'householdSize': _householdNumCtrl.text,
+          'hasChildren': _hasChildren,
+        },
+        'petExperience': {
+          'hadPetsBefore': _hadPetsBefore,
+          'types': _previousPetsCtrl.text,
+          'previousOutcome': _previousPetOutcome,
+        },
+        'currentPets': {
+          'hasPets': _hasCurrentPets,
+          'details': _currentPetsCtrl.text,
+          'vaccinated': _petsVaccinated,
+        },
+        'lifestyle': {
+          'hoursAlone': _hoursAloneCtrl.text,
+          'petStayLocation': _petStayLocation,
+          'caregiver': _caregiverCtrl.text,
+        },
+        'financial': {
+          'vaccination': _canCoverVaccines,
+          'vetCare': _canCoverVet,
+          'food': _canCoverFood,
+        },
+        'agreement': {
+          'reason': _reasonCtrl.text.trim(),
+          'care': _agreeCare,
+          'noAbandon': _agreeNoAbandon,
+          'followUp': _agreeFollowup,
+        },
         'status': 'pending_appointment', //--- to be changed when admin view is available---
         'statusHistory': [
           {
@@ -394,10 +463,13 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 24),
 
         // Form
+
         Form(
           key: _formKey,
           child: Column(
             children: [
+              Text('Personal Information', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              const SizedBox(height: 12),
               _FormField(controller: _nameCtrl,
                 label: 'Full Name',
                 hint: ' ',
@@ -415,9 +487,135 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                   readOnly: true,
                   keyboardType: TextInputType.phone),
               const SizedBox(height: 12),
+              _FormField(controller: _ageCtrl,
+                  label: 'Age',
+                  hint: ' ',
+                  keyboardType: TextInputType.number),
+              const SizedBox(height: 12),
               _FormField(controller: _addressCtrl,
                   label: 'Home Address',
                   hint: ' ',),
+
+              const SizedBox(height: 18),
+              Text('Household', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              DropdownButtonFormField<String>(
+                value: _residenceType,
+                items: ['House','Apartment','Condo']
+                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
+                onChanged: (v)=>setState(()=>_residenceType=v),
+                decoration: const InputDecoration(labelText:'Type of Residence'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _ownershipType,
+                items: ['Own','Rent']
+                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
+                onChanged: (v)=>setState(()=>_ownershipType=v),
+                decoration: const InputDecoration(labelText:'Ownership'),
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                title: const Text('Landlord allows pets'),
+                value: _allowsPets,
+                onChanged:(v)=>setState(()=>_allowsPets=v),
+              ),
+              const SizedBox(height: 12),
+              _FormField(
+                controller: _householdNumCtrl,
+                label: 'Number of people in household',
+                hint: '',
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                title: const Text('Children in household'),
+                value: _hasChildren,
+                onChanged:(v)=>setState(()=>_hasChildren=v),
+              ),
+              const SizedBox(height: 18),
+              Text('Pet Experience', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              SwitchListTile(
+                title: const Text('Owned pets before'),
+                value: _hadPetsBefore,
+                onChanged:(v)=>setState(()=>_hadPetsBefore=v),
+              ),
+              const SizedBox(height: 12),
+              _FormField(
+                controller: _previousPetsCtrl,
+                label: 'What types of pets?',
+                hint: 'Dog, Cat, etc',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _previousPetOutcome,
+                items:['Still with me','Passed away','Rehomed']
+                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
+                onChanged:(v)=>setState(()=>_previousPetOutcome=v),
+                decoration: const InputDecoration(labelText:'What happened to them'),
+              ),
+
+              const SizedBox(height: 18),
+              Text('Current Pets', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              SwitchListTile(
+                title: const Text('Currently have pets'),
+                value: _hasCurrentPets,
+                onChanged:(v)=>setState(()=>_hasCurrentPets=v),
+              ),
+              const SizedBox(height: 12),
+              _FormField(
+                controller: _currentPetsCtrl,
+                label: 'How many and types?',
+                hint: '',
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                title: const Text('Vaccinated'),
+                value: _petsVaccinated,
+                onChanged:(v)=>setState(()=>_petsVaccinated=v),
+              ),
+
+              const SizedBox(height: 18),
+              Text('Lifestyle and Care', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              _FormField(
+                controller: _hoursAloneCtrl,
+                label: 'Hours pet will be alone daily',
+                hint: '',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _petStayLocation,
+                items:['Indoor','Outdoor','Mixed']
+                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
+                onChanged:(v)=>setState(()=>_petStayLocation=v),
+                decoration: const InputDecoration(labelText:'Where will the pet stay'),
+              ),
+              const SizedBox(height: 12),
+              _FormField(
+                controller: _caregiverCtrl,
+                label: 'Primary caregiver',
+                hint: '',
+              ),
+
+              const SizedBox(height: 18),
+              Text('Financial Readiness', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              CheckboxListTile(
+                title: const Text('Vaccination'),
+                value: _canCoverVaccines,
+                onChanged:(v)=>setState(()=>_canCoverVaccines=v!),
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                title: const Text('Vet Care'),
+                value: _canCoverVet,
+                onChanged:(v)=>setState(()=>_canCoverVet=v!),
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                title: const Text('Food'),
+                value: _canCoverFood,
+                onChanged:(v)=>setState(()=>_canCoverFood=v!),
+              ),
+
               const SizedBox(height: 12),
               _FormField(
                 controller: _reasonCtrl,
@@ -425,14 +623,34 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 hint: 'Tell us a little about yourself…',
                 maxLines: 4,
               ),
+              const SizedBox(height: 18),
+              Text('Agreements', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              CheckboxListTile(
+                title: const Text('I will provide proper care'),
+                value: _agreeCare,
+                onChanged:(v)=>setState(()=>_agreeCare=v!),
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                title: const Text('I will not abandon the animal'),
+                value: _agreeNoAbandon,
+                onChanged:(v)=>setState(()=>_agreeNoAbandon=v!),
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                title: const Text('I allow follow-up checks'),
+                value: _agreeFollowup,
+                onChanged:(v)=>setState(()=>_agreeFollowup=v!),
+              ),
             ],
-          ),
+
+          )
         ),
 
         const SizedBox(height: 28),
 
         _PrimaryButton(
-          label: _isSubmitting ? 'Submitting...' : "Let's Start",
+          label: _isSubmitting ? 'Submitting...' : "Submit",
           onTap: _isSubmitting ? null : _submitAdoptionForm,
         ),
 
