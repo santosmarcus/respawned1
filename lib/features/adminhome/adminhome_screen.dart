@@ -4,6 +4,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/admin_adoption_page.dart';
+import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -450,7 +451,16 @@ class _AdminDrawer extends StatelessWidget {
             _DrawerItem(label: 'Volunteer', onTap: () {}),
             _DrawerItem(label: 'Pet Transporters', onTap: () {}),
             _DrawerItem(label: 'Rescue Volunteers', onTap: () {}),
-            _DrawerItem(label: 'Animal Record', onTap: () {}),
+            _DrawerItem(
+              label: 'Animal Record',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AnimalRecordsPage()),
+                );
+              },
+            ),
             _DrawerItem(label: 'Shelter Resources', onTap: () {}),
 
             const Spacer(),
