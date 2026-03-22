@@ -90,7 +90,7 @@ class _UserProfileState extends State<UserProfile> {
         await FirebaseAuth.instance.signOut();
         if(mounted){
           Navigator.of(
-              context, rootNavigator: true).pushAndRemoveUntil(
+              context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false,);
         }
       } //to be fixed

@@ -283,6 +283,21 @@ class _TrackingTab extends StatelessWidget {
     required this.onSend,
   });
 
+  String _formatTime(DateTime d) {
+    final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final min = d.minute.toString().padLeft(2, '0');
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    return '$h:$min $ampm';
+  }
+
+  String _formatDate(DateTime d) {
+    const months = [
+      '', 'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    return '${months[d.month]} ${d.day}, ${d.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -295,13 +310,10 @@ class _TrackingTab extends StatelessWidget {
             itemBuilder: (context, index) {
               final item = statusHistory[index];
               final isLast = index == statusHistory.length - 1;
-              final ts = item['timestamp'] as Timestamp?;
-              final timeStr = ts != null
-                  ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-                  : '';
-              final dateStr = ts != null
-                  ? 'February ${ts.toDate().day}, ${ts.toDate().year}'
-                  : '';
+              final ts = item['timestamp'];
+              final date = ts is Timestamp ? ts.toDate() : null;
+              final timeStr = date != null ? _formatTime(date) : '';
+              final dateStr = date != null ? _formatDate(date) : '';
 
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -314,7 +326,7 @@ class _TrackingTab extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: isLast
                               ? AppColors.textPrimary
-                              : AppColors.slaterspwn,
+                              : AppColors.textPrimary,
                           shape: BoxShape.circle,
                           border: Border.all(
                               color: AppColors.textPrimary, width: 2),
