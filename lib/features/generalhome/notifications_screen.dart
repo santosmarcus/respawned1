@@ -51,10 +51,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         scrolledUnderElevation: 0,
         automaticallyImplyLeading: false,
         centerTitle: true,
+        toolbarHeight: 80,
         title: Text(
           'Notifications',
           style: GoogleFonts.tiltWarp(
-            fontSize: 30,
+            fontSize: 22,
             fontWeight: FontWeight.bold,
             color: AppColors.textPrimary,
           ),

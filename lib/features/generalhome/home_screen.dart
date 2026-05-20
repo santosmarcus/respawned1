@@ -17,6 +17,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 80,
         title: FutureBuilder<DocumentSnapshot>(
             future: FirebaseFirestore.instance
             .collection('users')
