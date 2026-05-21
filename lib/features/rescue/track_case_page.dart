@@ -529,27 +529,119 @@ class _CaseDetailTab extends StatelessWidget {
   final Map<String, dynamic> data;
   const _CaseDetailTab({required this.data});
 
+  void _showFullImage(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(6),
+                  child: const Icon(Icons.close,
+                      color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final photoUrls = List<String>.from(data['photoUrls'] ?? []);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Case media placeholders
+          // Case media
           Text('Case Media',
               style: GoogleFonts.zain(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              _MediaBox(),
-              const SizedBox(width: 12),
-              _MediaBox(),
-            ],
+
+      photoUrls.isEmpty
+          ? Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          'No media uploaded.',
+          style: GoogleFonts.zain(
+              fontSize: 13, color: AppColors.textSecondary),
+        ),
+      )
+          : Align(
+          alignment: Alignment.centerLeft,
+
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: photoUrls.map((url) {
+              return GestureDetector(
+                onTap: () => _showFullImage(context, url),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    url,
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            value: progress.expectedTotalBytes != null
+                                ? progress.cumulativeBytesLoaded /
+                                progress.expectedTotalBytes!
+                                : null,
+                            strokeWidth: 2,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, _, __) => Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: AppColors.slaterspwn,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.broken_image_outlined,
+                          color: AppColors.textSecondary),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
           ),
+          ),
+
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Reporter Mobile Number', data['reporterPhone']),
