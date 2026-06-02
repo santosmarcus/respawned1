@@ -55,7 +55,8 @@ dependencies:
   # UI
   lottie: ^3.3.2  # animated illustrations (loading, empty states)
   cached_network_image: ^3.4.1 # load animal photos from Firebase Storage
-  flutter_svg: ^2.2.4          # SVG icons
+  #flutter_svg: ^2.2.4
+  flutter_svg: ^2.0.0 # SVG icons
   shimmer:   ^3.0.0            # loading skeleton effect on lists
 
   # Navigation
@@ -98,7 +99,7 @@ flutter:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
   assets:
-    - assets/images/
+    - assets/Image/
     - assets/icons/
     - assets/animations/
 
