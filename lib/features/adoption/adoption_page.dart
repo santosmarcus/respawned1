@@ -9,7 +9,6 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'animal_page.dart';
 
 //Data Model
-
 enum AnimalGender { male, female }
 enum AnimalCategory { dog, cat }
 
