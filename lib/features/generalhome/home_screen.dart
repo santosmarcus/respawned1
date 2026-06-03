@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
 import 'package:respawnd1/features/generalhome/activity_feed.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
@@ -120,6 +121,12 @@ class HomeScreen extends StatelessWidget {
                   _QuickActionCard(
                     label: 'Volunteer',
                     color: AppColors.yellowrspwn,
+                    onTap: (){
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => VolunteerPage(),
+                      ),
+                      );
+                    },
                   ),
                 ],
               ),
