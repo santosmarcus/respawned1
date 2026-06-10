@@ -186,7 +186,7 @@ class _AdoptionPageState extends State<AdoptionPage> {
         backgroundColor: AppColors.background,
         elevation: 0,
         scrolledUnderElevation: 0,
-        automaticallyImplyLeading: false,
+        automaticallyImplyLeading: true,
         centerTitle: true,
         title: Text(
           'Adopt a Stray',
@@ -224,13 +224,13 @@ class _AdoptionPageState extends State<AdoptionPage> {
             );
           }
           else if (index == 1) {
-            Navigator.pushReplacement(
+            Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const NotificationsScreen()),
             );
           }
           else if (index == 2) {
-            Navigator.pushReplacement(
+            Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const UserProfile()),
             );

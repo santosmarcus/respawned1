@@ -481,7 +481,7 @@ class _RescuePageState extends State<RescuePage> {
       appBar: AppBar(
         title: Text(
           'Report a Stray',
-          style: Theme.of(context).textTheme.displaySmall,
+          style: Theme.of(context).textTheme.displayLarge,
         ),
         automaticallyImplyLeading: true,
         centerTitle: true,
@@ -513,13 +513,13 @@ class _RescuePageState extends State<RescuePage> {
             );
           }
           else if (index == 1) {
-            Navigator.pushReplacement(
+            Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const NotificationsScreen()),
             );
           }
           else if (index == 2) {
-            Navigator.pushReplacement(
+            Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const UserProfile()),
             );

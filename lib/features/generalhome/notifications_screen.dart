@@ -82,9 +82,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ],
         onTap: (index) {
           if (index == 0) {
-            Navigator.pushReplacement(
-              context, MaterialPageRoute(builder: (_) => const HomeScreen()),
-            );
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => const HomeScreen()),
+              );
+            }
           } else if (index == 2) {
             Navigator.pushReplacement(
               context, MaterialPageRoute(builder: (_) => const UserProfile()),

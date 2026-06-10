@@ -248,7 +248,7 @@ class _VolunteerPageState extends State<VolunteerPage> {
         backgroundColor: AppColors.background,
         elevation: 0,
         scrolledUnderElevation: 0,
-        automaticallyImplyLeading: false,
+        automaticallyImplyLeading: true,
         centerTitle: true,
         title: Text(
           'Volunteer',
