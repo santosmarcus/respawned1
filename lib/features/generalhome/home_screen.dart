@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/features/donation/donation_page.dart';
 import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
 import 'package:respawnd1/features/generalhome/activity_feed.dart';
 import '../../app_theme.dart';
@@ -81,6 +82,7 @@ class HomeScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
               ),
               // Replace with Image.asset or a Lottie animation
+              // Replace with Image.asset or a Lottie animation
             ),
 
             const SizedBox(height: 24),
@@ -117,6 +119,12 @@ class HomeScreen extends StatelessWidget {
                   _QuickActionCard(
                     label: 'Donate or\nSponsor',
                     color: AppColors.pinkrspwn,
+                    onTap: (){
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => DonationPage(),
+                      ),
+                      );
+                    },
                   ),
                   _QuickActionCard(
                     label: 'Volunteer',
