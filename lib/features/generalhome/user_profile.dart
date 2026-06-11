@@ -191,6 +191,11 @@ class _UserProfileState extends State<UserProfile> {
                     label: 'Certificates',
                     onTap: (){},
                   ),
+                  _ProfileTile(
+                    icon: Icons.sell,
+                    label: 'Create Pet Collar Tag',
+                    onTap: (){},
+                  ),
                 ],
               ),
             ),

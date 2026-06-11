@@ -71,7 +71,11 @@ dependencies:
 
   #Scan NFC and QR
   mobile_scanner: ^5.0.0      # QR scanning
-  flutter_nfc_kit: ^3.3.0     # NFC scanning
+  flutter_nfc_kit: ^3.3.0   # NFC scanning
+  #nfc_manager: ^3.3.0
+  #  path_provider: ^2.1.0
+   # qr_flutter: ^4.1.0
+   # share_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:
