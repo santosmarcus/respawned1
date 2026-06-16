@@ -433,7 +433,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
-  // 1st step --- fill out form
+  // 1st step - fill out form
   Widget _buildIntro() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -659,7 +659,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     );
   }
 
-  // 2nd step --- book appointment
+  // 2nd step book appointment
   Widget _buildBookAppointment() {
     final slots = _slotsForDate;
     final isSunday = _appointmentDate != null &&
@@ -1085,71 +1085,81 @@ class _StepTracker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: List.generate(labels.length, (i) {
-        final isDone = i < activeIndex;
-        final isActive = i == activeIndex;
-        final isRejected = rejected && i == activeIndex;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(labels.length, (index) {
+        final isDone = index < activeIndex;
+        final isActive = index == activeIndex;
 
-        Color dotColor;
-        if (isRejected) {
-          dotColor = Colors.redAccent;
-        } else if (isDone) {
-          dotColor = AppColors.lavenderrspwn;
-        } else if (isActive) {
-          dotColor = AppColors.lavenderrspwn;
-        } else {
-          dotColor = AppColors.slaterspwn;
-        }
+        return Expanded(
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  if (index != 0)
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: isDone
+                            ? AppColors.lavenderrspwn
+                            : AppColors.slaterspwn,
+                      ),
+                    ),
 
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Dot + vertical line
-            Column(
-              children: [
-                Container(
-                  width: 14,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: dotColor,
-                    shape: BoxShape.circle,
-                    border: isActive
-                        ? Border.all(color: AppColors.textPrimary, width: 2)
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isDone || isActive
+                          ? AppColors.lavenderrspwn
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: isDone || isActive
+                            ? AppColors.lavenderrspwn
+                            : AppColors.slaterspwn,
+                      ),
+                    ),
+                    child: isDone
+                        ? const Icon(
+                      Icons.check,
+                      size: 9,
+                      color: AppColors.textPrimary,
+                    )
                         : null,
                   ),
-                  child: isDone
-                      ? const Icon(Icons.check, size: 9, color: AppColors.textPrimary)
-                      : null,
-                ),
-                if (i < labels.length - 1)
-                  Container(
-                    width: 2,
-                    height: 28,
-                    color: i < activeIndex
-                        ? AppColors.greenrspwn
-                        : AppColors.slaterspwn,
+
+                  if (index != labels.length - 1)
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: index < activeIndex
+                            ? AppColors.lavenderrspwn
+                            : AppColors.slaterspwn,
+                      ),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              SizedBox(
+                width: 70,
+                child: Text(
+                  labels[index],
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.zain(
+                    fontSize: 11,
+                    fontWeight:
+                    isActive ? FontWeight.w700 : FontWeight.w500,
+                    color: isActive
+                        ? AppColors.textPrimary
+                        : AppColors.textSecondary,
                   ),
-              ],
-            ),
-
-            const SizedBox(width: 12),
-
-            Padding(
-              padding: const EdgeInsets.only(top: 0),
-              child: Text(
-                labels[i],
-                style: GoogleFonts.zain(
-                  fontSize: 14,
-                  fontWeight:
-                  isActive ? FontWeight.w700 : FontWeight.w500,
-                  color: isActive
-                      ? AppColors.textPrimary
-                      : AppColors.textSecondary,
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       }),
     );

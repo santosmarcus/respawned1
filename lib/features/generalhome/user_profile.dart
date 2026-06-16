@@ -7,6 +7,7 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_intro.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -194,7 +195,10 @@ class _UserProfileState extends State<UserProfile> {
                   _ProfileTile(
                     icon: Icons.sell,
                     label: 'Create Pet Collar Tag',
-                    onTap: (){},
+                    onTap: (){
+                      Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const CollarIdTagIntroScreen()),);
+                    },
                   ),
                 ],
               ),
