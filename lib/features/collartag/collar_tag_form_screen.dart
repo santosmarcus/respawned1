@@ -10,35 +10,43 @@ import 'collar_tag_data_model.dart';
 import 'collar_id_tag_screen.dart';
 
 class CollarTagFormScreen extends StatefulWidget {
-  const CollarTagFormScreen({super.key});
+  final CollarTagData? existingTag;
+
+  const CollarTagFormScreen({
+    super.key,
+    this.existingTag,
+  });
 
   @override
   State<CollarTagFormScreen> createState() => _CollarTagFormScreenState();
 }
 
 class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
-  final PageController _pageController = PageController();
-  int _currentPage = 0; // 0 = pet info, 1 = health + owner info
-
-  // Controllers – Pet Info
+  // Pet Info
   final _nameCtrl = TextEditingController();
-  final _birthdayCtrl = TextEditingController();
-  final _sexCtrl = TextEditingController();
-  final _breedCtrl = TextEditingController();
+  final _breedCtrl = TextEditingController(); // specific breed
   final _colorCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
 
-  // Controllers – Health
+  DateTime? _birthdayDate;
+  String _birthdayRawFallback = '';
+  String? _sex; // 'M' or 'F'
+  String? _petType; // 'Dog' or 'Cat'
+
+  // Health
   bool _spayedNeutered = false;
   bool _vaccinated = false;
   File? _vaccinationImage;
+
+  bool _hasAllergies = false;
   final _allergiesCtrl = TextEditingController();
+
+  bool _hasMedicalCondition = false;
   final _medicalCtrl = TextEditingController();
 
-  // Controllers – Owner
+  //Owner
   final _ownerNameCtrl = TextEditingController();
   final _ownerMobileCtrl = TextEditingController();
-
   // Pet image
   File? _petImage;
   bool _submitting = false;
@@ -46,14 +54,69 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
   final _picker = ImagePicker();
 
   @override
+  void initState() {
+    super.initState();
+
+    final tag = widget.existingTag;
+    if (tag != null) {
+      _nameCtrl.text = tag.name;
+      _colorCtrl.text = tag.colorMarkings;
+      _descCtrl.text = tag.briefDescription;
+
+      _spayedNeutered = tag.isSpayedNeutered;
+      _vaccinated = tag.isVaccinated;
+
+      _ownerNameCtrl.text = tag.ownerName;
+      _ownerMobileCtrl.text = tag.ownerMobile;
+
+      // Sex
+      final sexUpper = tag.sex.trim().toUpperCase();
+      _sex = (sexUpper == 'M' || sexUpper == 'F') ? sexUpper : null;
+
+      //Bday
+      _birthdayDate = _tryParseDate(tag.birthday);
+      if (_birthdayDate == null) _birthdayRawFallback = tag.birthday;
+
+      //Breed
+      final breedParts = tag.breed.split(' - ');
+      if (breedParts.length == 2 &&
+          (breedParts[0] == 'Dog' || breedParts[0] == 'Cat')) {
+        _petType = breedParts[0];
+        _breedCtrl.text = breedParts[1];
+      } else {
+        _breedCtrl.text = tag.breed;
+      }
+
+      // Allergies
+      final allergiesText = tag.allergies.trim();
+      _hasAllergies =
+          allergiesText.isNotEmpty && allergiesText.toLowerCase() != 'none';
+      if (_hasAllergies) _allergiesCtrl.text = allergiesText;
+
+      // Medical condition
+      final medicalText = tag.medicalCondition.trim();
+      _hasMedicalCondition =
+          medicalText.isNotEmpty && medicalText.toLowerCase() != 'none';
+      if (_hasMedicalCondition) _medicalCtrl.text = medicalText;
+
+      if (tag.petImagePath != null) {
+        _petImage = File(tag.petImagePath!);
+      }
+
+      if (tag.vaccinationImagePath != null) {
+        _vaccinationImage = File(tag.vaccinationImagePath!);
+      }
+    }
+  }
+
+  @override
   void dispose() {
     for (final c in [
-      _nameCtrl, _birthdayCtrl, _sexCtrl, _breedCtrl, _colorCtrl, _descCtrl,
+      _nameCtrl, _breedCtrl, _colorCtrl, _descCtrl,
       _allergiesCtrl, _medicalCtrl, _ownerNameCtrl, _ownerMobileCtrl
     ]) {
       c.dispose();
     }
-    _pageController.dispose();
     super.dispose();
   }
 
@@ -67,15 +130,48 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
     if (xf != null) setState(() => _vaccinationImage = File(xf.path));
   }
 
-  void _nextPage() {
-    if (_currentPage == 0) {
-      _pageController.nextPage(
-          duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
-      setState(() => _currentPage = 1);
-    } else {
-      _submit();
+  Future<void> _pickBirthday() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _birthdayDate ?? DateTime(now.year - 1, now.month, now.day),
+      firstDate: DateTime(1990),
+      lastDate: now,
+    );
+    if (picked != null) {
+      setState(() {
+        _birthdayDate = picked;
+        _birthdayRawFallback = '';
+      });
     }
   }
+
+  DateTime? _tryParseDate(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+
+    final iso = DateTime.tryParse(value);
+    if (iso != null) return iso;
+
+    final parts = value.split('/');
+    if (parts.length == 3) {
+      final month = int.tryParse(parts[0]);
+      final day = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+      if (month != null && day != null && year != null) {
+        try {
+          return DateTime(year, month, day);
+        } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  String _formatDate(DateTime d) =>
+      '${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}/${d.year}';
+
+  String get _birthdayDisplay =>
+      _birthdayDate != null ? _formatDate(_birthdayDate!) : _birthdayRawFallback;
 
   Future<String?> _uploadImage(File file, String path) async {
     try {
@@ -99,13 +195,23 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
-      final tagRef = FirebaseFirestore.instance
+      final isEditing = widget.existingTag != null;
+
+      final tagRef = isEditing
+          ? FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('collarTags')
+          .doc(widget.existingTag!.tagId)
+          : FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
           .collection('collarTags')
           .doc();
 
-      final tagId = tagRef.id;
+      final tagId = isEditing
+          ? widget.existingTag!.tagId!
+          : tagRef.id;
 
       // Upload images
       String? petImageUrl;
@@ -115,48 +221,67 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
         petImageUrl = await _uploadImage(
             _petImage!, 'collar_tags/$uid/$tagId/pet.jpg');
       }
-      if (_vaccinationImage != null) {
+      if (_vaccinated && _vaccinationImage != null) {
         vacImageUrl = await _uploadImage(
             _vaccinationImage!, 'collar_tags/$uid/$tagId/vaccination.jpg');
       }
+
+      final breedValue = _petType != null
+          ? '$_petType - ${_breedCtrl.text.trim()}'
+          : _breedCtrl.text.trim();
+
+      final allergiesValue =
+      (_hasAllergies && _allergiesCtrl.text.trim().isNotEmpty)
+          ? _allergiesCtrl.text.trim()
+          : 'None';
+
+      final medicalValue =
+      (_hasMedicalCondition && _medicalCtrl.text.trim().isNotEmpty)
+          ? _medicalCtrl.text.trim()
+          : 'None';
 
       final tagData = CollarTagData(
         tagId: tagId,
         petImageUrl: petImageUrl,
         petImagePath: _petImage?.path,
         name: _nameCtrl.text.trim(),
-        birthday: _birthdayCtrl.text.trim(),
-        sex: _sexCtrl.text.trim(),
-        breed: _breedCtrl.text.trim(),
+        birthday: _birthdayDisplay,
+        sex: _sex ?? '',
+        breed: breedValue,
         colorMarkings: _colorCtrl.text.trim(),
         briefDescription: _descCtrl.text.trim(),
         isSpayedNeutered: _spayedNeutered,
         isVaccinated: _vaccinated,
         vaccinationImageUrl: vacImageUrl,
-        vaccinationImagePath: _vaccinationImage?.path,
-        allergies: _allergiesCtrl.text.trim(),
-        medicalCondition: _medicalCtrl.text.trim(),
+        vaccinationImagePath: _vaccinated ? _vaccinationImage?.path : null,
+        allergies: allergiesValue,
+        medicalCondition: medicalValue,
         ownerName: _ownerNameCtrl.text.trim(),
         ownerMobile: _ownerMobileCtrl.text.trim(),
-        createdAt: DateTime.now(),
+        createdAt: widget.existingTag?.createdAt ?? DateTime.now(),
       );
 
-      // Save to user's collar tags
-      await tagRef.set({
-        ...tagData.toFirestore(),
-        'tagId': tagId,
-        'ownerId': uid,
-      });
 
-      // Also save to global public collection (for QR scan lookup)
+      await tagRef.set(
+        {
+          ...tagData.toFirestore(),
+          'tagId': tagId,
+          'ownerId': uid,
+        },
+        SetOptions(merge: true),
+      );
+
       await FirebaseFirestore.instance
           .collection('collarTags')
           .doc(tagId)
-          .set({
-        ...tagData.toFirestore(),
-        'tagId': tagId,
-        'ownerId': uid,
-      });
+          .set(
+        {
+          ...tagData.toFirestore(),
+          'tagId': tagId,
+          'ownerId': uid,
+        },
+        SetOptions(merge: true),
+      );
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -191,16 +316,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
         leading: IconButton(
           icon: const Icon(Icons.chevron_left,
               color: AppColors.textPrimary, size: 28),
-          onPressed: () {
-            if (_currentPage == 1) {
-              _pageController.previousPage(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut);
-              setState(() => _currentPage = 0);
-            } else {
-              Navigator.pop(context);
-            }
-          },
+          onPressed: () => Navigator.pop(context),
         ),
         centerTitle: true,
         title: Text(
@@ -211,291 +327,244 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
               color: AppColors.textPrimary),
         ),
       ),
+
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-          _PetInfoPage(
-            petImage: _petImage,
-            onPickImage: _pickPetImage,
-            nameCtrl: _nameCtrl,
-            birthdayCtrl: _birthdayCtrl,
-            sexCtrl: _sexCtrl,
-            breedCtrl: _breedCtrl,
-            colorCtrl: _colorCtrl,
-            descCtrl: _descCtrl,
-            spayedNeutered: _spayedNeutered,
-            vaccinated: _vaccinated,
-            vaccinationImage: _vaccinationImage,
-            onSpayedChanged: (v) => setState(() => _spayedNeutered = v),
-            onVaccinatedChanged: (v) => setState(() => _vaccinated = v),
-            onPickVaccination: _pickVaccinationImage,
-            onNext: _nextPage,
-            showNextOnly: true,
-          ),
-          _HealthOwnerPage(
-            spayedNeutered: _spayedNeutered,
-            vaccinated: _vaccinated,
-            vaccinationImage: _vaccinationImage,
-            onSpayedChanged: (v) => setState(() => _spayedNeutered = v),
-            onVaccinatedChanged: (v) => setState(() => _vaccinated = v),
-            onPickVaccination: _pickVaccinationImage,
-            allergiesCtrl: _allergiesCtrl,
-            medicalCtrl: _medicalCtrl,
-            ownerNameCtrl: _ownerNameCtrl,
-            ownerMobileCtrl: _ownerMobileCtrl,
-            submitting: _submitting,
-            onGenerate: _nextPage,
-          ),
-        ],
-      ),
-      ),
-    );
-  }
-}
+            const SizedBox(height: 8),
+            _sectionLabel('Pet Information'),
+            const SizedBox(height: 10),
 
-// ─── Page 1: Pet Info ────────────────────────────────────────────────────────
-
-class _PetInfoPage extends StatelessWidget {
-  final File? petImage;
-  final VoidCallback onPickImage;
-  final TextEditingController nameCtrl, birthdayCtrl, sexCtrl, breedCtrl,
-      colorCtrl, descCtrl;
-  final bool spayedNeutered, vaccinated;
-  final File? vaccinationImage;
-  final ValueChanged<bool> onSpayedChanged, onVaccinatedChanged;
-  final VoidCallback onPickVaccination;
-  final VoidCallback onNext;
-  final bool showNextOnly;
-
-  const _PetInfoPage({
-    required this.petImage,
-    required this.onPickImage,
-    required this.nameCtrl,
-    required this.birthdayCtrl,
-    required this.sexCtrl,
-    required this.breedCtrl,
-    required this.colorCtrl,
-    required this.descCtrl,
-    required this.spayedNeutered,
-    required this.vaccinated,
-    required this.vaccinationImage,
-    required this.onSpayedChanged,
-    required this.onVaccinatedChanged,
-    required this.onPickVaccination,
-    required this.onNext,
-    required this.showNextOnly,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 8),
-          _sectionLabel('Pet Information'),
-          const SizedBox(height: 10),
-
-          // Pet image picker
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onTap: onPickImage,
-                child: Container(
-                  width: 90,
-                  height: 90,
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                        color: AppColors.textPrimary.withOpacity(0.3),
-                        style: BorderStyle.solid),
-                    borderRadius: BorderRadius.circular(8),
-                    color: AppColors.tearspwn.withOpacity(0.3),
-                  ),
-                  child: petImage != null
-                      ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(petImage!, fit: BoxFit.cover),
-                  )
-                      : const Center(
-                    child: Icon(Icons.add,
-                        size: 32, color: AppColors.textPrimary),
+            // Pet image
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  onTap: _pickPetImage,
+                  child: Container(
+                    width: 90,
+                    height: 90,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                          color: AppColors.textPrimary.withOpacity(0.3),
+                          style: BorderStyle.solid),
+                      borderRadius: BorderRadius.circular(8),
+                      color: AppColors.tearspwn.withOpacity(0.3),
+                    ),
+                    child: _petImage != null
+                        ? ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(_petImage!, fit: BoxFit.cover),
+                    )
+                        : const Center(
+                      child: Icon(Icons.add,
+                          size: 32, color: AppColors.textPrimary),
+                    ),
                   ),
                 ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Insert Pet Image',
+                        style: GoogleFonts.zain(
+                            fontSize: 13, color: AppColors.textPrimary)),
+                    const Text(' *',
+                        style: TextStyle(color: Colors.red, fontSize: 13)),
+                  ],
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+            _field(_nameCtrl, 'Name'),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: _datePickerField(
+                  label: 'Birthday',
+                  displayText: _birthdayDisplay,
+                  onTap: _pickBirthday,
+                ),
               ),
-              const SizedBox(width: 12),
-              Column(
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Sex',
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    _SingleChoiceRow(
+                      value: _sex,
+                      options: const ['M', 'F'],
+                      onChanged: (v) => setState(() => _sex = v),
+                    ),
+                  ],
+                ),
+              ),
+            ]),
+
+            const SizedBox(height: 14),
+            Text(
+              'Pet Type',
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            _SingleChoiceRow(
+              value: _petType,
+              options: const ['Dog', 'Cat'],
+              onChanged: (v) => setState(() => _petType = v),
+            ),
+            if (_petType != null) ...[
+              const SizedBox(height: 10),
+              _field(
+                _breedCtrl,
+                _petType == 'Dog'
+                    ? 'Breed (e.g. Labrador Retriever)'
+                    : 'Breed (e.g. Persian)',
+              ),
+            ],
+
+            const SizedBox(height: 10),
+            _field(_colorCtrl, 'Color/Markings'),
+            const SizedBox(height: 10),
+            _sectionLabel('Brief Pet Description'),
+            const SizedBox(height: 6),
+            _field(_descCtrl, 'Enter description'),
+
+            const SizedBox(height: 24),
+            _sectionLabel('Health Information'),
+            const SizedBox(height: 8),
+            _YesNoRow(
+              label: 'Spayed/Neutered',
+              value: _spayedNeutered,
+              onChanged: (v) => setState(() => _spayedNeutered = v),
+            ),
+            const SizedBox(height: 10),
+            _YesNoRow(
+              label: 'Vaccinated',
+              value: _vaccinated,
+              onChanged: (v) => setState(() => _vaccinated = v),
+            ),
+
+            if (_vaccinated) ...[
+              const SizedBox(height: 10),
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Insert Pet Image',
+                  GestureDetector(
+                    onTap: _pickVaccinationImage,
+                    child: Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                            color: AppColors.textPrimary.withOpacity(0.3),
+                            style: BorderStyle.solid),
+                        borderRadius: BorderRadius.circular(8),
+                        color: AppColors.tearspwn.withOpacity(0.3),
+                      ),
+                      child: _vaccinationImage != null
+                          ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(_vaccinationImage!, fit: BoxFit.cover),
+                      )
+                          : const Center(
+                        child: Icon(Icons.add,
+                            size: 28, color: AppColors.textPrimary),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('Vaccination Record\nImage',
                       style: GoogleFonts.zain(
                           fontSize: 13, color: AppColors.textPrimary)),
-                  const Text(' *',
-                      style: TextStyle(color: Colors.red, fontSize: 13)),
                 ],
               ),
             ],
-          ),
 
-          const SizedBox(height: 14),
-          _field(nameCtrl, 'Name'),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: _field(birthdayCtrl, 'Birthday')),
-            const SizedBox(width: 10),
-            Expanded(child: _field(sexCtrl, 'Sex')),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: _field(breedCtrl, 'Breed')),
-            const SizedBox(width: 10),
-            Expanded(child: _field(colorCtrl, 'Color/Markings')),
-          ]),
-          const SizedBox(height: 10),
-          _sectionLabel('Brief Pet Description'),
-          const SizedBox(height: 6),
-          _field(descCtrl, 'Enter description'),
-
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-}
-
-class _HealthOwnerPage extends StatelessWidget {
-  final bool spayedNeutered, vaccinated;
-  final File? vaccinationImage;
-  final ValueChanged<bool> onSpayedChanged, onVaccinatedChanged;
-  final VoidCallback onPickVaccination;
-  final TextEditingController allergiesCtrl, medicalCtrl,
-      ownerNameCtrl, ownerMobileCtrl;
-  final bool submitting;
-  final VoidCallback onGenerate;
-
-  const _HealthOwnerPage({
-    required this.spayedNeutered,
-    required this.vaccinated,
-    required this.vaccinationImage,
-    required this.onSpayedChanged,
-    required this.onVaccinatedChanged,
-    required this.onPickVaccination,
-    required this.allergiesCtrl,
-    required this.medicalCtrl,
-    required this.ownerNameCtrl,
-    required this.ownerMobileCtrl,
-    required this.submitting,
-    required this.onGenerate,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 8),
-          _sectionLabel('Health Information'),
-          const SizedBox(height: 8),
-          _CheckRow(
-              label: 'Spayed/Neutered',
-              value: spayedNeutered,
-              onChanged: onSpayedChanged),
-          _CheckRow(
-              label: 'Vaccinated',
-              value: vaccinated,
-              onChanged: onVaccinatedChanged),
-          const SizedBox(height: 10),
-
-          // Vaccination image
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onTap: onPickVaccination,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                        color: AppColors.textPrimary.withOpacity(0.3),
-                        style: BorderStyle.solid),
-                    borderRadius: BorderRadius.circular(8),
-                    color: AppColors.tearspwn.withOpacity(0.3),
-                  ),
-                  child: vaccinationImage != null
-                      ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(vaccinationImage!, fit: BoxFit.cover),
-                  )
-                      : const Center(
-                    child: Icon(Icons.add,
-                        size: 28, color: AppColors.textPrimary),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text('Vaccination Record\nImage',
-                  style: GoogleFonts.zain(
-                      fontSize: 13, color: AppColors.textPrimary)),
-            ],
-          ),
-
-          const SizedBox(height: 14),
-          _sectionLabel('Allergies'),
-          const SizedBox(height: 6),
-          _field(allergiesCtrl, 'Enter condition'),
-          const SizedBox(height: 10),
-          _sectionLabel('Current/Existing Medical Condition'),
-          const SizedBox(height: 6),
-          _field(medicalCtrl, 'Enter condition'),
-
-          const SizedBox(height: 16),
-          _sectionLabel('Owner Information'),
-          const SizedBox(height: 10),
-          _field(ownerNameCtrl, 'Name'),
-          const SizedBox(height: 10),
-          _field(ownerMobileCtrl, 'Mobile Number',
-              keyboardType: TextInputType.phone),
-
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: submitting ? null : onGenerate,
-              style: ElevatedButton.styleFrom(
-                foregroundColor: AppColors.textPrimary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                elevation: 0,
-              ),
-              child: submitting
-                  ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppColors.textPrimary),
-              )
-                  : Text('Generate Collar Tag',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary)),
+            const SizedBox(height: 14),
+            _sectionLabel('Allergies'),
+            const SizedBox(height: 6),
+            _YesNoRow(
+              label: 'Does your pet have allergies?',
+              value: _hasAllergies,
+              onChanged: (v) => setState(() => _hasAllergies = v),
             ),
-          ),
-          const SizedBox(height: 32),
-        ],
+            if (_hasAllergies) ...[
+              const SizedBox(height: 8),
+              _field(_allergiesCtrl, 'Enter allergies'),
+            ],
+
+            const SizedBox(height: 14),
+            _sectionLabel('Current/Existing Medical Condition'),
+            const SizedBox(height: 6),
+            _YesNoRow(
+              label: 'Does your pet have a medical condition?',
+              value: _hasMedicalCondition,
+              onChanged: (v) => setState(() => _hasMedicalCondition = v),
+            ),
+            if (_hasMedicalCondition) ...[
+              const SizedBox(height: 8),
+              _field(_medicalCtrl, 'Enter condition'),
+            ],
+
+            const SizedBox(height: 16),
+            _sectionLabel('Owner Information'),
+            const SizedBox(height: 10),
+            _field(_ownerNameCtrl, 'Name'),
+            const SizedBox(height: 10),
+            _field(_ownerMobileCtrl, 'Mobile Number',
+                keyboardType: TextInputType.phone),
+
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _submitting ? null : _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.yellowrspwn,
+                  foregroundColor: AppColors.textPrimary,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  elevation: 0,
+                ),
+                child: _submitting
+                    ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.textPrimary),
+                )
+                    : Text('Generate Collar Tag',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary)),
+              ),
+            ),
+            const SizedBox(height: 32),
+          ],
+        ),
       ),
     );
   }
 }
 
-// Shared helpers
 
 Widget _sectionLabel(String text) => Text(
   text,
@@ -569,32 +638,146 @@ Widget _field(
       ],
     );
 
-class _CheckRow extends StatelessWidget {
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
+Widget _datePickerField({
+  required String label,
+  required String displayText,
+  required VoidCallback onTap,
+}) =>
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.zain(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 4),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.background.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.slaterspwn, width: 1),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    displayText.isEmpty ? 'Select date' : displayText,
+                    style: GoogleFonts.zain(
+                      fontSize: 15,
+                      color: displayText.isEmpty
+                          ? AppColors.textSecondary
+                          : AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                const Icon(Icons.calendar_today,
+                    size: 18, color: AppColors.textPrimary),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
 
-  const _CheckRow(
-      {required this.label, required this.value, required this.onChanged});
+
+class _SingleChoiceRow extends StatelessWidget {
+  final String? value;
+  final List<String> options;
+  final ValueChanged<String> onChanged;
+
+  const _SingleChoiceRow({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(
-          width: 24,
-          height: 24,
-          child: Radio<bool>(
-            value: true,
-            groupValue: value ? true : null,
-            activeColor: AppColors.textPrimary,
-            onChanged: (_) => onChanged(!value),
+        for (final option in options)
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: GestureDetector(
+              onTap: () => onChanged(option),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Radio<String>(
+                    value: option,
+                    groupValue: value,
+                    activeColor: AppColors.textPrimary,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (v) => onChanged(v ?? option),
+                  ),
+                  const SizedBox(width: 2),
+                  Text(option,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                ],
+              ),
+            ),
           ),
+      ],
+    );
+  }
+}
+
+// Yes/No for health-related questions
+class _YesNoRow extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _YesNoRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  Widget _option(String text, bool optionValue) {
+    return GestureDetector(
+      onTap: () => onChanged(optionValue),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Radio<bool>(
+            value: optionValue,
+            groupValue: value,
+            activeColor: AppColors.textPrimary,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            onChanged: (v) => onChanged(v ?? optionValue),
+          ),
+          const SizedBox(width: 2),
+          Text(text,
+              style:
+              GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(label,
+              style:
+              GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
         ),
-        const SizedBox(width: 6),
-        Text(label,
-            style: GoogleFonts.zain(
-                fontSize: 14, color: AppColors.textPrimary)),
+        _option('Yes', true),
+        const SizedBox(width: 8),
+        _option('No', false),
       ],
     );
   }

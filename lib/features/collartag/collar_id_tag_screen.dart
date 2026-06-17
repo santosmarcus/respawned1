@@ -1,17 +1,13 @@
 import 'dart:io';
-import 'dart:ui' as ui;
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:path_provider/path_provider.dart';
-//import 'package:share_plus/share_plus.dart';
-
 import '../../../app_theme.dart';
 import 'collar_tag_data_model.dart';
+import 'collar_tag_form_screen.dart';
 
 //  Pet Identification Card Screen
 
@@ -60,28 +56,6 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     } catch (_) {}
   }
 
-  // Share / export the card as an image
-
- /* Future<void> _shareCard() async {
-    try {
-      final boundary = _cardKey.currentContext!.findRenderObject()
-      as RenderRepaintBoundary;
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData =
-      await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return;
-
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/pet_id_card.png');
-      await file.writeAsBytes(byteData.buffer.asUint8List());
-
-      await Share.shareXFiles([XFile(file.path)],
-          text: 'My pet\'s digital ID – ${widget.tagData.name}');
-    } catch (e) {
-      _showSnack('Could not share card: $e');
-    }
-  }
-*/
   void _showSnack(String msg) {
     if (mounted) {
       ScaffoldMessenger.of(context)
@@ -123,28 +97,20 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
               'Pet Identification\nCard',
               textAlign: TextAlign.center,
               style: GoogleFonts.tiltWarp(
-                  fontSize: 24,
+                  fontSize: 32,
                   fontWeight: FontWeight.bold,
                   color: AppColors.textPrimary),
             ),
             const SizedBox(height: 16),
 
-            // Printable card
+
             RepaintBoundary(
               key: _cardKey,
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
                 ),
                 child: Column(
                   children: [
@@ -157,45 +123,52 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                     Text(
                       tag.name.isNotEmpty ? tag.name : '—',
                       style: GoogleFonts.tiltWarp(
-                          fontSize: 22,
+                          fontSize: 28,
                           fontWeight: FontWeight.bold,
                           color: AppColors.textPrimary),
                     ),
                     const SizedBox(height: 12),
+                    const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     _infoRow('Breed:', tag.breed),
+                    const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     _infoRow('Color/Markings:', tag.colorMarkings),
+                    const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     _infoRow('Birthday: ${tag.birthday}', 'Sex: ${tag.sex}',
                         isDouble: true),
+                    const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     const SizedBox(height: 8),
                     _healthDots(tag),
                     const SizedBox(height: 10),
-                    const Divider(thickness: 0.5),
+
                     const SizedBox(height: 6),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text('Owner Information',
                           style: GoogleFonts.tiltWarp(
-                              fontSize: 13,
+                              fontSize: 16,
                               color: AppColors.textPrimary)),
                     ),
-                    const SizedBox(height: 6),
+
+                    const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         tag.ownerName,
                         style: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textPrimary),
+                            fontSize: 14, color: AppColors.textPrimary),
                       ),
                     ),
-                    const Divider(thickness: 0.5),
+                    const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         tag.ownerMobile,
                         style: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textPrimary),
+                            fontSize: 14, color: AppColors.textPrimary),
                       ),
                     ),
+                    const Divider(thickness: 0.5, color: AppColors.textPrimary),
+
 
                   ],
                 ),
@@ -203,15 +176,6 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
             ),
 
             const SizedBox(height: 24),
-
-            // Action buttons
-            _ActionButton(
-              icon: Icons.share_outlined,
-              label: 'Share Card',
-              //onTap: _shareCard,
-            ),
-
-            const SizedBox(height: 12),
 
             // Finish
             SizedBox(
@@ -229,7 +193,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                 ),
                 child: Text('Finish',
                     style: GoogleFonts.tiltWarp(
-                        fontSize: 16,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: AppColors.textPrimary)),
               ),
@@ -252,13 +216,13 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
           Expanded(
             child: Text(left,
                 style: GoogleFonts.zain(
-                    fontSize: 12, color: AppColors.textPrimary)),
+                    fontSize: 14, color: AppColors.textPrimary)),
           ),
           Expanded(
             child: Text(right,
                 textAlign: TextAlign.end,
                 style: GoogleFonts.zain(
-                    fontSize: 12, color: AppColors.textPrimary)),
+                    fontSize: 14, color: AppColors.textPrimary)),
           ),
         ],
       ),
@@ -302,8 +266,8 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     child: Row(
       children: [
         Container(
-          width: 10,
-          height: 10,
+          width: 13,
+          height: 13,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: positive ? AppColors.textPrimary : Colors.grey.shade400,
@@ -313,18 +277,25 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
         Flexible(
           child: Text(label,
               style: GoogleFonts.zain(
-                  fontSize: 11, color: AppColors.textPrimary)),
+                  fontSize: 14, color: AppColors.textPrimary)),
         ),
       ],
     ),
   );
 
   void _editTag(BuildContext context) {
-    _showSnack('Edit flow: re-open the form pre-populated (coming soon).');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CollarTagFormScreen(
+          existingTag: widget.tagData,
+        ),
+      ),
+    );
   }
 }
 
-// ─── Pet Photo widget (network / local / placeholder) ────────────────────────
+// Pet Photo
 
 class _PetPhoto extends StatelessWidget {
   final String? imageUrl;
@@ -350,8 +321,8 @@ class _PetPhoto extends StatelessWidget {
     }
 
     return Container(
-      width: 110,
-      height: 110,
+      width: 180,
+      height: 180,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         color: AppColors.tearspwn,
@@ -363,7 +334,6 @@ class _PetPhoto extends StatelessWidget {
 }
 
 // Action button
-
 class _ActionButton extends StatelessWidget {
   final IconData icon;
   final String label;
