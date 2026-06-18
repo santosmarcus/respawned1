@@ -5,6 +5,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:respawnd1/features/userauth/signup_screen.dart';
 
 
@@ -98,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ResPAWnd')),
+      appBar: AppBar(),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -107,18 +108,13 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 48),
 
               // Logo placeholder
-              Container(
-                width: 140,
-                height: 140,
-                decoration: const BoxDecoration(
-                  color: AppColors.slaterspwn,
-                  shape: BoxShape.circle,
-                ),
-                // Replace with your actual logo:
-                // child: Image.asset('assets/images/logo.png'),
+              Image.asset(
+                'assets/Image/logo.png',
+                width: 250,
+                height: 250,
               ),
 
-              const SizedBox(height: 48),
+              const SizedBox(height: 16),
 
               // Email field
               TextFormField(
@@ -310,21 +306,26 @@ class _SocialButton extends StatelessWidget {
         backgroundColor: Colors.white,
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (icon != null)
-            Image.asset(icon!, width: 22, height: 22),
+            SvgPicture.asset(
+              icon!,
+              width: 22,
+              height: 22,
+            ),
           //else if (iconData != null)
             //Icon(iconData, size: 22, color: AppColors.textPrimary),
           const SizedBox(width: 10),
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
+          Flexible(
+            child: Text(
+                label,
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+          )
           ),
         ],
       ),

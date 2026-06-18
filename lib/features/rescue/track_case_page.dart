@@ -2,7 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+import 'package:respawnd1/features/generalhome/user_profile.dart';
+import '../../../app_theme.dart';
+import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 
 class TrackCasePage extends StatefulWidget {
@@ -97,13 +100,41 @@ class _TrackCasePageState extends State<TrackCasePage> {
             currentIndex: 0,
             items: const [
               BottomNavigationBarItem(
-                  icon: Icon(Icons.home_outlined), label: 'Home'),
+                icon: Icon(Icons.home_outlined),
+                activeIcon: Icon(Icons.home),
+                label: 'Home',
+              ),
               BottomNavigationBarItem(
-                  icon: Icon(Icons.notifications_outlined),
-                  label: 'Notifications'),
+                icon: Icon(Icons.notifications_outlined),
+                activeIcon: Icon(Icons.notifications),
+                label: 'Notifications',
+              ),
               BottomNavigationBarItem(
-                  icon: Icon(Icons.person_outline), label: 'My Profile'),
+                icon: Icon(Icons.person_outline),
+                activeIcon: Icon(Icons.person),
+                label: 'My Profile',
+              ),
             ],
+            onTap: (index) {
+              if (index == 0) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const HomeScreen()),
+                );
+              }
+              else if (index == 1) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+                );
+              }
+              else if (index == 2) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const UserProfile()),
+                );
+              }
+            },
           ),
           body: Column(
             children: [
@@ -252,6 +283,21 @@ class _TrackingTab extends StatelessWidget {
     required this.onSend,
   });
 
+  String _formatTime(DateTime d) {
+    final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final min = d.minute.toString().padLeft(2, '0');
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    return '$h:$min $ampm';
+  }
+
+  String _formatDate(DateTime d) {
+    const months = [
+      '', 'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    return '${months[d.month]} ${d.day}, ${d.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -264,13 +310,10 @@ class _TrackingTab extends StatelessWidget {
             itemBuilder: (context, index) {
               final item = statusHistory[index];
               final isLast = index == statusHistory.length - 1;
-              final ts = item['timestamp'] as Timestamp?;
-              final timeStr = ts != null
-                  ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-                  : '';
-              final dateStr = ts != null
-                  ? 'February ${ts.toDate().day}, ${ts.toDate().year}'
-                  : '';
+              final ts = item['timestamp'];
+              final date = ts is Timestamp ? ts.toDate() : null;
+              final timeStr = date != null ? _formatTime(date) : '';
+              final dateStr = date != null ? _formatDate(date) : '';
 
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -283,7 +326,7 @@ class _TrackingTab extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: isLast
                               ? AppColors.textPrimary
-                              : AppColors.slaterspwn,
+                              : AppColors.textPrimary,
                           shape: BoxShape.circle,
                           border: Border.all(
                               color: AppColors.textPrimary, width: 2),
@@ -486,27 +529,119 @@ class _CaseDetailTab extends StatelessWidget {
   final Map<String, dynamic> data;
   const _CaseDetailTab({required this.data});
 
+  void _showFullImage(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(6),
+                  child: const Icon(Icons.close,
+                      color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final photoUrls = List<String>.from(data['photoUrls'] ?? []);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Case media placeholders
+          // Case media
           Text('Case Media',
               style: GoogleFonts.zain(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              _MediaBox(),
-              const SizedBox(width: 12),
-              _MediaBox(),
-            ],
+
+      photoUrls.isEmpty
+          ? Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          'No media uploaded.',
+          style: GoogleFonts.zain(
+              fontSize: 13, color: AppColors.textSecondary),
+        ),
+      )
+          : Align(
+          alignment: Alignment.centerLeft,
+
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: photoUrls.map((url) {
+              return GestureDetector(
+                onTap: () => _showFullImage(context, url),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    url,
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            value: progress.expectedTotalBytes != null
+                                ? progress.cumulativeBytesLoaded /
+                                progress.expectedTotalBytes!
+                                : null,
+                            strokeWidth: 2,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, _, __) => Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: AppColors.slaterspwn,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.broken_image_outlined,
+                          color: AppColors.textSecondary),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
           ),
+          ),
+
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Reporter Mobile Number', data['reporterPhone']),

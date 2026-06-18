@@ -1,11 +1,14 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+import 'package:respawnd1/features/generalhome/user_profile.dart';
+import '../../../app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
-import '../../app_theme.dart';
 import 'animal_page.dart';
 
 //Data Model
-
 enum AnimalGender { male, female }
 enum AnimalCategory { dog, cat }
 
@@ -105,6 +108,7 @@ class _AdoptionPageState extends State<AdoptionPage> {
   void initState() {
     super.initState();
     _animals = List.from(_allAnimals);
+    _loadFavorites();
   }
 
   @override
@@ -127,10 +131,50 @@ class _AdoptionPageState extends State<AdoptionPage> {
     }).toList();
   }
 
-  void _toggleFavorite(int id) {
+  Future<void> _toggleFavorite(Animal animal) async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    
+    final favRef = FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .collection('favorites')
+      .doc(animal.id.toString());
+
     setState(() {
-      final animal = _animals.firstWhere((p) => p.id == id);
       animal.favorited = !animal.favorited;
+    });
+
+    if(animal.favorited){
+      await favRef.set({
+        'animalId': animal.id,
+        'name': animal.name,
+        'breed': animal.breed,
+        'age': animal.age,
+        'description': animal.description,
+        'gender': animal.gender.name,
+        'category': animal.category.name,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    }else{
+      await favRef.delete();
+    }
+  }
+
+  Future<void> _loadFavorites() async{
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    final snapshot = await FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .collection('favorites')
+      .get();
+
+    final favId = snapshot.docs.map((d) => int.parse(d.id)).toSet();
+
+    setState(() {
+      for(var animal in _animals){
+        animal.favorited = favId.contains(animal.id);
+      }
     });
   }
 
@@ -142,7 +186,7 @@ class _AdoptionPageState extends State<AdoptionPage> {
         backgroundColor: AppColors.background,
         elevation: 0,
         scrolledUnderElevation: 0,
-        automaticallyImplyLeading: false,
+        automaticallyImplyLeading: true,
         centerTitle: true,
         title: Text(
           'Adopt a Stray',
@@ -177,6 +221,18 @@ class _AdoptionPageState extends State<AdoptionPage> {
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (context) => const HomeScreen()),
+            );
+          }
+          else if (index == 1) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+            );
+          }
+          else if (index == 2) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const UserProfile()),
             );
           }
         },
@@ -279,14 +335,14 @@ class _AdoptionPageState extends State<AdoptionPage> {
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final animal = _filtered[index];
-                return _AnimalCard(
+                return AnimalCard(
                   animal: animal,
-                  onFavorite: () => _toggleFavorite(animal.id),
+                  onFavorite: () => _toggleFavorite(animal),
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => AnimalPage(animal: animal),
+                        builder: (context) => AnimalPage(animal: animal, onFavoriteToggle: () => _toggleFavorite(animal),),
                       ),
                     );
                   },
@@ -341,12 +397,12 @@ class _FilterChip extends StatelessWidget {
 
 // Animal card
 
-class _AnimalCard extends StatelessWidget {
+class AnimalCard extends StatelessWidget {
   final Animal animal;
   final VoidCallback onFavorite;
   final VoidCallback onTap;
 
-  const _AnimalCard({
+  const AnimalCard({
     required this.animal,
     required this.onFavorite,
     required this.onTap,

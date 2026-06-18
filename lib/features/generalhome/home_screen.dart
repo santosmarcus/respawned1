@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/features/donation/donation_page.dart';
+import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
+import 'package:respawnd1/features/generalhome/activity_feed.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
+import 'package:respawnd1/features/generalhome/user_profile.dart';
+import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -11,7 +19,21 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Welcome, User!'),
+        toolbarHeight: 80,
+        title: FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+            .collection('users')
+            .doc(FirebaseAuth.instance.currentUser?.uid)
+            .get(),
+            builder: (context, snapshot){
+              if(!snapshot.hasData){
+                return const Text('Welcome!');
+              }
+              final data = snapshot.data!.data() as Map<String, dynamic>?;
+              final firstName = data?['firstName'] ?? 'User';
+
+              return Text('Welcome, $firstName!');
+            },),
         automaticallyImplyLeading: false,
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -34,7 +56,15 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
         onTap: (index) {
-          // TODO: navigation
+          if (index == 1) {
+            Navigator.pushReplacement(
+              context, MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            );
+          } else if (index == 2) {
+            Navigator.pushReplacement(
+              context, MaterialPageRoute(builder: (_) => const UserProfile()),
+            );
+          }
         },
       ),
       body: SingleChildScrollView(
@@ -51,6 +81,7 @@ class HomeScreen extends StatelessWidget {
                 color: AppColors.slaterspwn,
                 borderRadius: BorderRadius.circular(20),
               ),
+              // Replace with Image.asset or a Lottie animation
               // Replace with Image.asset or a Lottie animation
             ),
 
@@ -88,10 +119,22 @@ class HomeScreen extends StatelessWidget {
                   _QuickActionCard(
                     label: 'Donate or\nSponsor',
                     color: AppColors.pinkrspwn,
+                    onTap: (){
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => DonationPage(),
+                      ),
+                      );
+                    },
                   ),
                   _QuickActionCard(
                     label: 'Volunteer',
                     color: AppColors.yellowrspwn,
+                    onTap: (){
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => VolunteerPage(),
+                      ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -113,47 +156,7 @@ class HomeScreen extends StatelessWidget {
 
             const SizedBox(height: 20),
 
-            // Case card placeholder
-            Card(
-              color: AppColors.bgres,
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    // Animal photo placeholder
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: AppColors.background,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    const SizedBox(width: 30),
-                    // Case details — fill in when you have real data
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('#123ABCD',
-                              style: Theme.of(context).textTheme.titleMedium),
-                          const SizedBox(height: 4),
-                          Text('February 12, 2026 11:00 AM ',
-                              style: Theme.of(context).textTheme.titleSmall),
-                          const SizedBox(height: 4),
-                          Text('123 A. B. Street, Pasay, Metro Manila 1234 ',
-                              style: Theme.of(context).textTheme.titleSmall),
-                          const SizedBox(height: 4),
-                          Text('Status: Pending',
-                              style: Theme.of(context).textTheme.titleSmall),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            ActivityFeed(),
 
             const SizedBox(height: 24),
           ],

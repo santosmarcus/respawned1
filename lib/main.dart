@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
@@ -16,8 +18,12 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  await FirebaseAuth.instance.signOut();
-  runApp(const ResPAWndApp());
+  // await FirebaseAuth.instance.signOut(); // Commented out for easier testing
+  runApp(
+    const ProviderScope(
+      child: ResPAWndApp(),
+    ),
+  );
 }
 
 class ResPAWndApp extends StatelessWidget {
@@ -29,7 +35,7 @@ class ResPAWndApp extends StatelessWidget {
       title: 'ResPAWnd',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const AuthWrapper(), // ← use this instead of LoginScreen directly
+      home: const HomeScreen(), // ← Bypassing login screen for testing
     );
   }
 }
@@ -83,7 +89,7 @@ class AuthWrapper extends StatelessWidget {
                 return const AdminHomeScreen();
               case 'pet_transporter':
               case 'rescue_volunteer':
-                return const ServiceHomeScreen();
+                return const ServiceScreen();
               case 'general':
               default:
                 return const HomeScreen();
@@ -94,5 +100,3 @@ class AuthWrapper extends StatelessWidget {
     );
   }
 }
-
-

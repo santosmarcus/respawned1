@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/features/pettransporter/service_screen.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
   final String firstName;
@@ -77,9 +78,18 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       }, SetOptions(merge: true));
 
       if (mounted) {
+        Widget nextPage;
+
+        if(_selectedRole == 'general'){
+          nextPage = const HomeScreen();
+        } else if (_selectedRole == 'pet_transporter'){
+          nextPage = const ServiceScreen();
+        } else {
+          nextPage = const HomeScreen();
+        }
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          MaterialPageRoute(builder: (_) => nextPage),
               (route) => false,
         );
       }
