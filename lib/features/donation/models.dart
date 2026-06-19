@@ -69,6 +69,22 @@ class DonationReviewParams {
       (pet?.id).hashCode;
 }
 
+class InKindDonationReviewParams {
+  final String fundraiserId;
+  final String organizationName;
+  final String category;
+  final String clarification;
+  final bool isAnonymous;
+
+  InKindDonationReviewParams({
+    required this.fundraiserId,
+    required this.organizationName,
+    required this.category,
+    required this.clarification,
+    required this.isAnonymous,
+  });
+}
+
 class DonationListing {
   final int id;
   final String title;
