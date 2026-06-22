@@ -133,23 +133,29 @@ class _RescuePageState extends State<RescuePage> {
             '&key=$_mapsApiKey',
       );
       final res = await http.get(url);
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
 
-        if (res.statusCode == 200 && data['status'] == 'OK') {
-          final results = data['results'];
+      print('GEOCODE RESPONSE');
+      print(res.body);
+      final data = jsonDecode(res.body);
 
-          if (data['results'] != null && results.isNotEmpty) {
-            final address =
-                results[0]['formatted_address'] as String? ?? '';
-            setState(() => _pinnedAddress = address);
-          } else {
-            setState(() =>
-            _pinnedAddress =
-            '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude
-                .toStringAsFixed(5)}');
-          }
-        }
+      print(data);
+
+      if (res.statusCode == 200 &&
+          data['status'] == 'OK' &&
+          data['results'] != null &&
+          data['results'].isNotEmpty) {
+
+        setState(() {
+          _pinnedAddress = data['results'][0]['formatted_address'];
+        });
+
+      } else {
+
+        setState(() {
+          _pinnedAddress =
+          'Failed: ${data['status'] ?? 'Unknown Error'}';
+        });
+
       }
     } catch (_) {
       setState(() => _pinnedAddress =
@@ -173,6 +179,9 @@ class _RescuePageState extends State<RescuePage> {
       );
 
       final res = await http.get(url);
+
+      print('SEARCH RESPONSE');
+      print(res.body);
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200) {
@@ -544,13 +553,24 @@ class _RescuePageState extends State<RescuePage> {
                   ),
                   clipBehavior: Clip.hardEdge,
                   child: GoogleMap(
-                    gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
+                    gestureRecognizers: {
+                      Factory<OneSequenceGestureRecognizer>(
+                            () => EagerGestureRecognizer(),
+                      ),
+                    },
                     onMapCreated: (ctrl) => _mapController = ctrl,
                     initialCameraPosition: CameraPosition(
                       target: _pinnedLocation,
                       zoom: 15,
                     ),
                     onTap: _updatePin,
+                    onCameraMove: (position) {
+                      _pinnedLocation = position.target;
+                    },
+
+                    onCameraIdle: () {
+                      _updatePin(_pinnedLocation);
+                    },
                     markers: {
                       Marker(
                         markerId: const MarkerId('rescue_pin'),

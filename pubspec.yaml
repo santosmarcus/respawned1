@@ -42,7 +42,7 @@ dependencies:
   cloud_functions: ^6.0.7
   google_maps_flutter: ^2.14.2
   geolocator: ^14.0.2
-  #geocoding: ^2.1.1 #geocode
+  geocoding: ^3.0.0 #geocode
   image_picker: ^1.2.1
   video_player: ^2.9.1
   flutter_stripe: ^12.3.0  # for PayMongo integration via Stripe
