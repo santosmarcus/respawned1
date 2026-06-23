@@ -19,7 +19,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
-const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
+const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
 //Media
 class _MediaItem {
@@ -79,124 +79,209 @@ class _RescuePageState extends State<RescuePage> {
   //Geolocation
   Future<void> _fetchCurrentLocation() async {
     setState(() => _loadingLocation = true);
+
     try {
+      // Check if location service is on
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        _setError('Location services are disabled.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Please enable location services for accurate pinning.'),
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: () => Geolocator.openLocationSettings(),
+              ),
+            ),
+          );
+        }
+        setState(() {
+          _loadingLocation = false;
+          _pinnedAddress = 'Location services disabled — tap map to pin manually.';
+        });
         return;
       }
 
+      // Check/request permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        _setError('Location permission denied.');
+        if (mounted && permission == LocationPermission.deniedForever) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Location permission permanently denied.'),
+              action: SnackBarAction(
+                label: 'App Settings',
+                onPressed: () => Geolocator.openAppSettings(),
+              ),
+            ),
+          );
+        }
+        setState(() {
+          _loadingLocation = false;
+          _pinnedAddress = 'Location permission denied — tap map to pin manually.';
+        });
         return;
       }
 
+      // Get position with a timeout fallback
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => Geolocator.getLastKnownPosition().then(
+              (p) => p ?? Position(
+            latitude: 14.5995,
+            longitude: 120.9842,
+            timestamp: DateTime.now(),
+            accuracy: 0,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          ),
+        ),
       );
-      final latLng = LatLng(pos.latitude, pos.longitude);
-      await _updatePin(latLng);
+
+      await _updatePin(LatLng(pos.latitude, pos.longitude));
     } catch (e) {
-      _setError('Could not get location.');
+      setState(() {
+        _loadingLocation = false;
+        _pinnedAddress = 'Could not get location — tap map to pin manually.';
+      });
     }
   }
 
-  void _setError(String msg) {
-    setState(() {
-      _loadingLocation = false;
-      _pinnedAddress = msg;
-    });
+  Future<String?> _nearbyLandmark(LatLng pos) async {
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/place/nearbysearch/json'
+            '?location=${pos.latitude},${pos.longitude}'
+            '&rankby=distance'                  // closest first
+            '&type=point_of_interest'           // landmarks, establishments, etc.
+            '&key=$_geocodingApiKey',
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 10));
+      final data = jsonDecode(res.body);
+
+      print("===== NEARBY LANDMARK =====");
+      print("STATUS: ${data['status']}");
+      print("ERROR: ${data['error_message']}");
+
+      if (res.statusCode == 200 &&
+          data['status'] == 'OK' &&
+          (data['results'] as List).isNotEmpty) {
+        return data['results'][0]['name'] as String?;
+      }
+      return null;
+    } catch (e) {
+      print("Nearby landmark lookup failed: $e");
+      return null;
+    }
   }
 
-  // Reverse-geocode from LatLng to address --- still not working
   Future<void> _updatePin(LatLng pos) async {
     setState(() {
       _pinnedLocation = pos;
       _pinnedAddress = 'Resolving address…';
+      _loadingLocation = true;
     });
 
     _mapController?.animateCamera(
-      CameraUpdate.newCameraPosition(
-        CameraPosition(target: pos, zoom: 17),
-      ),
+      CameraUpdate.newCameraPosition(CameraPosition(target: pos, zoom: 17)),
     );
+
+    String resolvedAddress;
 
     try {
       final url = Uri.parse(
         'https://maps.googleapis.com/maps/api/geocode/json'
             '?latlng=${pos.latitude},${pos.longitude}'
-            '&key=$_mapsApiKey',
+            '&key=$_geocodingApiKey',
       );
-      final res = await http.get(url);
 
-      print('GEOCODE RESPONSE');
-      print(res.body);
+      final res = await http.get(url).timeout(const Duration(seconds: 10));
       final data = jsonDecode(res.body);
 
-      print(data);
+      print("===== REVERSE GEOCODE =====");
+      print("STATUS: ${data['status']}");
+      print("ERROR: ${data['error_message']}");
+      print("BODY: ${res.body}");
 
       if (res.statusCode == 200 &&
           data['status'] == 'OK' &&
-          data['results'] != null &&
-          data['results'].isNotEmpty) {
-
-        setState(() {
-          _pinnedAddress = data['results'][0]['formatted_address'];
-        });
-
+          (data['results'] as List).isNotEmpty) {
+        resolvedAddress = data['results'][0]['formatted_address'];
       } else {
-
-        setState(() {
-          _pinnedAddress =
-          'Failed: ${data['status'] ?? 'Unknown Error'}';
-        });
-
+        // Fallback to coordinates
+        resolvedAddress =
+        '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
       }
     } catch (_) {
-      setState(() => _pinnedAddress =
-      '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}');
-    } finally {
-      setState(() => _loadingLocation = false);
+      resolvedAddress =
+      '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
     }
+
+    // Try to attach a nearby landmark name, without blocking on failure
+    final landmark = await _nearbyLandmark(pos);
+
+    setState(() {
+      _pinnedAddress = (landmark != null && landmark.trim().isNotEmpty)
+          ? 'Near $landmark • $resolvedAddress'
+          : resolvedAddress;
+      _loadingLocation = false;
+    });
   }
 
-  // Forward-geocode a typed address to LatLng
   Future<void> _geocodeAddress(String address) async {
-    if (address.trim().isEmpty) return;
-
+    if (address
+        .trim()
+        .isEmpty) return;
     FocusManager.instance.primaryFocus?.unfocus();
+
+    setState(() => _loadingLocation = true);
 
     try {
       final url = Uri.parse(
         'https://maps.googleapis.com/maps/api/geocode/json'
             '?address=${Uri.encodeComponent(address)}'
-            '&key=$_mapsApiKey',
+            '&key=$_geocodingApiKey',
       );
-
-      final res = await http.get(url);
-
-      print('SEARCH RESPONSE');
-      print(res.body);
+      final res = await http.get(url).timeout(const Duration(seconds: 10));
       final data = jsonDecode(res.body);
 
-      if (res.statusCode == 200) {
-        if (data['status'] == 'OK' && data['results'].isNotEmpty) {
-          final loc = data['results'][0]['geometry']['location'];
-          final latLng = LatLng(
-              (loc['lat'] as num).toDouble(),
-              (loc['lng'] as num).toDouble(),);
+      print("===== ADDRESS SEARCH =====");
+      print("STATUS: ${data['status']}");
+      print("ERROR: ${data['error_message']}");
+      print("BODY: ${res.body}");
 
-          _addressController.text = data['results'][0]['formatted_address'];
-
-          await _updatePin(latLng);
+      if (res.statusCode == 200 &&
+          data['status'] == 'OK' &&
+          (data['results'] as List).isNotEmpty) {
+        final loc = data['results'][0]['geometry']['location'];
+        final latLng = LatLng(
+          (loc['lat'] as num).toDouble(),
+          (loc['lng'] as num).toDouble(),
+        );
+        _addressController.text = data['results'][0]['formatted_address'];
+        await _updatePin(latLng);
+      } else {
+        setState(() => _loadingLocation = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Address not found. Try a different search.')),
+          );
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      setState(() => _loadingLocation = false);
+    }
   }
 
   //Media picker
@@ -564,13 +649,6 @@ class _RescuePageState extends State<RescuePage> {
                       zoom: 15,
                     ),
                     onTap: _updatePin,
-                    onCameraMove: (position) {
-                      _pinnedLocation = position.target;
-                    },
-
-                    onCameraIdle: () {
-                      _updatePin(_pinnedLocation);
-                    },
                     markers: {
                       Marker(
                         markerId: const MarkerId('rescue_pin'),
