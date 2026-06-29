@@ -11,12 +11,15 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
 import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  GoogleFonts.config.allowRuntimeFetching = false;
   await FirebaseAuth.instance.signOut();
   runApp(const ResPAWndApp());
 }

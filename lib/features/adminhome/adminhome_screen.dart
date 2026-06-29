@@ -5,6 +5,7 @@ import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/admin_adoption_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
+import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -462,6 +463,16 @@ class _AdminDrawer extends StatelessWidget {
               },
             ),
             _DrawerItem(label: 'Shelter Resources', onTap: () {}),
+            _DrawerItem(
+              label: 'Pet Collar ID Tags',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AdminCollarTagScreen()),
+                );
+              },
+            ),
 
             const Spacer(),
 
