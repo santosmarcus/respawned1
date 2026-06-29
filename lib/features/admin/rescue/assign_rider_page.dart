@@ -85,13 +85,14 @@ class _AssignRiderPageState extends State<AssignRiderPage> {
         .doc(widget.caseId)
         .update({
       'status': 'assigned',
+      'riderId': rider['uid'],
       'assignedVolunteerId': rider['uid'],
       'assignedVolunteerName': rider['name'],
       'assignedVehicle': rider['vehicle'],
       'assignedPlate': rider['plateNumber'],
       'statusHistory': FieldValue.arrayUnion([
         {
-          'status': 'Searching for Pet Transporter...',
+          'status': 'Pet transporter assigned: ${rider['name']}.',
           'timestamp': Timestamp.now(),
         }
       ]),

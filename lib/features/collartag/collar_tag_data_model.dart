@@ -1,9 +1,9 @@
-// collar_tag_model.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CollarTagData {
   // Pet info
-  String? petImagePath;       // local path (for form preview)
-  String? petImageUrl;        // Firebase Storage URL (after upload)
+  String? petImagePath;     // local path (form preview only, never sent to Firestore)
+  String? petImageUrl;      // Firebase Storage URL
   String name;
   String birthday;
   String sex;
@@ -23,10 +23,14 @@ class CollarTagData {
   String ownerName;
   String ownerMobile;
 
-  // Generated
-  String? tagId;              // Firestore document ID
-  String? qrCodeUrl;          // URL embedded in QR (points to tag profile)
+  // Generated / system fields
+  String? tagId;        // Firestore document ID
+  String? qrCodeUrl;
   DateTime? createdAt;
+
+  // NFC write tracking
+  final bool? nfcWritten;
+  DateTime? nfcWrittenAt;
 
   CollarTagData({
     this.petImagePath,
@@ -48,7 +52,11 @@ class CollarTagData {
     this.tagId,
     this.qrCodeUrl,
     this.createdAt,
+    this.nfcWritten,
+    this.nfcWrittenAt,
   });
+
+  // Firestore serialisation
 
   Map<String, dynamic> toFirestore() => {
     'petImageUrl': petImageUrl ?? '',
@@ -65,10 +73,21 @@ class CollarTagData {
     'medicalCondition': medicalCondition,
     'ownerName': ownerName,
     'ownerMobile': ownerMobile,
-    'createdAt': createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
+    'qrCodeUrl': qrCodeUrl ?? '',
+    'createdAt': createdAt != null
+        ? Timestamp.fromDate(createdAt!)
+        : FieldValue.serverTimestamp(),
+    'nfcWritten': nfcWritten ?? false,
+    if (nfcWrittenAt != null)
+      'nfcWrittenAt': Timestamp.fromDate(nfcWrittenAt!),
   };
 
-  factory CollarTagData.fromFirestore(Map<String, dynamic> data, String id) =>
+  // Firestore deserialisation
+
+  factory CollarTagData.fromFirestore(
+      Map<String, dynamic> data,
+      String id,
+      ) =>
       CollarTagData(
         tagId: id,
         petImageUrl: data['petImageUrl'] as String?,
@@ -85,8 +104,15 @@ class CollarTagData {
         medicalCondition: data['medicalCondition'] as String? ?? '',
         ownerName: data['ownerName'] as String? ?? '',
         ownerMobile: data['ownerMobile'] as String? ?? '',
+        qrCodeUrl: data['qrCodeUrl'] as String?,
+        // createdAt stored as Timestamp — convert to DateTime
         createdAt: data['createdAt'] != null
-            ? DateTime.tryParse(data['createdAt'] as String)
+            ? (data['createdAt'] as Timestamp).toDate()
+            : null,
+        nfcWritten: data['nfcWritten'] as bool? ?? false,
+        // nfcWrittenAt stored as Timestamp — convert to DateTime
+        nfcWrittenAt: data['nfcWrittenAt'] != null
+            ? (data['nfcWrittenAt'] as Timestamp).toDate()
             : null,
       );
 }

@@ -2,11 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+
 
 class TrackCasePage extends StatefulWidget {
   final String caseId;
@@ -17,7 +16,7 @@ class TrackCasePage extends StatefulWidget {
 }
 
 class _TrackCasePageState extends State<TrackCasePage> {
-  int _tabIndex = 0; // 0 = Tracking Detail, 1 = Case Detail
+  int _tabIndex = 0;
   final _messageController = TextEditingController();
 
   @override
@@ -96,56 +95,29 @@ class _TrackCasePageState extends State<TrackCasePage> {
                 style: Theme.of(context).textTheme.displaySmall),
             centerTitle: true,
           ),
-          bottomNavigationBar: BottomNavigationBar(
-            currentIndex: 0,
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.home_outlined),
-                activeIcon: Icon(Icons.home),
-                label: 'Home',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.notifications_outlined),
-                activeIcon: Icon(Icons.notifications),
-                label: 'Notifications',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.person_outline),
-                activeIcon: Icon(Icons.person),
-                label: 'My Profile',
-              ),
-            ],
-            onTap: (index) {
-              if (index == 0) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const HomeScreen()),
-                );
-              }
-              else if (index == 1) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const NotificationsScreen()),
-                );
-              }
-              else if (index == 2) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const UserProfile()),
-                );
-              }
-            },
-          ),
           body: Column(
             children: [
               // Map area placeholder
-              Container(
+              data?['riderId'] != null
+                  ? SizedBox(
+                height: 200,
+                child: _TrackCaseMap(caseId: widget.caseId),
+              )
+                  : Container(
                 height: 200,
                 color: AppColors.slaterspwn,
                 child: Center(
-                  child: Icon(Icons.map_outlined,
-                      size: 48,
-                      color: AppColors.textSecondary),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.map_outlined,
+                          size: 40, color: AppColors.textSecondary),
+                      const SizedBox(height: 8),
+                      Text('Map will appear once a transporter is assigned.',
+                          style: GoogleFonts.zain(
+                              fontSize: 12, color: AppColors.textSecondary)),
+                    ],
+                  ),
                 ),
               ),
 
@@ -213,8 +185,8 @@ class _TrackCasePageState extends State<TrackCasePage> {
                           statusHistory: statusHistory,
                           caseId: widget.caseId,
                           messageController: _messageController,
-                          onSend: () =>
-                              _sendMessage(widget.caseId),
+                          onSend: () => _sendMessage(widget.caseId),
+                          data: data ?? {},  // ADDED
                         )
                             : _CaseDetailTab(data: data ?? {}),
                       ),
@@ -223,6 +195,86 @@ class _TrackCasePageState extends State<TrackCasePage> {
                 ),
               ),
             ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TrackCaseMap extends StatefulWidget {
+  final String caseId;
+  const _TrackCaseMap({required this.caseId});
+
+  @override
+  State<_TrackCaseMap> createState() => _TrackCaseMapState();
+}
+
+class _TrackCaseMapState extends State<_TrackCaseMap> {
+  GoogleMapController? _controller;
+  bool _centered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .collection('tracking')
+          .orderBy('timestamp')
+          .limitToLast(100)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final points = <LatLng>[];
+        if (snapshot.hasData) {
+          for (final doc in snapshot.data!.docs) {
+            final d = doc.data() as Map<String, dynamic>;
+            final lat = d['lat'];
+            final lng = d['lng'];
+            if (lat is num && lng is num) {
+              points.add(LatLng(lat.toDouble(), lng.toDouble()));
+            }
+          }
+        }
+
+        final center = points.isNotEmpty
+            ? points.last
+            : const LatLng(14.5995, 120.9842);
+
+        if (_controller != null && points.isNotEmpty && !_centered) {
+          _centered = true;
+          _controller!.animateCamera(
+              CameraUpdate.newLatLngZoom(points.last, 15));
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.zero,
+          child: GoogleMap(
+            onMapCreated: (ctrl) => _controller = ctrl,
+            initialCameraPosition: CameraPosition(target: center, zoom: 14),
+            myLocationEnabled: false,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            mapToolbarEnabled: false,
+            markers: points.isEmpty
+                ? {}
+                : {
+              Marker(
+                markerId: const MarkerId('rider_current'),
+                position: points.last,
+                infoWindow: const InfoWindow(title: 'Transporter'),
+              ),
+            },
+            polylines: points.length < 2
+                ? {}
+                : {
+              Polyline(
+                polylineId: const PolylineId('route_trail'),
+                points: points,
+                color: AppColors.textPrimary,
+                width: 4,
+              ),
+            },
           ),
         );
       },
@@ -275,12 +327,14 @@ class _TrackingTab extends StatelessWidget {
   final String caseId;
   final TextEditingController messageController;
   final VoidCallback onSend;
+  final Map<String, dynamic> data;
 
   const _TrackingTab({
     required this.statusHistory,
     required this.caseId,
     required this.messageController,
     required this.onSend,
+    required this.data,
   });
 
   String _formatTime(DateTime d) {
@@ -298,13 +352,129 @@ class _TrackingTab extends StatelessWidget {
     return '${months[d.month]} ${d.day}, ${d.year}';
   }
 
+
+  void _showFullImage(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(6),
+                  child: const Icon(Icons.close,
+                      color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMediaSection(
+      BuildContext context, String title, List<String> urls) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: urls.isEmpty
+                ? Text(
+              'Not available yet.',
+              style: GoogleFonts.zain(
+                  fontSize: 12, color: AppColors.textSecondary),
+            )
+                : Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: urls.map((url) {
+                return GestureDetector(
+                  onTap: () => _showFullImage(context, url),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      url,
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: AppColors.slaterspwn,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              value: progress.expectedTotalBytes !=
+                                  null
+                                  ? progress.cumulativeBytesLoaded /
+                                  progress.expectedTotalBytes!
+                                  : null,
+                              strokeWidth: 2,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, _, __) => Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                            Icons.broken_image_outlined,
+                            color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Status timeline
         Expanded(
-          child: ListView.builder(
+          child: statusHistory.isEmpty
+              ? Center(
+            child: Text('No status updates yet.',
+                style: GoogleFonts.zain(
+                    fontSize: 13, color: AppColors.textSecondary)),
+          )
+              : ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: statusHistory.length,
             itemBuilder: (context, index) {
@@ -324,9 +494,7 @@ class _TrackingTab extends StatelessWidget {
                         width: 20,
                         height: 20,
                         decoration: BoxDecoration(
-                          color: isLast
-                              ? AppColors.textPrimary
-                              : AppColors.textPrimary,
+                          color: AppColors.textPrimary,
                           shape: BoxShape.circle,
                           border: Border.all(
                               color: AppColors.textPrimary, width: 2),
@@ -382,6 +550,19 @@ class _TrackingTab extends StatelessWidget {
             },
           ),
         ),
+
+        _buildMediaSection(
+          context,
+          'Pickup Verification',
+          List<String>.from(data['pickupVerificationUrls'] ?? []),
+        ),
+        const SizedBox(height: 12),
+        _buildMediaSection(
+          context,
+          'Dropoff Verification',
+          List<String>.from(data['dropoffVerificationUrls'] ?? []),
+        ),
+        const SizedBox(height: 8),
 
         const Divider(),
 
@@ -562,39 +743,29 @@ class _CaseDetailTab extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final photoUrls = List<String>.from(data['photoUrls'] ?? []);
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Case media
-          Text('Case Media',
-              style: GoogleFonts.zain(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
-
-      photoUrls.isEmpty
-          ? Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          'No media uploaded.',
-          style: GoogleFonts.zain(
-              fontSize: 13, color: AppColors.textSecondary),
-        ),
-      )
-          : Align(
-          alignment: Alignment.centerLeft,
-
-          child: Wrap(
+  Widget _buildMediaSection(
+      BuildContext context, String title, List<String> urls) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: GoogleFonts.zain(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: urls.isEmpty
+              ? Text(
+            'Not available yet.',
+            style: GoogleFonts.zain(
+                fontSize: 13, color: AppColors.textSecondary),
+          )
+              : Wrap(
             spacing: 12,
             runSpacing: 12,
-            children: photoUrls.map((url) {
+            children: urls.map((url) {
               return GestureDetector(
                 onTap: () => _showFullImage(context, url),
                 child: ClipRRect(
@@ -640,8 +811,27 @@ class _CaseDetailTab extends StatelessWidget {
               );
             }).toList(),
           ),
-          ),
+        ),
+      ],
+    );
+  }
 
+
+  @override
+  Widget build(BuildContext context) {
+    final photoUrls = List<String>.from(data['photoUrls'] ?? []);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Case media
+          _buildMediaSection(
+            context,
+            'Report Photos',
+            List<String>.from(data['photoUrls'] ?? []),
+          ),
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Reporter Mobile Number', data['reporterPhone']),
@@ -657,21 +847,6 @@ class _CaseDetailTab extends StatelessWidget {
           _DetailRow('Interest to adopt', data['interestedToAdopt']),
           const SizedBox(height: 24),
         ],
-      ),
-    );
-  }
-}
-
-class _MediaBox extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 100,
-      height: 100,
-      decoration: BoxDecoration(
-        color: AppColors.slaterspwn,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.textSecondary),
       ),
     );
   }

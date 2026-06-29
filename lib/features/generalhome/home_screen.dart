@@ -73,20 +73,6 @@ class HomeScreen extends StatelessWidget {
           children: [
             const SizedBox(height: 16),
 
-            // Hero banner area
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              height: 180,
-              decoration: BoxDecoration(
-                color: AppColors.slaterspwn,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              // Replace with Image.asset or a Lottie animation
-              // Replace with Image.asset or a Lottie animation
-            ),
-
-            const SizedBox(height: 24),
-
             // Quick action cards
             SizedBox(
               height: 140,
@@ -129,6 +115,16 @@ class HomeScreen extends StatelessWidget {
                   _QuickActionCard(
                     label: 'Volunteer',
                     color: AppColors.yellowrspwn,
+                    onTap: (){
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => VolunteerPage(),
+                      ),
+                      );
+                    },
+                  ),
+                  _QuickActionCard(
+                    label: 'Organization',
+                    color: AppColors.lavenderrspwn,
                     onTap: (){
                       Navigator.push(context, MaterialPageRoute(
                         builder: (context) => VolunteerPage(),

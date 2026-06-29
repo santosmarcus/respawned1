@@ -69,12 +69,9 @@ dependencies:
   flutter_form_builder: ^10.3.0+2
   form_builder_validators: ^11.3.0
 
-  #Scan NFC and QR
+  #Scan/Write NFC and QR
   mobile_scanner: ^5.0.0      # QR scanning
-  flutter_nfc_kit: ^3.3.0   # NFC scanning
-
-  #NFC writing and QR code
-  nfc_manager: ^4.0.0
+  nfc_manager: ^4.1.0
   nfc_manager_ndef: ^1.1.0
   qr_flutter: ^4.1.0
 
