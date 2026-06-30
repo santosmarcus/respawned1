@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'adoption_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 enum _AdoptionProcess {
   intro,           // 1st step - Lets start
@@ -39,45 +39,70 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   // Form fields
   final _formKey = GlobalKey<FormState>();
+
+  // Personal Information
   final _nameCtrl = TextEditingController();
   final _ageCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _addressCtrl = TextEditingController();
-  final _occupationCtrl = TextEditingController();
+  String? _city;
 
-  //household questions
+  // Household & Living Information
   String? _residenceType;
-  String? _ownershipType;
+  final _residenceOtherCtrl = TextEditingController();
+  String? _ownershipStatus;
   bool _allowsPets = false;
-  final _householdNumCtrl = TextEditingController();
-  bool _hasChildren = false;
+  int _householdMembers = 0;
 
-  //pet experience
+  //Pet Experience
   bool _hadPetsBefore = false;
-  final _previousPetsCtrl = TextEditingController();
-  String? _previousPetOutcome;
+  int _currentDogs = 0;
+  int _currentCats = 0;
+  int _currentBirds = 0;
+  int _currentFish = 0;
+  int _currentReptiles = 0;
+  int _currentOther = 0;
+  final _currentOtherTypeCtrl = TextEditingController();
+  String? _petsVaccinated;
+  String? _petsSpayedNeutered;
 
-  //current pets
-  bool _hasCurrentPets = false;
-  final _currentPetsCtrl = TextEditingController();
-  bool _petsVaccinated = false;
-
-  //lifestyle
-  final _hoursAloneCtrl = TextEditingController();
-  String? _petStayLocation;
+  //Lifestyle & Care
+  String? _hoursAlone;
   final _caregiverCtrl = TextEditingController();
+  String? _petStayLocation;
+  bool _canAffordFood = false;
+  bool _canAffordVaccinations = false;
+  bool _canAffordVetVisits = false;
+  bool _canAffordEmergencyCare = false;
+  bool _canAffordGrooming = false;
+  bool _canAffordCareSupplies= false;
+  String? _monthlyBudget;
+  final _reasonCtrl = TextEditingController();
 
-  // Financial readiness
-  bool _canCoverVaccines = false;
-  bool _canCoverVet = false;
-  bool _canCoverFood = false;
+  //Required Uploads
+  File? _governmentIdFile;
+  File? _proofOfAddressFile;
+  File? _digitalSignatureFile;
+  File? _homePhotosFile;
+
+  String? _governmentIdUrl;
+  String? _proofOfAddressUrl;
+  String? _digitalSignatureUrl;
+  String? _homePhotosUrl;
+
+  bool _isUploadingGovId = false;
+  bool _isUploadingProof = false;
+  bool _isUploadingSignature = false;
+  bool _isUploadingHomePhotos = false;
+
+  final _picker = ImagePicker();
 
   // Agreements
   bool _agreeCare = false;
   bool _agreeNoAbandon = false;
   bool _agreeFollowup = false;
-  final _reasonCtrl = TextEditingController();
+  bool _agreeAccurate = false;
+  bool _agreeNotGuaranteed = false;
 
   String? _adoptionId;
   bool _isSubmitting = false;
@@ -87,7 +112,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   String _appointmentType = 'On-site Visit';
   String? _appointmentTime;
 
-  // timeslots --- to be changed
+  // timeslots
   static const Map<int, List<String>> _timeSlots = {
     0: ['9:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
     1: [
@@ -108,7 +133,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   List<String> get _slotsForDate {
     if (_appointmentDate == null) return [];
-    // weekday: 1=Mon … 7=Sun → convert to 0-based Mon-Sun
     final dow = (_appointmentDate!.weekday - 1) % 7;
     return _timeSlots[dow] ?? [];
   }
@@ -122,9 +146,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _ageCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
-    _addressCtrl.dispose();
+    _residenceOtherCtrl.dispose();
+    _currentOtherTypeCtrl.dispose();
+    _caregiverCtrl.dispose();
     _reasonCtrl.dispose();
     super.dispose();
   }
@@ -144,6 +171,29 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       case _AdoptionProcess.appReject:
         return 2; // rejected stays at review
     }
+  }
+
+  //select image
+  Future<void> _pickUploadFile({
+    required void Function(File) onPicked,
+  }) async {
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+      maxWidth: 1280,
+    );
+    if (picked != null) {
+      onPicked(File(picked.path));
+    }
+  }
+
+  //upload helper
+  Future<String?> _uploadFile(File? file, String pathSegment, String adoptionId) async {
+    if (file == null) return null;
+    final ref = FirebaseStorage.instance
+        .ref('adoptions/$adoptionId/$pathSegment.jpg');
+    await ref.putFile(file);
+    return await ref.getDownloadURL();
   }
 
   Future<void> _pickDate() async {
@@ -198,68 +248,114 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
         _phoneCtrl.text =
             data['phone'] ?? '';
-        _addressCtrl.text =
-            data['address'] ?? '';
         _emailCtrl.text =
             FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
+        _city = data['city'];
       });
     } catch (_) {}
   }
 
   Future<void> _submitAdoptionForm() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    if (!_agreeCare ||
+        !_agreeNoAbandon ||
+        !_agreeFollowup ||
+        !_agreeAccurate ||
+        !_agreeNotGuaranteed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please accept all agreements before submitting.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
 
-      final docRef = await FirebaseFirestore.instance
-          .collection('adoptions')
-          .add({
+      final docRef = FirebaseFirestore.instance.collection('adoptions').doc();
+
+      final results = await Future.wait([
+        _uploadFile(_governmentIdFile, 'government_id', docRef.id),
+        _uploadFile(_proofOfAddressFile, 'proof_of_address', docRef.id),
+        _uploadFile(_digitalSignatureFile, 'digital_signature', docRef.id),
+        _uploadFile(_homePhotosFile, 'home_photos', docRef.id),
+      ]);
+
+      _governmentIdUrl = results[0];
+      _proofOfAddressUrl = results[1];
+      _digitalSignatureUrl = results[2];
+      _homePhotosUrl = results[3];
+
+      await docRef.set({
         'personal': {
           'adopterId': uid,
-          'animalId': widget.animal.id, //--- to be changed---
-          'animalName': widget.animal.name, //--- to be changed ---
+          'animalId': widget.animal.id,
+          'animalName': widget.animal.name,
           'adopterName': _nameCtrl.text.trim(),
           'adopterEmail': _emailCtrl.text.trim(),
           'adopterAge': _ageCtrl.text.trim(),
           'adopterPhone': _phoneCtrl.text.trim(),
-          'adopterAddress': _addressCtrl.text.trim(),
+          'adopterCity': _city,
         },
         'household': {
           'residenceType': _residenceType,
-          'ownershipType': _ownershipType,
-          'landlordAllowsPets': _allowsPets,
-          'householdSize': _householdNumCtrl.text,
-          'hasChildren': _hasChildren,
+          'residenceOther': _residenceType == 'Other'
+              ? _residenceOtherCtrl.text.trim()
+              : null,
+          'ownershipStatus': _ownershipStatus,
+          'landlordAllowsPets':
+          _ownershipStatus == 'Renting' ? _allowsPets : null,
+          'householdMembers': _householdMembers,
         },
         'petExperience': {
           'hadPetsBefore': _hadPetsBefore,
-          'types': _previousPetsCtrl.text,
-          'previousOutcome': _previousPetOutcome,
-        },
-        'currentPets': {
-          'hasPets': _hasCurrentPets,
-          'details': _currentPetsCtrl.text,
-          'vaccinated': _petsVaccinated,
+          'currentPets': {
+            'dogs': _currentDogs,
+            'cats': _currentCats,
+            'birds': _currentBirds,
+            'fish': _currentFish,
+            'reptiles': _currentReptiles,
+            'other': _currentOther,
+            'otherType': _currentOtherTypeCtrl.text.trim(),
+          },
+          'currentPetsVaccinated': _petsVaccinated,
+          'currentPetsSpayedNeutered': _petsSpayedNeutered,
         },
         'lifestyle': {
-          'hoursAlone': _hoursAloneCtrl.text,
+          'hoursAlone': _hoursAlone,
+          'primaryCaregiver': _caregiverCtrl.text.trim(),
           'petStayLocation': _petStayLocation,
-          'caregiver': _caregiverCtrl.text,
+          'canAfford': {
+            'food': _canAffordFood,
+            'vaccinations': _canAffordVaccinations,
+            'vetVisits': _canAffordVetVisits,
+            'emergencyMedicalCare': _canAffordEmergencyCare,
+            'grooming': _canAffordGrooming,
+            'careSupplies':  _canAffordCareSupplies,
+
+          },
+          'monthlyBudget': _monthlyBudget,
         },
-        'financial': {
-          'vaccination': _canCoverVaccines,
-          'vetCare': _canCoverVet,
-          'food': _canCoverFood,
+        'uploads': {
+          'governmentId': _governmentIdUrl,
+          'proofOfAddress': _proofOfAddressUrl,
+          'digitalSignature': _digitalSignatureUrl,
+          'homePhotos': _homePhotosUrl,
         },
         'agreement': {
           'reason': _reasonCtrl.text.trim(),
           'care': _agreeCare,
           'noAbandon': _agreeNoAbandon,
           'followUp': _agreeFollowup,
+          'infoAccurate': _agreeAccurate,
+          'approvalNotGuaranteed': _agreeNotGuaranteed,
         },
-        'status': 'pending_appointment', //--- to be changed when admin view is available---
+        'status': 'pending_appointment',
         'statusHistory': [
           {
             'status': 'Form submitted.',
@@ -457,194 +553,380 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         Text(
           'Fill out this quick form to help us match you with the right rescue and confirm eligibility for adoption.',
           style: GoogleFonts.zain(
-              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 24),
-
-        // Form
 
         Form(
           key: _formKey,
           child: Column(
             children: [
-              Text('Personal Information', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+              // Personal Information
+              _SectionTitle('Personal Information'),
               const SizedBox(height: 12),
-              _FormField(controller: _nameCtrl,
-                label: 'Full Name',
-                hint: ' ',
-                readOnly: true,),
+              _FormField(controller: _nameCtrl, label: 'Name', hint: ' '),
               const SizedBox(height: 12),
-              _FormField(controller: _emailCtrl,
+              _FormField(
+                  controller: _emailCtrl,
                   label: 'Email',
-                  hint: ' ',
-                  readOnly: true,
+                  hint: 'Email@email.com',
                   keyboardType: TextInputType.emailAddress),
               const SizedBox(height: 12),
-              _FormField(controller: _phoneCtrl,
-                  label: 'Phone Number',
-                  hint: ' ',
-                  readOnly: true,
-                  keyboardType: TextInputType.phone),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: _FormField(
+                        controller: _phoneCtrl,
+                        label: 'Number',
+                        hint: '+63 989 989 989',
+                        keyboardType: TextInputType.phone),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _FormField(
+                        controller: _ageCtrl,
+                        label: 'Age',
+                        hint: ' ',
+                        keyboardType: TextInputType.number),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
-              _FormField(controller: _ageCtrl,
-                  label: 'Age',
-                  hint: ' ',
-                  keyboardType: TextInputType.number),
-              const SizedBox(height: 12),
-              _FormField(controller: _addressCtrl,
-                  label: 'Home Address',
-                  hint: ' ',),
+              _DropdownField<String>(
+                label: 'City',
+                value: _city,
+                items: const [
+                  'Quezon City',
+                  'Manila',
+                  'Caloocan',
+                  'Taguig',
+                  'Paranaque',
+                  'Valenzuela',
+                  'Las Pinas',
+                  'Muntinlupa',
+                  'Makati',
+                  'Mandaluyong',
+                  'Malabon',
+                  'Marikina',
+                  'Navotas',
+                  'Pasig',
+                  'Pateros',
+                  'San Juan',
+                  'Other'
+                ],
+                onChanged: (v) => setState(() => _city = v),
+              ),
 
-              const SizedBox(height: 18),
-              Text('Household', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
-              DropdownButtonFormField<String>(
+              const SizedBox(height: 22),
+
+              // Household & Living Information
+              _SectionTitle('Household & Living Information'),
+              const SizedBox(height: 8),
+              _RadioGroup<String>(
+                label: 'Residence Type',
                 value: _residenceType,
-                items: ['House','Apartment','Condo']
-                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
-                onChanged: (v)=>setState(()=>_residenceType=v),
-                decoration: const InputDecoration(labelText:'Type of Residence'),
+                options: const [
+                  'House',
+                  'Apartment',
+                  'Condominium',
+                  'Townhouse',
+                  'Other'
+                ],
+                onChanged: (v) => setState(() => _residenceType = v),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _ownershipType,
-                items: ['Own','Rent']
-                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
-                onChanged: (v)=>setState(()=>_ownershipType=v),
-                decoration: const InputDecoration(labelText:'Ownership'),
+              if (_residenceType == 'Other') ...[
+                const SizedBox(height: 8),
+                _FormField(
+                    controller: _residenceOtherCtrl,
+                    label: 'Please specify',
+                    hint: ' '),
+              ],
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Ownership Status',
+                value: _ownershipStatus,
+                options: const ['Owned', 'Renting', 'Living with Parents'],
+                onChanged: (v) => setState(() => _ownershipStatus = v),
               ),
+              if (_ownershipStatus == 'Renting') ...[
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('If renting, landlord allows pets',
+                      style: GoogleFonts.zain(fontSize: 14)),
+                  value: _allowsPets,
+                  onChanged: (v) => setState(() => _allowsPets = v),
+                ),
+              ],
               const SizedBox(height: 12),
+              _CounterField(
+                label: 'Number of Household Members',
+                value: _householdMembers,
+                onChanged: (v) => setState(() => _householdMembers = v),
+              ),
+
+              const SizedBox(height: 22),
+
+              // Pet Experience
+              _SectionTitle('Pet Experience'),
+              const SizedBox(height: 8),
               SwitchListTile(
-                title: const Text('Landlord allows pets'),
-                value: _allowsPets,
-                onChanged:(v)=>setState(()=>_allowsPets=v),
-              ),
-              const SizedBox(height: 12),
-              _FormField(
-                controller: _householdNumCtrl,
-                label: 'Number of people in household',
-                hint: '',
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                title: const Text('Children in household'),
-                value: _hasChildren,
-                onChanged:(v)=>setState(()=>_hasChildren=v),
-              ),
-              const SizedBox(height: 18),
-              Text('Pet Experience', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
-              SwitchListTile(
-                title: const Text('Owned pets before'),
+                contentPadding: EdgeInsets.zero,
+                title: Text('Owned pets before?',
+                    style: GoogleFonts.zain(fontSize: 14)),
                 value: _hadPetsBefore,
-                onChanged:(v)=>setState(()=>_hadPetsBefore=v),
+                onChanged: (v) => setState(() => _hadPetsBefore = v),
               ),
-              const SizedBox(height: 12),
-              _FormField(
-                controller: _previousPetsCtrl,
-                label: 'What types of pets?',
-                hint: 'Dog, Cat, etc',
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _previousPetOutcome,
-                items:['Still with me','Passed away','Rehomed']
-                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
-                onChanged:(v)=>setState(()=>_previousPetOutcome=v),
-                decoration: const InputDecoration(labelText:'What happened to them'),
-              ),
-
-              const SizedBox(height: 18),
-              Text('Current Pets', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
-              SwitchListTile(
-                title: const Text('Currently have pets'),
-                value: _hasCurrentPets,
-                onChanged:(v)=>setState(()=>_hasCurrentPets=v),
-              ),
-              const SizedBox(height: 12),
-              _FormField(
-                controller: _currentPetsCtrl,
-                label: 'How many and types?',
-                hint: '',
-              ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                title: const Text('Vaccinated'),
+              const SizedBox(height: 8),
+              Text('Current pets',
+                  style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              _CounterField(
+                  label: 'Dogs',
+                  value: _currentDogs,
+                  onChanged: (v) => setState(() => _currentDogs = v)),
+              _CounterField(
+                  label: 'Cats',
+                  value: _currentCats,
+                  onChanged: (v) => setState(() => _currentCats = v)),
+              _CounterField(
+                  label: 'Birds',
+                  value: _currentBirds,
+                  onChanged: (v) => setState(() => _currentBirds = v)),
+              _CounterField(
+                  label: 'Fish',
+                  value: _currentFish,
+                  onChanged: (v) => setState(() => _currentFish = v)),
+              _CounterField(
+                  label: 'Reptiles',
+                  value: _currentReptiles,
+                  onChanged: (v) => setState(() => _currentReptiles = v)),
+              _CounterField(
+                  label: 'Other',
+                  value: _currentOther,
+                  onChanged: (v) => setState(() => _currentOther = v)),
+              if (_currentOther > 0) ...[
+                const SizedBox(height: 8),
+                _FormField(
+                    controller: _currentOtherTypeCtrl,
+                    label: 'Specify other pet type',
+                    hint: ' '),
+              ],
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Are all current pets vaccinated?',
                 value: _petsVaccinated,
-                onChanged:(v)=>setState(()=>_petsVaccinated=v),
+                options: const ['Yes', 'Some', 'None', 'Not Applicable'],
+                onChanged: (v) => setState(() => _petsVaccinated = v),
+              ),
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Are all current pets spayed/neutered?',
+                value: _petsSpayedNeutered,
+                options: const ['Yes', 'Some', 'None', 'Not Applicable'],
+                onChanged: (v) => setState(() => _petsSpayedNeutered = v),
               ),
 
-              const SizedBox(height: 18),
-              Text('Lifestyle and Care', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
-              _FormField(
-                controller: _hoursAloneCtrl,
-                label: 'Hours pet will be alone daily',
-                hint: '',
+              const SizedBox(height: 22),
+
+              // Lifestyle & Care
+              _SectionTitle('Lifestyle & Care'),
+              const SizedBox(height: 8),
+              _RadioGroup<String>(
+                label: 'Hours animal will be left alone',
+                value: _hoursAlone,
+                options: const [
+                  'Less than 2 hours',
+                  '2-4',
+                  '5-8',
+                  'More than 8 hours'
+                ],
+                onChanged: (v) => setState(() => _hoursAlone = v),
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
+              _FormField(
+                  controller: _caregiverCtrl,
+                  label: 'Primary Caregiver',
+                  hint: 'Enter'),
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Where will pet stay?',
                 value: _petStayLocation,
-                items:['Indoor','Outdoor','Mixed']
-                    .map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),
-                onChanged:(v)=>setState(()=>_petStayLocation=v),
-                decoration: const InputDecoration(labelText:'Where will the pet stay'),
+                options: const ['Indoors', 'Outdoors', 'Mixed'],
+                onChanged: (v) => setState(() => _petStayLocation = v),
               ),
-              const SizedBox(height: 12),
-              _FormField(
-                controller: _caregiverCtrl,
-                label: 'Primary caregiver',
-                hint: '',
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text('Can you afford? (check all that apply)',
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(width: 4),
+                  const _InfoTooltip(
+                    message:
+                    'According to the McDuffy 2026 Guide, the starter budget for owning a pet in the Philippines is approximately ₱2,400 per month. This covers essential expenses such as food, veterinary care, grooming, supplies, treats, and emergency savings.\n\n'
+                        'Estimated monthly costs:\n'
+                        '• Food – ₱500\n'
+                        '• Vaccines – ₱250\n'
+                        '• Flea & Tick Prevention – ₱500\n'
+                        '• Grooming – ₱250\n'
+                        '• Supplies & Replacements – ₱300\n'
+                        '• Treats – ₱200\n'
+                        '• Emergency Fund – ₱250\n'
+                        '• Miscellaneous – ₱150',
+                  ),
+                ],
               ),
-
-              const SizedBox(height: 18),
-              Text('Financial Readiness', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
               CheckboxListTile(
-                title: const Text('Vaccination'),
-                value: _canCoverVaccines,
-                onChanged:(v)=>setState(()=>_canCoverVaccines=v!),
-              ),
-              const SizedBox(height: 12),
-              CheckboxListTile(
-                title: const Text('Vet Care'),
-                value: _canCoverVet,
-                onChanged:(v)=>setState(()=>_canCoverVet=v!),
-              ),
-              const SizedBox(height: 12),
-              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
                 title: const Text('Food'),
-                value: _canCoverFood,
-                onChanged:(v)=>setState(()=>_canCoverFood=v!),
+                value: _canAffordFood,
+                onChanged: (v) => setState(() => _canAffordFood = v!),
               ),
-
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Vaccinations'),
+                value: _canAffordVaccinations,
+                onChanged: (v) =>
+                    setState(() => _canAffordVaccinations = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Vet Visits'),
+                value: _canAffordVetVisits,
+                onChanged: (v) => setState(() => _canAffordVetVisits = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Emergency Medical Care'),
+                value: _canAffordEmergencyCare,
+                onChanged: (v) =>
+                    setState(() => _canAffordEmergencyCare = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Grooming'),
+                value: _canAffordGrooming,
+                onChanged: (v) =>
+                    setState(() => _canAffordGrooming = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Care Supplies'),
+                value: _canAffordCareSupplies,
+                onChanged: (v) =>
+                    setState(() => _canAffordCareSupplies = v!),
+              ),
+              const SizedBox(height: 12),
+              _RadioGroup<String>(
+                label: 'Monthly Pet Budget',
+                value: _monthlyBudget,
+                options: const [
+                  'Under P1,000',
+                  'P1,000-P3,000',
+                  'P3,000-P5,000',
+                  'Above P5,000'
+                ],
+                onChanged: (v) => setState(() => _monthlyBudget = v),
+              ),
               const SizedBox(height: 12),
               _FormField(
                 controller: _reasonCtrl,
                 label: 'Why do you want to adopt?',
-                hint: 'Tell us a little about yourself…',
+                hint: 'Enter',
                 maxLines: 4,
               ),
-              const SizedBox(height: 18),
-              Text('Agreements', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+
+              const SizedBox(height: 22),
+
+              // Required Uploads
+              _SectionTitle('Required Uploads'),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 14,
+                runSpacing: 14,
+                children: [
+                  _UploadBox(
+                    label: 'Government ID',
+                    file: _governmentIdFile,
+                    isUploading: _isUploadingGovId,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _governmentIdFile = f),
+                    ),
+                  ),
+                  _UploadBox(
+                    label: 'Proof of Address',
+                    file: _proofOfAddressFile,
+                    isUploading: _isUploadingProof,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _proofOfAddressFile = f),
+                    ),
+                  ),
+                  _UploadBox(
+                    label: 'Digital Signature',
+                    file: _digitalSignatureFile,
+                    isUploading: _isUploadingSignature,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _digitalSignatureFile = f),
+                    ),
+                  ),
+                  _UploadBox(
+                    label: 'Home Photos',
+                    file: _homePhotosFile,
+                    isUploading: _isUploadingHomePhotos,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _homePhotosFile = f),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 22),
+
+              // Agreements
+              _SectionTitle('Agreements'),
               CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
                 title: const Text('I will provide proper care'),
                 value: _agreeCare,
-                onChanged:(v)=>setState(()=>_agreeCare=v!),
+                onChanged: (v) => setState(() => _agreeCare = v!),
               ),
-              const SizedBox(height: 12),
               CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
                 title: const Text('I will not abandon the animal'),
                 value: _agreeNoAbandon,
-                onChanged:(v)=>setState(()=>_agreeNoAbandon=v!),
+                onChanged: (v) => setState(() => _agreeNoAbandon = v!),
               ),
-              const SizedBox(height: 12),
               CheckboxListTile(
-                title: const Text('I allow follow-up checks'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('I agree to post-adoption follow ups'),
                 value: _agreeFollowup,
-                onChanged:(v)=>setState(()=>_agreeFollowup=v!),
+                onChanged: (v) => setState(() => _agreeFollowup = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Information provided is accurate'),
+                value: _agreeAccurate,
+                onChanged: (v) => setState(() => _agreeAccurate = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title:
+                const Text('I understand approval is not guaranteed'),
+                value: _agreeNotGuaranteed,
+                onChanged: (v) => setState(() => _agreeNotGuaranteed = v!),
               ),
             ],
-
-          )
+          ),
         ),
 
         const SizedBox(height: 28),
@@ -652,6 +934,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _PrimaryButton(
           label: _isSubmitting ? 'Submitting...' : "Submit",
           onTap: _isSubmitting ? null : _submitAdoptionForm,
+        ),
+        const SizedBox(height: 10),
+        _SecondaryButton(
+          label: 'Cancel',
+          onTap: _isSubmitting ? null : () => Navigator.pop(context),
         ),
 
         const SizedBox(height: 24),
@@ -683,7 +970,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         Text(
           'As part of this process, we\'d like to schedule an interview with the organization to further assess suitability and answer any questions you may have.\n\nPlease choose a date that works best for you, and we\'ll confirm your appointment once your application has been reviewed.',
           style: GoogleFonts.zain(
-              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 20),
@@ -753,7 +1040,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         if (_appointmentDate == null)
           Text('Select a date above to see available times.',
               style: GoogleFonts.zain(
-                  fontSize: 13, color: AppColors.textSecondary))
+                  fontSize: 13, color: AppColors.textPrimary))
         else
           if (isSunday || slots.isEmpty)
             Container(
@@ -768,7 +1055,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                     ? 'Closed on Sundays — please pick another day.'
                     : 'No slots available for this date.',
                 style: GoogleFonts.zain(
-                    fontSize: 13, color: AppColors.textSecondary),
+                    fontSize: 13, color: AppColors.textPrimary),
               ),
             )
           else
@@ -883,7 +1170,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         Text(
           'Please allow us time to review your form and confirm your appointment. If you need to reschedule, kindly update your meeting date at least 3 days before your appointment.',
           style: GoogleFonts.zain(
-              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 28),
@@ -945,7 +1232,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           'Your adoption application and interview appointment have been confirmed! We are excited to get to know you as a potential adopter for ${widget
               .animal.name} for today!',
           style: GoogleFonts.zain(
-              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         if (_appointmentDate != null) ...[
@@ -962,7 +1249,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                     color: AppColors.greenrspwn, size: 20),
                 const SizedBox(width: 10),
                 Text(
-                  '${_appointmentType}  ·  ${_formatDate(_appointmentDate!)}',
+                  '${_appointmentType}  ·  ${_formatDate(_appointmentDate!)} ·  ${_appointmentTime!}',
                   style: GoogleFonts.zain(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -1013,7 +1300,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         Text(
           'The organization will safely deliver your pet to your generalhome. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies.\n\nWe\'re so happy for you and your new best friend!',
           style: GoogleFonts.zain(
-              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 28),
@@ -1055,7 +1342,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         Text(
           'After careful review, we feel this may not be the best match at this time.\n\nWe truly appreciate your willingness to give a rescue a loving generalhome, and we encourage you to consider other pets in need — your perfect companion could be waiting!',
           style: GoogleFonts.zain(
-              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 28),
@@ -1154,7 +1441,7 @@ class _StepTracker extends StatelessWidget {
                     isActive ? FontWeight.w700 : FontWeight.w500,
                     color: isActive
                         ? AppColors.textPrimary
-                        : AppColors.textSecondary,
+                        : AppColors.textPrimary,
                   ),
                 ),
               ),
@@ -1162,6 +1449,64 @@ class _StepTracker extends StatelessWidget {
           ),
         );
       }),
+    );
+  }
+}
+
+class _InfoTooltip extends StatefulWidget {
+  final String message;
+
+  const _InfoTooltip({required this.message});
+
+  @override
+  State<_InfoTooltip> createState() => _InfoTooltipState();
+}
+
+class _InfoTooltipState extends State<_InfoTooltip> {
+  final GlobalKey<TooltipState> _tooltipKey = GlobalKey<TooltipState>();
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        final dynamic tooltip = _tooltipKey.currentState;
+        tooltip?.ensureTooltipVisible();
+      },
+      child: Tooltip(
+        key: _tooltipKey,
+        message: widget.message,
+        preferBelow: true,
+        triggerMode: TooltipTriggerMode.manual,
+        showDuration: const Duration(seconds: 10),
+        textStyle: GoogleFonts.zain(fontSize: 14, color: Colors.white),
+        decoration: BoxDecoration(
+          color: AppColors.textPrimary.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        child: Icon(
+          Icons.info_outline,
+          size: 16,
+          color: AppColors.textPrimary,
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String title;
+  const _SectionTitle(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: GoogleFonts.tiltWarp(
+          fontSize: 15,
+          fontWeight: FontWeight.bold,
+          color: AppColors.textPrimary),
     );
   }
 }
@@ -1194,7 +1539,7 @@ class _FormField extends StatelessWidget {
           style: GoogleFonts.zain(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: AppColors.textSecondary,
+            color: AppColors.textPrimary,
           ),
         ),
         const SizedBox(height: 4),
@@ -1209,10 +1554,10 @@ class _FormField extends StatelessWidget {
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: GoogleFonts.zain(
-                fontSize: 14, color: AppColors.textSecondary),
+                fontSize: 14, color: AppColors.textPrimary),
             filled: true,
             fillColor: readOnly
-            ? AppColors.slaterspwn.withOpacity(0.3) : AppColors.yellowrspwn.withOpacity(0.3),
+                ? AppColors.slaterspwn.withOpacity(0.3) : AppColors.yellowrspwn.withOpacity(0.3),
             contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             border: OutlineInputBorder(
@@ -1246,9 +1591,266 @@ class _FormField extends StatelessWidget {
   }
 }
 
+class _DropdownField<T> extends StatelessWidget {
+  final String label;
+  final T? value;
+  final List<T> items;
+  final ValueChanged<T?> onChanged;
+
+  const _DropdownField({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 4),
+        DropdownButtonFormField<T>(
+          value: value,
+          items: items
+              .map((e) => DropdownMenuItem(value: e, child: Text(e.toString())))
+              .toList(),
+          onChanged: onChanged,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: AppColors.yellowrspwn.withOpacity(0.3),
+            contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppColors.slaterspwn, width: 1),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RadioGroup<T> extends StatelessWidget {
+  final String label;
+  final T? value;
+  final List<T> options;
+  final ValueChanged<T?> onChanged;
+
+  const _RadioGroup({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 2),
+        ...options.map((o) {
+          return InkWell(
+            onTap: () => onChanged(o),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Radio<T>(
+                    value: o,
+                    groupValue: value,
+                    onChanged: onChanged,
+                    activeColor: AppColors.greenrspwn,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      o.toString(),
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+class _CounterField extends StatelessWidget {
+  final String label;
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _CounterField({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.zain(
+                  fontSize: 14, color: AppColors.textPrimary),
+            ),
+          ),
+          _CounterButton(
+            icon: Icons.remove,
+            onTap: value > 0 ? () => onChanged(value - 1) : null,
+          ),
+          SizedBox(
+            width: 28,
+            child: Text(
+              '$value',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
+            ),
+          ),
+          _CounterButton(
+            icon: Icons.add,
+            onTap: () => onChanged(value + 1),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CounterButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _CounterButton({required this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 26,
+        height: 26,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: onTap == null
+                ? AppColors.slaterspwn.withOpacity(0.5)
+                : AppColors.slaterspwn,
+          ),
+        ),
+        child: Icon(icon,
+            size: 14,
+            color: onTap == null
+                ? AppColors.textPrimary.withOpacity(0.5)
+                : AppColors.textPrimary),
+      ),
+    );
+  }
+}
+
+class _UploadBox extends StatelessWidget {
+  final String label;
+  final File? file;
+  final bool isUploading;
+  final VoidCallback onTap;
+
+  const _UploadBox({
+    required this.label,
+    required this.file,
+    required this.onTap,
+    this.isUploading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 130,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: isUploading ? null : onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: 130,
+              height: 110,
+              decoration: BoxDecoration(
+                color: AppColors.yellowrspwn.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: file != null
+                      ? AppColors.greenrspwn
+                      : AppColors.greenrspwn.withOpacity(0.6),
+                  width: 1.2,
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: isUploading
+                  ? const Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+                  : file == null
+                  ? const Center(
+                child: Icon(Icons.add,
+                    size: 26, color: AppColors.greenrspwn),
+              )
+                  : Image.file(file!, fit: BoxFit.cover),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // buttons
-
 class _PrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
