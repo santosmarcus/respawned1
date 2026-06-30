@@ -194,7 +194,7 @@ class _QuickActionCard extends StatelessWidget {
             label,
             textAlign: TextAlign.center,
             style: GoogleFonts.tiltWarp(
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: FontWeight.normal,
               color: AppColors.textPrimary,
             ),
