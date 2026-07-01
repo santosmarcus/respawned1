@@ -422,10 +422,12 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               .addPostFrameCallback((_) => _beginLocationStreaming());
         }
 
-        return Scaffold(
-          backgroundColor: AppColors.background,
-          bottomNavigationBar: _buildBottomNav(),
-          body: Column(
+        return Theme(
+            data: AppTheme.rescuerTheme,
+            child: Scaffold(
+            backgroundColor: AppColors.background,
+            bottomNavigationBar: _buildBottomNav(),
+            body: Column(
             children: [
 
               // Map
@@ -516,6 +518,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               ),
             ],
           ),
+            ),
         );
       },
     );

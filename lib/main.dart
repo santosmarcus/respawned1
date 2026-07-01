@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
+import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
@@ -33,7 +34,7 @@ class ResPAWndApp extends StatelessWidget {
       title: 'ResPAWnd',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const AuthWrapper(), // ← use this instead of LoginScreen directly
+      home: const AuthWrapper(), // use this instead of LoginScreen directly
     );
   }
 }
@@ -86,6 +87,16 @@ class AuthWrapper extends StatelessWidget {
               case 'admin':
                 return const AdminHomeScreen();
               case 'pet_transporter':
+                final verificationStatus =
+                    data?['transporterVerificationStatus'] as String? ?? '';
+                if (verificationStatus.isEmpty) {
+                  return TransporterVerificationScreen(
+                    firstName: data?['firstName'] as String? ?? '',
+                    lastName: data?['lastName'] as String? ?? '',
+                    phone: data?['phone'] as String? ?? '',
+                  );
+                }
+                return const ServiceScreen();
               case 'rescue_volunteer':
                 return const ServiceScreen();
               case 'general':

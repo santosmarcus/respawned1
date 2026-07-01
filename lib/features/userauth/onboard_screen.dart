@@ -4,14 +4,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
-import 'package:respawnd1/features/pettransporter/service_screen.dart';
+import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
   final String firstName;
   final String lastName;
   final String phone;
-
-  // TEMPLATE: add extra params here when you add more fields
   // final String? address;
 
   const OnboardingRoleScreen({
@@ -72,7 +70,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
         'name': fullName,
         'phone': widget.phone,
         'role': _selectedRole,
-        // 'address': widget.address ?? '',  // TEMPLATE: uncomment when ready
+        // 'address': widget.address ?? '',
         'isVerified': false,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -83,7 +81,17 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
         if(_selectedRole == 'general'){
           nextPage = const HomeScreen();
         } else if (_selectedRole == 'pet_transporter'){
-          nextPage = const ServiceScreen();
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TransporterVerificationScreen(
+                firstName: widget.firstName,
+                lastName: widget.lastName,
+                phone: widget.phone,
+              ),
+            ),
+          );
+          return;
         } else {
           nextPage = const HomeScreen();
         }
@@ -129,7 +137,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
                           setState(() => _selectedRole = option.role),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
-                        height: 130, //TODO fix the size of this
+                        height: 140,
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           color: option.color,
