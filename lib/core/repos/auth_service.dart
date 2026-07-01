@@ -78,17 +78,21 @@ class AuthService {
     return userCredential;
   }
 
-  /*// Step 1: Send OTP
+  // Step 1: Send OTP
   Future<void> sendOtp({
     required String phoneNumber, // format: +639XXXXXXXXX
     required Function(String verificationId) onCodeSent,
     required Function(String error) onError,
+    Function(UserCredential)? onAutoVerified,
   }) async {
-    await _auth.verifyPhoneNumber(
+    await firebaseAuth.verifyPhoneNumber(
       phoneNumber: phoneNumber,
       verificationCompleted: (PhoneAuthCredential credential) async {
-        // Auto-verified on some Android devices
-        await _auth.signInWithCredential(credential);
+        // Auto-verified on some Android devices without the user typing an OTP.
+        final userCredential =
+        await firebaseAuth.signInWithCredential(credential);
+        await _createUserDocIfNew(userCredential.user!);
+        onAutoVerified?.call(userCredential);
       },
       verificationFailed: (FirebaseAuthException e) {
         onError(e.message ?? 'Verification failed');
@@ -109,15 +113,29 @@ class AuthService {
       verificationId: verificationId,
       smsCode: otp,
     );
-    final userCredential = await _auth.signInWithCredential(credential);
+    final userCredential = await firebaseAuth.signInWithCredential(credential);
     await _createUserDocIfNew(userCredential.user!);
     return userCredential;
-  }*/
+  }
+
 
 
   Future<void> signOut() async {
-    await GoogleSignIn().disconnect();
-    await FacebookAuth.instance.logOut();
+    try {
+      final googleSignIn = GoogleSignIn();
+      if (await googleSignIn.isSignedIn()) {
+        await googleSignIn.disconnect();
+      }
+    } catch (_) {
+    }
+
+    try {
+      final fbStatus = await FacebookAuth.instance.accessToken;
+      if (fbStatus != null) {
+        await FacebookAuth.instance.logOut();
+      }
+    } catch (_) {
+    }
     await firebaseAuth.signOut();
   }
 

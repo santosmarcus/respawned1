@@ -6,8 +6,8 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
-import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_intro.dart';
+import 'package:respawnd1/main.dart' show AuthWrapper;
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -57,44 +57,45 @@ class _UserProfileState extends State<UserProfile> {
       });
     } finally{
       if(mounted) setState(() =>
-        _loading = false);
-      }
+      _loading = false);
     }
+  }
 
   Future<void> _logout() async {
     final confirmed = await showDialog<bool>(
-        context:context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.background,
-          title: Text(
-            'Log Out',
-            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
-          ),
-          content: Text(
-            'Are you sure you want to log out?',
-            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text('Cancel',
-                  style: GoogleFonts.zain(color: AppColors.textPrimary)),
-            ),
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text('Log out', style: GoogleFonts.zain(color: Colors.redAccent)),
-            ),
-          ],
+      context:context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: Text(
+          'Log Out',
+          style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
         ),
+        content: Text(
+          'Are you sure you want to log out?',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel',
+                style: GoogleFonts.zain(color: AppColors.textPrimary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Log out', style: GoogleFonts.zain(color: Colors.redAccent)),
+          ),
+        ],
+      ),
     );
-      if (confirmed == true){
-        await FirebaseAuth.instance.signOut();
-        if(mounted){
-          Navigator.of(
-              context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false,);
-        }
-      } //to be fixed
+    if (confirmed == true){
+      await FirebaseAuth.instance.signOut();
+      if(mounted){
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AuthWrapper()),
+              (route) => false,
+        );
+      }
+    }
   }
 
   @override
@@ -103,21 +104,21 @@ class _UserProfileState extends State<UserProfile> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 2,
         items: const [
-        BottomNavigationBarItem(
-        icon: Icon(Icons.home_outlined),
-        activeIcon: Icon(Icons.home),
-        label: 'Home',
-        ),
-        BottomNavigationBarItem(
-        icon: Icon(Icons.notifications_outlined),
-        activeIcon: Icon(Icons.notifications),
-        label: 'Notifications',
-        ),
-        BottomNavigationBarItem(
-        icon: Icon(Icons.person_outline),
-        activeIcon: Icon(Icons.person),
-        label: 'My Profile',
-        ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.notifications_outlined),
+            activeIcon: Icon(Icons.notifications),
+            label: 'Notifications',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            activeIcon: Icon(Icons.person),
+            label: 'My Profile',
+          ),
         ],
         onTap: (index) {
           if (index == 0) {
@@ -136,17 +137,17 @@ class _UserProfileState extends State<UserProfile> {
             );
           }
         },
-        ),
+      ),
 
-        body: _loading
-        ? const Center(
-        child: CircularProgressIndicator(color: AppColors.greenrspwn))
-        : SingleChildScrollView(
+      body: _loading
+          ? const Center(
+          child: CircularProgressIndicator(color: AppColors.greenrspwn))
+          : SingleChildScrollView(
         child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
 
-    const SizedBox(height: 35),
+            const SizedBox(height: 35),
 
             Center(
               child: Column(
@@ -160,7 +161,7 @@ class _UserProfileState extends State<UserProfile> {
                   ),
                   const SizedBox(height: 10),
                   Text(_displayName,
-                  style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary,),
+                    style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary,),
                   ),
                   const SizedBox(height: 2,),
                   Text(_phone, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary,),
@@ -179,7 +180,7 @@ class _UserProfileState extends State<UserProfile> {
                     label: 'Favorites',
                     onTap: (){
                       Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const FavoritesScreen()),);
+                        MaterialPageRoute(builder: (_) => const FavoritesScreen()),);
                     },
                   ),
                   _ProfileTile(
@@ -207,42 +208,42 @@ class _UserProfileState extends State<UserProfile> {
             const SizedBox(height: 24),
 
             Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 25),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _SectionLabel(label: 'Settings'),
-                      _SectionLabel(label: 'My Account'),
-                      _ProfileTile(
-                        label: 'Edit account',
-                        onTap: () {},
-                      ),
-                      _ProfileTile(
-                        label: 'Payment methods',
-                        onTap: () {},
-                      ),
-                      const SizedBox(height: 10),
-                      _SectionLabel(label: 'Privacy'),
-                      _ProfileTile(
-                        label: 'Location Sharing',
-                        onTap: () {},
-                      ),
-                      _ProfileTile(
-                        label: 'Communications',
-                        onTap: () {},
-                      ),
-                    ],
+              padding: const EdgeInsets.symmetric(horizontal: 25),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SectionLabel(label: 'Settings'),
+                  _SectionLabel(label: 'My Account'),
+                  _ProfileTile(
+                    label: 'Edit account',
+                    onTap: () {},
                   ),
+                  _ProfileTile(
+                    label: 'Payment methods',
+                    onTap: () {},
+                  ),
+                  const SizedBox(height: 10),
+                  _SectionLabel(label: 'Privacy'),
+                  _ProfileTile(
+                    label: 'Location Sharing',
+                    onTap: () {},
+                  ),
+                  _ProfileTile(
+                    label: 'Communications',
+                    onTap: () {},
+                  ),
+                ],
+              ),
             ),
 
             const SizedBox(height: 32),
 
             Center(
               child: TextButton(
-                  onPressed: _logout,//TODO:
-                  child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: Colors.redAccent,
-                  ),
-                  ),
+                onPressed: _logout,//TODO:
+                child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: Colors.redAccent,
+                ),
+                ),
               ),
             ),
 
@@ -250,7 +251,7 @@ class _UserProfileState extends State<UserProfile> {
           ],
         ),
       ),
-        );
+    );
   }
 }
 
@@ -290,7 +291,7 @@ class _ProfileTile extends StatelessWidget {
     this.icon,
     required this.label,
     required this.onTap,
-});
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -310,10 +311,10 @@ class _ProfileTile extends StatelessWidget {
               const SizedBox(width: 12),
             ],
             Expanded(
-                child: Text(
-                  label,
-                  style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary,),
-                ),
+              child: Text(
+                label,
+                style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary,),
+              ),
             ),
             const Icon(Icons.chevron_right, size: 20, color: AppColors.textSecondary),
           ],

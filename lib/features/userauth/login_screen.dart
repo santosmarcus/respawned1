@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:respawnd1/features/userauth/signup_screen.dart';
+import 'package:respawnd1/features/userauth/phonelogin_screen.dart';
 
 
 class LoginScreen extends StatefulWidget {
@@ -53,15 +54,14 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // Success — AuthWrapper handles navigation, don't setState here
 
     } on FirebaseAuthException catch (e) {
       String message;
       switch (e.code) {
         case 'user-not-found':
         case 'wrong-password':
-        case 'invalid-credential':        // ← new Firebase error code
-        case 'INVALID_LOGIN_CREDENTIALS': // ← another variant
+        case 'invalid-credential':        // new Firebase error code
+        case 'INVALID_LOGIN_CREDENTIALS': // another variant
           message = 'Incorrect email or password.';
           break;
         case 'invalid-email':
@@ -74,9 +74,9 @@ class _LoginScreenState extends State<LoginScreen> {
           message = 'Too many attempts. Please try again later.';
           break;
         default:
-          message = 'Login failed (${e.code})'; // show code so you can debug
+          message = 'Login failed (${e.code})';
       }
-      // Only setState on error
+
       if (mounted) {
         setState(() {
           _errorMessage = message;
@@ -93,7 +93,6 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     }
-    // ← NO finally block — it was causing setState after successful login
   }
 
   @override
@@ -250,29 +249,30 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 12),
 
 // Facebook button
-              /*_SocialButton(
+              _SocialButton(
                 label: 'Continue with Facebook',
-                icon: 'assets/icons/facebook.png',
+                iconData: Icons.facebook,
                 onTap: () async {
                   try {
                     await _authService.signInWithFacebook();
+                    // AuthWrapper handles navigation automatically
                   } catch (e) {
                     setState(() => _errorMessage = 'Facebook sign-in failed.');
                   }
                 },
               ),
 
-              const SizedBox(height: 12),*/
+              const SizedBox(height: 12),
 
-// Phone button — uncomment when PhoneLoginScreen is ready
-// _SocialButton(
-//   label: 'Continue with Phone',
-//   iconData: Icons.phone_outlined,
-//   onTap: () {
-//     Navigator.push(context,
-//       MaterialPageRoute(builder: (_) => const PhoneLoginScreen()));
-//   },
-// ),
+// Phone button
+              _SocialButton(
+                label: 'Continue with Phone',
+                iconData: Icons.phone_outlined,
+                onTap: () {
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const PhoneLoginScreen()));
+                },
+              ),
             ],
           ),
         ),
@@ -284,14 +284,14 @@ class _LoginScreenState extends State<LoginScreen> {
 class _SocialButton extends StatelessWidget {
   final String label;
   final String? icon;
-  //final IconData? iconData;
+  final IconData? iconData;
   final VoidCallback onTap;
 
   const _SocialButton({
     required this.label,
     required this.onTap,
     this.icon,
-    //this.iconData,
+    this.iconData,
   });
 
   @override
@@ -313,19 +313,19 @@ class _SocialButton extends StatelessWidget {
               icon!,
               width: 22,
               height: 22,
-            ),
-          //else if (iconData != null)
-            //Icon(iconData, size: 22, color: AppColors.textPrimary),
+            )
+          else if (iconData != null)
+            Icon(iconData, size: 22, color: AppColors.textPrimary),
           const SizedBox(width: 10),
           Flexible(
-            child: Text(
+              child: Text(
                 label,
                 style: GoogleFonts.zain(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary,
                 ),
-          )
+              )
           ),
         ],
       ),
