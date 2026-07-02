@@ -9,14 +9,19 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class TrackCasePage extends StatefulWidget {
   final String caseId;
-  const TrackCasePage({super.key, required this.caseId});
+  final int initialTabIndex;
+  const TrackCasePage({
+    super.key,
+    required this.caseId,
+    this.initialTabIndex = 0,
+  });
 
   @override
   State<TrackCasePage> createState() => _TrackCasePageState();
 }
 
 class _TrackCasePageState extends State<TrackCasePage> {
-  int _tabIndex = 0;
+  late int _tabIndex = widget.initialTabIndex;
   final _messageController = TextEditingController();
 
   @override
@@ -188,7 +193,10 @@ class _TrackCasePageState extends State<TrackCasePage> {
                           onSend: () => _sendMessage(widget.caseId),
                           data: data ?? {},  // ADDED
                         )
-                            : _CaseDetailTab(data: data ?? {}),
+                            : _CaseDetailTab(
+                          caseId: widget.caseId,
+                          data: data ?? {},
+                        ),
                       ),
                     ],
                   ),
@@ -706,9 +714,82 @@ class _TrackingTab extends StatelessWidget {
 }
 
 // Case detail tab
-class _CaseDetailTab extends StatelessWidget {
+class _CaseDetailTab extends StatefulWidget {
+  final String caseId;
   final Map<String, dynamic> data;
-  const _CaseDetailTab({required this.data});
+  const _CaseDetailTab({required this.caseId, required this.data});
+
+  @override
+  State<_CaseDetailTab> createState() => _CaseDetailTabState();
+}
+
+class _CaseDetailTabState extends State<_CaseDetailTab> {
+  bool _isSubmitting = false;
+
+  Map<String, dynamic> get data => widget.data;
+
+  bool get _hasWillingAdopter {
+    final reporterWantsToAdopt = data['interestedToAdopt'] == 'yes';
+    final willingAdopterId = data['willingAdopterId'] as String?;
+    return reporterWantsToAdopt ||
+        (willingAdopterId != null && willingAdopterId.isNotEmpty);
+  }
+
+  Future<void> _registerInterest(String type) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final userData = userDoc.data();
+      final name =
+      '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
+          .trim();
+      final label = type == 'foster' ? 'foster' : 'adopt';
+
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .update({
+        'willingAdopterId': uid,
+        'willingAdopterName': name.isEmpty ? 'A general user' : name,
+        'willingAdopterType': type,
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status':
+            '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(type == 'foster'
+                ? 'Thanks! Your interest to foster has been noted.'
+                : 'Thanks! Your interest to adopt has been noted.'),
+            backgroundColor: AppColors.greenrspwn,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to register interest: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
 
   void _showFullImage(BuildContext context, String url) {
     showDialog(
@@ -845,6 +926,87 @@ class _CaseDetailTab extends StatelessWidget {
             _DetailRow('Witness Mobile Number', data['witnessPhone']),
           ],
           _DetailRow('Interest to adopt', data['interestedToAdopt']),
+          const SizedBox(height: 12),
+
+          // Adoption / foster availability banner — only shown while
+          // nobody has claimed the animal yet.
+          if (!_hasWillingAdopter) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              decoration: BoxDecoration(
+                color: AppColors.slaterspwn,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                'This rescue is available for adoption or temporary foster.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                    _isSubmitting ? null : () => _registerInterest('adopt'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.textPrimary),
+                    )
+                        : Text('Interest to Adopt',
+                        style: GoogleFonts.zain(fontSize: 13)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                    _isSubmitting ? null : () => _registerInterest('foster'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.textPrimary),
+                    )
+                        : Text('Interest to Foster',
+                        style: GoogleFonts.zain(fontSize: 13)),
+                  ),
+                ),
+              ],
+            ),
+          ] else
+            _DetailRow(
+              'Willing adopter/foster',
+              '${data['willingAdopterName'] ?? '-'}'
+                  '${data['willingAdopterType'] != null ? ' (${data['willingAdopterType']})' : ''}',
+            ),
+
           const SizedBox(height: 24),
         ],
       ),

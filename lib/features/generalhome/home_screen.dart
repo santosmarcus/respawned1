@@ -5,6 +5,7 @@ import 'package:respawnd1/features/donation/donation_page.dart';
 import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
 import 'package:respawnd1/features/organization/organization_list_page.dart';
 import 'package:respawnd1/features/generalhome/activity_feed.dart';
+import 'package:respawnd1/features/rescue/public_rescue_feed.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
@@ -22,19 +23,19 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         toolbarHeight: 80,
         title: FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance
-            .collection('users')
-            .doc(FirebaseAuth.instance.currentUser?.uid)
-            .get(),
-            builder: (context, snapshot){
-              if(!snapshot.hasData){
-                return const Text('Welcome!');
-              }
-              final data = snapshot.data!.data() as Map<String, dynamic>?;
-              final firstName = data?['firstName'] ?? 'User';
+          future: FirebaseFirestore.instance
+              .collection('users')
+              .doc(FirebaseAuth.instance.currentUser?.uid)
+              .get(),
+          builder: (context, snapshot){
+            if(!snapshot.hasData){
+              return const Text('Welcome!');
+            }
+            final data = snapshot.data!.data() as Map<String, dynamic>?;
+            final firstName = data?['firstName'] ?? 'User';
 
-              return Text('Welcome, $firstName!');
-            },),
+            return Text('Welcome, $firstName!');
+          },),
         automaticallyImplyLeading: false,
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -92,13 +93,13 @@ class HomeScreen extends StatelessWidget {
                         ),
                       );
                     },
-                    ),
+                  ),
                   _QuickActionCard(
                     label: 'Adopt a\nRescue',
                     color: AppColors.greenrspwn,
                     onTap: (){
                       Navigator.push(context, MaterialPageRoute(
-                          builder: (context) => AdoptionPage(),
+                        builder: (context) => AdoptionPage(),
                       ),
                       );
                     },
@@ -155,6 +156,23 @@ class HomeScreen extends StatelessWidget {
 
             ActivityFeed(),
 
+            const SizedBox(height: 28),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Explore Reports',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 16,
+                  fontWeight: FontWeight.normal,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            const PublicRescueFeed(),
+
             const SizedBox(height: 24),
           ],
         ),
@@ -170,40 +188,40 @@ class _QuickActionCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _QuickActionCard({required this.label, required this.color, this.onTap,
-    });
+  });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-      width: 111,
-      height: 139,
-      margin: const EdgeInsets.only(right: 12),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsetsGeometry.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Spacer(),
-            Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.tiltWarp(
-              fontSize: 13,
-              fontWeight: FontWeight.normal,
-              color: AppColors.textPrimary,
-            ),
+        width: 111,
+        height: 139,
+        margin: const EdgeInsets.only(right: 12),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsetsGeometry.all(12),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Spacer(),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 13,
+                      fontWeight: FontWeight.normal,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ]),
           ),
-        ]),
+        ),
       ),
-      ),
-    ),
     );
   }
 }

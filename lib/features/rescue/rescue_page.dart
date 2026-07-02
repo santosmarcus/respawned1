@@ -287,72 +287,72 @@ class _RescuePageState extends State<RescuePage> {
   //Media picker
   Future<void> _pickMedia(int index) async{
     final action = await showModalBottomSheet<String>(
-        context: context,
-        backgroundColor: AppColors.background,
-        shape: const RoundedRectangleBorder(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        builder: (_) => Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(
-                        color: AppColors.slaterspwn,
-                        borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
-            const SizedBox(height: 14),
-              Text('Add Photo or Video',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary)),
-              const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.camera_alt_outlined,
-                    color: AppColors.textPrimary),
-                title: Text('Take a photo',
-                    style: GoogleFonts.zain(
-                        fontSize: 15, color: AppColors.textPrimary)),
-                onTap: () => Navigator.pop(context, 'photo_camera'),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.slaterspwn,
+                    borderRadius: BorderRadius.circular(2)),
               ),
+            ),
+            const SizedBox(height: 14),
+            Text('Add Photo or Video',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
             ListTile(
-                  leading: const Icon(Icons.photo_library_outlined,
-                      color: AppColors.textPrimary),
-                  title: Text('Choose photo from gallery',
-                      style: GoogleFonts.zain(
-                          fontSize: 15, color: AppColors.textPrimary)),
-                  onTap: () => Navigator.pop(context, 'photo_gallery'),
-                ),
+              leading: const Icon(Icons.camera_alt_outlined,
+                  color: AppColors.textPrimary),
+              title: Text('Take a photo',
+                  style: GoogleFonts.zain(
+                      fontSize: 15, color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(context, 'photo_camera'),
+            ),
             ListTile(
-                  leading: const Icon(Icons.videocam_outlined,
-                      color: AppColors.textPrimary),
-                  title: Text('Record a video',
-                      style: GoogleFonts.zain(
-                          fontSize: 15, color: AppColors.textPrimary)),
-                  onTap: () => Navigator.pop(context, 'video_camera'),
-                ),
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: AppColors.textPrimary),
+              title: Text('Choose photo from gallery',
+                  style: GoogleFonts.zain(
+                      fontSize: 15, color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(context, 'photo_gallery'),
+            ),
             ListTile(
-                  leading: const Icon(Icons.video_library_outlined,
-                      color: AppColors.textPrimary),
-                  title: Text('Choose video from gallery',
-                      style: GoogleFonts.zain(
-                          fontSize: 15, color: AppColors.textPrimary)),
-                  onTap: () => Navigator.pop(context, 'video_gallery'),
-                ),
+              leading: const Icon(Icons.videocam_outlined,
+                  color: AppColors.textPrimary),
+              title: Text('Record a video',
+                  style: GoogleFonts.zain(
+                      fontSize: 15, color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(context, 'video_camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined,
+                  color: AppColors.textPrimary),
+              title: Text('Choose video from gallery',
+                  style: GoogleFonts.zain(
+                      fontSize: 15, color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(context, 'video_gallery'),
+            ),
             if (_mediaFiles[index] != null)
               ListTile(
-                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  title: Text('Remove',
-                      style: GoogleFonts.zain(
-                          fontSize: 15, color: Colors.redAccent)),
-                  onTap: () {
-                    setState(() => _mediaFiles[index] = null);
-                    Navigator.pop(context, 'remove');
-                  },
+                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: Text('Remove',
+                    style: GoogleFonts.zain(
+                        fontSize: 15, color: Colors.redAccent)),
+                onTap: () {
+                  setState(() => _mediaFiles[index] = null);
+                  Navigator.pop(context, 'remove');
+                },
               ),
           ],
         ),
@@ -809,14 +809,14 @@ class _RescuePageState extends State<RescuePage> {
                 children: [
                   _buildLabel('Include images and videos', required: true),
                   const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 12,
-                        runSpacing: 12,
-                        children: List.generate(4, (i) => _buildMediaBox(i)),
-                        ),
-                    ],
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: List.generate(4, (i) => _buildMediaBox(i)),
                   ),
+                ],
               ),
+            ),
 
             const SizedBox(height: 24),
 
@@ -827,42 +827,42 @@ class _RescuePageState extends State<RescuePage> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                    onPressed: _showScanOptions,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ), backgroundColor: AppColors.yellowrspwn,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.qr_code_scanner, size: 18),
-                      const SizedBox(width: 8,),
-                      Text(
-                          'Scan for NFC or QR',
-                          style: GoogleFonts.tiltWarp(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w400,
-                            color: AppColors.textPrimary,
+                      onPressed: _showScanOptions,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ), backgroundColor: AppColors.yellowrspwn,
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.qr_code_scanner, size: 18),
+                              const SizedBox(width: 8,),
+                              Text(
+                                'Scan for NFC or QR',
+                                style: GoogleFonts.tiltWarp(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w400,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ],
                           ),
+                          GestureDetector(
+                            onTap: () => _showScanInfo(context),
+                            child: const Icon(Icons.info_outline,
+                                size: 18, color: AppColors.textPrimary),
+                          ),
+                        ],
                       ),
-                    ],
                     ),
-                      GestureDetector(
-                        onTap: () => _showScanInfo(context),
-                        child: const Icon(Icons.info_outline,
-                            size: 18, color: AppColors.textPrimary),
-                      ),
-                ],
-            ),
-              ),
                   ),
-            ],
+                ],
               ),
             ),
             const SizedBox(height: 24),
@@ -975,7 +975,7 @@ class _RescuePageState extends State<RescuePage> {
                         child: Checkbox(
                           value: _coordinateChoice == 'yes',
                           onChanged: (val) => setState(()
-                            => _coordinateChoice = 'yes'),
+                          => _coordinateChoice = 'yes'),
                           activeColor: AppColors.textPrimary,
                           side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
                           shape: RoundedRectangleBorder(
@@ -1230,7 +1230,7 @@ class _RescuePageState extends State<RescuePage> {
         decoration: BoxDecoration(
           border: Border.all(color: item != null ? AppColors.greenrspwn : AppColors.textPrimary, width: 1.5),
           borderRadius: BorderRadius.circular(8),
-            color: item != null ? AppColors.greenrspwn.withOpacity(0.05) : Colors.transparent,
+          color: item != null ? AppColors.greenrspwn.withOpacity(0.05) : Colors.transparent,
         ),
 
         clipBehavior: Clip.hardEdge,
@@ -1238,40 +1238,40 @@ class _RescuePageState extends State<RescuePage> {
           fit: StackFit.expand,
           children: [
             item.isVideo ? Container(
-                color: Colors.black87,
-                child: const Center(
-                 child: Icon(Icons.play_circle_outline, size: 28, color: AppColors.textPrimary),
-                        ),
-              )
+              color: Colors.black87,
+              child: const Center(
+                child: Icon(Icons.play_circle_outline, size: 28, color: AppColors.textPrimary),
+              ),
+            )
                 :Image.file(File(item.file.path), fit:BoxFit.cover),
-                  if (progress != null)
-                    Container(
-                    color: Colors.black54,
-                    child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: 36, height: 36,
-                              child: CircularProgressIndicator(
-                                value: progress,
-                                strokeWidth: 3,
-                                color: AppColors.yellowrspwn,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text('${(progress * 100).toInt()}%',
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 10)),
-                          ],
+            if (progress != null)
+              Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 36, height: 36,
+                        child: CircularProgressIndicator(
+                          value: progress,
+                          strokeWidth: 3,
+                          color: AppColors.yellowrspwn,
                         ),
-                       ),
                       ),
-            ],
+                      const SizedBox(height: 4),
+                      Text('${(progress * 100).toInt()}%',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         )
-        : const Center(
-        child: Icon(Icons.add, size: 28, color: AppColors.textPrimary)
-      ),
+            : const Center(
+            child: Icon(Icons.add, size: 28, color: AppColors.textPrimary)
+        ),
       ),
     );
   }
@@ -1395,6 +1395,7 @@ class _RescuePageState extends State<RescuePage> {
         'witnessPhone': _witnessNumberController.text.trim(),
         'interestedToAdopt': _adoptionChoice,
         'status': 'pending',
+        'adminApproved': false,
         'statusHistory': [
           {
             'status': 'Rescue case is being reviewed.',
