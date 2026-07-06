@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -24,6 +27,11 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
   CollarTagData? _selected;
   bool _loadingTags = true;
   bool _sharing = false;
+  bool _updatingApproval = false;
+  String? _loadError;
+
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _tagsSub;
+  Timer? _loadTimeout;
 
   final _searchCtrl = TextEditingController();
   final _qrKey = GlobalKey();
@@ -31,39 +39,113 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchTags();
+    _listenToTags();
     _searchCtrl.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
+    _tagsSub?.cancel();
+    _loadTimeout?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  //Firestore
-  Future<void> _fetchTags() async {
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection('collarTags')
-          .orderBy('createdAt', descending: true)
-          .get();
+  // Firestore — every collar tag a user creates or edits is mirrored by
+  // CollarTagFormScreen into the top-level `collarTags` collection (with
+  // `ownerId` and `tagId` set), so this is the correct place for admins to
+  // read across all users. A live snapshot listener is used instead of a
+  // one-time fetch so newly generated or edited tags show up immediately.
+  //
+  // Deliberately NOT using `.orderBy('createdAt')` here: Firestore silently
+  // *excludes* any document where the order field is missing or still
+  // resolving (e.g. a brand-new tag whose `FieldValue.serverTimestamp()`
+  // hasn't round-tripped yet), which made freshly submitted tags disappear
+  // from this screen. Instead, fetch everything and sort client-side.
+  void _listenToTags() {
+    _tagsSub?.cancel();
+    _loadTimeout?.cancel();
+    setState(() {
+      _loadingTags = true;
+      _loadError = null;
+    });
 
-      final tags = snap.docs
-          .map((d) => CollarTagData.fromFirestore(d.data(), d.id))
-          .toList();
-
-      if (mounted) {
+    // Guards against a stream that never emits at all (e.g. a rules issue
+    // that doesn't surface as a clean permission-denied error), so the
+    // admin never gets stuck on a spinner forever.
+    _loadTimeout = Timer(const Duration(seconds: 12), () {
+      if (mounted && _loadingTags) {
         setState(() {
-          _allTags = tags;
-          _filtered = tags;
           _loadingTags = false;
+          _loadError =
+          'This is taking too long to load. Check your connection or Firestore access, then retry.';
         });
       }
-    } catch (e) {
-      if (mounted) setState(() => _loadingTags = false);
-      _showSnack('Failed to load tags: $e');
-    }
+    });
+
+    _tagsSub = FirebaseFirestore.instance
+        .collection('collarTags')
+        .snapshots()
+        .listen(
+          (snap) {
+        _loadTimeout?.cancel();
+
+        // Parse each doc independently — one malformed document (e.g. an
+        // unexpected field type) must not take down the entire list, which
+        // is what was causing this screen to spin forever.
+        final tags = <CollarTagData>[];
+        for (final d in snap.docs) {
+          try {
+            tags.add(CollarTagData.fromFirestore(d.data(), d.id));
+          } catch (e) {
+            debugPrint('Skipping malformed collarTags doc ${d.id}: $e');
+          }
+        }
+
+        tags.sort((a, b) {
+          final aTime = a.createdAt;
+          final bTime = b.createdAt;
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1; // unresolved timestamps sink last
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime); // newest first
+        });
+
+        if (!mounted) return;
+
+        // Keep the current selection in sync with fresh data (e.g. once
+        // this admin's own approval write comes back down, or if the owner
+        // edits the tag while it's open here), falling back to null if the
+        // tag was deleted.
+        CollarTagData? refreshedSelection;
+        if (_selected != null) {
+          for (final t in tags) {
+            if (t.tagId == _selected!.tagId) {
+              refreshedSelection = t;
+              break;
+            }
+          }
+        }
+
+        setState(() {
+          _allTags = tags;
+          _loadingTags = false;
+          _loadError = null;
+          _selected = refreshedSelection;
+        });
+        _onSearchChanged();
+      },
+      onError: (e) {
+        _loadTimeout?.cancel();
+        if (!mounted) return;
+        setState(() {
+          _loadingTags = false;
+          _loadError = e is FirebaseException && e.code == 'permission-denied'
+              ? 'You don\'t have permission to view collar tags.'
+              : 'Failed to load tags: $e';
+        });
+      },
+    );
   }
 
   void _onSearchChanged() {
@@ -81,8 +163,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
 
   // QR helpers
   String _qrData(CollarTagData tag) =>
-      'https://rspwn.app/tag/${tag.tagId}';
-
+      'https://respawnd.app/tag/${tag.tagId}';
 
   Future<Uint8List?> _captureQr() async {
     try {
@@ -94,6 +175,65 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
       return byteData?.buffer.asUint8List();
     } catch (_) {
       return null;
+    }
+  }
+
+  Future<void> _logAudit(String action, CollarTagData tag) async {
+    try {
+      final admin = FirebaseAuth.instance.currentUser;
+      if (admin == null || tag.tagId == null) return;
+
+      await FirebaseFirestore.instance.collection('auditLogs').add({
+        'action': action,
+        'entity': 'collarTag',
+        'tagId': tag.tagId,
+        'ownerId': tag.ownerId,
+        'petName': tag.name,
+        'performedBy': admin.uid,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+    }
+  }
+
+  void _selectTag(CollarTagData tag) {
+    setState(() => _selected = tag);
+    _logAudit('qr_generated', tag);
+  }
+
+  Future<void> _setQrEnabled(CollarTagData tag, bool enabled) async {
+    if (tag.tagId == null) return;
+    setState(() => _updatingApproval = true);
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+
+      final mirrorRef = FirebaseFirestore.instance
+          .collection('collarTags')
+          .doc(tag.tagId);
+      batch.set(mirrorRef, {'qrEnabled': enabled}, SetOptions(merge: true));
+
+      if (tag.ownerId != null) {
+        final ownerRef = FirebaseFirestore.instance
+            .collection('users')
+            .doc(tag.ownerId)
+            .collection('collarTags')
+            .doc(tag.tagId);
+        batch.set(ownerRef, {'qrEnabled': enabled}, SetOptions(merge: true));
+      }
+
+      await batch.commit();
+      await _logAudit(enabled ? 'qr_enabled' : 'qr_disabled', tag);
+
+      if (mounted) {
+        _showSnack(enabled
+            ? 'QR code enabled — the owner can now see and share it.'
+            : 'QR code disabled for this tag.');
+      }
+    } catch (e) {
+      _showSnack('Failed to update approval: $e');
+    } finally {
+      if (mounted) setState(() => _updatingApproval = false);
     }
   }
 
@@ -113,6 +253,8 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
         [XFile(file.path)],
         text: 'Pet Collar Tag QR — ${_selected!.name}',
       );
+
+      await _logAudit('qr_shared', _selected!);
     } catch (e) {
       _showSnack('Share failed: $e');
     } finally {
@@ -203,12 +345,19 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
           Expanded(
             child: _loadingTags
                 ? const Center(child: CircularProgressIndicator())
+                : _loadError != null
+                ? _errorState(_loadError!)
                 : _filtered.isEmpty
                 ? Center(
-              child: Text('No tags found.',
-                  style: GoogleFonts.zain(
-                      fontSize: 15,
-                      color: AppColors.textSecondary)),
+              child: Text(
+                _allTags.isEmpty
+                    ? 'No collar tags have been created yet.'
+                    : 'No tags found.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.zain(
+                    fontSize: 15,
+                    color: AppColors.textSecondary),
+              ),
             )
                 : Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,8 +376,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                         tag: tag,
                         selected:
                         _selected?.tagId == tag.tagId,
-                        onTap: () => setState(
-                                () => _selected = tag),
+                        onTap: () => _selectTag(tag),
                       );
                     },
                   ),
@@ -249,6 +397,57 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                           cardKey: _qrKey,
                         ),
                         const SizedBox(height: 16),
+
+                        // Approval toggle — this is what actually unlocks
+                        // the QR for the owner.
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _updatingApproval
+                                ? null
+                                : () => _setQrEnabled(
+                                _selected!, !_selected!.qrEnabled),
+                            icon: _updatingApproval
+                                ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.textPrimary),
+                            )
+                                : Icon(
+                              _selected!.qrEnabled
+                                  ? Icons.check_circle
+                                  : Icons.lock_outline,
+                              size: 18,
+                            ),
+                            label: Text(
+                              _selected!.qrEnabled
+                                  ? 'Enabled for owner — tap to revoke'
+                                  : 'Enable QR for owner',
+                              style: GoogleFonts.tiltWarp(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.textPrimary,
+                              side: BorderSide(
+                                color: _selected!.qrEnabled
+                                    ? AppColors.greenrspwn
+                                    : AppColors.textPrimary,
+                                width: 1.5,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 12),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
 
                         // Share button
                         SizedBox(
@@ -327,6 +526,33 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
       ],
     ),
   );
+
+  Widget _errorState(String message) => Center(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline,
+              size: 48, color: AppColors.textPrimary.withOpacity(0.4)),
+          const SizedBox(height: 12),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.zain(
+                fontSize: 14, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          TextButton(
+            onPressed: _listenToTags,
+            child: Text('Retry',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 14, color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 // Tag tile
@@ -357,11 +583,19 @@ class _TagTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tag.name,
-                style: GoogleFonts.tiltWarp(
-                    fontSize: 13, color: AppColors.textPrimary),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(tag.name,
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 13, color: AppColors.textPrimary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+                const SizedBox(width: 6),
+                _StatusPill(enabled: tag.qrEnabled),
+              ],
+            ),
             const SizedBox(height: 2),
             Text(tag.ownerName,
                 style: GoogleFonts.zain(
@@ -369,6 +603,33 @@ class _TagTile extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Small "Enabled"/"Pending" badge so the admin can scan the list at a glance
+class _StatusPill extends StatelessWidget {
+  final bool enabled;
+  const _StatusPill({required this.enabled});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: enabled
+            ? AppColors.greenrspwn.withOpacity(0.2)
+            : AppColors.slaterspwn.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        enabled ? 'Enabled' : 'Pending',
+        style: GoogleFonts.zain(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textPrimary,
         ),
       ),
     );
@@ -421,7 +682,6 @@ class _QrPreviewCard extends StatelessWidget {
             const Divider(thickness: 0.5, color: AppColors.textPrimary),
             const SizedBox(height: 8),
 
-            // QR code
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(

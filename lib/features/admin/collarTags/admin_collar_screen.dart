@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import '../../../app_theme.dart';
-import 'admin_nfc.dart';
+// NFC disabled for now — only QR is used for collar tags.
+// import 'admin_nfc.dart';
 import 'admin_qr.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/admin_adoption_page.dart';
@@ -53,7 +54,7 @@ class AdminCollarTagScreen extends StatelessWidget {
             ),
             const SizedBox(height: 14),
 
-            _HubCard(
+            /*_HubCard(
               icon: Icons.nfc,
               title: 'Write NFC Chip',
               subtitle:
@@ -64,7 +65,7 @@ class AdminCollarTagScreen extends StatelessWidget {
                     builder: (_) => const AdminNfc()),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 12),*/
 
             _HubCard(
               icon: Icons.qr_code_2,

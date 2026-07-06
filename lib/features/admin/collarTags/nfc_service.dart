@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+/*import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nfc_manager/nfc_manager.dart';
@@ -142,4 +142,4 @@ class NfcService {
       await NfcManager.instance.stopSession();
     } catch (_) {}
   }
-}
+}*/

@@ -74,7 +74,7 @@ class CollarIdTagIntroScreen extends StatelessWidget {
                   _bullet('Pet details and photo'),
                   _bullet('Medical and vaccination records'),
                   _bullet('Emergency contact information'),
-                  _bullet('QR code and NFC access'),
+                  _bullet('QR code access'),
                   const SizedBox(height: 20),
                   Text(
                     'When scanned, you will be notified of the location and the '

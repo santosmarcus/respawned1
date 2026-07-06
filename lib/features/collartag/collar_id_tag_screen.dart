@@ -1,10 +1,16 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_tag_form_screen.dart';
@@ -14,11 +20,16 @@ import 'collar_tag_form_screen.dart';
 class CollarIdTagCardScreen extends StatefulWidget {
   final CollarTagData tagData;
   final bool isNewlyCreated;
+  // True when opened by someone other than the tag's owner (e.g. a rescuer
+  // who scanned the QR code). Hides the Edit action so only the owner can
+  // change the pet's record.
+  final bool readOnly;
 
   const CollarIdTagCardScreen({
     super.key,
     required this.tagData,
     this.isNewlyCreated = false,
+    this.readOnly = false,
   });
 
   @override
@@ -27,11 +38,44 @@ class CollarIdTagCardScreen extends StatefulWidget {
 
 class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
   final GlobalKey _cardKey = GlobalKey();
+  bool _sharing = false;
+
+  // Local, live copy of the tag. Starts as whatever was passed in, then
+  // stays in sync with Firestore so that when an admin flips qrEnabled on
+  // (see admin_qr_generator_screen.dart), the QR appears here automatically
+  // without the owner needing to reopen the screen.
+  late CollarTagData _tag;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _tagSub;
 
   @override
   void initState() {
     super.initState();
+    _tag = widget.tagData;
     if (widget.isNewlyCreated) _saveFcmTokenToTag();
+    _listenToTag();
+  }
+
+  @override
+  void dispose() {
+    _tagSub?.cancel();
+    super.dispose();
+  }
+
+  void _listenToTag() {
+    final tagId = widget.tagData.tagId;
+    if (tagId == null) return;
+
+    _tagSub = FirebaseFirestore.instance
+        .collection('collarTags')
+        .doc(tagId)
+        .snapshots()
+        .listen((doc) {
+      if (!mounted || !doc.exists) return;
+      setState(() => _tag = CollarTagData.fromFirestore(doc.data()!, doc.id));
+    }, onError: (_) {
+      // Keep showing the last known state — this is a nice-to-have live
+      // update, not a hard requirement to view the card.
+    });
   }
 
   Future<void> _saveFcmTokenToTag() async {
@@ -56,6 +100,44 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     } catch (_) {}
   }
 
+  // QR code data — same scheme the admin QR generator uses, so the same
+  // code works whether it's shown here or printed from the admin screen.
+  String get _qrData => 'https://rspwn.app/tag/${_tag.tagId}';
+
+  Future<Uint8List?> _captureCard() async {
+    try {
+      final boundary = _cardKey.currentContext?.findRenderObject()
+      as RenderRepaintBoundary?;
+      if (boundary == null) return null;
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _shareCard() async {
+    setState(() => _sharing = true);
+    try {
+      final bytes = await _captureCard();
+      if (bytes == null) throw Exception('Could not capture the ID card.');
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/collar_tag_${_tag.tagId}.png');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Pet Collar ID Card — ${_tag.name}',
+      );
+    } catch (e) {
+      _showSnack('Share failed: $e');
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
   void _showSnack(String msg) {
     if (mounted) {
       ScaffoldMessenger.of(context)
@@ -67,7 +149,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final tag = widget.tagData;
+    final tag = _tag;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -81,12 +163,13 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          TextButton(
-            onPressed: () => _editTag(context),
-            child: Text('Edit',
-                style: GoogleFonts.zain(
-                    fontSize: 15, color: AppColors.textPrimary)),
-          ),
+          if (!widget.readOnly)
+            TextButton(
+              onPressed: () => _editTag(context),
+              child: Text('Edit',
+                  style: GoogleFonts.zain(
+                      fontSize: 15, color: AppColors.textPrimary)),
+            ),
         ],
       ),
       body: SingleChildScrollView(
@@ -138,7 +221,18 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     const SizedBox(height: 8),
                     _healthDots(tag),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
+
+                    // QR code — hidden until an admin reviews the submission
+                    // and enables it (see admin_qr_generator_screen.dart).
+                    // Same visual slot either way so the card layout doesn't
+                    // jump once it's approved.
+                    if (tag.tagId != null) ...[
+                      tag.qrEnabled
+                          ? _qrReadyBlock()
+                          : _qrPendingBlock(),
+                      const SizedBox(height: 10),
+                    ],
 
                     const SizedBox(height: 6),
                     Align(
@@ -175,7 +269,24 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+
+            // Share the ID card (with its QR code) — only once the QR has
+            // actually been enabled; sharing a card with a locked QR isn't
+            // useful yet.
+            if (tag.tagId != null)
+              _ActionButton(
+                icon: Icons.share_outlined,
+                label: _sharing
+                    ? 'Preparing…'
+                    : (tag.qrEnabled
+                    ? 'Share ID Card'
+                    : 'Share (available once approved)'),
+                loading: _sharing,
+                onTap: (tag.qrEnabled && !_sharing) ? _shareCard : null,
+              ),
+
+            const SizedBox(height: 16),
 
             // Finish
             SizedBox(
@@ -202,6 +313,70 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
             const SizedBox(height: 32),
           ],
         ),
+      ),
+    );
+  }
+
+  // QR blocks
+
+  Widget _qrReadyBlock() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: QrImageView(
+            data: _qrData,
+            version: QrVersions.auto,
+            size: 160,
+            backgroundColor: Colors.white,
+            eyeStyle: const QrEyeStyle(
+              eyeShape: QrEyeShape.square,
+              color: Colors.black,
+            ),
+            dataModuleStyle: const QrDataModuleStyle(
+              dataModuleShape: QrDataModuleShape.square,
+              color: Colors.black,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Scan to view full profile',
+          style: GoogleFonts.zain(
+              fontSize: 11, color: AppColors.textSecondary),
+        ),
+      ],
+    );
+  }
+
+  Widget _qrPendingBlock() {
+    return Container(
+      width: 160,
+      height: 160,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.tearspwn.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.hourglass_top_rounded,
+              size: 32, color: AppColors.textPrimary.withOpacity(0.5)),
+          const SizedBox(height: 8),
+          Text(
+            'QR code pending\nadmin approval',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.zain(
+                fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ],
       ),
     );
   }

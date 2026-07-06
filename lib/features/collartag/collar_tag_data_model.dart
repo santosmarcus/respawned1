@@ -28,9 +28,21 @@ class CollarTagData {
   String? qrCodeUrl;
   DateTime? createdAt;
 
-  // NFC write tracking
-  final bool? nfcWritten;
-  DateTime? nfcWrittenAt;
+  // Owning user's uid. Written by the collar tag form screen onto both the
+  // `users/{uid}/collarTags/{tagId}` doc and its `collarTags/{tagId}` mirror,
+  // so it is always present once a tag has been read back from Firestore.
+  String? ownerId;
+
+  // Gates QR visibility. A newly submitted tag defaults to false — the QR
+  // code stays hidden from the owner until an Organization Administrator
+  // reviews the submission and enables it from the admin QR screen.
+  bool qrEnabled;
+
+  // NFC support is disabled for now — only QR is used to access a collar
+  // tag. Fields kept commented (not deleted) so NFC can be re-enabled later
+  // without redesigning the model.
+  // final bool? nfcWritten;
+  // DateTime? nfcWrittenAt;
 
   CollarTagData({
     this.petImagePath,
@@ -52,8 +64,10 @@ class CollarTagData {
     this.tagId,
     this.qrCodeUrl,
     this.createdAt,
-    this.nfcWritten,
-    this.nfcWrittenAt,
+    this.ownerId,
+    this.qrEnabled = false,
+    // this.nfcWritten,
+    // this.nfcWrittenAt,
   });
 
   // Firestore serialisation
@@ -77,9 +91,14 @@ class CollarTagData {
     'createdAt': createdAt != null
         ? Timestamp.fromDate(createdAt!)
         : FieldValue.serverTimestamp(),
-    'nfcWritten': nfcWritten ?? false,
-    if (nfcWrittenAt != null)
-      'nfcWrittenAt': Timestamp.fromDate(nfcWrittenAt!),
+    // Deliberately NOT included here: a fresh submit (or an owner edit via
+    // CollarTagFormScreen) must never flip this back on by accident. Only
+    // the admin enable/disable action (see admin_qr_generator_screen.dart)
+    // writes 'qrEnabled' directly to Firestore.
+    // NFC disabled for now.
+    // 'nfcWritten': nfcWritten ?? false,
+    // if (nfcWrittenAt != null)
+    //   'nfcWrittenAt': Timestamp.fromDate(nfcWrittenAt!),
   };
 
   // Firestore deserialisation
@@ -109,10 +128,11 @@ class CollarTagData {
         createdAt: data['createdAt'] != null
             ? (data['createdAt'] as Timestamp).toDate()
             : null,
-        nfcWritten: data['nfcWritten'] as bool? ?? false,
-        // nfcWrittenAt stored as Timestamp — convert to DateTime
-        nfcWrittenAt: data['nfcWrittenAt'] != null
-            ? (data['nfcWrittenAt'] as Timestamp).toDate()
-            : null,
+        ownerId: data['ownerId'] as String?,
+        qrEnabled: data['qrEnabled'] as bool? ?? false,
+        // nfcWritten: data['nfcWritten'] as bool? ?? false,
+        // nfcWrittenAt: data['nfcWrittenAt'] != null
+        //     ? (data['nfcWrittenAt'] as Timestamp).toDate()
+        //     : null,
       );
 }
