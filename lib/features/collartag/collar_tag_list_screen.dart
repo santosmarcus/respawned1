@@ -35,8 +35,6 @@ class CollarTagHomeScreen extends StatelessWidget {
           );
         }
 
-        // If the check fails for any reason, fall back to the intro screen
-        // rather than blocking the user from creating their first tag.
         final hasTags = snapshot.data?.docs.isNotEmpty ?? false;
         return hasTags
             ? const CollarTagsListScreen()

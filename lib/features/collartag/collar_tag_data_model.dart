@@ -22,25 +22,19 @@ class CollarTagData {
   // Owner info
   String ownerName;
   String ownerMobile;
+  String ownerEmail;
+  String ownerFacebookLink;
+
+  String status;
+  String? activeRescueSessionId;
 
   // Generated / system fields
   String? tagId;        // Firestore document ID
   String? qrCodeUrl;
   DateTime? createdAt;
 
-  // Owning user's uid. Written by the collar tag form screen onto both the
-  // `users/{uid}/collarTags/{tagId}` doc and its `collarTags/{tagId}` mirror,
-  // so it is always present once a tag has been read back from Firestore.
   String? ownerId;
-
-  // Gates QR visibility. A newly submitted tag defaults to false — the QR
-  // code stays hidden from the owner until an Organization Administrator
-  // reviews the submission and enables it from the admin QR screen.
   bool qrEnabled;
-
-  // NFC support is disabled for now — only QR is used to access a collar
-  // tag. Fields kept commented (not deleted) so NFC can be re-enabled later
-  // without redesigning the model.
   // final bool? nfcWritten;
   // DateTime? nfcWrittenAt;
 
@@ -61,6 +55,10 @@ class CollarTagData {
     this.medicalCondition = '',
     this.ownerName = '',
     this.ownerMobile = '',
+    this.ownerEmail = '',
+    this.ownerFacebookLink = '',
+    this.status = 'active',
+    this.activeRescueSessionId,
     this.tagId,
     this.qrCodeUrl,
     this.createdAt,
@@ -87,14 +85,12 @@ class CollarTagData {
     'medicalCondition': medicalCondition,
     'ownerName': ownerName,
     'ownerMobile': ownerMobile,
+    'ownerEmail': ownerEmail,
+    'ownerFacebookLink': ownerFacebookLink,
     'qrCodeUrl': qrCodeUrl ?? '',
     'createdAt': createdAt != null
         ? Timestamp.fromDate(createdAt!)
         : FieldValue.serverTimestamp(),
-    // Deliberately NOT included here: a fresh submit (or an owner edit via
-    // CollarTagFormScreen) must never flip this back on by accident. Only
-    // the admin enable/disable action (see admin_qr_generator_screen.dart)
-    // writes 'qrEnabled' directly to Firestore.
     // NFC disabled for now.
     // 'nfcWritten': nfcWritten ?? false,
     // if (nfcWrittenAt != null)
@@ -123,6 +119,10 @@ class CollarTagData {
         medicalCondition: data['medicalCondition'] as String? ?? '',
         ownerName: data['ownerName'] as String? ?? '',
         ownerMobile: data['ownerMobile'] as String? ?? '',
+        ownerEmail: data['ownerEmail'] as String? ?? '',
+        ownerFacebookLink: data['ownerFacebookLink'] as String? ?? '',
+        status: data['status'] as String? ?? 'active',
+        activeRescueSessionId: data['activeRescueSessionId'] as String?,
         qrCodeUrl: data['qrCodeUrl'] as String?,
         // createdAt stored as Timestamp — convert to DateTime
         createdAt: data['createdAt'] != null

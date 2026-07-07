@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import 'dart:io';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
+import 'package:respawnd1/core/constants/app.links.dart';
 
 class AdminQrGeneratorScreen extends StatefulWidget {
   const AdminQrGeneratorScreen({super.key});
@@ -51,17 +52,6 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
     super.dispose();
   }
 
-  // Firestore — every collar tag a user creates or edits is mirrored by
-  // CollarTagFormScreen into the top-level `collarTags` collection (with
-  // `ownerId` and `tagId` set), so this is the correct place for admins to
-  // read across all users. A live snapshot listener is used instead of a
-  // one-time fetch so newly generated or edited tags show up immediately.
-  //
-  // Deliberately NOT using `.orderBy('createdAt')` here: Firestore silently
-  // *excludes* any document where the order field is missing or still
-  // resolving (e.g. a brand-new tag whose `FieldValue.serverTimestamp()`
-  // hasn't round-tripped yet), which made freshly submitted tags disappear
-  // from this screen. Instead, fetch everything and sort client-side.
   void _listenToTags() {
     _tagsSub?.cancel();
     _loadTimeout?.cancel();
@@ -70,9 +60,6 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
       _loadError = null;
     });
 
-    // Guards against a stream that never emits at all (e.g. a rules issue
-    // that doesn't surface as a clean permission-denied error), so the
-    // admin never gets stuck on a spinner forever.
     _loadTimeout = Timer(const Duration(seconds: 12), () {
       if (mounted && _loadingTags) {
         setState(() {
@@ -90,9 +77,6 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
           (snap) {
         _loadTimeout?.cancel();
 
-        // Parse each doc independently — one malformed document (e.g. an
-        // unexpected field type) must not take down the entire list, which
-        // is what was causing this screen to spin forever.
         final tags = <CollarTagData>[];
         for (final d in snap.docs) {
           try {
@@ -106,17 +90,13 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
           final aTime = a.createdAt;
           final bTime = b.createdAt;
           if (aTime == null && bTime == null) return 0;
-          if (aTime == null) return 1; // unresolved timestamps sink last
+          if (aTime == null) return 1;
           if (bTime == null) return -1;
-          return bTime.compareTo(aTime); // newest first
+          return bTime.compareTo(aTime);
         });
 
         if (!mounted) return;
 
-        // Keep the current selection in sync with fresh data (e.g. once
-        // this admin's own approval write comes back down, or if the owner
-        // edits the tag while it's open here), falling back to null if the
-        // tag was deleted.
         CollarTagData? refreshedSelection;
         if (_selected != null) {
           for (final t in tags) {
@@ -162,8 +142,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
   }
 
   // QR helpers
-  String _qrData(CollarTagData tag) =>
-      'https://respawnd.app/tag/${tag.tagId}';
+  String _qrData(CollarTagData tag) => AppLinks.tagUrl(tag.tagId!);
 
   Future<Uint8List?> _captureQr() async {
     try {
@@ -609,7 +588,6 @@ class _TagTile extends StatelessWidget {
   }
 }
 
-// Small "Enabled"/"Pending" badge so the admin can scan the list at a glance
 class _StatusPill extends StatelessWidget {
   final bool enabled;
   const _StatusPill({required this.enabled});

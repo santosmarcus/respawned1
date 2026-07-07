@@ -14,15 +14,14 @@ import 'package:share_plus/share_plus.dart';
 import '../../../app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_tag_form_screen.dart';
+import 'package:respawnd1/core/constants/app.links.dart';
+import 'pet_found_chat.dart';
 
 //  Pet Identification Card Screen
 
 class CollarIdTagCardScreen extends StatefulWidget {
   final CollarTagData tagData;
   final bool isNewlyCreated;
-  // True when opened by someone other than the tag's owner (e.g. a rescuer
-  // who scanned the QR code). Hides the Edit action so only the owner can
-  // change the pet's record.
   final bool readOnly;
 
   const CollarIdTagCardScreen({
@@ -39,11 +38,7 @@ class CollarIdTagCardScreen extends StatefulWidget {
 class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
   final GlobalKey _cardKey = GlobalKey();
   bool _sharing = false;
-
-  // Local, live copy of the tag. Starts as whatever was passed in, then
-  // stays in sync with Firestore so that when an admin flips qrEnabled on
-  // (see admin_qr_generator_screen.dart), the QR appears here automatically
-  // without the owner needing to reopen the screen.
+  bool _updatingStatus = false;
   late CollarTagData _tag;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _tagSub;
 
@@ -73,8 +68,6 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       if (!mounted || !doc.exists) return;
       setState(() => _tag = CollarTagData.fromFirestore(doc.data()!, doc.id));
     }, onError: (_) {
-      // Keep showing the last known state — this is a nice-to-have live
-      // update, not a hard requirement to view the card.
     });
   }
 
@@ -100,9 +93,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     } catch (_) {}
   }
 
-  // QR code data — same scheme the admin QR generator uses, so the same
-  // code works whether it's shown here or printed from the admin screen.
-  String get _qrData => 'https://rspwn.app/tag/${_tag.tagId}';
+  String get _qrData => AppLinks.tagUrl(_tag.tagId ?? '');
 
   Future<Uint8List?> _captureCard() async {
     try {
@@ -176,6 +167,47 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Column(
           children: [
+            if (!widget.readOnly && tag.activeRescueSessionId != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Material(
+                  color: AppColors.yellowrspwn,
+                  borderRadius: BorderRadius.circular(14),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PetFoundChatScreen(
+                          tagId: tag.tagId!,
+                          sessionId: tag.activeRescueSessionId!,
+                          petName: tag.name,
+                        ),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.pets, color: AppColors.textPrimary),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Pet Found! Someone scanned ${tag.name}\'s tag — tap to view & chat.',
+                              style: GoogleFonts.zain(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary),
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              color: AppColors.textPrimary),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Text(
               'Pet Identification\nCard',
               textAlign: TextAlign.center,
@@ -223,10 +255,6 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                     _healthDots(tag),
                     const SizedBox(height: 16),
 
-                    // QR code — hidden until an admin reviews the submission
-                    // and enables it (see admin_qr_generator_screen.dart).
-                    // Same visual slot either way so the card layout doesn't
-                    // jump once it's approved.
                     if (tag.tagId != null) ...[
                       tag.qrEnabled
                           ? _qrReadyBlock()
@@ -262,7 +290,28 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                       ),
                     ),
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
-
+                    if (tag.ownerEmail.isNotEmpty) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          tag.ownerEmail,
+                          style: GoogleFonts.zain(
+                              fontSize: 14, color: AppColors.textPrimary),
+                        ),
+                      ),
+                      const Divider(thickness: 0.5, color: AppColors.textPrimary),
+                    ],
+                    if (tag.ownerFacebookLink.isNotEmpty) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          tag.ownerFacebookLink,
+                          style: GoogleFonts.zain(
+                              fontSize: 14, color: AppColors.textPrimary),
+                        ),
+                      ),
+                      const Divider(thickness: 0.5, color: AppColors.textPrimary),
+                    ],
 
                   ],
                 ),
@@ -271,9 +320,17 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
 
             const SizedBox(height: 16),
 
-            // Share the ID card (with its QR code) — only once the QR has
-            // actually been enabled; sharing a card with a locked QR isn't
-            // useful yet.
+            ElevatedButton(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const PetFoundChatScreen(
+                  tagId: 'testTag1',
+                  sessionId: 'testSessions',
+                  petName: 'Nuni',
+                ),
+              )),
+              child: const Text('DEBUG: Open Pet Found Chat'),
+            ),
+
             if (tag.tagId != null)
               _ActionButton(
                 icon: Icons.share_outlined,
@@ -288,27 +345,33 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
 
             const SizedBox(height: 16),
 
-            // Finish
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () =>
-                    Navigator.popUntil(context, (r) => r.isFirst),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  elevation: 0,
+            if (!widget.readOnly)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _updatingStatus ? null : _handlePrimaryAction,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    foregroundColor: AppColors.textPrimary,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                  ),
+                  child: _updatingStatus
+                      ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.textPrimary),
+                  )
+                      : Text(_primaryActionLabel,
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary)),
                 ),
-                child: Text('Finish',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary)),
               ),
-            ),
 
             const SizedBox(height: 32),
           ],
@@ -457,6 +520,61 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       ],
     ),
   );
+
+  String get _primaryActionLabel {
+    if (widget.isNewlyCreated) return 'Finish';
+    return _tag.status == 'lost' ? 'Mark as Found' : 'Mark as Lost';
+  }
+
+  Future<void> _handlePrimaryAction() async {
+    if (widget.isNewlyCreated) {
+      Navigator.popUntil(context, (r) => r.isFirst);
+      return;
+    }
+
+    final goingLost = _tag.status != 'lost';
+    setState(() => _updatingStatus = true);
+    try {
+      final tagId = _tag.tagId;
+      if (tagId == null) return;
+
+      final update = <String, dynamic>{
+        'status': goingLost ? 'lost' : 'active',
+      };
+      if (!goingLost && _tag.activeRescueSessionId != null) {
+        await FirebaseFirestore.instance
+            .collection('rescueSessions')
+            .doc(_tag.activeRescueSessionId)
+            .set({'status': 'resolved'}, SetOptions(merge: true));
+        update['activeRescueSessionId'] = FieldValue.delete();
+      }
+
+      await FirebaseFirestore.instance
+          .collection('collarTags')
+          .doc(tagId)
+          .set(update, SetOptions(merge: true));
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_tag.ownerId)
+          .collection('collarTags')
+          .doc(tagId)
+          .set(update, SetOptions(merge: true));
+
+      if (mounted) {
+        setState(() {
+          _tag.status = goingLost ? 'lost' : 'active';
+          if (!goingLost) _tag.activeRescueSessionId = null;
+        });
+        _showSnack(goingLost
+            ? 'Marked as lost. Your contact info is now visible to anyone who scans the tag.'
+            : 'Welcome back! Marked as found.');
+      }
+    } catch (e) {
+      _showSnack('Could not update status: $e');
+    } finally {
+      if (mounted) setState(() => _updatingStatus = false);
+    }
+  }
 
   void _editTag(BuildContext context) {
     Navigator.push(

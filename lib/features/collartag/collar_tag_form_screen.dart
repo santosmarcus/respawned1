@@ -38,15 +38,14 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
   bool _vaccinated = false;
   File? _vaccinationImage;
 
-  bool _hasAllergies = false;
   final _allergiesCtrl = TextEditingController();
-
-  bool _hasMedicalCondition = false;
   final _medicalCtrl = TextEditingController();
 
   //Owner
   final _ownerNameCtrl = TextEditingController();
   final _ownerMobileCtrl = TextEditingController();
+  final _ownerEmailCtrl = TextEditingController();
+  final _ownerFacebookCtrl = TextEditingController();
   // Pet image
   File? _petImage;
   bool _submitting = false;
@@ -68,6 +67,8 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
 
       _ownerNameCtrl.text = tag.ownerName;
       _ownerMobileCtrl.text = tag.ownerMobile;
+      _ownerEmailCtrl.text = tag.ownerEmail;
+      _ownerFacebookCtrl.text = tag.ownerFacebookLink;
 
       // Sex
       final sexUpper = tag.sex.trim().toUpperCase();
@@ -87,17 +88,17 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
         _breedCtrl.text = tag.breed;
       }
 
-      // Allergies
       final allergiesText = tag.allergies.trim();
-      _hasAllergies =
-          allergiesText.isNotEmpty && allergiesText.toLowerCase() != 'none';
-      if (_hasAllergies) _allergiesCtrl.text = allergiesText;
+      _allergiesCtrl.text =
+      (allergiesText.isEmpty || allergiesText.toLowerCase() == 'none')
+          ? ''
+          : allergiesText;
 
-      // Medical condition
       final medicalText = tag.medicalCondition.trim();
-      _hasMedicalCondition =
-          medicalText.isNotEmpty && medicalText.toLowerCase() != 'none';
-      if (_hasMedicalCondition) _medicalCtrl.text = medicalText;
+      _medicalCtrl.text =
+      (medicalText.isEmpty || medicalText.toLowerCase() == 'none')
+          ? ''
+          : medicalText;
 
       if (tag.petImagePath != null) {
         _petImage = File(tag.petImagePath!);
@@ -113,7 +114,8 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
   void dispose() {
     for (final c in [
       _nameCtrl, _breedCtrl, _colorCtrl, _descCtrl,
-      _allergiesCtrl, _medicalCtrl, _ownerNameCtrl, _ownerMobileCtrl
+      _allergiesCtrl, _medicalCtrl, _ownerNameCtrl, _ownerMobileCtrl,
+      _ownerEmailCtrl, _ownerFacebookCtrl,
     ]) {
       c.dispose();
     }
@@ -230,13 +232,11 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
           ? '$_petType - ${_breedCtrl.text.trim()}'
           : _breedCtrl.text.trim();
 
-      final allergiesValue =
-      (_hasAllergies && _allergiesCtrl.text.trim().isNotEmpty)
+      final allergiesValue = _allergiesCtrl.text.trim().isNotEmpty
           ? _allergiesCtrl.text.trim()
           : 'None';
 
-      final medicalValue =
-      (_hasMedicalCondition && _medicalCtrl.text.trim().isNotEmpty)
+      final medicalValue = _medicalCtrl.text.trim().isNotEmpty
           ? _medicalCtrl.text.trim()
           : 'None';
 
@@ -258,6 +258,8 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
         medicalCondition: medicalValue,
         ownerName: _ownerNameCtrl.text.trim(),
         ownerMobile: _ownerMobileCtrl.text.trim(),
+        ownerEmail: _ownerEmailCtrl.text.trim(),
+        ownerFacebookLink: _ownerFacebookCtrl.text.trim(),
         createdAt: widget.existingTag?.createdAt ?? DateTime.now(),
       );
 
@@ -448,13 +450,13 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
             const SizedBox(height: 24),
             _sectionLabel('Health Information'),
             const SizedBox(height: 8),
-            _YesNoRow(
+            _CheckRow(
               label: 'Spayed/Neutered',
               value: _spayedNeutered,
               onChanged: (v) => setState(() => _spayedNeutered = v),
             ),
-            const SizedBox(height: 10),
-            _YesNoRow(
+            const SizedBox(height: 6),
+            _CheckRow(
               label: 'Vaccinated',
               value: _vaccinated,
               onChanged: (v) => setState(() => _vaccinated = v),
@@ -499,28 +501,12 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
             const SizedBox(height: 14),
             _sectionLabel('Allergies'),
             const SizedBox(height: 6),
-            _YesNoRow(
-              label: 'Does your pet have allergies?',
-              value: _hasAllergies,
-              onChanged: (v) => setState(() => _hasAllergies = v),
-            ),
-            if (_hasAllergies) ...[
-              const SizedBox(height: 8),
-              _field(_allergiesCtrl, 'Enter allergies'),
-            ],
+            _field(_allergiesCtrl, 'Enter condition'),
 
             const SizedBox(height: 14),
             _sectionLabel('Current/Existing Medical Condition'),
             const SizedBox(height: 6),
-            _YesNoRow(
-              label: 'Does your pet have a medical condition?',
-              value: _hasMedicalCondition,
-              onChanged: (v) => setState(() => _hasMedicalCondition = v),
-            ),
-            if (_hasMedicalCondition) ...[
-              const SizedBox(height: 8),
-              _field(_medicalCtrl, 'Enter condition'),
-            ],
+            _field(_medicalCtrl, 'Enter condition'),
 
             const SizedBox(height: 16),
             _sectionLabel('Owner Information'),
@@ -529,6 +515,12 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
             const SizedBox(height: 10),
             _field(_ownerMobileCtrl, 'Mobile Number',
                 keyboardType: TextInputType.phone),
+            const SizedBox(height: 10),
+            _field(_ownerEmailCtrl, 'Email',
+                keyboardType: TextInputType.emailAddress),
+            const SizedBox(height: 10),
+            _field(_ownerFacebookCtrl, 'Facebook Link',
+                keyboardType: TextInputType.url),
 
             const SizedBox(height: 24),
             SizedBox(
@@ -728,6 +720,43 @@ class _SingleChoiceRow extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _CheckRow extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _CheckRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Checkbox(
+              value: value,
+              activeColor: AppColors.textPrimary,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: (v) => onChanged(v ?? false),
+            ),
+            const SizedBox(width: 4),
+            Text(label,
+                style: GoogleFonts.zain(
+                    fontSize: 14, color: AppColors.textPrimary)),
+          ],
+        ),
+      ),
     );
   }
 }
