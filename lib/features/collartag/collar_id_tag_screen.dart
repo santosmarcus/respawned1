@@ -320,32 +320,18 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
 
             const SizedBox(height: 16),
 
-            ElevatedButton(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const PetFoundChatScreen(
-                  tagId: 'testTag1',
-                  sessionId: 'testSessions',
-                  petName: 'Nuni',
-                ),
-              )),
-              child: const Text('DEBUG: Open Pet Found Chat'),
-            ),
-
-            if (tag.tagId != null)
+            if (tag.tagId != null && tag.qrEnabled) ...[
               _ActionButton(
                 icon: Icons.share_outlined,
-                label: _sharing
-                    ? 'Preparing…'
-                    : (tag.qrEnabled
-                    ? 'Share ID Card'
-                    : 'Share (available once approved)'),
+                label: _sharing ? 'Preparing…' : 'Share ID Card',
                 loading: _sharing,
-                onTap: (tag.qrEnabled && !_sharing) ? _shareCard : null,
+                onTap: _sharing ? null : _shareCard,
               ),
+              const SizedBox(height: 16),
+            ],
 
-            const SizedBox(height: 16),
-
-            if (!widget.readOnly)
+            if (!widget.readOnly &&
+                (widget.isNewlyCreated || tag.qrEnabled))
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -371,7 +357,9 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                           fontWeight: FontWeight.bold,
                           color: AppColors.textPrimary)),
                 ),
-              ),
+              )
+            else if (!widget.readOnly && !widget.isNewlyCreated && !tag.qrEnabled)
+              _pendingApprovalNotice(),
 
             const SizedBox(height: 32),
           ],
@@ -438,6 +426,33 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
             textAlign: TextAlign.center,
             style: GoogleFonts.zain(
                 fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pendingApprovalNotice() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.tearspwn.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.hourglass_top_rounded,
+              size: 22, color: AppColors.textPrimary.withOpacity(0.6)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Sharing and lost/found reporting unlock once an admin '
+                  'approves this tag\'s QR code.',
+              style: GoogleFonts.zain(
+                  fontSize: 12.5, color: AppColors.textSecondary),
+            ),
           ),
         ],
       ),

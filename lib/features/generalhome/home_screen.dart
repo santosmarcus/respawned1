@@ -6,6 +6,7 @@ import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
 import 'package:respawnd1/features/organization/organization_list_page.dart';
 import 'package:respawnd1/features/generalhome/activity_feed.dart';
 import 'package:respawnd1/features/rescue/public_rescue_feed.dart';
+import 'package:respawnd1/features/rescue/all_explore_page.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
@@ -159,19 +160,43 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 28),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Explore Reports',
-                style: GoogleFonts.tiltWarp(
-                  fontSize: 16,
-                  fontWeight: FontWeight.normal,
-                  color: AppColors.textPrimary,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Explore Reports',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
+                      fontWeight: FontWeight.normal,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AllExploreReportsPage(),
+                      ),
+                    ),
+                    child: Text(
+                      'See All',
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
 
             const SizedBox(height: 20),
 
-            const PublicRescueFeed(),
+            // Only 3 shown in this preview, and only ongoing
+            // (admin-assigned) + approved reports — same rule as the
+            // admin dashboard's "Ongoing" tab in rescue_reports_page.dart.
+            const PublicRescueFeed(previewCount: 3),
 
             const SizedBox(height: 24),
           ],
