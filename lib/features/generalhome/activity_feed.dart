@@ -70,10 +70,10 @@ class ActivityFeed extends StatelessWidget {
               final data = doc.data() as Map<String, dynamic>;
               final status = data['status'] as String? ?? '';
 
-              // Once an adoption is completed (or a return has been
-              // requested), it moves to the "Post Adoption" section instead
-              // of staying in the general Activity feed.
-              if (status == 'completed' || status == 'return_requested') {
+              if (status == 'completed' ||
+                  status == 'return_requested' ||
+                  status == 'return_approved' ||
+                  status == 'withdrawn') {
                 continue;
               }
 

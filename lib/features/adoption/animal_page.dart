@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+//import 'package:respawnd1/features/generalhome/notifications_screen.dart';
+//import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
+//import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'adoption_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
@@ -147,7 +150,9 @@ class _AnimalPageState extends State<AnimalPage> {
       for (final doc in snap.docs) {
         final data = doc.data() as Map<String, dynamic>;
         final status = data['status'] as String? ?? '';
-        if (status == 'rejected') continue; // doesn't block re-adoption
+        if (status == 'rejected' || status == 'withdrawn') {
+          continue; // doesn't block re-adoption
+        }
 
         final personal = (data['personal'] as Map?) ?? {};
         final adopterId = personal['adopterId'] as String?;

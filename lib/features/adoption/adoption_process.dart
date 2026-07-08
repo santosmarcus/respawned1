@@ -15,6 +15,7 @@ enum _AdoptionProcess {
   timeToMeet,      // 4th step  – Appointment confirmed
   adoptionDay,     // 5th step  – Adoption Day! (success)
   appReject,       // 5th step  – Application Update (rejected)
+  withdrawn,       // 5th step  – Application withdrawn by adopter
 }
 
 const List<String> _stepLabels = [
@@ -181,6 +182,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         return 4;
       case _AdoptionProcess.appReject:
         return 2; // rejected stays at review
+      case _AdoptionProcess.withdrawn:
+        return 2; // withdrawn stays at review
     }
   }
 
@@ -282,6 +285,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         return _AdoptionProcess.adoptionDay;
       case 'rejected':
         return _AdoptionProcess.appReject;
+      case 'withdrawn':
+        return _AdoptionProcess.withdrawn;
       default:
         return _AdoptionProcess.intro;
     }
@@ -430,7 +435,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       final stillActiveOrDone = existing.docs.any((doc) {
         final data = doc.data();
         final status = data['status'] as String? ?? '';
-        return status != 'rejected';
+        return status != 'rejected' && status != 'withdrawn';
       });
 
       if (stillActiveOrDone) {
@@ -622,6 +627,74 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
+  Future<void> _withdrawApplication() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Withdraw Application?',
+          style: GoogleFonts.tiltWarp(
+              fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+        ),
+        content: Text(
+          'Are you sure you want to withdraw your adoption application for ${widget.animal.name}? This action cannot be undone.',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.zain(
+                  fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              'Withdraw',
+              style: GoogleFonts.zain(
+                  fontWeight: FontWeight.w700, color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || _adoptionId == null || !mounted) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(_adoptionId)
+          .update({
+        'status': 'withdrawn',
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Application withdrawn by adopter.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+
+      setState(() => _step = _AdoptionProcess.withdrawn);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to withdraw: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
 
   //Build
   @override
@@ -662,7 +735,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               child: _StepTracker(
                 labels: _stepLabels,
                 activeIndex: _activeStepIndex,
-                rejected: _step == _AdoptionProcess.appReject,
+                rejected: _step == _AdoptionProcess.appReject ||
+                    _step == _AdoptionProcess.withdrawn,
               ),
             ),
 
@@ -701,6 +775,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         return _buildAdoptionDay();
       case _AdoptionProcess.appReject:
         return _buildAppUpdate();
+      case _AdoptionProcess.withdrawn:
+        return _buildWithdrawn();
     }
   }
 
@@ -1355,6 +1431,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
 
         const SizedBox(height: 12),
+        _SecondaryButton(
+          label: 'Withdraw Application',
+          onTap: _isSubmitting ? null : _withdrawApplication,
+        ),
+
+        const SizedBox(height: 12),
 
         // ---------- for testing only!!
         Row(
@@ -1564,6 +1646,45 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       ],
     );
   }
+
+  // 5th step --- application withdrawn by the adopter
+  Widget _buildWithdrawn() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Application Withdrawn',
+          style: GoogleFonts.tiltWarp(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'You\'ve withdrawn your adoption application for ${widget.animal.name}.',
+          style: GoogleFonts.zain(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'No further action is needed on your end. If you change your mind, you\'re welcome to submit a new application for this pet or explore other rescues looking for their forever home.',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+
+        const SizedBox(height: 28),
+
+        _PrimaryButton(
+          label: 'Close',
+          onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
+        ),
+
+        const SizedBox(height: 24),
+      ],
+    );
+  }
 }
 
 // Terms and Conditions page (Adoption Day)
@@ -1660,7 +1781,7 @@ class _TermsAndConditionsPage extends StatelessWidget {
                     Text(
                       'I hereby confirm the following terms and conditions '
                           'that:',
-                      style: GoogleFonts.tiltWarp(
+                      style: GoogleFonts.zain(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary,
@@ -1699,17 +1820,6 @@ class _TermsAndConditionsPage extends StatelessWidget {
                         ),
                       );
                     }),
-                    Text(
-                      'I UNDERSTAND THAT FAILURE TO COMPLY WITH ANY OF THE ABOVE'
-                          ' PROVISIONS WILL RESULT IN THE FORFEITURE OF THE DOG '
-                          'TO THE ORGANIZATION. ',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                        height: 1.5,
-                      ),
-                    ),
                   ],
                 ),
               ),
