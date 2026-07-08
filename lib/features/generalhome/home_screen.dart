@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/donation/donation_page.dart';
 import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
 import 'package:respawnd1/features/organization/organization_list_page.dart';
@@ -193,12 +194,25 @@ class HomeScreen extends StatelessWidget {
 
             const SizedBox(height: 20),
 
-            // Only 3 shown in this preview, and only ongoing
-            // (admin-assigned) + approved reports — same rule as the
-            // admin dashboard's "Ongoing" tab in rescue_reports_page.dart.
             const PublicRescueFeed(previewCount: 3),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Post Adoption',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 16,
+                  fontWeight: FontWeight.normal,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            const PostAdoption(),
+
+            const SizedBox(height: 24)
           ],
         ),
       ),

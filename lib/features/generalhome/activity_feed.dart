@@ -25,7 +25,7 @@ class ActivityFeed extends StatelessWidget {
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('adoptions')
-              .where('adopterId', isEqualTo: uid)
+              .where('personal.adopterId', isEqualTo: uid)
               .snapshots(),
           builder: (context, adoptionsSnap) {
             final loading = caseSnap.connectionState ==
@@ -68,6 +68,16 @@ class ActivityFeed extends StatelessWidget {
 
             for (final doc in adoptionsSnap.data?.docs ?? []) {
               final data = doc.data() as Map<String, dynamic>;
+              final status = data['status'] as String? ?? '';
+
+              // Once an adoption is completed (or a return has been
+              // requested), it moves to the "Post Adoption" section instead
+              // of staying in the general Activity feed.
+              if (status == 'completed' || status == 'return_requested') {
+                continue;
+              }
+
+              final personal = (data['personal'] as Map?) ?? {};
               final history =
                   (data['statusHistory'] as List?)?.cast<Map>() ?? [];
               final latestStatus = history.isNotEmpty
@@ -78,7 +88,7 @@ class ActivityFeed extends StatelessWidget {
               items.add(ActivityItem(
                 id: doc.id,
                 type: ActivityType.adoption,
-                title: 'Adoption - ${data['animalName'] ?? 'Animal'}',
+                title: 'Adoption - ${personal['animalName'] ?? 'Animal'}',
                 subtitle: '',
                 status: latestStatus,
                 animalType: '',
@@ -112,29 +122,28 @@ class ActivityFeed extends StatelessWidget {
   }
 
 
-    Widget _emptyState(String message) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
-          decoration: BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [ BoxShadow(
-              color: AppColors.slaterspwn,
-              blurRadius: 1,
-              offset: const Offset(0, 3),
-            ),
-            ],
+  Widget _emptyState(String message) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [ BoxShadow(
+            color: AppColors.slaterspwn,
+            blurRadius: 1,
+            offset: const Offset(0, 3),
           ),
-          child: Text(
-            message, textAlign: TextAlign.center,
-            style: GoogleFonts.tiltWarp(
-                fontSize: 14, color: AppColors.slaterspwn),
-          ),
+          ],
         ),
-      );
-    }
+        child: Text(
+          message, textAlign: TextAlign.center,
+          style: GoogleFonts.tiltWarp(
+              fontSize: 14, color: AppColors.slaterspwn),
+        ),
+      ),
+    );
+  }
 }
-

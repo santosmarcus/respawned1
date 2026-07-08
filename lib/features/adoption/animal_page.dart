@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-//import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-//import 'package:respawnd1/features/generalhome/user_profile.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../../app_theme.dart';
-//import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'adoption_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 
 // Extended detail data
 class _AnimalDetail {
@@ -101,6 +101,7 @@ class AnimalPage extends StatefulWidget {
 
 class _AnimalPageState extends State<AnimalPage> {
   late bool _favorited;
+  bool _checkingAdoption = false;
 
   _AnimalDetail get _detail =>
       _detailMap[widget.animal.name] ??
@@ -121,6 +122,110 @@ class _AnimalPageState extends State<AnimalPage> {
   void initState() {
     super.initState();
     _favorited = widget.animal.favorited;
+  }
+
+  // Ensures a pet can't be adopted more than once at a time, and lets the
+  // current user resume/view their own existing application instead of
+  // starting a brand-new one for the same pet.
+  Future<void> _handleAdoptTap() async {
+    if (_checkingAdoption) return;
+    setState(() => _checkingAdoption = true);
+
+    final animal = widget.animal;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .where('personal.animalId', isEqualTo: animal.id)
+          .get();
+
+      QueryDocumentSnapshot? blockingDoc;
+      QueryDocumentSnapshot? myActiveDoc;
+      QueryDocumentSnapshot? myCompletedDoc;
+
+      for (final doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = data['status'] as String? ?? '';
+        if (status == 'rejected') continue; // doesn't block re-adoption
+
+        final personal = (data['personal'] as Map?) ?? {};
+        final adopterId = personal['adopterId'] as String?;
+
+        if (adopterId == uid) {
+          if (status == 'completed' ||
+              status == 'return_requested' ||
+              status == 'return_approved') {
+            myCompletedDoc = doc;
+          } else {
+            myActiveDoc = doc;
+          }
+        } else {
+          blockingDoc = doc;
+        }
+      }
+
+      if (!mounted) return;
+
+      if (myCompletedDoc != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                PostAdoptionMonitoringPage(adoptionId: myCompletedDoc!.id),
+          ),
+        );
+        return;
+      }
+
+      if (blockingDoc != null) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: AppColors.background,
+            title: Text('Not Available',
+                style: GoogleFonts.tiltWarp(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+            content: Text(
+              '${animal.name} already has an ongoing or completed adoption and isn\'t available right now.',
+              style: GoogleFonts.zain(color: AppColors.textPrimary),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('OK',
+                    style: GoogleFonts.zain(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AdoptionProcess(
+            animal: animal,
+            existingAdoptionId: myActiveDoc?.id,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => AdoptionProcess(animal: animal),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _checkingAdoption = false);
+    }
   }
 
   @override
@@ -334,15 +439,9 @@ class _AnimalPageState extends State<AnimalPage> {
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                AdoptionProcess(animal: animal),
-                          ),
-                        );
-                      },
+                      onPressed: _checkingAdoption
+                          ? null
+                          : () => _handleAdoptTap(),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.yellowrspwn,
                         foregroundColor: AppColors.textPrimary,
@@ -352,7 +451,7 @@ class _AnimalPageState extends State<AnimalPage> {
                         ),
                       ),
                       child: Text(
-                        'Adopt Me',
+                        _checkingAdoption ? 'Checking...' : 'Adopt Me',
                         style: GoogleFonts.tiltWarp(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,

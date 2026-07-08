@@ -28,7 +28,12 @@ const List<String> _stepLabels = [
 
 class AdoptionProcess extends StatefulWidget {
   final Animal animal;
-  const AdoptionProcess({super.key, required this.animal});
+  final String? existingAdoptionId;
+  const AdoptionProcess({
+    super.key,
+    required this.animal,
+    this.existingAdoptionId,
+  });
   @override
   State<AdoptionProcess> createState() => _AdoptionProcessState();
 }
@@ -106,6 +111,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   String? _adoptionId;
   bool _isSubmitting = false;
+  bool _isLoadingExisting = false;
 
   // Appointment
   DateTime? _appointmentDate;
@@ -140,7 +146,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   @override
   void initState() {
     super.initState();
-    _prefillFromAccount();
+    if (widget.existingAdoptionId != null) {
+      _isLoadingExisting = true;
+      _loadExistingAdoption();
+    } else {
+      _prefillFromAccount();
+    }
   }
 
   @override
@@ -255,6 +266,138 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     } catch (_) {}
   }
 
+  _AdoptionProcess _stepForStatus(String? status) {
+    switch (status) {
+      case 'pending_appointment':
+        return _AdoptionProcess.bookAppointment;
+      case 'under_review':
+        return _AdoptionProcess.appReview;
+      case 'appointment_confirmed':
+        return _AdoptionProcess.timeToMeet;
+      case 'completed':
+        return _AdoptionProcess.adoptionDay;
+      case 'return_requested':
+        return _AdoptionProcess.adoptionDay;
+      case 'return_approved':
+        return _AdoptionProcess.adoptionDay;
+      case 'rejected':
+        return _AdoptionProcess.appReject;
+      default:
+        return _AdoptionProcess.intro;
+    }
+  }
+
+  // Reloads every saved answer from a previously-submitted application so
+  // the person can see exactly what they entered instead of a blank form.
+  Future<void> _loadExistingAdoption() async {
+    final id = widget.existingAdoptionId;
+    if (id == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(id)
+          .get();
+
+      final data = doc.data();
+      if (data == null) {
+        if (mounted) setState(() => _isLoadingExisting = false);
+        return;
+      }
+
+      final personal = (data['personal'] as Map?) ?? {};
+      final household = (data['household'] as Map?) ?? {};
+      final petExperience = (data['petExperience'] as Map?) ?? {};
+      final currentPets = (petExperience['currentPets'] as Map?) ?? {};
+      final lifestyle = (data['lifestyle'] as Map?) ?? {};
+      final canAfford = (lifestyle['canAfford'] as Map?) ?? {};
+      final uploads = (data['uploads'] as Map?) ?? {};
+      final agreement = (data['agreement'] as Map?) ?? {};
+
+      final appointmentTs = data['appointmentDate'];
+
+      setState(() {
+        _adoptionId = id;
+
+        // Personal Information
+        _nameCtrl.text = personal['adopterName'] as String? ?? '';
+        _emailCtrl.text = personal['adopterEmail'] as String? ?? '';
+        _ageCtrl.text = personal['adopterAge'] as String? ?? '';
+        _phoneCtrl.text = personal['adopterPhone'] as String? ?? '';
+        _city = personal['adopterCity'] as String?;
+
+        // Household & Living Information
+        _residenceType = household['residenceType'] as String?;
+        _residenceOtherCtrl.text =
+            household['residenceOther'] as String? ?? '';
+        _ownershipStatus = household['ownershipStatus'] as String?;
+        _allowsPets = household['landlordAllowsPets'] as bool? ?? false;
+        _householdMembers = household['householdMembers'] as int? ?? 0;
+
+        // Pet Experience
+        _hadPetsBefore = petExperience['hadPetsBefore'] as bool? ?? false;
+        _currentDogs = currentPets['dogs'] as int? ?? 0;
+        _currentCats = currentPets['cats'] as int? ?? 0;
+        _currentBirds = currentPets['birds'] as int? ?? 0;
+        _currentFish = currentPets['fish'] as int? ?? 0;
+        _currentReptiles = currentPets['reptiles'] as int? ?? 0;
+        _currentOther = currentPets['other'] as int? ?? 0;
+        _currentOtherTypeCtrl.text = currentPets['otherType'] as String? ?? '';
+        _petsVaccinated = petExperience['currentPetsVaccinated'] as String?;
+        _petsSpayedNeutered =
+        petExperience['currentPetsSpayedNeutered'] as String?;
+
+        // Lifestyle & Care
+        _hoursAlone = lifestyle['hoursAlone'] as String?;
+        _caregiverCtrl.text = lifestyle['primaryCaregiver'] as String? ?? '';
+        _petStayLocation = lifestyle['petStayLocation'] as String?;
+        _canAffordFood = canAfford['food'] as bool? ?? false;
+        _canAffordVaccinations = canAfford['vaccinations'] as bool? ?? false;
+        _canAffordVetVisits = canAfford['vetVisits'] as bool? ?? false;
+        _canAffordEmergencyCare =
+            canAfford['emergencyMedicalCare'] as bool? ?? false;
+        _canAffordGrooming = canAfford['grooming'] as bool? ?? false;
+        _canAffordCareSupplies = canAfford['careSupplies'] as bool? ?? false;
+        _monthlyBudget = lifestyle['monthlyBudget'] as String?;
+        _reasonCtrl.text = agreement['reason'] as String? ?? '';
+
+        // Required Uploads (already uploaded — keep the saved URLs)
+        _governmentIdUrl = uploads['governmentId'] as String?;
+        _proofOfAddressUrl = uploads['proofOfAddress'] as String?;
+        _digitalSignatureUrl = uploads['digitalSignature'] as String?;
+        _homePhotosUrl = uploads['homePhotos'] as String?;
+
+        // Agreements
+        _agreeCare = agreement['care'] as bool? ?? false;
+        _agreeNoAbandon = agreement['noAbandon'] as bool? ?? false;
+        _agreeFollowup = agreement['followUp'] as bool? ?? false;
+        _agreeAccurate = agreement['infoAccurate'] as bool? ?? false;
+        _agreeNotGuaranteed =
+            agreement['approvalNotGuaranteed'] as bool? ?? false;
+
+        // Appointment
+        if (appointmentTs is Timestamp) {
+          _appointmentDate = appointmentTs.toDate();
+        }
+        _appointmentType = data['appointmentType'] as String? ?? _appointmentType;
+        _appointmentTime = data['appointmentTime'] as String?;
+
+        _step = _stepForStatus(data['status'] as String?);
+        _isLoadingExisting = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingExisting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load your application: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _submitAdoptionForm() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -276,6 +419,33 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
+
+      // Safety net: don't allow a second non-rejected adoption for the same
+      // animal, even if the entry-point check was somehow bypassed.
+      final existing = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .where('personal.animalId', isEqualTo: widget.animal.id)
+          .get();
+
+      final stillActiveOrDone = existing.docs.any((doc) {
+        final data = doc.data();
+        final status = data['status'] as String? ?? '';
+        return status != 'rejected';
+      });
+
+      if (stillActiveOrDone) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  '${widget.animal.name} already has an ongoing or completed adoption.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          setState(() => _isSubmitting = false);
+        }
+        return;
+      }
 
       final docRef = FirebaseFirestore.instance.collection('adoptions').doc();
 
@@ -500,7 +670,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
             // body
             Expanded(
-              child: SingleChildScrollView(
+              child: _isLoadingExisting
+                  ? const Center(
+                child: CircularProgressIndicator(
+                    color: AppColors.greenrspwn),
+              )
+                  : SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _buildStepBody(),
               ),
@@ -1298,9 +1473,42 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          'The organization will safely deliver your pet to your generalhome. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies.\n\nWe\'re so happy for you and your new best friend!',
+          'The organization will safely deliver your pet to your generalhome. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies. For your convenience, you may review the Terms and Conditions in advance below.',
           style: GoogleFonts.zain(
               fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'We\'re so happy for you and your new best friend!',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+
+        const SizedBox(height: 16),
+
+        Center(
+          child: GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => _TermsAndConditionsPage(
+                    animalName: widget.animal.name,
+                  ),
+                ),
+              );
+            },
+            child: Text(
+              'View Terms and Conditions',
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+                decoration: TextDecoration.underline,
+                decorationColor: AppColors.textPrimary,
+              ),
+            ),
+          ),
         ),
 
         const SizedBox(height: 28),
@@ -1354,6 +1562,161 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
         const SizedBox(height: 24),
       ],
+    );
+  }
+}
+
+// Terms and Conditions page (Adoption Day)
+class _TermsAndConditionsPage extends StatelessWidget {
+  final String animalName;
+
+  const _TermsAndConditionsPage({required this.animalName});
+
+  List<String> get _terms => [
+    'I am over eighteen (18) years of age and can legally adopt.',
+    '$animalName, hereinafter referred to as the pet, is being transferred '
+        'to the adopting owner with the understanding that the adopter is '
+        'taking possession of the pet to treat and be responsible for it as '
+        'their own pet.',
+    'The pet will be treated as a family member with loving care and '
+        'affection. I/we will do my/our best to ensure the pet\'s safety and '
+        'well-being.',
+    'I/we will feed the pet at least twice a day and provide a fresh water '
+        'supply at all times.',
+    'I will not leave the pet outside my home and will not let it be '
+        'isolated from the family. I will walk my pet on a leash or '
+        'accompanied lead whenever I take my pet out, and will never keep it '
+        'chained or tied up in a yard, garage, patio, balcony, or pen, or '
+        'leave the pet outdoors, even in a fenced yard.',
+    'I will not have the pet attack-trained, and will not use it for any '
+        'purpose other than companionship. I will not have the pet\'s ears '
+        'cropped, nor will I have its tail docked. I will never allow any '
+        'physical, mental, or emotional abuse of the pet.',
+    'I will take the pet to a licensed veterinarian when shots are due, but '
+        'in no event later than one year after its last vet visit. I will '
+        'ensure required and/or needed veterinary care, including rabies '
+        'shots as required every one to three years, yearly booster shots '
+        '(e.g. 5-in-1, 6-in-1 vaccines), and prompt treatment by a licensed '
+        'veterinarian for any illness or injury.',
+    'I/we affirm that no member of my household is allergic to or objects '
+        'to keeping the pet, and that all household members have agreed to '
+        'welcome the pet into the home.',
+    'I/we agree to allow the organization to conduct reasonable post-'
+        'adoption home visits or follow-up check-ins to ensure the pet\'s '
+        'continued well-being.',
+    'I/we understand that if, for any reason, I/we are no longer able to '
+        'care for the pet, I/we will first return the pet to the '
+        'organization rather than rehoming, abandoning, or surrendering it '
+        'to another shelter or individual.',
+    'I/we agree that a formal Adoption Agreement containing these terms '
+        'will be reviewed and signed by both parties on the day of the '
+        'adoption, and that this signed agreement will govern the adoption.',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: const Icon(Icons.chevron_left,
+                    size: 30, color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Terms and Conditions',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Please read and agree to the following terms and '
+                          'conditions before you continue. A formal Adoption '
+                          'Agreement containing these terms will be reviewed '
+                          'and signed by both parties on the day of the '
+                          'adoption.',
+                      style: GoogleFonts.zain(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                          height: 1.5),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'I hereby confirm the following terms and conditions '
+                          'that:',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...List.generate(_terms.length, (i) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 22,
+                              child: Text(
+                                '${i + 1}.',
+                                style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                _terms[i],
+                                style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  color: AppColors.textPrimary,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    Text(
+                      'I UNDERSTAND THAT FAILURE TO COMPLY WITH ANY OF THE ABOVE'
+                          ' PROVISIONS WILL RESULT IN THE FORFEITURE OF THE DOG '
+                          'TO THE ORGANIZATION. ',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
