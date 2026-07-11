@@ -2,10 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-//import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-//import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
-//import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'adoption_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
@@ -106,20 +103,25 @@ class _AnimalPageState extends State<AnimalPage> {
   late bool _favorited;
   bool _checkingAdoption = false;
 
-  _AnimalDetail get _detail =>
-      _detailMap[widget.animal.name] ??
-          _AnimalDetail(
-            dateOfBirth: 'Unknown',
-            size: 'Medium',
-            coatLength: 'Short',
-            health: widget.animal.healthTags,
-            keyCharacteristics:
-            widget.animal.badge != null ? [widget.animal.badge!] : [],
-            rescueBackground: ['Rescued from street'],
-            description: widget.animal.description,
-            organization: 'ResPAWnd Partner',
-            orgSubtitle: 'Verified rescue organization',
-          );
+  _AnimalDetail get _detail {
+    final animal = widget.animal;
+    final fallback = _detailMap[animal.name];
+    return _AnimalDetail(
+      dateOfBirth: fallback?.dateOfBirth ?? 'Unknown',
+      size: animal.size,
+      coatLength: animal.coatLength,
+      health: animal.healthTags,
+      keyCharacteristics: animal.keyCharacteristics.isNotEmpty
+          ? animal.keyCharacteristics
+          : (animal.badge != null ? [animal.badge!] : []),
+      rescueBackground: animal.rescueBackground.isNotEmpty
+          ? animal.rescueBackground
+          : ['Rescued from street'],
+      description: fallback?.description ?? animal.description,
+      organization: fallback?.organization ?? 'ResPAWnd Partner',
+      orgSubtitle: fallback?.orgSubtitle ?? 'Verified rescue organization',
+    );
+  }
 
   @override
   void initState() {
@@ -127,9 +129,6 @@ class _AnimalPageState extends State<AnimalPage> {
     _favorited = widget.animal.favorited;
   }
 
-  // Ensures a pet can't be adopted more than once at a time, and lets the
-  // current user resume/view their own existing application instead of
-  // starting a brand-new one for the same pet.
   Future<void> _handleAdoptTap() async {
     if (_checkingAdoption) return;
     setState(() => _checkingAdoption = true);
@@ -150,9 +149,7 @@ class _AnimalPageState extends State<AnimalPage> {
       for (final doc in snap.docs) {
         final data = doc.data() as Map<String, dynamic>;
         final status = data['status'] as String? ?? '';
-        if (status == 'rejected' || status == 'withdrawn') {
-          continue; // doesn't block re-adoption
-        }
+        if (status == 'rejected') continue; // doesn't block re-adoption
 
         final personal = (data['personal'] as Map?) ?? {};
         final adopterId = personal['adopterId'] as String?;
@@ -437,6 +434,10 @@ class _AnimalPageState extends State<AnimalPage> {
                     ],
                   ),
 
+                  const SizedBox(height: 20),
+
+                  _SponsorsRow(animalId: animal.id),
+
                   const SizedBox(height: 28),
 
                   // Adopt me button
@@ -577,6 +578,39 @@ class _YellowTag extends StatelessWidget {
           color: AppColors.textPrimary,
         ),
       ),
+    );
+  }
+}
+// Sponsors row
+class _SponsorsRow extends StatelessWidget {
+  final int animalId;
+  const _SponsorsRow({required this.animalId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('sponsors')
+          .where('animalId', isEqualTo: animalId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final count = snapshot.data?.docs.length ?? 0;
+        final label = count == 1 ? '1 sponsor' : '$count sponsors';
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _SectionHeader(label: 'Sponsors'),
+            Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 15,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -57,7 +57,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   String? _residenceType;
   final _residenceOtherCtrl = TextEditingController();
   String? _ownershipStatus;
-  bool _allowsPets = false;
   int _householdMembers = 0;
 
   //Pet Experience
@@ -292,8 +291,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
-  // Reloads every saved answer from a previously-submitted application so
-  // the person can see exactly what they entered instead of a blank form.
+  // Reloads every saved answer
   Future<void> _loadExistingAdoption() async {
     final id = widget.existingAdoptionId;
     if (id == null) return;
@@ -336,7 +334,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _residenceOtherCtrl.text =
             household['residenceOther'] as String? ?? '';
         _ownershipStatus = household['ownershipStatus'] as String?;
-        _allowsPets = household['landlordAllowsPets'] as bool? ?? false;
         _householdMembers = household['householdMembers'] as int? ?? 0;
 
         // Pet Experience
@@ -424,9 +421,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
-
-      // Safety net: don't allow a second non-rejected adoption for the same
-      // animal, even if the entry-point check was somehow bypassed.
       final existing = await FirebaseFirestore.instance
           .collection('adoptions')
           .where('personal.animalId', isEqualTo: widget.animal.id)
@@ -483,8 +477,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               ? _residenceOtherCtrl.text.trim()
               : null,
           'ownershipStatus': _ownershipStatus,
-          'landlordAllowsPets':
-          _ownershipStatus == 'Renting' ? _allowsPets : null,
           'householdMembers': _householdMembers,
         },
         'petExperience': {
@@ -899,19 +891,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Ownership Status',
                 value: _ownershipStatus,
-                options: const ['Owned', 'Renting', 'Living with Parents'],
+                options: const ['Owned', 'Renting (Allowed Pets)', 'Living with Parents'],
                 onChanged: (v) => setState(() => _ownershipStatus = v),
               ),
-              if (_ownershipStatus == 'Renting') ...[
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('If renting, landlord allows pets',
-                      style: GoogleFonts.zain(fontSize: 14)),
-                  value: _allowsPets,
-                  onChanged: (v) => setState(() => _allowsPets = v),
-                ),
-              ],
               const SizedBox(height: 12),
               _CounterField(
                 label: 'Number of Household Members',
@@ -924,12 +906,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               // Pet Experience
               _SectionTitle('Pet Experience'),
               const SizedBox(height: 8),
-              SwitchListTile(
+              CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('Owned pets before?',
                     style: GoogleFonts.zain(fontSize: 14)),
                 value: _hadPetsBefore,
-                onChanged: (v) => setState(() => _hadPetsBefore = v),
+                onChanged: (v) => setState(() => _hadPetsBefore = v!),
               ),
               const SizedBox(height: 8),
               Text('Current pets',
