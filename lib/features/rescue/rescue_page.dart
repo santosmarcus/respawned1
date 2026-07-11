@@ -45,10 +45,51 @@ class _RescuePageState extends State<RescuePage> {
   final TextEditingController _witnessNumberController = TextEditingController();
 
   String? _selectedUrgency;
+  String? _selectedRescueType;
   String? _coordinateChoice;
   String? _adoptionChoice;
   String? _selectedAnimalType;
   bool _isLoading = false;
+
+  // Rescue Type options
+  static const List<Map<String, String>> _rescueTypeOptions = [
+    {
+      'label': 'Illness',
+      'description':
+      'Appears weak, vomiting, coughing, skin disease; suspected illness',
+    },
+    {
+      'label': 'Injury',
+      'description': 'Visible wounds, fractures, bleeding',
+    },
+    {
+      'label': 'Abandonment',
+      'description': 'Animal left without care',
+    },
+    {
+      'label': 'Neglect or Abuse',
+      'description':
+      'Suspected animal cruelty, starvation, chaining, hoarding',
+    },
+    {
+      'label': 'Pet Surrender',
+      'description': 'Voluntary ownership surrender',
+    },
+    {
+      'label': 'Lost Pet',
+      'description': 'Owner reporting a missing pet for reunification',
+    },
+    {
+      'label': 'Trapped/Disaster',
+      'description':
+      'Affected by natural disasters / Stuck in debris, infrastructure',
+    },
+    {
+      'label': 'Aggressive Animal',
+      'description':
+      'Displaying aggressive behavior and posing a safety concern',
+    },
+  ];
 
   final List<_MediaItem?> _mediaFiles = [null, null, null, null];
   final ImagePicker _picker = ImagePicker();
@@ -281,6 +322,89 @@ class _RescuePageState extends State<RescuePage> {
       }
     } catch (_) {
       setState(() => _loadingLocation = false);
+    }
+  }
+
+  //Rescue Type picker
+  Future<void> _pickRescueType() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: AppColors.slaterspwn,
+                      borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Rescue Type',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.separated(
+                  controller: scrollController,
+                  itemCount: _rescueTypeOptions.length,
+                  separatorBuilder: (_, __) =>
+                      Divider(height: 1, color: AppColors.slaterspwn.withOpacity(0.4)),
+                  itemBuilder: (context, index) {
+                    final option = _rescueTypeOptions[index];
+                    final isSelected = option['label'] == _selectedRescueType;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        option['label']!,
+                        style: GoogleFonts.zain(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      subtitle: Text(
+                        option['description']!,
+                        style: GoogleFonts.zain(
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_circle,
+                          color: AppColors.textPrimary, size: 20)
+                          : null,
+                      onTap: () => Navigator.pop(context, option['label']),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (selected != null) {
+      setState(() => _selectedRescueType = selected);
     }
   }
 
@@ -895,6 +1019,41 @@ class _RescuePageState extends State<RescuePage> {
 
                   const SizedBox(height: 18),
 
+                  // Rescue Type
+                  _buildLabel('Rescue Type', required: true),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: _pickRescueType,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.slaterspwn),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _selectedRescueType ?? 'Select',
+                            style: GoogleFonts.zain(
+                              fontSize: 14,
+                              color: _selectedRescueType == null
+                                  ? AppColors.textSecondary
+                                  : AppColors.textPrimary,
+                            ),
+                          ),
+                          const Icon(Icons.keyboard_arrow_down,
+                              color: AppColors.textPrimary, size: 20),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
                   // Describe Condition
                   _buildLabel('Describe Condition', required: true),
                   const SizedBox(height: 6),
@@ -1348,6 +1507,7 @@ class _RescuePageState extends State<RescuePage> {
     final filledCount = _mediaFiles.where((f) => f != null).length;
 
     if (condition.isEmpty ||
+        _selectedRescueType == null ||
         _selectedUrgency == null ||
         _selectedAnimalType == null ||
         _coordinateChoice == null ||
@@ -1387,6 +1547,7 @@ class _RescuePageState extends State<RescuePage> {
             .trim(),
         'reporterPhone': userData?['phone'] ?? '',
         'animalType': _selectedAnimalType,
+        'rescueType': _selectedRescueType,
         'condition': condition,
         'urgency': _selectedUrgency,
         'address': _addressController.text.trim(),
@@ -1395,7 +1556,6 @@ class _RescuePageState extends State<RescuePage> {
         'witnessPhone': _witnessNumberController.text.trim(),
         'interestedToAdopt': _adoptionChoice,
         'status': 'pending',
-        'adminApproved': false,
         'statusHistory': [
           {
             'status': 'Rescue case is being reviewed.',
