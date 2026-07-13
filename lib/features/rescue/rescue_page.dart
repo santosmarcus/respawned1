@@ -31,6 +31,20 @@ class _MediaItem {
   });
 }
 
+class _FoundAnimalEntry {
+  final TextEditingController speciesController = TextEditingController();
+  final TextEditingController breedController = TextEditingController();
+  final TextEditingController colorController = TextEditingController();
+  String? sex;
+  String? size;
+
+  void dispose() {
+    speciesController.dispose();
+    breedController.dispose();
+    colorController.dispose();
+  }
+}
+
 class RescuePage extends StatefulWidget {
   const RescuePage({super.key});
 
@@ -50,6 +64,29 @@ class _RescuePageState extends State<RescuePage> {
   String? _adoptionChoice;
   String? _selectedAnimalType;
   bool _isLoading = false;
+
+  bool? _isOwner;
+  String? _scannedTagId;
+
+  // Owner-side controllers
+  final TextEditingController _petNameController = TextEditingController();
+  final TextEditingController _lostBreedController = TextEditingController();
+  final TextEditingController _lostColorController = TextEditingController();
+  DateTime? _lastSeenDate;
+  TimeOfDay? _lastSeenTime;
+  final TextEditingController _rewardAmountController = TextEditingController();
+  final TextEditingController _ownerContactController = TextEditingController();
+  String? _lostSex;
+  String? _temperament;
+  bool _offerReward = false;
+
+  // Finder-side: one card per animal found (supports a multi-animal group case)
+  final List<_FoundAnimalEntry> _foundAnimals = [_FoundAnimalEntry()];
+  final TextEditingController _finderContactController = TextEditingController();
+  String? _animalStatus; // 'with_finder' | 'still_roaming' | 'brought_to_vet'
+  bool _finderNeedsRescue = false;
+
+  bool get _isLostPetType => _selectedRescueType == 'Lost Pet';
 
   // Rescue Type options
   static const List<Map<String, String>> _rescueTypeOptions = [
@@ -114,6 +151,15 @@ class _RescuePageState extends State<RescuePage> {
     _conditionController.dispose();
     _witnessNameController.dispose();
     _witnessNumberController.dispose();
+    _petNameController.dispose();
+    _lostBreedController.dispose();
+    _lostColorController.dispose();
+    _rewardAmountController.dispose();
+    _ownerContactController.dispose();
+    _finderContactController.dispose();
+    for (final a in _foundAnimals) {
+      a.dispose();
+    }
     super.dispose();
   }
 
@@ -683,9 +729,14 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   void _handleScanResult(String result) {
+    setState(() => _scannedTagId = result);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Tag scanned: $result'),
+        content: Text(
+          _isLostPetType
+              ? 'Tag found — this animal already has a registered profile. Owner will be notified directly.'
+              : 'Tag scanned: $result',
+        ),
         backgroundColor: Colors.green,
       ),
     );
@@ -1054,260 +1105,268 @@ class _RescuePageState extends State<RescuePage> {
 
                   const SizedBox(height: 20),
 
-                  // Describe Condition
-                  _buildLabel('Describe Condition', required: true),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _conditionController,
-                    decoration: InputDecoration(
-                      hintText: 'Enter condition',
-                      hintStyle: GoogleFonts.zain(
-                        color: AppColors.textSecondary,
+                  if (!_isLostPetType) ...[
+                    // Describe Condition
+                    _buildLabel('Describe Condition', required: true),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _conditionController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter condition',
+                        hintStyle: GoogleFonts.zain(
+                          color: AppColors.textSecondary,
+                          fontSize: 14,
+                        ),
+                        enabledBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+                        ),
+                        focusedBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.only(bottom: 8),
+                      ),
+                      style: GoogleFonts.zain(
                         fontSize: 14,
+                        color: AppColors.textPrimary,
                       ),
-                      enabledBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
-                      ),
-                      focusedBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
-                      ),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.only(bottom: 8),
                     ),
-                    style: GoogleFonts.zain(
-                      fontSize: 14,
-                      color: AppColors.textPrimary,
+
+                    const SizedBox(height: 20),
+
+                    _buildLabel('Type of Animal', required: true),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Found more than one? Add each animal below — they will '
+                          'be tracked together as one case.',
+                      style: GoogleFonts.zain(
+                          fontSize: 11, color: AppColors.textSecondary),
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                    ..._buildAnimalEntryFields(),
 
-                  const SizedBox(height: 20),
-                  // Type of Animal
-                  _buildLabel('Type of Animal', required: true),
-                  const SizedBox(height: 8),
-                  _buildCheckboxOption2('Dog', _selectedAnimalType,
-                          (val) => setState(() => _selectedAnimalType = val)),
-                  _buildCheckboxOption2('Cat', _selectedAnimalType,
-                          (val) => setState(() => _selectedAnimalType = val)),
+                    const SizedBox(height: 20),
 
-                  const SizedBox(height: 20),
+                    // Select Urgency
+                    _buildLabel('Select Urgency', required: true),
+                    const SizedBox(height: 8),
+                    _buildCheckboxOption('Low'),
+                    _buildCheckboxOption('Medium'),
+                    _buildCheckboxOption('Critical'),
 
-                  // Select Urgency
-                  _buildLabel('Select Urgency', required: true),
-                  const SizedBox(height: 8),
-                  _buildCheckboxOption('Low'),
-                  _buildCheckboxOption('Medium'),
-                  _buildCheckboxOption('Critical'),
+                    const SizedBox(height: 20),
 
-                  const SizedBox(height: 20),
-
-                  // Coordinate with shelter
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Would you be willing to coordinate with the shelter to assist in the rescue?',
+                    // Coordinate with shelter
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Would you be willing to coordinate with the shelter to assist in the rescue?',
+                            style: GoogleFonts.zain(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          '*',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: Checkbox(
+                            value: _coordinateChoice == 'yes',
+                            onChanged: (val) => setState(()
+                            => _coordinateChoice = 'yes'),
+                            activeColor: AppColors.textPrimary,
+                            side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Yes, I would.',
                           style: GoogleFonts.zain(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
+                            fontSize: 14,
                             color: AppColors.textPrimary,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        '*',
-                        style: TextStyle(
-                          color: Colors.red,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: Checkbox(
-                          value: _coordinateChoice == 'yes',
-                          onChanged: (val) => setState(()
-                          => _coordinateChoice = 'yes'),
-                          activeColor: AppColors.textPrimary,
-                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Yes, I would.',
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: Checkbox(
-                          value: _coordinateChoice == 'no',
-                          onChanged: (val) =>
-                              setState(() => _coordinateChoice = 'no'),
-                          activeColor: AppColors.textPrimary,
-                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'No, but I can refer you to witnesses who can assist.',
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (_coordinateChoice == 'no') ...[
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: _witnessNameController,
-                      decoration: InputDecoration(
-                        hintText: 'Enter name of witness',
-                        hintStyle: GoogleFonts.zain(
-                          color: AppColors.textSecondary,
-                          fontSize: 14,
-                        ),
-                        enabledBorder: const UnderlineInputBorder(
-                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
-                        ),
-                        focusedBorder: const UnderlineInputBorder(
-                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
-                        ),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.only(bottom: 8),
-                      ),
-                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                      ],
                     ),
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: _witnessNumberController,
-                      keyboardType: TextInputType.phone,
-                      decoration: InputDecoration(
-                        hintText: 'Enter mobile number of witness',
-                        hintStyle: GoogleFonts.zain(
-                          color: AppColors.textSecondary,
-                          fontSize: 14,
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: Checkbox(
+                            value: _coordinateChoice == 'no',
+                            onChanged: (val) =>
+                                setState(() => _coordinateChoice = 'no'),
+                            activeColor: AppColors.textPrimary,
+                            side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
                         ),
-                        enabledBorder: const UnderlineInputBorder(
-                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+                        const SizedBox(width: 8),
+                        Text(
+                          'No, but I can refer you to witnesses who can assist.',
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
-                        focusedBorder: const UnderlineInputBorder(
-                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
-                        ),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.only(bottom: 8),
-                      ),
-                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                      ],
                     ),
+                    if (_coordinateChoice == 'no') ...[
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _witnessNameController,
+                        decoration: InputDecoration(
+                          hintText: 'Enter name of witness',
+                          hintStyle: GoogleFonts.zain(
+                            color: AppColors.textSecondary,
+                            fontSize: 14,
+                          ),
+                          enabledBorder: const UnderlineInputBorder(
+                            borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+                          ),
+                          focusedBorder: const UnderlineInputBorder(
+                            borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+                          ),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.only(bottom: 8),
+                        ),
+                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _witnessNumberController,
+                        keyboardType: TextInputType.phone,
+                        decoration: InputDecoration(
+                          hintText: 'Enter mobile number of witness',
+                          hintStyle: GoogleFonts.zain(
+                            color: AppColors.textSecondary,
+                            fontSize: 14,
+                          ),
+                          enabledBorder: const UnderlineInputBorder(
+                            borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+                          ),
+                          focusedBorder: const UnderlineInputBorder(
+                            borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+                          ),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.only(bottom: 8),
+                        ),
+                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                      ),
+                    ],
+
+                    // Willing to adopt
+                    const SizedBox(height: 20,),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Would you like to adopt the animal once rescued?',
+                            style: GoogleFonts.zain(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          '*',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8,),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: Checkbox(
+                            value: _adoptionChoice == 'yes',
+                            onChanged: (val) => setState(()
+                            => _adoptionChoice = 'yes'),
+                            activeColor: AppColors.textPrimary,
+                            side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Yes, I would.',
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: Checkbox(
+                            value: _adoptionChoice == 'no',
+                            onChanged: (val) =>
+                                setState(() => _adoptionChoice = 'no'),
+                            activeColor: AppColors.textPrimary,
+                            side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'No.',
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    ..._buildLostPetFields(),
                   ],
-
-                  // Willing to adopt
-                  const SizedBox(height: 20,),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Would you like to adopt the animal once rescued?',
-                          style: GoogleFonts.zain(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        '*',
-                        style: TextStyle(
-                          color: Colors.red,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 8,),
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: Checkbox(
-                          value: _adoptionChoice == 'yes',
-                          onChanged: (val) => setState(()
-                          => _adoptionChoice = 'yes'),
-                          activeColor: AppColors.textPrimary,
-                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Yes, I would.',
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: Checkbox(
-                          value: _adoptionChoice == 'no',
-                          onChanged: (val) =>
-                              setState(() => _adoptionChoice = 'no'),
-                          activeColor: AppColors.textPrimary,
-                          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'No.',
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
@@ -1502,14 +1561,561 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
+
+  Future<void> _pickLastSeenDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _lastSeenDate ?? now,
+      firstDate: now.subtract(const Duration(days: 365)),
+      lastDate: now,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.yellowrspwn,
+              onPrimary: AppColors.textPrimary,
+              surface: AppColors.background,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) setState(() => _lastSeenDate = picked);
+  }
+
+  Future<void> _pickLastSeenTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _lastSeenTime ?? TimeOfDay.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.yellowrspwn,
+              onPrimary: AppColors.textPrimary,
+              surface: AppColors.background,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) setState(() => _lastSeenTime = picked);
+  }
+
+  String _formatDate(DateTime d) =>
+      '${_monthName(d.month)} ${d.day}, ${d.year}';
+
+  String _monthName(int m) => const [
+    '', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ][m];
+
+  Widget _pickerField({
+    required String label,
+    required VoidCallback onTap,
+    required IconData icon,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: AppColors.textPrimary, width: 1),
+          ),
+        ),
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: AppColors.textPrimary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildLostPetFields() {
+    return [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              'Are you the owner?',
+              style: GoogleFonts.zain(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Text('*',
+              style: TextStyle(
+                  color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold)),
+        ],
+      ),
+      const SizedBox(height: 8),
+      _buildOwnerToggle('Yes, I am the owner.', true),
+      const SizedBox(height: 4),
+      _buildOwnerToggle(
+          'No, I am a rescuer reporting a suspected lost pet.', false),
+
+      if (_scannedTagId != null) ...[
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.greenrspwn.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.verified_outlined,
+                  size: 18, color: AppColors.textPrimary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'A registered ID tag was found on scan — the owner will be '
+                      'notified directly instead of a manual match.',
+                  style: GoogleFonts.zain(
+                      fontSize: 12, color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+
+      if (_isOwner == true) ..._buildOwnerFields(),
+      if (_isOwner == false) ..._buildFinderFields(),
+    ];
+  }
+
+  Widget _buildOwnerToggle(String label, bool value) {
+    return GestureDetector(
+      onTap: () => setState(() => _isOwner = value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: Checkbox(
+                value: _isOwner == value,
+                onChanged: (_) => setState(() => _isOwner = value),
+                activeColor: AppColors.textPrimary,
+                side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(label,
+                  style: GoogleFonts.zain(
+                      fontSize: 14, color: AppColors.textPrimary)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _lostPetTextField(TextEditingController controller, String hint,
+      {TextInputType? keyboardType}) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle:
+        GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
+        enabledBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+        ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.only(bottom: 8),
+      ),
+      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+    );
+  }
+
+  // Owner side: reporting their own lost pet
+  List<Widget> _buildOwnerFields() {
+    return [
+      const SizedBox(height: 20),
+      _buildLabel('Pet Name', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(_petNameController, 'Enter pet name'),
+      const SizedBox(height: 20),
+      _buildLabel('Species', required: true),
+      const SizedBox(height: 8),
+      _buildCheckboxOption2('Dog', _selectedAnimalType,
+              (val) => setState(() => _selectedAnimalType = val)),
+      _buildCheckboxOption2('Cat', _selectedAnimalType,
+              (val) => setState(() => _selectedAnimalType = val)),
+      const SizedBox(height: 20),
+      Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabel('Breed', required: false),
+                const SizedBox(height: 6),
+                _lostPetTextField(_lostBreedController, 'Mixed / unknown'),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabel('Sex', required: false),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  value: _lostSex,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: UnderlineInputBorder(
+                        borderSide:
+                        BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Male', child: Text('Male')),
+                    DropdownMenuItem(value: 'Female', child: Text('Female')),
+                  ],
+                  onChanged: (v) => setState(() => _lostSex = v),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      _buildLabel('Color / Markings', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(
+          _lostColorController, 'e.g. Brown and white, torn left ear'),
+      const SizedBox(height: 20),
+      _buildLabel('Last seen location', required: true),
+      const SizedBox(height: 6),
+      Text(
+        _pinnedAddress,
+        style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+      ),
+      Text(
+        'Uses the pin on the map above — adjust it if this isn\'t right.',
+        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+      ),
+      const SizedBox(height: 20),
+      Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabel('Date last seen', required: true),
+                const SizedBox(height: 6),
+                _pickerField(
+                  label: _lastSeenDate != null
+                      ? _formatDate(_lastSeenDate!)
+                      : 'Select date',
+                  onTap: _pickLastSeenDate,
+                  icon: Icons.calendar_today_outlined,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabel('Time last seen', required: false),
+                const SizedBox(height: 6),
+                _pickerField(
+                  label: _lastSeenTime != null
+                      ? _lastSeenTime!.format(context)
+                      : 'Select time',
+                  onTap: _pickLastSeenTime,
+                  icon: Icons.access_time,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      _buildLabel('Temperament', required: false),
+      const SizedBox(height: 8),
+      _buildCheckboxOption2('Friendly, approachable', _temperament,
+              (val) => setState(() => _temperament = val)),
+      _buildCheckboxOption2('Skittish, may run', _temperament,
+              (val) => setState(() => _temperament = val)),
+      _buildCheckboxOption2('Can be defensive / bite risk', _temperament,
+              (val) => setState(() => _temperament = val)),
+      const SizedBox(height: 20),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('Offer a reward',
+              style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          Switch(
+            value: _offerReward,
+            activeColor: AppColors.textPrimary,
+            onChanged: (v) => setState(() => _offerReward = v),
+          ),
+        ],
+      ),
+      if (_offerReward) ...[
+        const SizedBox(height: 6),
+        _lostPetTextField(_rewardAmountController, 'Enter amount',
+            keyboardType: TextInputType.number),
+      ],
+      const SizedBox(height: 20),
+      _buildLabel('Contact Number', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(_ownerContactController, 'Mobile number',
+          keyboardType: TextInputType.phone),
+      const SizedBox(height: 6),
+      Text(
+        'Only revealed to a finder once you confirm a match.',
+        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+      ),
+    ];
+  }
+
+  // Finder side: someone reporting a stray they suspect is lost
+  List<Widget> _buildFinderFields() {
+    return [
+      const SizedBox(height: 20),
+      _buildLabel('Location Found', required: true),
+      const SizedBox(height: 6),
+      Text(
+        _pinnedAddress,
+        style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+      ),
+      const SizedBox(height: 20),
+      _buildLabel('Animal(s) found', required: true),
+      const SizedBox(height: 4),
+      Text(
+        'Found more than one? Add each animal below — they will be tracked '
+            'together as one case.',
+        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+      ),
+      const SizedBox(height: 10),
+      ..._buildAnimalEntryFields(),
+      const SizedBox(height: 12),
+      _buildLabel('Describe Condition', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(_conditionController, 'Calm, scared, injured…'),
+      const SizedBox(height: 20),
+      _buildLabel('Right now, the animal is', required: true),
+      const SizedBox(height: 8),
+      _buildCheckboxOption2('With me, I can hold it for now', _animalStatus,
+              (val) => setState(() => _animalStatus = val)),
+      _buildCheckboxOption2("Still roaming, can't approach it", _animalStatus,
+              (val) => setState(() => _animalStatus = val)),
+      _buildCheckboxOption2('Already brought to a vet/shelter', _animalStatus,
+              (val) => setState(() => _animalStatus = val)),
+      const SizedBox(height: 16),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.pinkrspwn.withOpacity(0.4),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text('This animal needs pickup or medical help',
+                  style: GoogleFonts.zain(
+                      fontSize: 13, color: AppColors.textPrimary)),
+            ),
+            Switch(
+              value: _finderNeedsRescue,
+              activeColor: AppColors.textPrimary,
+              onChanged: (v) => setState(() => _finderNeedsRescue = v),
+            ),
+          ],
+        ),
+      ),
+      if (_finderNeedsRescue) ...[
+        const SizedBox(height: 16),
+        _buildLabel('Select Urgency', required: true),
+        const SizedBox(height: 8),
+        _buildCheckboxOption('Low'),
+        _buildCheckboxOption('Medium'),
+        _buildCheckboxOption('Critical'),
+      ],
+      const SizedBox(height: 20),
+      _buildLabel('Contact Number', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(_finderContactController, 'Mobile number',
+          keyboardType: TextInputType.phone),
+      const SizedBox(height: 6),
+      Text(
+        "We'll check this against open lost pet alerts nearby.",
+        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+      ),
+    ];
+  }
+
+  // Shared by every rescue type (not just Lost Pet finder reports): renders
+  // the repeatable animal cards plus "Add another animal" so any report —
+  // illness, injury, abandonment, a litter turned in together, etc. — can
+  // cover more than one animal as a single grouped case.
+  List<Widget> _buildAnimalEntryFields() {
+    return [
+      for (int i = 0; i < _foundAnimals.length; i++) _buildFoundAnimalCard(i),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => setState(() => _foundAnimals.add(_FoundAnimalEntry())),
+          icon: const Icon(Icons.add, size: 18, color: AppColors.textPrimary),
+          label: Text('Add another animal',
+              style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          style: TextButton.styleFrom(padding: EdgeInsets.zero),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildFoundAnimalCard(int index) {
+    final entry = _foundAnimals[index];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppColors.slaterspwn),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Animal ${index + 1}',
+                  style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
+              if (_foundAnimals.length > 1)
+                GestureDetector(
+                  onTap: () {
+                    entry.dispose();
+                    setState(() => _foundAnimals.removeAt(index));
+                  },
+                  child: const Icon(Icons.close,
+                      size: 18, color: AppColors.textSecondary),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _lostPetTextField(entry.speciesController, 'Species'),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _lostPetTextField(entry.breedController, 'Breed / mixed'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: entry.sex,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Sex',
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Male', child: Text('Male')),
+                    DropdownMenuItem(value: 'Female', child: Text('Female')),
+                    DropdownMenuItem(value: 'Unsure', child: Text('Unsure')),
+                  ],
+                  onChanged: (v) => setState(() => entry.sex = v),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: entry.size,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Size',
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Small', child: Text('Small')),
+                    DropdownMenuItem(value: 'Medium', child: Text('Medium')),
+                    DropdownMenuItem(value: 'Large', child: Text('Large')),
+                  ],
+                  onChanged: (v) => setState(() => entry.size = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _lostPetTextField(entry.colorController, 'Color / markings'),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handleSubmit() async {
+    if (_isLostPetType) {
+      await _submitLostPetReport();
+      return;
+    }
+
     final condition = _conditionController.text.trim();
     final filledCount = _mediaFiles.where((f) => f != null).length;
+    final validAnimals =
+    _foundAnimals.where((a) => a.speciesController.text.trim().isNotEmpty).toList();
 
     if (condition.isEmpty ||
         _selectedRescueType == null ||
         _selectedUrgency == null ||
-        _selectedAnimalType == null ||
+        validAnimals.isEmpty ||
         _coordinateChoice == null ||
         _adoptionChoice == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1539,46 +2145,331 @@ class _RescuePageState extends State<RescuePage> {
           .doc(uid)
           .get();
       final userData = userDoc.data() as Map<String, dynamic>?;
+      final reporterName =
+      '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
-      final docRef = await FirebaseFirestore.instance.collection('cases').add({
-        'reporterId': uid,
-        'reporterName':
-        '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
-            .trim(),
-        'reporterPhone': userData?['phone'] ?? '',
-        'animalType': _selectedAnimalType,
-        'rescueType': _selectedRescueType,
-        'condition': condition,
-        'urgency': _selectedUrgency,
-        'address': _addressController.text.trim(),
-        'lat': _pinnedLocation.latitude,
-        'lng': _pinnedLocation.longitude,
-        'coordinateWithShelter': _coordinateChoice,
-        'witnessName': _witnessNameController.text.trim(),
-        'witnessPhone': _witnessNumberController.text.trim(),
-        'interestedToAdopt': _adoptionChoice,
-        'status': 'pending',
-        'statusHistory': [
-          {
-            'status': 'Rescue case is being reviewed.',
-            'timestamp': Timestamp.now(),
-          }
-        ],
-        'photoUrls': [],
-        'createdAt': Timestamp.now(),
-        'serverCreatedAt' : FieldValue.serverTimestamp(),
-      });
+      final casesCollection = FirebaseFirestore.instance.collection('cases');
+      String? groupId;
+      final createdDocIds = <String>[];
 
-      final photoUrls = await _uploadAllMedia(docRef.id);
+      for (final animal in validAnimals) {
+        final docRef = await casesCollection.add({
+          'reporterId': uid,
+          'reporterName': reporterName,
+          'reporterPhone': userData?['phone'] ?? '',
+          'groupId': groupId, // backfilled below once the first doc exists
+          'animalType': animal.speciesController.text.trim(),
+          'breed': animal.breedController.text.trim(),
+          'sex': animal.sex,
+          'size': animal.size,
+          'colorMarkings': animal.colorController.text.trim(),
+          'rescueType': _selectedRescueType,
+          'condition': condition,
+          'urgency': _selectedUrgency,
+          'address': _addressController.text.trim(),
+          'lat': _pinnedLocation.latitude,
+          'lng': _pinnedLocation.longitude,
+          'coordinateWithShelter': _coordinateChoice,
+          'witnessName': _witnessNameController.text.trim(),
+          'witnessPhone': _witnessNumberController.text.trim(),
+          'interestedToAdopt': _adoptionChoice,
+          'status': 'pending',
+          'statusHistory': [
+            {
+              'status': 'Rescue case is being reviewed.',
+              'timestamp': Timestamp.now(),
+            }
+          ],
+          'photoUrls': [],
+          'createdAt': Timestamp.now(),
+          'serverCreatedAt' : FieldValue.serverTimestamp(),
+        });
+        groupId ??= docRef.id;
+        createdDocIds.add(docRef.id);
+      }
+      for (final id in createdDocIds) {
+        await casesCollection.doc(id).update({'groupId': groupId});
+      }
+
+      final primaryCaseId = createdDocIds.first;
+      final photoUrls = await _uploadAllMedia(primaryCaseId);
       if (photoUrls.isNotEmpty) {
-        await docRef.update({'photoUrls': photoUrls});
+        for (final id in createdDocIds) {
+          await casesCollection.doc(id).update({'photoUrls': photoUrls});
+        }
       }
 
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => TrackCasePage(caseId: docRef.id),
+            builder: (_) => TrackCasePage(caseId: primaryCaseId),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _submitLostPetReport() async {
+    if (_isOwner == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please tell us whether you are the owner.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    final filledCount = _mediaFiles.where((f) => f != null).length;
+    if (filledCount < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least 1 photo.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (_isOwner == true) {
+      if (_petNameController.text.trim().isEmpty ||
+          _selectedAnimalType == null ||
+          _lostColorController.text.trim().isEmpty ||
+          _lastSeenDate == null ||
+          _ownerContactController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please fill in all required fields.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
+    } else {
+      final hasEmptySpecies = _foundAnimals
+          .any((a) => a.speciesController.text.trim().isEmpty);
+      if (hasEmptySpecies ||
+          _conditionController.text.trim().isEmpty ||
+          _animalStatus == null ||
+          _finderContactController.text.trim().isEmpty ||
+          (_finderNeedsRescue && _selectedUrgency == null)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please fill in all required fields.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final userData = userDoc.data() as Map<String, dynamic>?;
+      final reporterName =
+      '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
+
+      final alertsCollection = FirebaseFirestore.instance.collection('petAlerts');
+      String? groupId;
+      final createdDocIds = <String>[];
+      String? linkedCaseId;
+
+      if (_isOwner == true) {
+        final docRef = await alertsCollection.add({
+          'type': 'lost',
+          'groupId': null, // set to own id right after creation
+          'reporterId': uid,
+          'reporterName': reporterName,
+          'contactNumber': _ownerContactController.text.trim(),
+          'petName': _petNameController.text.trim(),
+          'species': _selectedAnimalType,
+          'breed': _lostBreedController.text.trim(),
+          'sex': _lostSex,
+          'colorMarkings': _lostColorController.text.trim(),
+          'temperament': _temperament,
+          'offerReward': _offerReward,
+          'rewardAmount': _offerReward ? _rewardAmountController.text.trim() : null,
+          'lastSeenDate': _lastSeenDate != null
+              ? Timestamp.fromDate(_lastSeenDate!)
+              : null,
+          'lastSeenTime': _lastSeenTime?.format(context),
+          'address': _addressController.text.trim().isEmpty
+              ? _pinnedAddress
+              : _addressController.text.trim(),
+          'lat': _pinnedLocation.latitude,
+          'lng': _pinnedLocation.longitude,
+          'scannedTagId': _scannedTagId,
+          'photoUrls': [],
+          'status': 'open',
+          'createdAt': Timestamp.now(),
+          'serverCreatedAt': FieldValue.serverTimestamp(),
+        });
+        groupId = docRef.id;
+        createdDocIds.add(docRef.id);
+        await docRef.update({'groupId': groupId});
+      } else {
+        // Optional linked rescue case if the finder needs pickup/medical help.
+        if (_finderNeedsRescue) {
+          final caseRef = await FirebaseFirestore.instance.collection('cases').add({
+            'reporterId': uid,
+            'reporterName': reporterName,
+            'reporterPhone': _finderContactController.text.trim(),
+            'animalType': _foundAnimals.first.speciesController.text.trim(),
+            'rescueType': 'Lost Pet',
+            'condition': _conditionController.text.trim(),
+            'urgency': _selectedUrgency,
+            'address': _addressController.text.trim().isEmpty
+                ? _pinnedAddress
+                : _addressController.text.trim(),
+            'lat': _pinnedLocation.latitude,
+            'lng': _pinnedLocation.longitude,
+            'status': 'pending',
+            'statusHistory': [
+              {
+                'status': 'Suspected lost pet reported — awaiting pickup assignment.',
+                'timestamp': Timestamp.now(),
+              }
+            ],
+            'photoUrls': [],
+            'createdAt': Timestamp.now(),
+            'serverCreatedAt': FieldValue.serverTimestamp(),
+          });
+          linkedCaseId = caseRef.id;
+        }
+
+        for (int i = 0; i < _foundAnimals.length; i++) {
+          final a = _foundAnimals[i];
+          final docRef = await alertsCollection.add({
+            'type': 'found',
+            'groupId': groupId, // filled in after the first doc is created
+            'reporterId': uid,
+            'reporterName': reporterName,
+            'contactNumber': _finderContactController.text.trim(),
+            'species': a.speciesController.text.trim(),
+            'breed': a.breedController.text.trim(),
+            'sex': a.sex,
+            'size': a.size,
+            'colorMarkings': a.colorController.text.trim(),
+            'describeCondition': _conditionController.text.trim(),
+            'animalStatus': _animalStatus,
+            'needsRescue': _finderNeedsRescue,
+            'linkedCaseId': linkedCaseId,
+            'address': _addressController.text.trim().isEmpty
+                ? _pinnedAddress
+                : _addressController.text.trim(),
+            'lat': _pinnedLocation.latitude,
+            'lng': _pinnedLocation.longitude,
+            'scannedTagId': _scannedTagId,
+            'photoUrls': [],
+            'status': 'open',
+            'createdAt': Timestamp.now(),
+            'serverCreatedAt': FieldValue.serverTimestamp(),
+          });
+          groupId ??= docRef.id;
+          createdDocIds.add(docRef.id);
+        }
+        // Backfill groupId on every doc in the group (first doc included).
+        for (final id in createdDocIds) {
+          await alertsCollection.doc(id).update({'groupId': groupId});
+        }
+      }
+
+      // Media is shared across the whole group (same sighting/animal(s)).
+      final photoUrls = await _uploadAllMedia('lostpet_$groupId');
+      if (photoUrls.isNotEmpty) {
+        for (final id in createdDocIds) {
+          await alertsCollection.doc(id).update({'photoUrls': photoUrls});
+        }
+      }
+
+      final oppositeType = _isOwner == true ? 'found' : 'lost';
+      final firstSpecies = _isOwner == true
+          ? _selectedAnimalType
+          : _foundAnimals.first.speciesController.text.trim();
+      final candidates = await alertsCollection
+          .where('type', isEqualTo: oppositeType)
+          .where('status', isEqualTo: 'open')
+          .where('species', isEqualTo: firstSpecies)
+          .limit(20)
+          .get();
+
+      for (final candidate in candidates.docs) {
+        final lostAlertId = _isOwner == true ? groupId : candidate.id;
+        final foundAlertId = _isOwner == true ? candidate.id : groupId;
+        final lostReporterId = _isOwner == true ? uid : candidate['reporterId'];
+        final foundReporterId = _isOwner == true ? candidate['reporterId'] : uid;
+
+        await FirebaseFirestore.instance.collection('possibleMatches').add({
+          'lostAlertId': lostAlertId,
+          'foundAlertId': foundAlertId,
+          'lostReporterId': lostReporterId,
+          'foundReporterId': foundReporterId,
+          'species': firstSpecies,
+          'status': 'pending_review',
+          'createdAt': Timestamp.now(),
+          'serverCreatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (mounted) {
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            backgroundColor: AppColors.background,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text(
+              _isOwner == true ? 'Lost pet alert sent' : 'Found pet report sent',
+              style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
+            ),
+            content: Text(
+              candidates.docs.isNotEmpty
+                  ? 'We found ${candidates.docs.length} possible match(es). '
+                  'They will appear under Possible Matches on your home screen '
+                  'once our team verifies them.'
+                  : "We'll notify you on your home screen the moment a possible "
+                  'match comes in.',
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+            ),
+            actions: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const HomeScreen()),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    foregroundColor: AppColors.textPrimary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    elevation: 0,
+                  ),
+                  child: Text('Done', style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
           ),
         );
       }

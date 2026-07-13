@@ -118,6 +118,32 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   String _appointmentType = 'On-site Visit';
   String? _appointmentTime;
 
+  _AdoptionProcess? _reviewStep;
+
+  _AdoptionProcess get _displayStep => _reviewStep ?? _step;
+
+  bool get _isReadOnly => _reviewStep != null;
+
+  // The 5 circles on the tracker, left to right.
+  static const List<_AdoptionProcess> _trackerSteps = [
+    _AdoptionProcess.intro,
+    _AdoptionProcess.bookAppointment,
+    _AdoptionProcess.appReview,
+    _AdoptionProcess.timeToMeet,
+    _AdoptionProcess.adoptionDay,
+  ];
+
+  int get _displayIndex {
+    final idx = _trackerSteps.indexOf(_displayStep);
+    return idx == -1 ? _activeStepIndex : idx;
+  }
+
+  void _onTrackerTap(int index) {
+    if (index > _activeStepIndex) return; // hasn't reached that phase yet
+    final target = _trackerSteps[index];
+    setState(() => _reviewStep = target == _step ? null : target);
+  }
+
   // timeslots
   static const Map<int, List<String>> _timeSlots = {
     0: ['9:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
@@ -305,6 +331,13 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       final data = doc.data();
       if (data == null) {
         if (mounted) setState(() => _isLoadingExisting = false);
+        return;
+      }
+
+      final loadedStatus = data['status'] as String?;
+      if (loadedStatus == 'withdrawn' || loadedStatus == 'rejected') {
+        if (mounted) setState(() => _isLoadingExisting = false);
+        await _prefillFromAccount();
         return;
       }
 
@@ -619,6 +652,60 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
+  // Clears every field back to a blank application
+  void _resetProcessState() {
+    _adoptionId = null;
+    _step = _AdoptionProcess.intro;
+    _reviewStep = null;
+
+    _residenceType = null;
+    _residenceOtherCtrl.clear();
+    _ownershipStatus = null;
+    _householdMembers = 0;
+
+    _hadPetsBefore = false;
+    _currentDogs = 0;
+    _currentCats = 0;
+    _currentBirds = 0;
+    _currentFish = 0;
+    _currentReptiles = 0;
+    _currentOther = 0;
+    _currentOtherTypeCtrl.clear();
+    _petsVaccinated = null;
+    _petsSpayedNeutered = null;
+
+    _hoursAlone = null;
+    _caregiverCtrl.clear();
+    _petStayLocation = null;
+    _canAffordFood = false;
+    _canAffordVaccinations = false;
+    _canAffordVetVisits = false;
+    _canAffordEmergencyCare = false;
+    _canAffordGrooming = false;
+    _canAffordCareSupplies = false;
+    _monthlyBudget = null;
+    _reasonCtrl.clear();
+
+    _governmentIdFile = null;
+    _proofOfAddressFile = null;
+    _digitalSignatureFile = null;
+    _homePhotosFile = null;
+    _governmentIdUrl = null;
+    _proofOfAddressUrl = null;
+    _digitalSignatureUrl = null;
+    _homePhotosUrl = null;
+
+    _agreeCare = false;
+    _agreeNoAbandon = false;
+    _agreeFollowup = false;
+    _agreeAccurate = false;
+    _agreeNotGuaranteed = false;
+
+    _appointmentDate = null;
+    _appointmentType = 'On-site Visit';
+    _appointmentTime = null;
+  }
+
   Future<void> _withdrawApplication() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -707,12 +794,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                         size: 22, color: AppColors.textPrimary),
                   ),
                   const SizedBox(width: 16),
-                  Text(
-                    'Adopt ${widget.animal.name}',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary,
+                  Expanded(
+                    child: Text(
+                      'Adopt ${widget.animal.name}',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                   ),
                 ],
@@ -721,16 +810,50 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
             const SizedBox(height: 20),
 
-            // Tracker
+            // Tracker — tap a circle for a phase you've already reached to
+            // review it (read-only); tap the current one again to return.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: _StepTracker(
                 labels: _stepLabels,
                 activeIndex: _activeStepIndex,
+                displayIndex: _displayIndex,
                 rejected: _step == _AdoptionProcess.appReject ||
                     _step == _AdoptionProcess.withdrawn,
+                onStepTap: _onTrackerTap,
               ),
             ),
+
+            if (_isReadOnly) ...[
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.slaterspwn.withOpacity(0.35),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.visibility_outlined,
+                          size: 16, color: AppColors.textPrimary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Viewing a previous step — read only. Tap your '
+                              'current step\'s circle above to return.',
+                          style: GoogleFonts.zain(
+                              fontSize: 12, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
 
             const SizedBox(height: 24),
 
@@ -743,7 +866,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               )
                   : SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _buildStepBody(),
+                child: IgnorePointer(
+                  ignoring: _isReadOnly,
+                  child: _buildStepBody(),
+                ),
               ),
             ),
           ],
@@ -754,7 +880,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   // switcher
   Widget _buildStepBody() {
-    switch (_step) {
+    switch (_displayStep) {
       case _AdoptionProcess.intro:
         return _buildIntro();
       case _AdoptionProcess.bookAppointment:
@@ -1164,15 +1290,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
         const SizedBox(height: 28),
 
-        _PrimaryButton(
-          label: _isSubmitting ? 'Submitting...' : "Submit",
-          onTap: _isSubmitting ? null : _submitAdoptionForm,
-        ),
-        const SizedBox(height: 10),
-        _SecondaryButton(
-          label: 'Cancel',
-          onTap: _isSubmitting ? null : () => Navigator.pop(context),
-        ),
+        if (!_isReadOnly) ...[
+          _PrimaryButton(
+            label: _isSubmitting ? 'Submitting...' : "Submit",
+            onTap: _isSubmitting ? null : _submitAdoptionForm,
+          ),
+          const SizedBox(height: 10),
+          _SecondaryButton(
+            label: 'Cancel',
+            onTap: _isSubmitting ? null : () => Navigator.pop(context),
+          ),
+        ],
 
         const SizedBox(height: 24),
       ],
@@ -1244,16 +1372,25 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.greenrspwn, width: 1.2),
           ),
-          child: CalendarDatePicker(
-            initialDate: _appointmentDate ??
-                DateTime.now().add(const Duration(days: 1)),
-            firstDate: DateTime.now().add(const Duration(days: 1)),
-            lastDate: DateTime.now().add(const Duration(days: 90)),
-            onDateChanged: (picked) {
-              setState(() {
-                _appointmentDate = picked;
-                _appointmentTime = null;
-              });
+          child: Builder(
+            builder: (context) {
+              final firstDate = DateTime.now().add(const Duration(days: 1));
+              final lastDate = DateTime.now().add(const Duration(days: 90));
+              var initialDate = _appointmentDate ?? firstDate;
+              if (initialDate.isBefore(firstDate)) initialDate = firstDate;
+              if (initialDate.isAfter(lastDate)) initialDate = lastDate;
+
+              return CalendarDatePicker(
+                initialDate: initialDate,
+                firstDate: firstDate,
+                lastDate: lastDate,
+                onDateChanged: (picked) {
+                  setState(() {
+                    _appointmentDate = picked;
+                    _appointmentTime = null;
+                  });
+                },
+              );
             },
           ),
         ),
@@ -1366,13 +1503,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
         const SizedBox(height: 28),
 
-        _PrimaryButton(
-          label: _isSubmitting ? 'Booking...' : 'Book',
-          onTap: (_appointmentDate == null || _appointmentTime == null ||
-              _isSubmitting)
-              ? null
-              : _saveAppointment,
-        ),
+        if (!_isReadOnly)
+          _PrimaryButton(
+            label: _isSubmitting ? 'Booking...' : 'Book',
+            onTap: (_appointmentDate == null || _appointmentTime == null ||
+                _isSubmitting)
+                ? null
+                : _saveAppointment,
+          ),
 
         const SizedBox(height: 24),
       ],
@@ -1406,48 +1544,50 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
-        const SizedBox(height: 28),
-        _PrimaryButton(
-          label: 'Change date',
-          onTap: _isSubmitting ? null : _pickDate,
-        ),
+        if (!_isReadOnly) ...[
+          const SizedBox(height: 28),
+          _PrimaryButton(
+            label: 'Change date',
+            onTap: _isSubmitting ? null : _pickDate,
+          ),
 
-        const SizedBox(height: 12),
-        _SecondaryButton(
-          label: 'Withdraw Application',
-          onTap: _isSubmitting ? null : _withdrawApplication,
-        ),
+          const SizedBox(height: 12),
+          _SecondaryButton(
+            label: 'Withdraw Application',
+            onTap: _isSubmitting ? null : _withdrawApplication,
+          ),
 
-        const SizedBox(height: 12),
+          const SizedBox(height: 12),
 
-        // ---------- for testing only!!
-        Row(
-          children: [
-            Expanded(
-              child: _SecondaryButton(
-                label: 'Approved →',
-                onTap: _isSubmitting
-                    ? null
-                    : () =>
-                    _updateStatus('appointment_confirmed',
-                      'Application approved. Appointment confirmed.',
-                      _AdoptionProcess.timeToMeet,),
+          // ---------- for testing only!!
+          Row(
+            children: [
+              Expanded(
+                child: _SecondaryButton(
+                  label: 'Approved →',
+                  onTap: _isSubmitting
+                      ? null
+                      : () =>
+                      _updateStatus('appointment_confirmed',
+                        'Application approved. Appointment confirmed.',
+                        _AdoptionProcess.timeToMeet,),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _SecondaryButton(
-                label: 'Rejected →',
-                onTap: _isSubmitting
-                    ? null
-                    : () =>
-                    _updateStatus('rejected', 'Application was not approved.',
-                      _AdoptionProcess.appReject,),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SecondaryButton(
+                  label: 'Rejected →',
+                  onTap: _isSubmitting
+                      ? null
+                      : () =>
+                      _updateStatus('rejected', 'Application was not approved.',
+                        _AdoptionProcess.appReject,),
+                ),
               ),
-            ),
-          ],
-        ),
-        // ---------- for testing only ^^^^
+            ],
+          ),
+          // ---------- for testing only ^^^^
+        ],
 
         const SizedBox(height: 24),
       ],
@@ -1499,16 +1639,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           ),
         ],
 
-        const SizedBox(height: 28),
-
-        _PrimaryButton(
-          label: _isSubmitting ? 'Updating...' : 'Adoption Day!',
-          onTap: _isSubmitting
-              ? null
-              : () =>
-              _updateStatus('completed', 'Adoption Completed!',
-                _AdoptionProcess.adoptionDay,),
-        ),
+        if (!_isReadOnly) ...[
+          const SizedBox(height: 28),
+          _PrimaryButton(
+            label: _isSubmitting ? 'Updating...' : 'Adoption Day!',
+            onTap: _isSubmitting
+                ? null
+                : () =>
+                _updateStatus('completed', 'Adoption Completed!',
+                  _AdoptionProcess.adoptionDay,),
+          ),
+        ],
 
         const SizedBox(height: 24),
       ],
@@ -1659,8 +1800,18 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 28),
 
         _PrimaryButton(
-          label: 'Close',
-          onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
+          label: 'Okay',
+          onTap: _isReadOnly
+              ? null
+              : () {
+            // Confirming the withdrawal notice resets the whole process
+            _resetProcessState();
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const AdoptionPage()),
+                  (route) => false,
+            );
+          },
         ),
 
         const SizedBox(height: 24),
@@ -1817,12 +1968,16 @@ class _TermsAndConditionsPage extends StatelessWidget {
 class _StepTracker extends StatelessWidget {
   final List<String> labels;
   final int activeIndex;
+  final int? displayIndex;
   final bool rejected;
+  final ValueChanged<int>? onStepTap;
 
   const _StepTracker({
     required this.labels,
     required this.activeIndex,
+    this.displayIndex,
     this.rejected = false,
+    this.onStepTap,
   });
 
   @override
@@ -1832,75 +1987,86 @@ class _StepTracker extends StatelessWidget {
       children: List.generate(labels.length, (index) {
         final isDone = index < activeIndex;
         final isActive = index == activeIndex;
+        final isReachable = index <= activeIndex;
+        final isBeingViewed = displayIndex != null && index == displayIndex;
 
         return Expanded(
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  if (index != 0)
-                    Expanded(
-                      child: Container(
-                        height: 2,
-                        color: isDone
-                            ? AppColors.lavenderrspwn
-                            : AppColors.slaterspwn,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: isReachable && onStepTap != null
+                ? () => onStepTap!(index)
+                : null,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    if (index != 0)
+                      Expanded(
+                        child: Container(
+                          height: 2,
+                          color: isDone
+                              ? AppColors.lavenderrspwn
+                              : AppColors.slaterspwn,
+                        ),
                       ),
-                    ),
 
-                  Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isDone || isActive
-                          ? AppColors.lavenderrspwn
-                          : Colors.transparent,
-                      border: Border.all(
+                    Container(
+                      width: isBeingViewed ? 18 : 14,
+                      height: isBeingViewed ? 18 : 14,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
                         color: isDone || isActive
                             ? AppColors.lavenderrspwn
-                            : AppColors.slaterspwn,
+                            : Colors.transparent,
+                        border: Border.all(
+                          color: isBeingViewed
+                              ? AppColors.yellowrspwn
+                              : (isDone || isActive
+                              ? AppColors.lavenderrspwn
+                              : AppColors.slaterspwn),
+                          width: isBeingViewed ? 2.5 : 1,
+                        ),
                       ),
+                      child: isDone
+                          ? const Icon(
+                        Icons.check,
+                        size: 9,
+                        color: AppColors.textPrimary,
+                      )
+                          : null,
                     ),
-                    child: isDone
-                        ? const Icon(
-                      Icons.check,
-                      size: 9,
-                      color: AppColors.textPrimary,
-                    )
-                        : null,
-                  ),
 
-                  if (index != labels.length - 1)
-                    Expanded(
-                      child: Container(
-                        height: 2,
-                        color: index < activeIndex
-                            ? AppColors.lavenderrspwn
-                            : AppColors.slaterspwn,
+                    if (index != labels.length - 1)
+                      Expanded(
+                        child: Container(
+                          height: 2,
+                          color: index < activeIndex
+                              ? AppColors.lavenderrspwn
+                              : AppColors.slaterspwn,
+                        ),
                       ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                SizedBox(
+                  width: 70,
+                  child: Text(
+                    labels[index],
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(
+                      fontSize: 11,
+                      fontWeight:
+                      isActive ? FontWeight.w700 : FontWeight.w500,
+                      color: isActive
+                          ? AppColors.textPrimary
+                          : AppColors.textPrimary,
                     ),
-                ],
-              ),
-
-              const SizedBox(height: 8),
-
-              SizedBox(
-                width: 70,
-                child: Text(
-                  labels[index],
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.zain(
-                    fontSize: 11,
-                    fontWeight:
-                    isActive ? FontWeight.w700 : FontWeight.w500,
-                    color: isActive
-                        ? AppColors.textPrimary
-                        : AppColors.textPrimary,
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       }),

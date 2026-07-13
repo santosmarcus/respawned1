@@ -14,13 +14,19 @@ class ActivityCard extends StatelessWidget{
 
   const ActivityCard({super.key, required this.item});
 
-  Color get _accentColor => item.type == ActivityType.rescue
-      ? AppColors.lavenderrspwn
-      : AppColors.greenrspwn;
+  Color get _accentColor => switch (item.type) {
+    ActivityType.rescue => AppColors.lavenderrspwn,
+    ActivityType.adoption => AppColors.greenrspwn,
+    ActivityType.lostFoundPet =>
+    item.alertKind == 'lost' ? AppColors.lavenderrspwn : AppColors.tearspwn,
+  };
 
-  IconData get _icon => item.type == ActivityType.rescue
-      ? Icons.pets_outlined
-      : Icons.favorite_border;
+  IconData get _icon => switch (item.type) {
+    ActivityType.rescue => Icons.pets_outlined,
+    ActivityType.adoption => Icons.favorite_border,
+    ActivityType.lostFoundPet =>
+    item.alertKind == 'lost' ? Icons.search : Icons.pets,
+  };
 
   String get _dateLabel{
     final d = item.createdAt;
@@ -97,6 +103,51 @@ class ActivityCard extends StatelessWidget{
     }
   }
 
+  Future<void> _viewPetAlert(BuildContext context) async {
+    final doc = await FirebaseFirestore.instance
+        .collection('petAlerts')
+        .doc(item.docId)
+        .get();
+    final data = doc.data();
+    if (data == null || !context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(item.title,
+                style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            Text(item.status,
+                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 12),
+            if ((data['species'] as String?)?.isNotEmpty == true)
+              Text('Species: ${data['species']}',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+            if ((data['address'] as String?)?.isNotEmpty == true)
+              Text('Location: ${data['address']}',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+            const SizedBox(height: 16),
+            Text(
+              (data['status'] as String?) == 'verified'
+                  ? 'A possible match for this report was verified — check '
+                  'Possible Matches on your home screen for next steps.'
+                  : 'We\'ll keep checking this against new reports automatically.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return  GestureDetector(
@@ -109,6 +160,8 @@ class ActivityCard extends StatelessWidget{
           );
         } else if (item.type == ActivityType.adoption){
           _viewAdoption(context);
+        } else if (item.type == ActivityType.lostFoundPet) {
+          _viewPetAlert(context);
         }
       },
       child: Container(
@@ -168,8 +221,9 @@ class ActivityCard extends StatelessWidget{
 
                   const SizedBox(height: 6),
 
-                  // Address and Animal type row (rescue only)
-                  if (item.type == ActivityType.rescue &&
+                  // Address and Animal type row (rescue + lost/found pet)
+                  if ((item.type == ActivityType.rescue ||
+                      item.type == ActivityType.lostFoundPet) &&
                       item.animalType.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Row(children: [
@@ -217,7 +271,8 @@ class ActivityCard extends StatelessWidget{
                         ),
                       ),
                       if (item.type == ActivityType.rescue ||
-                          item.type == ActivityType.adoption)
+                          item.type == ActivityType.adoption ||
+                          item.type == ActivityType.lostFoundPet)
                         Text(
                           'View details →',
                           style: GoogleFonts.zain(
