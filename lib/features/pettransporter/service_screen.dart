@@ -387,29 +387,25 @@ class _ServiceRequestList extends StatelessWidget {
 
         final docs = snapshot.data!.docs;
 
-        final assignedToMe = <QueryDocumentSnapshot>[];
-        final myActiveTrips = <QueryDocumentSnapshot>[];
-        final openNearby = <QueryDocumentSnapshot>[];
-
-        for (final doc in docs) {
+        final visible = docs.where((doc) {
           final d = doc.data() as Map<String, dynamic>;
           final status = d['status'];
           final assignedId = d['assignedVolunteerId'];
+          final declinedBy =
+          List<String>.from(d['declinedBy'] ?? const <String>[]);
 
-          if (assignedId == currentRiderUid &&
-              (status == 'accepted' || status == 'ongoing')) {
-            myActiveTrips.add(doc);
-          } else if (assignedId == currentRiderUid && status == 'assigned') {
-            assignedToMe.add(doc);
-          } else if (status == 'pending' &&
-              (assignedId == null || assignedId == '')) {
-            openNearby.add(doc);
-          }
-        }
+          final isMineActive = assignedId == currentRiderUid &&
+              (status == 'accepted' || status == 'ongoing');
+          final isMineAssigned =
+              assignedId == currentRiderUid && status == 'assigned';
+          final isOpenNearby = status == 'pending' &&
+              (assignedId == null || assignedId == '') &&
+              !declinedBy.contains(currentRiderUid);
 
-        final ordered = [...myActiveTrips, ...assignedToMe, ...openNearby];
+          return isMineActive || isMineAssigned || isOpenNearby;
+        }).toList();
 
-        if (ordered.isEmpty) {
+        if (visible.isEmpty) {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
@@ -436,10 +432,10 @@ class _ServiceRequestList extends StatelessWidget {
               const SizedBox(height: 10),
               Expanded(
                 child: ListView.separated(
-                  itemCount: ordered.length,
+                  itemCount: visible.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final doc = ordered[index];
+                    final doc = visible[index];
                     final data = doc.data() as Map<String, dynamic>;
                     final isMine = data['assignedVolunteerId'] == currentRiderUid;
                     final isActiveTrip = isMine &&

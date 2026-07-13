@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,18 +8,121 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/app_theme.dart';
 
+// Google Places API key used to search for the next nearby veterinary
+// clinic automatically whenever a clinic rejects a treatment request.
+// Reuses the same project key already used for Maps/Geocoding elsewhere.
+const String _placesApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
+
+// Same Google Maps Platform project key, used for the Directions API —
+// draws the actual driving route on the map and verifies the rider has
+// genuinely reached a destination before letting them confirm arrival.
+const String _directionsApiKey = _placesApiKey;
+
+// How close (in meters) the rider's live location must be to a
+// destination — per Google's Directions API remaining-distance — before
+// an "arrived" confirmation is accepted.
+const double _arrivalThresholdMeters = 150;
+
+// Result of a Google Directions API driving-route lookup.
+class DirectionsRoute {
+  final List<LatLng> points;
+  final double distanceMeters;
+  final String distanceText;
+  final String durationText;
+
+  const DirectionsRoute({
+    required this.points,
+    required this.distanceMeters,
+    required this.distanceText,
+    required this.durationText,
+  });
+}
+
+// Calls the Google Directions API for a driving route between two points.
+// Returns null if the request fails or Google reports no route.
+Future<DirectionsRoute?> fetchDirectionsRoute(
+    LatLng origin, LatLng destination) async {
+  try {
+    final uri = Uri.https(
+      'maps.googleapis.com',
+      '/maps/api/directions/json',
+      {
+        'origin': '${origin.latitude},${origin.longitude}',
+        'destination': '${destination.latitude},${destination.longitude}',
+        'mode': 'driving',
+        'key': _directionsApiKey,
+      },
+    );
+    final res = await http.get(uri);
+    if (res.statusCode != 200) return null;
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (body['status'] != 'OK') return null;
+    final routes = body['routes'] as List<dynamic>;
+    if (routes.isEmpty) return null;
+    final route = routes.first as Map<String, dynamic>;
+    final legs = route['legs'] as List<dynamic>;
+    if (legs.isEmpty) return null;
+    final leg = legs.first as Map<String, dynamic>;
+    final overview = route['overview_polyline']?['points'] as String?;
+    if (overview == null) return null;
+
+    return DirectionsRoute(
+      points: decodePolyline(overview),
+      distanceMeters: (leg['distance']?['value'] as num?)?.toDouble() ?? 0,
+      distanceText: (leg['distance']?['text'] as String?) ?? '',
+      durationText: (leg['duration']?['text'] as String?) ?? '',
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+// Standard Google encoded-polyline decoder.
+List<LatLng> decodePolyline(String encoded) {
+  final points = <LatLng>[];
+  int index = 0, lat = 0, lng = 0;
+  final len = encoded.length;
+
+  while (index < len) {
+    int shift = 0, result = 0, b;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    final dLat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    lat += dLat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    final dLng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    lng += dLng;
+
+    points.add(LatLng(lat / 1e5, lng / 1e5));
+  }
+  return points;
+}
+
 // Status
-// accepted  - rider accepted, not yet started
-// ongoing   - otw to pickup
-// arrived   - arrived at pickup, verify
-// treatment - picked up, otw to clinic
-// dropoff   - arrived at clinic, verifying drop-off
-// completed - rescue done
-// ended     - aborted
+// accepted         - rider accepted, not yet started
+// ongoing          - otw to pickup
+// arrived          - arrived at pickup, verify
+// treatment        - picked up, otw to clinic
+// dropoff          - arrived at a clinic, awaiting Treatment Accepted/Rejected
+// searching_clinic - clinic rejected treatment, auto-searching next nearby clinic
+// in_transit_shelter - treatment accepted, on the way to drop the pet at the shelter
+// completed        - rescue done (delivered to shelter)
+// ended            - aborted
 
 class TransitProgressPage extends StatefulWidget {
   final String caseId;
@@ -35,10 +139,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   StreamSubscription<Position>? _positionSub;
 
   bool _isActing = false;
+  bool _isSearchingClinic = false;
+  bool _autoSearchAttempted = false;
+  bool _isVerifyingArrival = false;
 
   // Verification images
   final List<File?> _pickupImages = [null, null];
-  final List<File?> _dropoffImages = [null, null];
+  final List<File?> _clinicImages = [null, null]; // arrived-at-clinic verification
+  final List<File?> _shelterImages = [null, null]; // final shelter drop-off verification
 
   @override
   void dispose() {
@@ -107,8 +215,104 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     _beginLocationStreaming();
   }
 
+  // Reads a lat/lng pair off the case document, if present.
+  LatLng? _latLngFrom(Map<String, dynamic> data, String latKey, String lngKey) {
+    final lat = data[latKey];
+    final lng = data[lngKey];
+    if (lat is num && lng is num) {
+      return LatLng(lat.toDouble(), lng.toDouble());
+    }
+    return null;
+  }
+
+  // Confirms — via Google's Directions API remaining-distance for a
+  // driving route from the rider's live position — that the rider has
+  // genuinely reached [destination] before letting an "arrived" action
+  // through. If no coordinates were recorded for this destination (older
+  // cases, address-only), verification is skipped and the action is
+  // allowed through, rather than blocking the rider on missing data.
+  Future<bool> _verifyArrivalViaDirections(
+      LatLng? destination, String destinationLabel) async {
+    if (destination == null) return true;
+
+    setState(() => _isVerifyingArrival = true);
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+      final origin = LatLng(pos.latitude, pos.longitude);
+      final route = await fetchDirectionsRoute(origin, destination);
+
+      if (route == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Could not verify your route to $destinationLabel. Check your connection and try again.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+        return false;
+      }
+
+      if (route.distanceMeters > _arrivalThresholdMeters) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  "You're still ${route.distanceText} from $destinationLabel according to Google Maps — keep heading there before confirming arrival."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Could not check your location: $e'),
+              backgroundColor: Colors.redAccent),
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _isVerifyingArrival = false);
+    }
+  }
+
   Future<void> _markArrived() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('cases')
+        .doc(widget.caseId)
+        .get();
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    final destination = _latLngFrom(data, 'lat', 'lng');
+
+    final arrived =
+    await _verifyArrivalViaDirections(destination, 'the pick up location');
+    if (!arrived) return;
+
     await _setStatus('arrived', 'Arrived at pick up location.');
+  }
+
+  // Same Directions-verified arrival check, used right before the rider
+  // is allowed to swipe into the clinic drop-off decision screen.
+  Future<void> _arriveAtClinic() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('cases')
+        .doc(widget.caseId)
+        .get();
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    final destination = _latLngFrom(data, 'dropoffLat', 'dropoffLng');
+
+    final arrived =
+    await _verifyArrivalViaDirections(destination, 'the clinic');
+    if (!arrived) return;
+
+    await _setStatus('dropoff', 'Arrived at clinic for treatment.');
   }
 
   Future<void> _submitPickupVerification() async {
@@ -143,8 +347,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     }
   }
 
-  Future<void> _submitDropoffVerification() async {
-    if (_dropoffImages.every((f) => f == null)) {
+  // Called when the rider swipes "Treatment Accepted" at a clinic.
+  // Uploads the clinic verification images then moves the case into the
+  // final leg: transporting the animal to the shelter.
+  Future<void> _acceptTreatment() async {
+    if (_clinicImages.every((f) => f == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please add at least one verification image.'),
@@ -155,25 +362,281 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     }
     setState(() => _isActing = true);
     try {
-      final urls = await _uploadVerificationImages(
-          _dropoffImages, 'dropoff');
+      final urls = await _uploadVerificationImages(_clinicImages, 'clinic');
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .update({
+        'status': 'in_transit_shelter',
+        'clinicVerificationUrls': urls,
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Treatment accepted. On the way to shelter.',
+            'timestamp': Timestamp.now()
+          }
+        ]),
+      });
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
+  }
+
+  // Called when the rider swipes "Treatment Rejected" at a clinic — opens the
+  // rejection reason dialog, then automatically searches for the next
+  // nearest available clinic and routes the rider there.
+  Future<void> _rejectTreatment() async {
+    if (_clinicImages.every((f) => f == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one verification image.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+    final reason = await _showTreatmentRejectDialog();
+    if (reason == null) return; // dismissed via X / back
+
+    setState(() => _isActing = true);
+    try {
+      final data = (await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .get())
+          .data() as Map<String, dynamic>? ??
+          {};
+      final currentAddress = data['dropoffAddress'] ?? data['address'] ?? '';
+
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .update({
+        'status': 'searching_clinic',
+        'lastRejectionReason': reason,
+        'rejectedClinics': FieldValue.arrayUnion([
+          {
+            'address': currentAddress,
+            'reason': reason,
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Treatment has been rejected - $reason',
+            'timestamp': Timestamp.now()
+          }
+        ]),
+      });
+
+      // reset verification images for the next clinic attempt
+      setState(() {
+        for (int i = 0; i < _clinicImages.length; i++) {
+          _clinicImages[i] = null;
+        }
+      });
+
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
+  }
+
+  Future<void> _findAndRouteToNextClinic() async {
+    if (_isSearchingClinic) return;
+    setState(() => _isSearchingClinic = true);
+    try {
+      final docRef =
+      FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
+      final doc = await docRef.get();
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+
+      final rejected = (data['rejectedClinics'] as List<dynamic>? ?? [])
+          .map((e) => (e as Map)['address']?.toString() ?? '')
+          .toSet();
+
+      final originLat = data['riderLastLat'] ?? data['dropoffLat'];
+      final originLng = data['riderLastLng'] ?? data['dropoffLng'];
+      if (originLat == null || originLng == null) {
+        throw Exception('Missing current location for clinic search.');
+      }
+
+      Map<String, dynamic>? candidate;
+      bool sawSuccessfulResponse = false;
+
+      // Widen the search radius progressively if nearby clinics have rejected
+      for (final radius in [5000, 10000, 20000, 40000]) {
+        final uri = Uri.https(
+          'maps.googleapis.com',
+          '/maps/api/place/nearbysearch/json',
+          {
+            'location': '$originLat,$originLng',
+            'radius': '$radius',
+            'type': 'veterinary_care',
+            'key': _placesApiKey,
+          },
+        );
+        final res = await http.get(uri);
+        if (res.statusCode != 200) continue;
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final apiStatus = body['status'] as String?;
+
+        if (apiStatus != 'OK' && apiStatus != 'ZERO_RESULTS') continue;
+        sawSuccessfulResponse = true;
+
+        final results = (body['results'] as List<dynamic>? ?? []);
+        for (final r in results) {
+          final map = r as Map<String, dynamic>;
+          final addr = (map['vicinity'] ?? map['name'] ?? '').toString();
+          if (addr.isEmpty || rejected.contains(addr)) continue;
+          candidate = map;
+          break;
+        }
+        if (candidate != null) break;
+      }
+
+      if (candidate == null) {
+        if (!sawSuccessfulResponse) {
+          throw Exception(
+              'Could not reach clinic search. Please try again.');
+        }
+
+        await docRef.update({
+          'status': 'in_transit_shelter',
+          'statusHistory': FieldValue.arrayUnion([
+            {
+              'status':
+              'No more nearby clinics available. Proceeding directly to shelter.',
+              'timestamp': Timestamp.now()
+            }
+          ]),
+        });
+        return;
+      }
+
+      final loc = candidate['geometry']?['location'] as Map<String, dynamic>?;
+      final newAddress =
+      (candidate['vicinity'] ?? candidate['name'] ?? 'Nearby Clinic')
+          .toString();
+
+      await docRef.update({
+        'status': 'dropoff',
+        'dropoffAddress': newAddress,
+        if (loc != null) 'dropoffLat': loc['lat'],
+        if (loc != null) 'dropoffLng': loc['lng'],
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Finding nearby clinics… routed to $newAddress',
+            'timestamp': Timestamp.now()
+          }
+        ]),
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Clinic search failed: $e'),
+              backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSearchingClinic = false);
+    }
+  }
+
+  // TESTING ONLY — remove later.
+  Future<void> _testSkipToNextStep() async {
+    await FirebaseFirestore.instance
+        .collection('cases')
+        .doc(widget.caseId)
+        .update({
+      'status': 'in_transit_shelter',
+      'statusHistory': FieldValue.arrayUnion([
+        {
+          'status': '[TEST] Skipped clinic search — proceeding to shelter.',
+          'timestamp': Timestamp.now()
+        }
+      ]),
+    });
+  }
+
+  Future<void> _completeShelterDropoff() async {
+    if (_shelterImages.every((f) => f == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one verification image.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    final doc = await FirebaseFirestore.instance
+        .collection('cases')
+        .doc(widget.caseId)
+        .get();
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    final destination = _latLngFrom(data, 'shelterLat', 'shelterLng');
+    final arrived =
+    await _verifyArrivalViaDirections(destination, 'the shelter');
+    if (!arrived) return;
+
+    setState(() => _isActing = true);
+    try {
+      final urls = await _uploadVerificationImages(_shelterImages, 'shelter');
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
           .update({
         'status': 'completed',
-        'dropoffVerificationUrls': urls,
+        'shelterVerificationUrls': urls,
         'statusHistory': FieldValue.arrayUnion([
           {
-            'status': 'Animal delivered to clinic. Rescue completed.',
+            'status': 'Animal delivered to shelter. Rescue completed.',
             'timestamp': Timestamp.now()
           }
         ]),
       });
       _positionSub?.cancel();
-      if (mounted) Navigator.pop(context);
+      if (mounted) await _showTransitCompletedBanner();
     } finally {
       if (mounted) setState(() => _isActing = false);
+    }
+  }
+
+  Future<void> _showTransitCompletedBanner() async {
+    ScaffoldMessenger.of(context).clearMaterialBanners();
+    ScaffoldMessenger.of(context).showMaterialBanner(
+      MaterialBanner(
+        backgroundColor: AppColors.greenrspwn,
+        contentTextStyle:
+        GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+        leading: const Icon(Icons.check_circle,
+            color: AppColors.textPrimary),
+        content: Text(
+          'Transit has been completed. Routing you to the home screen…',
+          style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+              if (mounted) Navigator.pop(context);
+            },
+            child: Text('OK',
+                style: GoogleFonts.zain(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+      Navigator.pop(context);
     }
   }
 
@@ -223,10 +686,23 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Text('End Reason',
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 18, color: AppColors.textPrimary)),
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Center(
+                      child: Text('End Reason',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 18, color: AppColors.textPrimary)),
+                    ),
+                    Positioned(
+                      right: 0,
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(ctx),
+                        child: const Icon(Icons.close,
+                            size: 20, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 ...reasons.map((r) => CheckboxListTile(
@@ -291,6 +767,126 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                           'ended', 'Rescue ended: $reasonStr');
                       _positionSub?.cancel();
                       if (mounted) Navigator.pop(context);
+                    },
+                    child: Text('Confirm',
+                        style: GoogleFonts.zain(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: selected.isEmpty
+                                ? AppColors.textSecondary
+                                : Colors.redAccent)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _showTreatmentRejectDialog() async {
+    final reasons = [
+      'Clinic at full capacity',
+      'Insufficient Medication/Treatment Supplies',
+      'Animal Deceased',
+      'No Veterinarian/Specialist Available',
+      'Other',
+    ];
+    final selected = <String>{};
+    String? other;
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => Dialog(
+          backgroundColor: AppColors.background,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Center(
+                      child: Text('Treatment Rejected',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 18, color: AppColors.textPrimary)),
+                    ),
+                    Positioned(
+                      right: 0,
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(ctx),
+                        child: const Icon(Icons.close,
+                            size: 20, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ...reasons.map((r) => CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: selected.contains(r),
+                  activeColor: AppColors.textPrimary,
+                  side: const BorderSide(color: AppColors.textPrimary),
+                  title: Text(r,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                  onChanged: (v) => setDlg(() {
+                    if (v == true) {
+                      selected.add(r);
+                    } else {
+                      selected.remove(r);
+                    }
+                  }),
+                )),
+                if (selected.contains('Other')) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    onChanged: (v) => other = v,
+                    style: GoogleFonts.zain(
+                        fontSize: 14, color: AppColors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Describe reason…',
+                      hintStyle: GoogleFonts.zain(
+                          fontSize: 13, color: AppColors.textSecondary),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                        const BorderSide(color: AppColors.slaterspwn),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                        const BorderSide(color: AppColors.textPrimary),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: selected.isEmpty
+                        ? null
+                        : () {
+                      final reasonStr = [
+                        ...selected.where((r) => r != 'Other'),
+                        if (selected.contains('Other') &&
+                            other != null &&
+                            other!.isNotEmpty)
+                          other!,
+                      ].join(', ');
+                      Navigator.pop(ctx, reasonStr);
                     },
                     child: Text('Confirm',
                         style: GoogleFonts.zain(
@@ -412,113 +1008,139 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
         final status = data['status'] ?? 'accepted';
 
-        // Auto-start streaming if already ongoing
         if ((status == 'ongoing' ||
             status == 'arrived' ||
             status == 'treatment' ||
-            status == 'dropoff') &&
+            status == 'dropoff' ||
+            status == 'searching_clinic' ||
+            status == 'in_transit_shelter') &&
             _positionSub == null) {
           WidgetsBinding.instance
               .addPostFrameCallback((_) => _beginLocationStreaming());
         }
 
+        if (status == 'searching_clinic') {
+          if (!_isSearchingClinic && !_autoSearchAttempted) {
+            _autoSearchAttempted = true;
+            WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => _findAndRouteToNextClinic());
+          }
+        } else {
+          _autoSearchAttempted = false;
+        }
+
+        LatLng? currentDestination;
+        String currentDestinationLabel = '';
+        if (status == 'ongoing' || status == 'arrived') {
+          currentDestination = _latLngFrom(data, 'lat', 'lng');
+          currentDestinationLabel = 'Pick up location';
+        } else if (status == 'treatment' || status == 'dropoff') {
+          currentDestination = _latLngFrom(data, 'dropoffLat', 'dropoffLng');
+          currentDestinationLabel = 'Clinic';
+        } else if (status == 'in_transit_shelter') {
+          currentDestination = _latLngFrom(data, 'shelterLat', 'shelterLng');
+          currentDestinationLabel = 'Shelter';
+        }
+
         return Theme(
-            data: AppTheme.rescuerTheme,
-            child: Scaffold(
+          data: AppTheme.rescuerTheme,
+          child: Scaffold(
             backgroundColor: AppColors.background,
             bottomNavigationBar: _buildBottomNav(),
             body: Column(
-            children: [
+              children: [
 
-              // Map
-              Expanded(
-                flex: 2,
-                child: Stack(
-                  children: [
-                    _TrackingMap(
-                      caseId: widget.caseId,
-                      onMapCreated: (ctrl) => _mapController = ctrl,
-                    ),
-
-                    // Online badge
-                    Positioned(
-                      top: 48,
-                      left: 16,
-                      child: _OnlineBadge(),
-                    ),
-                    // Settings / filter icon top right
-                    Positioned(
-                      top: 48,
-                      right: 16,
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: [
-                            BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 4)
-                          ],
-                        ),
-                        child: const Icon(Icons.tune,
-                            size: 18, color: AppColors.textPrimary),
+                // Map
+                Expanded(
+                  flex: 2,
+                  child: Stack(
+                    children: [
+                      _TrackingMap(
+                        caseId: widget.caseId,
+                        onMapCreated: (ctrl) => _mapController = ctrl,
+                        destination: currentDestination,
+                        destinationLabel: currentDestinationLabel,
                       ),
-                    ),
 
-                    Positioned(
-                      bottom: 20,
-                      right: 16,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          FloatingActionButton(
-                            heroTag: 'chat_btn',
-                            backgroundColor: AppColors.yellowrspwn,
-                            onPressed: _openMessageSheet,
-                            child: const Icon(
-                              Icons.chat_bubble,
-                              color: AppColors.textPrimary,
-                            ),
+                      // Online badge
+                      Positioned(
+                        top: 48,
+                        left: 16,
+                        child: _OnlineBadge(),
+                      ),
+                      // Settings / filter icon top right
+                      Positioned(
+                        top: 48,
+                        right: 16,
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.black.withOpacity(0.08),
+                                  blurRadius: 4)
+                            ],
                           ),
+                          child: const Icon(Icons.tune,
+                              size: 18, color: AppColors.textPrimary),
+                        ),
+                      ),
 
-                          Positioned(
-                            right: -2,
-                            top: -2,
-                            child: Container(
-                              width: 18,
-                              height: 18,
-                              decoration: const BoxDecoration(
-                                color: Colors.red,
-                                shape: BoxShape.circle,
+                      Positioned(
+                        bottom: 20,
+                        right: 16,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            FloatingActionButton(
+                              heroTag: 'chat_btn',
+                              backgroundColor: AppColors.yellowrspwn,
+                              onPressed: _openMessageSheet,
+                              child: const Icon(
+                                Icons.chat_bubble,
+                                color: AppColors.textPrimary,
                               ),
-                              child: const Center(
-                                child: Text(
-                                  '2',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
+                            ),
+
+                            Positioned(
+                              right: -2,
+                              top: -2,
+                              child: Container(
+                                width: 18,
+                                height: 18,
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    '2',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
 
-              // Bottom panel
-              Expanded(
-                flex: 1,
-                child: _buildBottomPanel(status, data),
-              ),
-            ],
-          ),
+                // Bottom panel
+                Expanded(
+                  flex: 1,
+                  child: _buildBottomPanel(status, data),
+                ),
+              ],
             ),
+          ),
         );
       },
     );
@@ -539,14 +1161,24 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       );
     }
 
-    // Arrived at clinic — dropoff verification
+    // Arrived at a clinic — Treatment Accepted / Treatment Rejected decision
     if (status == 'dropoff') {
+      return _buildClinicDecisionPanel(data);
+    }
+
+    // A clinic just rejected treatment — auto-searching for the next one
+    if (status == 'searching_clinic') {
+      return _buildSearchingClinicPanel(data);
+    }
+
+    // Treatment accepted — final leg to the shelter
+    if (status == 'in_transit_shelter') {
       return _buildVerificationPanel(
-        title: 'Arrived at drop off location',
-        address: data['dropoffAddress'] ?? data['address'] ?? '',
-        images: _dropoffImages,
-        onImageTap: (i) => _pickImage(_dropoffImages, i),
-        onConfirm: _submitDropoffVerification,
+        title: 'In transit to shelter',
+        address: data['shelterAddress'] ?? 'Shelter Address',
+        images: _shelterImages,
+        onImageTap: (i) => _pickImage(_shelterImages, i),
+        onConfirm: _completeShelterDropoff,
         confirmLabel: 'Complete',
         isActing: _isActing,
       );
@@ -554,6 +1186,221 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
     // Standard panel for other statuses
     return _buildStandardPanel(status, data);
+  }
+
+  // Arrived at clinic — decide whether treatment was accepted or rejected.
+  Widget _buildClinicDecisionPanel(Map<String, dynamic> data) {
+    final address = data['dropoffAddress'] ?? data['address'] ?? '';
+    final canDecide = !_isActing;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Arrived at drop off location',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 15, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.circle, size: 8, color: AppColors.textPrimary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(address,
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Text('Provide images and video to verify',
+                    style: GoogleFonts.zain(
+                        fontSize: 13, color: AppColors.textPrimary)),
+                const SizedBox(width: 4),
+                const Text('*',
+                    style: TextStyle(color: Colors.red, fontSize: 13)),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // image grid
+            Row(
+              children: List.generate(
+                2,
+                    (i) => Padding(
+                  padding: EdgeInsets.only(right: i == 0 ? 12 : 0),
+                  child: GestureDetector(
+                    onTap: () => _pickImage(_clinicImages, i)
+                        .then((_) => setState(() {})),
+                    child: Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: _clinicImages[i] != null
+                              ? AppColors.greenrspwn
+                              : AppColors.slaterspwn,
+                          width: 1.5,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        color: AppColors.tearspwn.withOpacity(0.15),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: _clinicImages[i] != null
+                          ? Image.file(_clinicImages[i]!, fit: BoxFit.cover)
+                          : const Center(
+                          child: Icon(Icons.add,
+                              size: 28, color: AppColors.textSecondary)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            Row(
+              children: [
+                const Icon(Icons.location_on_outlined,
+                    size: 14, color: AppColors.textSecondary),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(address,
+                      style: GoogleFonts.zain(
+                          fontSize: 12, color: AppColors.textSecondary)),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+
+            _SwipeButton(
+              label: 'Treatment Accepted',
+              onSwiped: canDecide ? _acceptTreatment : null,
+            ),
+            const SizedBox(height: 10),
+            _SwipeButton(
+              label: 'Treatment Rejected',
+              onSwiped: canDecide ? _rejectTreatment : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchingClinicPanel(Map<String, dynamic> data) {
+    final rejectionReason = data['lastRejectionReason'] ?? '';
+    final lastAddress = data['dropoffAddress'] ?? data['address'] ?? '';
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Arrived at drop off location',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 15, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.circle, size: 8, color: AppColors.textPrimary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(lastAddress,
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text('Treatment has been rejected - $rejectionReason',
+                style: GoogleFonts.zain(
+                    fontSize: 12, color: AppColors.textSecondary)),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: _isSearchingClinic
+                      ? CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.textSecondary)
+                      : const SizedBox.shrink(),
+                ),
+                if (_isSearchingClinic) const SizedBox(width: 8),
+                Text(
+                  _isSearchingClinic
+                      ? 'Finding nearby clinics'
+                      : 'Search paused — tap Retry to try again',
+                  style: GoogleFonts.zain(
+                      fontSize: 13, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
+            if (!_isSearchingClinic) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _findAndRouteToNextClinic,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.textPrimary),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30)),
+                      ),
+                      child: Text('Retry',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 14, color: AppColors.textPrimary)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Testing-only remove later
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _testSkipToNextStep,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.orange),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30)),
+                      ),
+                      child: Text('Skip (Testing)',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 12, color: Colors.orange)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 20),
+            _SwipeButton(
+              label: 'Treatment Rejected',
+              onSwiped: null, // locked — reflects the last decision made
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildStandardPanel(String status, Map<String, dynamic> data) {
@@ -611,7 +1458,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         break;
       case 'treatment':
         label = 'On the way to Treatment';
-        onSwipe = () => _setStatus('dropoff', 'Arrived at clinic for treatment.');
+        onSwipe = _arriveAtClinic;
         break;
       default:
         label = 'Processing…';
@@ -620,7 +1467,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
     return _SwipeButton(
       label: label,
-      onSwiped: _isActing ? null : onSwipe,
+      onSwiped: (_isActing || _isVerifyingArrival) ? null : onSwipe,
     );
   }
 
@@ -816,6 +1663,8 @@ class _SwipeButtonState extends State<_SwipeButton> {
 
   @override
   Widget build(BuildContext context) {
+    final disabled = widget.onSwiped == null;
+
     return LayoutBuilder(builder: (context, constraints) {
       final trackWidth = constraints.maxWidth;
       final maxDrag = trackWidth - _thumbSize - 8;
@@ -825,13 +1674,19 @@ class _SwipeButtonState extends State<_SwipeButton> {
         AppColors.textPrimary,
         fraction,
       )!;
+      final fillColor =
+      disabled ? Colors.grey.shade400 : AppColors.textPrimary;
+      final thumbColor =
+      disabled ? Colors.grey.shade600 : AppColors.textPrimary;
+      final labelColor =
+      disabled ? Colors.grey.shade100 : AppColors.background;
 
       return GestureDetector(
-        onHorizontalDragUpdate: widget.onSwiped == null
+        onHorizontalDragUpdate: disabled
             ? null
             : (d) => setState(
                 () => _dragX = (_dragX + d.delta.dx).clamp(0, maxDrag)),
-        onHorizontalDragEnd: widget.onSwiped == null
+        onHorizontalDragEnd: disabled
             ? null
             : (d) {
           if (fraction >= _triggerFraction) {
@@ -842,7 +1697,7 @@ class _SwipeButtonState extends State<_SwipeButton> {
         child: Container(
           height: 56,
           decoration: BoxDecoration(
-            color: AppColors.slaterspwn,
+            color: disabled ? Colors.grey.shade300 : AppColors.slaterspwn,
             borderRadius: BorderRadius.circular(30),
           ),
           child: Stack(
@@ -854,7 +1709,7 @@ class _SwipeButtonState extends State<_SwipeButton> {
                 width: _thumbSize + _dragX + 4,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: AppColors.textPrimary,
+                  color: fillColor,
                   borderRadius: BorderRadius.circular(30),
                 ),
               ),
@@ -864,7 +1719,7 @@ class _SwipeButtonState extends State<_SwipeButton> {
                 child: Text(
                   widget.label,
                   style: GoogleFonts.tiltWarp(
-                      fontSize: 13, color: AppColors.background),
+                      fontSize: 13, color: labelColor),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -875,12 +1730,15 @@ class _SwipeButtonState extends State<_SwipeButton> {
                 child: Container(
                   width: _thumbSize,
                   height: _thumbSize,
-                  decoration: const BoxDecoration(
-                    color: AppColors.textPrimary,
+                  decoration: BoxDecoration(
+                    color: thumbColor,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.chevron_right,
-                      color: AppColors.yellowrspwn, size: 25),
+                  child: Icon(Icons.chevron_right,
+                      color: disabled
+                          ? Colors.grey.shade300
+                          : AppColors.yellowrspwn,
+                      size: 25),
                 ),
               ),
             ],
@@ -1136,10 +1994,14 @@ class _MessageInput extends StatelessWidget {
 class _TrackingMap extends StatefulWidget {
   final String caseId;
   final void Function(GoogleMapController) onMapCreated;
+  final LatLng? destination;
+  final String destinationLabel;
 
   const _TrackingMap({
     required this.caseId,
     required this.onMapCreated,
+    this.destination,
+    this.destinationLabel = 'Destination',
   });
 
   @override
@@ -1149,6 +2011,45 @@ class _TrackingMap extends StatefulWidget {
 class _TrackingMapState extends State<_TrackingMap> {
   GoogleMapController? _controller;
   bool _centered = false;
+
+  DirectionsRoute? _route;
+  LatLng? _routeFetchedFor;
+  LatLng? _routeFetchedFrom;
+  Timer? _routeRefreshTimer;
+
+  @override
+  void dispose() {
+    _routeRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _maybeRefreshRoute(LatLng riderPosition) {
+    if (widget.destination == null) return;
+
+    final destChanged = _routeFetchedFor == null ||
+        _routeFetchedFor!.latitude != widget.destination!.latitude ||
+        _routeFetchedFor!.longitude != widget.destination!.longitude;
+
+    final movedFar = _routeFetchedFrom == null ||
+        Geolocator.distanceBetween(
+          _routeFetchedFrom!.latitude,
+          _routeFetchedFrom!.longitude,
+          riderPosition.latitude,
+          riderPosition.longitude,
+        ) >
+            200;
+
+    if (!destChanged && !movedFar) return;
+
+    _routeFetchedFor = widget.destination;
+    _routeFetchedFrom = riderPosition;
+
+    fetchDirectionsRoute(riderPosition, widget.destination!).then((route) {
+      if (mounted && route != null) {
+        setState(() => _route = route);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1183,6 +2084,53 @@ class _TrackingMapState extends State<_TrackingMap> {
               CameraUpdate.newLatLngZoom(points.last, 15));
         }
 
+        if (points.isNotEmpty) {
+          WidgetsBinding.instance
+              .addPostFrameCallback((_) => _maybeRefreshRoute(points.last));
+        }
+
+        final markers = <Marker>{};
+        if (points.isNotEmpty) {
+          markers.add(Marker(
+            markerId: const MarkerId('rider_current'),
+            position: points.last,
+            infoWindow: const InfoWindow(title: 'You'),
+          ));
+        }
+        if (widget.destination != null) {
+          markers.add(Marker(
+            markerId: const MarkerId('destination'),
+            position: widget.destination!,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueGreen),
+            infoWindow: InfoWindow(
+              title: widget.destinationLabel,
+              snippet: _route == null
+                  ? null
+                  : '${_route!.distanceText} • ${_route!.durationText}',
+            ),
+          ));
+        }
+
+        final polylines = <Polyline>{};
+        if (points.length >= 2) {
+          polylines.add(Polyline(
+            polylineId: const PolylineId('route_trail'),
+            points: points,
+            color: AppColors.textPrimary,
+            width: 4,
+          ));
+        }
+        if (_route != null && _route!.points.length >= 2) {
+          polylines.add(Polyline(
+            polylineId: const PolylineId('directions_route'),
+            points: _route!.points,
+            color: Colors.blueAccent,
+            width: 4,
+            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+          ));
+        }
+
         return GoogleMap(
           onMapCreated: (ctrl) {
             _controller = ctrl;
@@ -1194,25 +2142,8 @@ class _TrackingMapState extends State<_TrackingMap> {
           myLocationButtonEnabled: false,
           zoomControlsEnabled: false,
           mapToolbarEnabled: false,
-          markers: points.isEmpty
-              ? {}
-              : {
-            Marker(
-              markerId: const MarkerId('rider_current'),
-              position: points.last,
-              infoWindow: const InfoWindow(title: 'You'),
-            ),
-          },
-          polylines: points.length < 2
-              ? {}
-              : {
-            Polyline(
-              polylineId: const PolylineId('route_trail'),
-              points: points,
-              color: AppColors.textPrimary,
-              width: 4,
-            ),
-          },
+          markers: markers,
+          polylines: polylines,
         );
       },
     );

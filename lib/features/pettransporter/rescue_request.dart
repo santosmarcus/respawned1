@@ -22,6 +22,7 @@ class RescueRequest extends StatefulWidget {
 
 class _RescueRequestState extends State<RescueRequest> {
   bool _isAccepting = false;
+  bool _isDeclining = false;
 
   Future<void> _startNow() async {
     setState(() => _isAccepting = true);
@@ -72,6 +73,50 @@ class _RescueRequestState extends State<RescueRequest> {
       }
     } finally {
       if (mounted) setState(() => _isAccepting = false);
+    }
+  }
+
+  Future<void> _decline() async {
+    setState(() => _isDeclining = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final caseRef =
+      FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
+      final snap = await caseRef.get();
+      final currentStatus = (snap.data() as Map<String, dynamic>?)?['status'];
+      final wasAssignedToMe =
+          (snap.data() as Map<String, dynamic>?)?['assignedVolunteerId'] == uid;
+
+      final updateData = <String, dynamic>{
+        'declinedBy': FieldValue.arrayUnion([uid]),
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'A rider declined this request.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      };
+
+      if (wasAssignedToMe && currentStatus == 'assigned') {
+        updateData['status'] = 'pending';
+        updateData['assignedVolunteerId'] = null;
+        updateData['assignedVolunteerName'] = null;
+      }
+
+      await caseRef.update(updateData);
+
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to decline request: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDeclining = false);
     }
   }
 
@@ -309,32 +354,66 @@ class _RescueRequestState extends State<RescueRequest> {
           // Start now / already accepted footer
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: alreadyAccepted || _isAccepting ? null : _startNow,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+            child: Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: alreadyAccepted || _isAccepting || _isDeclining
+                        ? null
+                        : _startNow,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _isAccepting
+                        ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: AppColors.textPrimary),
+                    )
+                        : Text(
+                      alreadyAccepted ? 'Already Accepted' : 'Start now',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 16, color: AppColors.textPrimary),
+                    ),
                   ),
-                  elevation: 0,
                 ),
-                child: _isAccepting
-                    ? const SizedBox(
-                  height: 22,
-                  width: 22,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.5, color: AppColors.textPrimary),
-                )
-                    : Text(
-                  alreadyAccepted ? 'Already Accepted' : 'Start now',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 16, color: AppColors.textPrimary),
-                ),
-              ),
+                if (!alreadyAccepted) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _isAccepting || _isDeclining ? null : _decline,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.yellowrspwn, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                      ),
+                      child: _isDeclining
+                          ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.5, color: AppColors.textPrimary),
+                      )
+                          : Text(
+                        'Decline',
+                        style: GoogleFonts.tiltWarp(
+                            fontSize: 16, color: AppColors.textPrimary),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

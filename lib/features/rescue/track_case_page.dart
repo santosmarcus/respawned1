@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
@@ -23,10 +26,12 @@ class TrackCasePage extends StatefulWidget {
 class _TrackCasePageState extends State<TrackCasePage> {
   late int _tabIndex = widget.initialTabIndex;
   final _messageController = TextEditingController();
+  final _messageFocusNode = FocusNode();
 
   @override
   void dispose() {
     _messageController.dispose();
+    _messageFocusNode.dispose();
     super.dispose();
   }
 
@@ -190,6 +195,7 @@ class _TrackCasePageState extends State<TrackCasePage> {
                           statusHistory: statusHistory,
                           caseId: widget.caseId,
                           messageController: _messageController,
+                          messageFocusNode: _messageFocusNode,
                           onSend: () => _sendMessage(widget.caseId),
                           data: data ?? {},  // ADDED
                         )
@@ -334,6 +340,7 @@ class _TrackingTab extends StatelessWidget {
   final List<Map<String, dynamic>> statusHistory;
   final String caseId;
   final TextEditingController messageController;
+  final FocusNode? messageFocusNode;
   final VoidCallback onSend;
   final Map<String, dynamic> data;
 
@@ -341,6 +348,7 @@ class _TrackingTab extends StatelessWidget {
     required this.statusHistory,
     required this.caseId,
     required this.messageController,
+    this.messageFocusNode,
     required this.onSend,
     required this.data,
   });
@@ -471,10 +479,239 @@ class _TrackingTab extends StatelessWidget {
       ),
     );
   }
+  // Haversine distance in kilometers — used to show how far the assigned
+  // transporter currently is from the pickup location.
+  double _distanceKm(double lat1, double lng1, double lat2, double lng2) {
+    const earthRadiusKm = 6371.0;
+    double deg2rad(double deg) => deg * (math.pi / 180.0);
+    final dLat = deg2rad(lat2 - lat1);
+    final dLng = deg2rad(lng2 - lng1);
+    final a = math.pow(math.sin(dLat / 2), 2) +
+        math.cos(deg2rad(lat1)) *
+            math.cos(deg2rad(lat2)) *
+            math.pow(math.sin(dLng / 2), 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  // Looks up the assigned transporter's phone number and shows it in a
+  // simple sheet the reporter can copy, without pulling in a url_launcher
+  // dependency just for this.
+  Future<void> _showCallSheet(BuildContext context, String riderName) async {
+    final riderId = data['assignedVolunteerId'] as String?;
+    String? phone;
+    if (riderId != null && riderId.isNotEmpty) {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(riderId)
+          .get();
+      phone = userDoc.data()?['phone'] as String?;
+    }
+
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: Text(riderName,
+            style: GoogleFonts.tiltWarp(
+                fontSize: 16, color: AppColors.textPrimary)),
+        content: Text(
+          (phone == null || phone.isEmpty)
+              ? 'No contact number on file for this transporter yet.'
+              : phone,
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+        ),
+        actions: [
+          if (phone != null && phone.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: phone!));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Number copied.')),
+                );
+              },
+              child: Text('Copy',
+                  style: GoogleFonts.zain(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Close',
+                style: GoogleFonts.zain(color: AppColors.textSecondary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget? _buildRiderInfoCard(BuildContext context) {
+    final name = data['assignedVolunteerName'] as String?;
+    if (name == null || name.trim().isEmpty) return null;
+
+    final vehicle = (data['assignedVehicle'] ?? '').toString();
+    final plate = (data['assignedPlate'] ?? '').toString();
+
+    String? distanceLabel;
+    final riderLat = data['riderLastLat'];
+    final riderLng = data['riderLastLng'];
+    final caseLat = data['lat'];
+    final caseLng = data['lng'];
+    if (riderLat is num &&
+        riderLng is num &&
+        caseLat is num &&
+        caseLng is num) {
+      final km = _distanceKm(riderLat.toDouble(), riderLng.toDouble(),
+          caseLat.toDouble(), caseLng.toDouble());
+      distanceLabel = '${km.toStringAsFixed(1)}km';
+    }
+
+    final vehicleLine =
+    [plate, vehicle].where((s) => s.isNotEmpty).join('  ');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.slaterspwn,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.person,
+                  color: AppColors.textSecondary, size: 28),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 15, color: AppColors.textPrimary)),
+                  if (distanceLabel != null)
+                    Text(distanceLabel,
+                        style: GoogleFonts.zain(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                  if (vehicleLine.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(vehicleLine,
+                        style: GoogleFonts.zain(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary)),
+                  ],
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.message_outlined,
+                  color: AppColors.textPrimary),
+              onPressed: () =>
+                  FocusScope.of(context).requestFocus(messageFocusNode),
+            ),
+            IconButton(
+              icon: const Icon(Icons.call, color: AppColors.textPrimary),
+              onPressed: () => _showCallSheet(context, name),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimelineItem(int index) {
+    final item = statusHistory[index];
+    final isLast = index == statusHistory.length - 1;
+    final ts = item['timestamp'];
+    final date = ts is Timestamp ? ts.toDate() : null;
+    final timeStr = date != null ? _formatTime(date) : '';
+    final dateStr = date != null ? _formatDate(date) : '';
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: AppColors.textPrimary,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.textPrimary, width: 2),
+              ),
+              child: isLast
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
+            ),
+            if (index < statusHistory.length - 1)
+              Container(width: 2, height: 40, color: AppColors.textPrimary),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    item['status'] ?? '',
+                    style: GoogleFonts.zain(
+                        fontSize: 13, color: AppColors.textPrimary),
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(timeStr,
+                        style: GoogleFonts.zain(
+                            fontSize: 11, color: AppColors.textSecondary)),
+                    Text(dateStr,
+                        style: GoogleFonts.zain(
+                            fontSize: 11, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final riderCard = _buildRiderInfoCard(context);
     return Column(
       children: [
+        if (riderCard != null) riderCard,
+
+        // Tracking progress + verification media now share ONE scrollable
+        // region. Previously the media sections sat as fixed-size Column
+        // siblings below the timeline's Expanded — however many pickup/
+        // dropoff verification photos there were, that block claimed its
+        // full natural height first, squeezing (or entirely hiding) the
+        // timeline above it. Putting both inside the same ListView means
+        // the timeline is always reachable by scrolling, no matter how
+        // much media there is.
         Expanded(
           child: statusHistory.isEmpty
               ? Center(
@@ -482,97 +719,31 @@ class _TrackingTab extends StatelessWidget {
                 style: GoogleFonts.zain(
                     fontSize: 13, color: AppColors.textSecondary)),
           )
-              : ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: statusHistory.length,
-            itemBuilder: (context, index) {
-              final item = statusHistory[index];
-              final isLast = index == statusHistory.length - 1;
-              final ts = item['timestamp'];
-              final date = ts is Timestamp ? ts.toDate() : null;
-              final timeStr = date != null ? _formatTime(date) : '';
-              final dateStr = date != null ? _formatDate(date) : '';
+              : ListView(
+            children: [
+              for (int i = 0; i < statusHistory.length; i++)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildTimelineItem(i),
+                ),
 
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
-                    children: [
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: AppColors.textPrimary,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: AppColors.textPrimary, width: 2),
-                        ),
-                        child: isLast
-                            ? const Icon(Icons.check,
-                            size: 12, color: Colors.white)
-                            : null,
-                      ),
-                      if (index < statusHistory.length - 1)
-                        Container(
-                            width: 2,
-                            height: 40,
-                            color: AppColors.textPrimary),
-                    ],
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        mainAxisAlignment:
-                        MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              item['status'] ?? '',
-                              style: GoogleFonts.zain(
-                                  fontSize: 13,
-                                  color: AppColors.textPrimary),
-                            ),
-                          ),
-                          Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.end,
-                            children: [
-                              Text(timeStr,
-                                  style: GoogleFonts.zain(
-                                      fontSize: 11,
-                                      color: AppColors.textSecondary)),
-                              Text(dateStr,
-                                  style: GoogleFonts.zain(
-                                      fontSize: 11,
-                                      color: AppColors.textSecondary)),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
+              const SizedBox(height: 12),
+              _buildMediaSection(
+                context,
+                'Pickup Verification',
+                List<String>.from(data['pickupVerificationUrls'] ?? []),
+              ),
+              const SizedBox(height: 12),
+              _buildMediaSection(
+                context,
+                'Dropoff Verification',
+                List<String>.from(data['dropoffVerificationUrls'] ?? []),
+              ),
+              const SizedBox(height: 8),
+              const Divider(),
+            ],
           ),
         ),
-
-        _buildMediaSection(
-          context,
-          'Pickup Verification',
-          List<String>.from(data['pickupVerificationUrls'] ?? []),
-        ),
-        const SizedBox(height: 12),
-        _buildMediaSection(
-          context,
-          'Dropoff Verification',
-          List<String>.from(data['dropoffVerificationUrls'] ?? []),
-        ),
-        const SizedBox(height: 8),
-
-        const Divider(),
 
         // Messages
         Padding(
@@ -671,6 +842,7 @@ class _TrackingTab extends StatelessWidget {
               Expanded(
                 child: TextField(
                   controller: messageController,
+                  focusNode: messageFocusNode,
                   decoration: InputDecoration(
                     hintText: 'Type a message',
                     hintStyle: GoogleFonts.zain(

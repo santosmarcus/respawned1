@@ -1551,6 +1551,8 @@ class _RescuePageState extends State<RescuePage> {
         'condition': condition,
         'urgency': _selectedUrgency,
         'address': _addressController.text.trim(),
+        'lat': _pinnedLocation.latitude,
+        'lng': _pinnedLocation.longitude,
         'coordinateWithShelter': _coordinateChoice,
         'witnessName': _witnessNameController.text.trim(),
         'witnessPhone': _witnessNumberController.text.trim(),
