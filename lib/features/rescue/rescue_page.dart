@@ -2443,10 +2443,11 @@ class _RescuePageState extends State<RescuePage> {
             content: Text(
               candidates.docs.isNotEmpty
                   ? 'We found ${candidates.docs.length} possible match(es). '
-                  'They will appear under Possible Matches on your home screen '
-                  'once our team verifies them.'
-                  : "We'll notify you on your home screen the moment a possible "
-                  'match comes in.',
+                  'Open this report from your Activity feed and check the '
+                  'Possible Matches section once our team verifies them.'
+                  : "We'll notify you the moment a possible match comes in — "
+                  'check the Possible Matches section on this report from '
+                  'your Activity feed.',
               style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
             ),
             actions: [

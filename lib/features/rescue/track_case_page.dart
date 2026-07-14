@@ -1,13 +1,17 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+
 
 
 class TrackCasePage extends StatefulWidget {
@@ -62,6 +66,13 @@ class _TrackCasePageState extends State<TrackCasePage> {
     _messageController.clear();
   }
 
+  void _focusOrgMessages() {
+    setState(() => _tabIndex = 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _messageFocusNode.requestFocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
@@ -79,6 +90,8 @@ class _TrackCasePageState extends State<TrackCasePage> {
         final status = data?['status'] ?? 'pending';
         final statusHistory = List<Map<String, dynamic>>.from(
             data?['statusHistory'] ?? []);
+        final isReporter = FirebaseAuth.instance.currentUser?.uid != null &&
+            FirebaseAuth.instance.currentUser?.uid == data?['reporterId'];
 
         // Navigate to completed page when case is done
         if (status == 'completed') {
@@ -107,29 +120,33 @@ class _TrackCasePageState extends State<TrackCasePage> {
           ),
           body: Column(
             children: [
-              // Map area placeholder
-              data?['riderId'] != null
-                  ? SizedBox(
-                height: 200,
-                child: _TrackCaseMap(caseId: widget.caseId),
-              )
-                  : Container(
-                height: 200,
-                color: AppColors.slaterspwn,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.map_outlined,
-                          size: 40, color: AppColors.textSecondary),
-                      const SizedBox(height: 8),
-                      Text('Map will appear once a transporter is assigned.',
-                          style: GoogleFonts.zain(
-                              fontSize: 12, color: AppColors.textSecondary)),
-                    ],
+              if (isReporter && data?['riderId'] != null)
+                SizedBox(
+                  height: 200,
+                  child: _TrackCaseMap(caseId: widget.caseId),
+                )
+              else if (isReporter)
+                Container(
+                  height: 200,
+                  color: AppColors.slaterspwn,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.map_outlined,
+                            size: 40, color: AppColors.textSecondary),
+                        const SizedBox(height: 8),
+                        Text('Map will appear once a transporter is assigned.',
+                            style: GoogleFonts.zain(
+                                fontSize: 12, color: AppColors.textSecondary)),
+                      ],
+                    ),
                   ),
+                )
+              else
+                _CasePhotoHeader(
+                  photoUrls: List<String>.from(data?['photoUrls'] ?? []),
                 ),
-              ),
 
               // Bottom panel
               Expanded(
@@ -198,10 +215,13 @@ class _TrackCasePageState extends State<TrackCasePage> {
                           messageFocusNode: _messageFocusNode,
                           onSend: () => _sendMessage(widget.caseId),
                           data: data ?? {},  // ADDED
+                          isReporter: isReporter,
                         )
                             : _CaseDetailTab(
                           caseId: widget.caseId,
                           data: data ?? {},
+                          isReporter: isReporter,
+                          onMessageOrg: _focusOrgMessages,
                         ),
                       ),
                     ],
@@ -343,6 +363,7 @@ class _TrackingTab extends StatelessWidget {
   final FocusNode? messageFocusNode;
   final VoidCallback onSend;
   final Map<String, dynamic> data;
+  final bool isReporter;
 
   const _TrackingTab({
     required this.statusHistory,
@@ -351,6 +372,7 @@ class _TrackingTab extends StatelessWidget {
     this.messageFocusNode,
     required this.onSend,
     required this.data,
+    required this.isReporter,
   });
 
   String _formatTime(DateTime d) {
@@ -479,162 +501,6 @@ class _TrackingTab extends StatelessWidget {
       ),
     );
   }
-  // Haversine distance in kilometers — used to show how far the assigned
-  // transporter currently is from the pickup location.
-  double _distanceKm(double lat1, double lng1, double lat2, double lng2) {
-    const earthRadiusKm = 6371.0;
-    double deg2rad(double deg) => deg * (math.pi / 180.0);
-    final dLat = deg2rad(lat2 - lat1);
-    final dLng = deg2rad(lng2 - lng1);
-    final a = math.pow(math.sin(dLat / 2), 2) +
-        math.cos(deg2rad(lat1)) *
-            math.cos(deg2rad(lat2)) *
-            math.pow(math.sin(dLng / 2), 2);
-    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-    return earthRadiusKm * c;
-  }
-
-  // Looks up the assigned transporter's phone number and shows it in a
-  // simple sheet the reporter can copy, without pulling in a url_launcher
-  // dependency just for this.
-  Future<void> _showCallSheet(BuildContext context, String riderName) async {
-    final riderId = data['assignedVolunteerId'] as String?;
-    String? phone;
-    if (riderId != null && riderId.isNotEmpty) {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(riderId)
-          .get();
-      phone = userDoc.data()?['phone'] as String?;
-    }
-
-    if (!context.mounted) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Text(riderName,
-            style: GoogleFonts.tiltWarp(
-                fontSize: 16, color: AppColors.textPrimary)),
-        content: Text(
-          (phone == null || phone.isEmpty)
-              ? 'No contact number on file for this transporter yet.'
-              : phone,
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-        ),
-        actions: [
-          if (phone != null && phone.isNotEmpty)
-            TextButton(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: phone!));
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Number copied.')),
-                );
-              },
-              child: Text('Copy',
-                  style: GoogleFonts.zain(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-            ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Close',
-                style: GoogleFonts.zain(color: AppColors.textSecondary)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget? _buildRiderInfoCard(BuildContext context) {
-    final name = data['assignedVolunteerName'] as String?;
-    if (name == null || name.trim().isEmpty) return null;
-
-    final vehicle = (data['assignedVehicle'] ?? '').toString();
-    final plate = (data['assignedPlate'] ?? '').toString();
-
-    String? distanceLabel;
-    final riderLat = data['riderLastLat'];
-    final riderLng = data['riderLastLng'];
-    final caseLat = data['lat'];
-    final caseLng = data['lng'];
-    if (riderLat is num &&
-        riderLng is num &&
-        caseLat is num &&
-        caseLng is num) {
-      final km = _distanceKm(riderLat.toDouble(), riderLng.toDouble(),
-          caseLat.toDouble(), caseLng.toDouble());
-      distanceLabel = '${km.toStringAsFixed(1)}km';
-    }
-
-    final vehicleLine =
-    [plate, vehicle].where((s) => s.isNotEmpty).join('  ');
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: AppColors.slaterspwn,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.person,
-                  color: AppColors.textSecondary, size: 28),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 15, color: AppColors.textPrimary)),
-                  if (distanceLabel != null)
-                    Text(distanceLabel,
-                        style: GoogleFonts.zain(
-                            fontSize: 12, color: AppColors.textSecondary)),
-                  if (vehicleLine.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(vehicleLine,
-                        style: GoogleFonts.zain(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary)),
-                  ],
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.message_outlined,
-                  color: AppColors.textPrimary),
-              onPressed: () =>
-                  FocusScope.of(context).requestFocus(messageFocusNode),
-            ),
-            IconButton(
-              icon: const Icon(Icons.call, color: AppColors.textPrimary),
-              onPressed: () => _showCallSheet(context, name),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildTimelineItem(int index) {
     final item = statusHistory[index];
     final isLast = index == statusHistory.length - 1;
@@ -699,33 +565,27 @@ class _TrackingTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final riderCard = _buildRiderInfoCard(context);
     return Column(
       children: [
-        if (riderCard != null) riderCard,
-
-        // Tracking progress + verification media now share ONE scrollable
-        // region. Previously the media sections sat as fixed-size Column
-        // siblings below the timeline's Expanded — however many pickup/
-        // dropoff verification photos there were, that block claimed its
-        // full natural height first, squeezing (or entirely hiding) the
-        // timeline above it. Putting both inside the same ListView means
-        // the timeline is always reachable by scrolling, no matter how
-        // much media there is.
         Expanded(
-          child: statusHistory.isEmpty
-              ? Center(
-            child: Text('No status updates yet.',
-                style: GoogleFonts.zain(
-                    fontSize: 13, color: AppColors.textSecondary)),
-          )
-              : ListView(
+          child: ListView(
             children: [
-              for (int i = 0; i < statusHistory.length; i++)
+              if (statusHistory.isEmpty)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _buildTimelineItem(i),
-                ),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 24),
+                  child: Center(
+                    child: Text('No status updates yet.',
+                        style: GoogleFonts.zain(
+                            fontSize: 13, color: AppColors.textSecondary)),
+                  ),
+                )
+              else
+                for (int i = 0; i < statusHistory.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _buildTimelineItem(i),
+                  ),
 
               const SizedBox(height: 12),
               _buildMediaSection(
@@ -740,146 +600,151 @@ class _TrackingTab extends StatelessWidget {
                 List<String>.from(data['dropoffVerificationUrls'] ?? []),
               ),
               const SizedBox(height: 8),
-              const Divider(),
+              const SizedBox(height: 12),
+
+              _CommunityReportSection(caseId: caseId),
+
             ],
           ),
         ),
 
-        // Messages
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Messages',
-                style: GoogleFonts.zain(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+        // Messages to the Organization — reporter-only private channel.
+        if (isReporter) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Messages to the Organization',
+                  style: GoogleFonts.zain(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+            ),
           ),
-        ),
 
-        // Message list
-        SizedBox(
-          height: 100,
-          child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('cases')
-                .doc(caseId)
-                .collection('messages')
-                .orderBy('timestamp')
-                .snapshots(),
-            builder: (context, snap) {
-              if (!snap.hasData || snap.data!.docs.isEmpty) {
-                return const SizedBox();
-              }
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: snap.data!.docs.length,
-                itemBuilder: (context, i) {
-                  final msg = snap.data!.docs[i].data()
-                  as Map<String, dynamic>;
-                  final ts = msg['timestamp'] as Timestamp?;
-                  final timeStr = ts != null
-                      ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-                      : '';
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CircleAvatar(
-                          radius: 14,
-                          backgroundColor: AppColors.slaterspwn,
-                          child: Text(
-                            (msg['senderName'] ?? 'U')[0],
-                            style: GoogleFonts.zain(
-                                fontSize: 12,
-                                color: AppColors.textPrimary),
+          // Message list
+          SizedBox(
+            height: 100,
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('cases')
+                  .doc(caseId)
+                  .collection('messages')
+                  .orderBy('timestamp')
+                  .snapshots(),
+              builder: (context, snap) {
+                if (!snap.hasData || snap.data!.docs.isEmpty) {
+                  return const SizedBox();
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: snap.data!.docs.length,
+                  itemBuilder: (context, i) {
+                    final msg = snap.data!.docs[i].data()
+                    as Map<String, dynamic>;
+                    final ts = msg['timestamp'] as Timestamp?;
+                    final timeStr = ts != null
+                        ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
+                        : '';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 14,
+                            backgroundColor: AppColors.slaterspwn,
+                            child: Text(
+                              (msg['senderName'] ?? 'U')[0],
+                              style: GoogleFonts.zain(
+                                  fontSize: 12,
+                                  color: AppColors.textPrimary),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(msg['senderName'] ?? '',
-                                      style: GoogleFonts.zain(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.textPrimary)),
-                                  Text(timeStr,
-                                      style: GoogleFonts.zain(
-                                          fontSize: 10,
-                                          color: AppColors.textSecondary)),
-                                ],
-                              ),
-                              Text(msg['text'] ?? '',
-                                  style: GoogleFonts.zain(
-                                      fontSize: 12,
-                                      color: AppColors.textSecondary)),
-                            ],
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(msg['senderName'] ?? '',
+                                        style: GoogleFonts.zain(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.textPrimary)),
+                                    Text(timeStr,
+                                        style: GoogleFonts.zain(
+                                            fontSize: 10,
+                                            color: AppColors.textSecondary)),
+                                  ],
+                                ),
+                                Text(msg['text'] ?? '',
+                                    style: GoogleFonts.zain(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary)),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            },
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
-        ),
 
-        // Message input
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: messageController,
-                  focusNode: messageFocusNode,
-                  decoration: InputDecoration(
-                    hintText: 'Type a message',
-                    hintStyle: GoogleFonts.zain(
-                        fontSize: 13, color: AppColors.textSecondary),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(50),
-                      borderSide:
-                      const BorderSide(color: AppColors.slaterspwn),
+          // Message input
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: messageController,
+                    focusNode: messageFocusNode,
+                    decoration: InputDecoration(
+                      hintText: 'Type a message',
+                      hintStyle: GoogleFonts.zain(
+                          fontSize: 13, color: AppColors.textSecondary),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(50),
+                        borderSide:
+                        const BorderSide(color: AppColors.slaterspwn),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(50),
+                        borderSide: const BorderSide(
+                            color: AppColors.textPrimary),
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(50),
-                      borderSide: const BorderSide(
-                          color: AppColors.textPrimary),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: onSend,
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                    color: AppColors.yellowrspwn,
-                    shape: BoxShape.circle,
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onSend,
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: const BoxDecoration(
+                      color: AppColors.yellowrspwn,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.send,
+                        size: 18, color: AppColors.textPrimary),
                   ),
-                  child: const Icon(Icons.send,
-                      size: 18, color: AppColors.textPrimary),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -889,7 +754,14 @@ class _TrackingTab extends StatelessWidget {
 class _CaseDetailTab extends StatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const _CaseDetailTab({required this.caseId, required this.data});
+  final bool isReporter;
+  final VoidCallback? onMessageOrg;
+  const _CaseDetailTab({
+    required this.caseId,
+    required this.data,
+    required this.isReporter,
+    this.onMessageOrg,
+  });
 
   @override
   State<_CaseDetailTab> createState() => _CaseDetailTabState();
@@ -899,6 +771,158 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   bool _isSubmitting = false;
 
   Map<String, dynamic> get data => widget.data;
+
+  double _distanceKm(double lat1, double lng1, double lat2, double lng2) {
+    const earthRadiusKm = 6371.0;
+    double deg2rad(double deg) => deg * (math.pi / 180.0);
+    final dLat = deg2rad(lat2 - lat1);
+    final dLng = deg2rad(lng2 - lng1);
+    final a = math.pow(math.sin(dLat / 2), 2) +
+        math.cos(deg2rad(lat1)) *
+            math.cos(deg2rad(lat2)) *
+            math.pow(math.sin(dLng / 2), 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  Future<void> _showCallSheet(BuildContext context, String riderName) async {
+    final riderId = data['assignedVolunteerId'] as String?;
+    String? phone;
+    if (riderId != null && riderId.isNotEmpty) {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(riderId)
+          .get();
+      phone = userDoc.data()?['phone'] as String?;
+    }
+
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: Text(riderName,
+            style: GoogleFonts.tiltWarp(
+                fontSize: 16, color: AppColors.textPrimary)),
+        content: Text(
+          (phone == null || phone.isEmpty)
+              ? 'No contact number on file for this transporter yet.'
+              : phone,
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+        ),
+        actions: [
+          if (phone != null && phone.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: phone!));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Number copied.')),
+                );
+              },
+              child: Text('Copy',
+                  style: GoogleFonts.zain(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Close',
+                style: GoogleFonts.zain(color: AppColors.textSecondary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  Widget? _buildRiderInfoCard(BuildContext context) {
+    if (!widget.isReporter) return null;
+    final name = data['assignedVolunteerName'] as String?;
+    if (name == null || name.trim().isEmpty) return null;
+
+    final vehicle = (data['assignedVehicle'] ?? '').toString();
+    final plate = (data['assignedPlate'] ?? '').toString();
+
+    String? distanceLabel;
+    final riderLat = data['riderLastLat'];
+    final riderLng = data['riderLastLng'];
+    final caseLat = data['lat'];
+    final caseLng = data['lng'];
+    if (riderLat is num &&
+        riderLng is num &&
+        caseLat is num &&
+        caseLng is num) {
+      final km = _distanceKm(riderLat.toDouble(), riderLng.toDouble(),
+          caseLat.toDouble(), caseLng.toDouble());
+      distanceLabel = '${km.toStringAsFixed(1)}km';
+    }
+
+    final vehicleLine =
+    [plate, vehicle].where((s) => s.isNotEmpty).join('  ');
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.slaterspwn,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.person,
+                  color: AppColors.textSecondary, size: 28),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 15, color: AppColors.textPrimary)),
+                  if (distanceLabel != null)
+                    Text(distanceLabel,
+                        style: GoogleFonts.zain(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                  if (vehicleLine.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(vehicleLine,
+                        style: GoogleFonts.zain(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary)),
+                  ],
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.message_outlined,
+                  color: AppColors.textPrimary),
+              onPressed: widget.onMessageOrg,
+            ),
+            IconButton(
+              icon: const Icon(Icons.call, color: AppColors.textPrimary),
+              onPressed: () => _showCallSheet(context, name),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   bool get _hasWillingAdopter {
     final reporterWantsToAdopt = data['interestedToAdopt'] == 'yes';
@@ -1073,12 +1097,15 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   @override
   Widget build(BuildContext context) {
     final photoUrls = List<String>.from(data['photoUrls'] ?? []);
+    final riderCard = _buildRiderInfoCard(context);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (riderCard != null) riderCard,
+
           // Case media
           _buildMediaSection(
             context,
@@ -1100,8 +1127,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           _DetailRow('Interest to adopt', data['interestedToAdopt']),
           const SizedBox(height: 12),
 
-          // Adoption / foster availability banner — only shown while
-          // nobody has claimed the animal yet.
+
           if (!_hasWillingAdopter) ...[
             Container(
               width: double.infinity,
@@ -1207,6 +1233,660 @@ class _DetailRow extends StatelessWidget {
               style: GoogleFonts.zain(
                   fontSize: 13, color: AppColors.textSecondary)),
         ],
+      ),
+    );
+  }
+}
+
+// Hero header shown to everyone who is NOT the reporter — since they have
+// no live rider to track, the gray area simply shows the submitted report
+// photo instead of a map.
+class _CasePhotoHeader extends StatefulWidget {
+  final List<String> photoUrls;
+  const _CasePhotoHeader({required this.photoUrls});
+
+  @override
+  State<_CasePhotoHeader> createState() => _CasePhotoHeaderState();
+}
+
+class _CasePhotoHeaderState extends State<_CasePhotoHeader> {
+  int _page = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final urls = widget.photoUrls;
+    return SizedBox(
+      height: 200,
+      width: double.infinity,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          urls.isEmpty
+              ? Container(
+            color: AppColors.slaterspwn,
+            child: const Center(
+              child: Icon(Icons.pets, size: 40, color: AppColors.textSecondary),
+            ),
+          )
+              : PageView.builder(
+            itemCount: urls.length,
+            onPageChanged: (i) => setState(() => _page = i),
+            itemBuilder: (context, i) {
+              return Image.network(
+                urls[i],
+                fit: BoxFit.cover,
+                width: double.infinity,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return Container(
+                    color: AppColors.slaterspwn,
+                    child: const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                  );
+                },
+                errorBuilder: (context, _, __) => Container(
+                  color: AppColors.slaterspwn,
+                  child: const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        size: 36, color: AppColors.textSecondary),
+                  ),
+                ),
+              );
+            },
+          ),
+          if (urls.length > 1)
+            Positioned(
+              bottom: 10,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(urls.length, (i) {
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: i == _page
+                          ? AppColors.textPrimary
+                          : Colors.white.withOpacity(0.8),
+                    ),
+                  );
+                }),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// Community Report — lets any viewer (reporter included) see a feed of
+// sighting/status updates from the community, and lets them submit one of
+// four quick report types to help verify the case is still accurate.
+class _CommunityReportSection extends StatefulWidget {
+  final String caseId;
+  const _CommunityReportSection({required this.caseId});
+
+  @override
+  State<_CommunityReportSection> createState() =>
+      _CommunityReportSectionState();
+}
+
+class _CommunityReportSectionState extends State<_CommunityReportSection> {
+  bool _expanded = false;
+  String? _selectedType;
+  XFile? _pickedImage;
+  bool _submitting = false;
+  final _commentController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _picker = ImagePicker();
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    _locationController.dispose();
+    super.dispose();
+  }
+
+  CollectionReference<Map<String, dynamic>> get _reportsRef =>
+      FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .collection('communityReports');
+
+  String _typeLabel(String? t) => switch (t) {
+    'still_here' => 'Animal still here',
+    'moved' => 'Animal moved',
+    'rescued' => 'Animal rescued',
+    'no_animal' => 'No animal present',
+    _ => 'Update',
+  };
+
+  String _typeIconAsset(String? t) => switch (t) {
+    'still_here' => 'assets/icons/animalstillhere.png',
+    'moved' => 'assets/icons/animalmoved.png',
+    'rescued' => 'assets/icons/animalrescued.png',
+    'no_animal' => 'assets/icons/noanimal.png',
+    _ => 'assets/icons/info.png',
+  };
+
+  String _typeDescription(String? t) => switch (t) {
+    'still_here' =>
+    'Upload a recent photo to confirm the animal is still at the reported location.',
+    'moved' =>
+    'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
+    'rescued' =>
+    'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
+    'no_animal' =>
+    'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
+    _ => '',
+  };
+
+  Future<void> _pickImage() async {
+    final file = await _picker.pickImage(
+        source: ImageSource.gallery, imageQuality: 80);
+    if (file != null && mounted) {
+      setState(() => _pickedImage = file);
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_selectedType == null || _submitting) return;
+    if (_selectedType == 'moved' && _locationController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter the new location.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final userDoc =
+      await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final name =
+      '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
+          .trim();
+
+      final reportRef = _reportsRef.doc();
+
+      String? photoUrl;
+      if (_pickedImage != null) {
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('cases/${widget.caseId}/communityReports/${reportRef.id}.jpg');
+        await ref.putFile(
+          File(_pickedImage!.path),
+          SettableMetadata(contentType: 'image/jpeg'),
+        );
+        photoUrl = await ref.getDownloadURL();
+      }
+
+      await reportRef.set({
+        'reporterId': uid,
+        'reporterName': name.isEmpty ? 'A community member' : name,
+        'type': _selectedType,
+        'comment': _commentController.text.trim(),
+        'newAddress':
+        _selectedType == 'moved' ? _locationController.text.trim() : null,
+        'photoUrl': photoUrl,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        setState(() {
+          _selectedType = null;
+          _pickedImage = null;
+          _expanded = false;
+        });
+        _commentController.clear();
+        _locationController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Thanks! Your report has been submitted.'),
+            backgroundColor: AppColors.greenrspwn,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not submit report: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Widget _optionButton(String type, String iconAsset, String label) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _selectedType = type),
+        child: Column(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(
+                color: AppColors.textPrimary,
+                shape: BoxShape.circle,
+              ),
+              child: Image.asset(
+                iconAsset,
+                width: 10,
+                height: 10,
+              )
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildForm() {
+    return Stack(
+      children: [
+        Column(
+          children: [
+            const SizedBox(height: 4),
+            Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                color: AppColors.textPrimary,
+                shape: BoxShape.circle,
+              ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Image.asset(
+                    _typeIconAsset(_selectedType),
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                  ),
+            const SizedBox(height: 8),
+            Text(_typeLabel(_selectedType),
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            Text(
+              _typeDescription(_selectedType),
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                  fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 14),
+            GestureDetector(
+              onTap: _pickImage,
+              child: Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.slaterspwn),
+                  borderRadius: BorderRadius.circular(10),
+                  color: AppColors.background,
+                ),
+                child: _pickedImage != null
+                    ? ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.file(File(_pickedImage!.path),
+                      fit: BoxFit.cover),
+                )
+                    : const Icon(Icons.add_a_photo_outlined,
+                    color: AppColors.textSecondary, size: 26),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+            if (_selectedType == 'moved') ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                          text: 'Location Found',
+                          style: GoogleFonts.zain(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary)),
+                      const TextSpan(
+                          text: ' *',
+                          style: TextStyle(color: Colors.redAccent)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _locationController,
+                style: GoogleFonts.zain(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Enter the new location',
+                  hintStyle: GoogleFonts.zain(
+                      fontSize: 12, color: AppColors.textSecondary),
+                  prefixIcon: const Icon(Icons.search,
+                      size: 18, color: AppColors.textSecondary),
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: AppColors.slaterspwn),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            TextField(
+              controller: _commentController,
+              maxLines: 2,
+              style: GoogleFonts.zain(fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Comment',
+                hintStyle: GoogleFonts.zain(
+                    fontSize: 12, color: AppColors.textSecondary),
+                contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: AppColors.slaterspwn),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _submitting ? null : _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.yellowrspwn,
+                  foregroundColor: AppColors.textPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
+                ),
+                child: _submitting
+                    ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.textPrimary),
+                )
+                    : Text('Report',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary)),
+              ),
+            ),
+          ],
+        ),
+        Positioned(
+          top: 0,
+          right: 0,
+          child: GestureDetector(
+            onTap: () => setState(() => _selectedType = null),
+            child: const Icon(Icons.close,
+                size: 20, color: AppColors.textSecondary),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatTime(DateTime d) {
+    final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final min = d.minute.toString().padLeft(2, '0');
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    return '$h:$min $ampm';
+  }
+
+  String _formatDate(DateTime d) {
+    const months = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[d.month]} ${d.day}, ${d.year}';
+  }
+
+  Widget _reportTile(Map<String, dynamic> r) {
+    final ts = r['timestamp'] as Timestamp?;
+    final date = ts?.toDate();
+    final newAddress = r['newAddress'] as String?;
+    final comment = r['comment'] as String?;
+    final photoUrl = r['photoUrl'] as String?;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 13,
+            backgroundColor: AppColors.textPrimary,
+              child: Padding(
+                padding: const EdgeInsets.all(9),
+                child: Image.asset(
+                  _typeIconAsset(r['type'] as String?),
+                  fit: BoxFit.contain,
+                ),
+              ),
+        ),
+
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${r['reporterName'] ?? 'Someone'} · ${_typeLabel(r['type'] as String?)}',
+                        style: GoogleFonts.zain(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary),
+                      ),
+                    ),
+                    if (date != null)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(_formatTime(date),
+                              style: GoogleFonts.zain(
+                                  fontSize: 10,
+                                  color: AppColors.textSecondary)),
+                          Text(_formatDate(date),
+                              style: GoogleFonts.zain(
+                                  fontSize: 10,
+                                  color: AppColors.textSecondary)),
+                        ],
+                      ),
+                  ],
+                ),
+                if (newAddress != null && newAddress.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.location_on_outlined,
+                            size: 12, color: AppColors.textSecondary),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(newAddress,
+                              style: GoogleFonts.zain(
+                                  fontSize: 11, color: AppColors.textPrimary)),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (comment != null && comment.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(comment,
+                        style: GoogleFonts.zain(
+                            fontSize: 11, color: AppColors.textSecondary)),
+                  ),
+              ],
+            ),
+          ),
+          if (photoUrl != null && photoUrl.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.network(
+                photoUrl,
+                width: 36,
+                height: 36,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 36,
+                  height: 36,
+                  color: AppColors.slaterspwn,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Community Report',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary), textAlign: TextAlign.center,),
+                ),
+                GestureDetector(
+                  onTap: () => setState(() => _expanded = !_expanded),
+                  child: Icon(
+                    _expanded ? Icons.expand_less : Icons.add_circle_outline,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+            if (_expanded) ...[
+              const SizedBox(height: 10),
+              if (_selectedType == null) ...[
+                Text('What is happening?',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 4),
+                Text(
+                  'Help keep rescue reports accurate by sharing timely updates on the animal\'s location, condition, and safety.',
+                  style: GoogleFonts.zain(
+                      fontSize: 14, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    _optionButton(
+                      'still_here',
+                      'assets/icons/animalstillhere.png',
+                      'Animal still here',
+                    ),
+
+                    _optionButton(
+                      'moved',
+                      'assets/icons/animalmoved.png',
+                      'Animal moved',
+                    ),
+
+                    _optionButton(
+                      'rescued',
+                      'assets/icons/animalrescued.png',
+                      'Animal rescued',
+                    ),
+
+                    _optionButton(
+                      'no_animal',
+                      'assets/icons/noanimal.png',
+                      'No Animal Present',
+                    ),
+                  ],
+                ),
+              ] else
+                _buildForm(),
+            ],
+            const SizedBox(height: 12),
+            const Divider(color: AppColors.slaterspwn),
+            const SizedBox(height: 4),
+            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _reportsRef
+                  .orderBy('timestamp', descending: true)
+                  .limit(20)
+                  .snapshots(),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                }
+                final docs = snap.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text('No community reports yet.',
+                        style: GoogleFonts.zain(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                  );
+                }
+                return Column(
+                  children:
+                  docs.map((d) => _reportTile(d.data())).toList(),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

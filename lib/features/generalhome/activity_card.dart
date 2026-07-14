@@ -5,6 +5,7 @@ import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
 import '../../app_theme.dart';
 import 'activity_item.dart';
 
@@ -103,47 +104,11 @@ class ActivityCard extends StatelessWidget{
     }
   }
 
-  Future<void> _viewPetAlert(BuildContext context) async {
-    final doc = await FirebaseFirestore.instance
-        .collection('petAlerts')
-        .doc(item.docId)
-        .get();
-    final data = doc.data();
-    if (data == null || !context.mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(item.title,
-                style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-            Text(item.status,
-                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-            const SizedBox(height: 12),
-            if ((data['species'] as String?)?.isNotEmpty == true)
-              Text('Species: ${data['species']}',
-                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-            if ((data['address'] as String?)?.isNotEmpty == true)
-              Text('Location: ${data['address']}',
-                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-            const SizedBox(height: 16),
-            Text(
-              (data['status'] as String?) == 'verified'
-                  ? 'A possible match for this report was verified — check '
-                  'Possible Matches on your home screen for next steps.'
-                  : 'We\'ll keep checking this against new reports automatically.',
-              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-            ),
-          ],
-        ),
+  void _viewPetAlert(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LostFoundTrackCasePage(alertId: item.docId),
       ),
     );
   }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
-import '../rescue/track_case_page.dart';
+import 'track_case_page.dart';
 import 'public_rescue_item.dart';
 
 class PublicRescueCard extends StatelessWidget {
