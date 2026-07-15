@@ -11,6 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 
@@ -132,11 +133,62 @@ class _TrackCasePageState extends State<TrackCasePage> {
           ),
           body: Column(
             children: [
-              // The gray area always shows the submitted report photos —
-              // for everyone, reporter included.
-              _CasePhotoHeader(
-                photoUrls: List<String>.from(data?['photoUrls'] ?? []),
-              ),
+              // Reporter: live transit-progress map as soon as the rider
+              // has accepted and started the trip — riderLastLat/Lng only
+              // get written once _startTrip() begins location streaming,
+              // so their presence is the real "accepted" signal (being
+              // merely assigned isn't enough yet). Before that — and for
+              // everyone who isn't the reporter — the gray area shows the
+              // submitted report photos instead.
+              if (isReporter && data?['riderLastLat'] != null)
+                SizedBox(
+                  height: 200,
+                  child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
+                )
+              else if (isReporter && data?['riderId'] != null)
+                Container(
+                  height: 200,
+                  color: AppColors.slaterspwn,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.map_outlined,
+                            size: 40, color: AppColors.textSecondary),
+                        const SizedBox(height: 8),
+                        Text(
+                            'The transit map will appear once your transporter accepts and starts the pickup.',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.zain(
+                                fontSize: 12, color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                )
+              else if (isReporter)
+                  Container(
+                    height: 200,
+                    color: AppColors.slaterspwn,
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.map_outlined,
+                              size: 40, color: AppColors.textSecondary),
+                          const SizedBox(height: 8),
+                          Text(
+                              'The transit map will appear once a transporter is assigned.',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.zain(
+                                  fontSize: 12, color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  _CasePhotoHeader(
+                    photoUrls: List<String>.from(data?['photoUrls'] ?? []),
+                  ),
 
               // Bottom panel
               Expanded(
@@ -261,6 +313,133 @@ class _TabButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// Reporter-only transit progress map: pickup marker, drop-off marker, the
+// transporter's live position, and the route actually traveled so far
+// (built from the periodic location pings the transporter's app writes to
+// cases/{caseId}/tracking). Gives the reporter a clear "pickup → now →
+// drop-off" picture of the rescue in progress.
+class _TrackCaseMap extends StatefulWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _TrackCaseMap({required this.caseId, required this.data});
+
+  @override
+  State<_TrackCaseMap> createState() => _TrackCaseMapState();
+}
+
+class _TrackCaseMapState extends State<_TrackCaseMap> {
+  GoogleMapController? _controller;
+  bool _centered = false;
+
+  LatLng? _latLngFrom(Map<String, dynamic> data, String latKey, String lngKey) {
+    final lat = data[latKey];
+    final lng = data[lngKey];
+    if (lat is num && lng is num) return LatLng(lat.toDouble(), lng.toDouble());
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pickup = _latLngFrom(widget.data, 'lat', 'lng');
+    final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng');
+    final riderLastKnown =
+    _latLngFrom(widget.data, 'riderLastLat', 'riderLastLng');
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .collection('tracking')
+          .orderBy('timestamp')
+          .limitToLast(200)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final trail = <LatLng>[];
+        if (snapshot.hasData) {
+          for (final doc in snapshot.data!.docs) {
+            final d = doc.data() as Map<String, dynamic>;
+            final lat = d['lat'];
+            final lng = d['lng'];
+            if (lat is num && lng is num) {
+              trail.add(LatLng(lat.toDouble(), lng.toDouble()));
+            }
+          }
+        }
+
+        // Current transporter position: latest ping if we have one,
+        // otherwise fall back to the last known lat/lng stored on the
+        // case doc itself.
+        final riderPos = trail.isNotEmpty ? trail.last : riderLastKnown;
+
+        final center = riderPos ?? pickup ?? dropoff ?? const LatLng(14.5995, 120.9842);
+
+        if (_controller != null && riderPos != null && !_centered) {
+          _centered = true;
+          _controller!.animateCamera(CameraUpdate.newLatLngZoom(riderPos, 15));
+        }
+
+        final markers = <Marker>{
+          if (pickup != null)
+            Marker(
+              markerId: const MarkerId('pickup'),
+              position: pickup,
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueGreen),
+              infoWindow: const InfoWindow(title: 'Pickup location'),
+            ),
+          if (dropoff != null)
+            Marker(
+              markerId: const MarkerId('dropoff'),
+              position: dropoff,
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueRed),
+              infoWindow: const InfoWindow(title: 'Drop-off location'),
+            ),
+          if (riderPos != null)
+            Marker(
+              markerId: const MarkerId('rider_current'),
+              position: riderPos,
+              infoWindow: const InfoWindow(title: 'Transporter'),
+            ),
+        };
+
+        // The traveled route: pickup, then every recorded ping in order.
+        // If there's no ping history yet but we do have both endpoints,
+        // fall back to a straight pickup→drop-off line so progress is
+        // still visible from the very start.
+        final routePoints = <LatLng>[
+          if (pickup != null) pickup,
+          ...trail,
+          if (trail.isEmpty && dropoff != null) dropoff,
+        ];
+
+        return ClipRRect(
+          borderRadius: BorderRadius.zero,
+          child: GoogleMap(
+            onMapCreated: (ctrl) => _controller = ctrl,
+            initialCameraPosition: CameraPosition(target: center, zoom: 14),
+            myLocationEnabled: false,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            mapToolbarEnabled: false,
+            markers: markers,
+            polylines: routePoints.length < 2
+                ? {}
+                : {
+              Polyline(
+                polylineId: const PolylineId('route_trail'),
+                points: routePoints,
+                color: AppColors.textPrimary,
+                width: 4,
+              ),
+            },
+          ),
+        );
+      },
     );
   }
 }

@@ -38,45 +38,6 @@ class _RescueRequestState extends State<RescueRequest> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
           .trim();
 
-      // Decide where the animal will be brought for treatment as soon as
-      // the transporter accepts the request:
-      // - Critical / Medium cases auto-locate whichever registered
-      //   veterinary clinic is genuinely nearest the pick-up point.
-      // - Low cases skip the search and go straight to the organization's
-      //   regular partner clinic in General Trias, Cavite.
-      // Either way, the final drop-off after treatment is always the
-      // organization's shelter, LGARI Shelter-Tanza.
-      final urgency = (widget.data['urgency'] ?? '').toString();
-      final pickupLat = widget.data['lat'];
-      final pickupLng = widget.data['lng'];
-
-      String dropoffName = kPartnerClinicName;
-      String dropoffAddress = kPartnerClinicAddress;
-      double dropoffLat = kPartnerClinicLocation.latitude;
-      double dropoffLng = kPartnerClinicLocation.longitude;
-      String routingNote =
-          "Low-urgency case — routed to the organization's partner clinic in General Trias, Cavite.";
-
-      if ((urgency == 'Critical' || urgency == 'Medium') &&
-          pickupLat is num &&
-          pickupLng is num) {
-        final nearest = await findNearestVeterinaryClinic(
-          originLat: pickupLat.toDouble(),
-          originLng: pickupLng.toDouble(),
-        );
-        if (nearest != null) {
-          dropoffName = nearest.name;
-          dropoffAddress = nearest.address;
-          dropoffLat = nearest.lat;
-          dropoffLng = nearest.lng;
-          routingNote =
-          '$urgency case — auto-routed to nearest clinic: ${nearest.name}.';
-        } else {
-          routingNote =
-          "$urgency case — no nearby clinic found, defaulting to the partner clinic in General Trias, Cavite.";
-        }
-      }
-
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
@@ -85,21 +46,9 @@ class _RescueRequestState extends State<RescueRequest> {
         'assignedVolunteerId': uid,
         'assignedVolunteerName':
         riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
-        'dropoffName': dropoffName,
-        'dropoffAddress': dropoffAddress,
-        'dropoffLat': dropoffLat,
-        'dropoffLng': dropoffLng,
-        'shelterName': kOrgShelterName,
-        'shelterAddress': kOrgShelterAddress,
-        'shelterLat': kOrgShelterLocation.latitude,
-        'shelterLng': kOrgShelterLocation.longitude,
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Rider accepted the rescue request.',
-            'timestamp': Timestamp.now(),
-          },
-          {
-            'status': routingNote,
             'timestamp': Timestamp.now(),
           }
         ]),
@@ -127,7 +76,7 @@ class _RescueRequestState extends State<RescueRequest> {
     }
   }
 
-  Future<void> _decline() async {
+  Future<void> _decline(List<String> reasons) async {
     setState(() => _isDeclining = true);
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
@@ -138,11 +87,22 @@ class _RescueRequestState extends State<RescueRequest> {
       final wasAssignedToMe =
           (snap.data() as Map<String, dynamic>?)?['assignedVolunteerId'] == uid;
 
+      final reasonText = reasons.join('; ');
+
       final updateData = <String, dynamic>{
         'declinedBy': FieldValue.arrayUnion([uid]),
+        'declineReasons': FieldValue.arrayUnion([
+          {
+            'riderId': uid,
+            'reasons': reasons,
+            'timestamp': Timestamp.now(),
+          }
+        ]),
         'statusHistory': FieldValue.arrayUnion([
           {
-            'status': 'A rider declined this request.',
+            'status': reasonText.isEmpty
+                ? 'A rider declined this request.'
+                : 'A rider declined this request: $reasonText.',
             'timestamp': Timestamp.now(),
           }
         ]),
@@ -168,6 +128,194 @@ class _RescueRequestState extends State<RescueRequest> {
       }
     } finally {
       if (mounted) setState(() => _isDeclining = false);
+    }
+  }
+
+  static const _declineReasonOptions = [
+    'Already assigned to another pickup',
+    'Pickup/Drop off location is too far',
+    'Insufficient equipment (crate, leash, medical supplies)',
+    'Capacity is full',
+    'Total transaction time conflicts with schedule',
+    'Road closure or heavy traffic prevents timely transit',
+  ];
+
+  Future<void> _showDeclineReasonSheet() async {
+    final selected = <String>{};
+    bool otherChecked = false;
+    final otherController = TextEditingController();
+    String? errorText;
+
+    final result = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 12,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Decline Reason',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    for (final reason in _declineReasonOptions)
+                      _DeclineReasonCheckbox(
+                        label: reason,
+                        value: selected.contains(reason),
+                        onChanged: (v) => setModalState(() {
+                          if (v == true) {
+                            selected.add(reason);
+                          } else {
+                            selected.remove(reason);
+                          }
+                        }),
+                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Checkbox(
+                            value: otherChecked,
+                            side: const BorderSide(
+                                color: AppColors.textPrimary, width: 1.5),
+                            activeColor: AppColors.textPrimary,
+                            materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                            onChanged: (v) => setModalState(
+                                    () => otherChecked = v ?? false),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Text('Other:',
+                                    style: GoogleFonts.zain(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textPrimary)),
+                              ),
+                              if (otherChecked)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: TextField(
+                                    controller: otherController,
+                                    style: GoogleFonts.zain(fontSize: 13),
+                                    decoration: InputDecoration(
+                                      hintText: 'Please specify',
+                                      hintStyle: GoogleFonts.zain(
+                                          fontSize: 13,
+                                          color: AppColors.textSecondary),
+                                      contentPadding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 10),
+                                      filled: true,
+                                      fillColor: Colors.white,
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                        BorderRadius.circular(10),
+                                        borderSide: const BorderSide(
+                                            color: AppColors.slaterspwn),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(errorText!,
+                            style: GoogleFonts.zain(
+                                fontSize: 12, color: Colors.redAccent)),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: AppColors.background,
+                          side: BorderSide(
+                              color: AppColors.slaterspwn, width: 1),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                        ),
+                        onPressed: () {
+                          final finalReasons = [...selected];
+                          if (otherChecked &&
+                              otherController.text.trim().isNotEmpty) {
+                            finalReasons
+                                .add('Other: ${otherController.text.trim()}');
+                          }
+                          if (finalReasons.isEmpty) {
+                            setModalState(() => errorText =
+                            'Please select or specify at least one reason.');
+                            return;
+                          }
+                          Navigator.pop(ctx, finalReasons);
+                        },
+                        child: Text(
+                          'Confirm',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    otherController.dispose();
+
+    if (result != null && result.isNotEmpty) {
+      _decline(result);
     }
   }
 
@@ -441,7 +589,9 @@ class _RescueRequestState extends State<RescueRequest> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed: _isAccepting || _isDeclining ? null : _decline,
+                      onPressed: _isAccepting || _isDeclining
+                          ? null
+                          : _showDeclineReasonSheet,
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: AppColors.yellowrspwn, width: 1.5),
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -496,6 +646,55 @@ class _RescueRequestState extends State<RescueRequest> {
                   padding: const EdgeInsets.all(6),
                   child: const Icon(Icons.close,
                       color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeclineReasonCheckbox extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool?> onChanged;
+
+  const _DeclineReasonCheckbox({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Checkbox(
+                value: value,
+                side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                activeColor: AppColors.textPrimary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: onChanged,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  label,
+                  style: GoogleFonts.zain(
+                      fontSize: 14, color: AppColors.textPrimary),
                 ),
               ),
             ),
