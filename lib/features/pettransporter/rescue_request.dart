@@ -38,6 +38,45 @@ class _RescueRequestState extends State<RescueRequest> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
           .trim();
 
+      // Decide where the animal will be brought for treatment as soon as
+      // the transporter accepts the request:
+      // - Critical / Medium cases auto-locate whichever registered
+      //   veterinary clinic is genuinely nearest the pick-up point.
+      // - Low cases skip the search and go straight to the organization's
+      //   regular partner clinic in General Trias, Cavite.
+      // Either way, the final drop-off after treatment is always the
+      // organization's shelter, LGARI Shelter-Tanza.
+      final urgency = (widget.data['urgency'] ?? '').toString();
+      final pickupLat = widget.data['lat'];
+      final pickupLng = widget.data['lng'];
+
+      String dropoffName = kPartnerClinicName;
+      String dropoffAddress = kPartnerClinicAddress;
+      double dropoffLat = kPartnerClinicLocation.latitude;
+      double dropoffLng = kPartnerClinicLocation.longitude;
+      String routingNote =
+          "Low-urgency case — routed to the organization's partner clinic in General Trias, Cavite.";
+
+      if ((urgency == 'Critical' || urgency == 'Medium') &&
+          pickupLat is num &&
+          pickupLng is num) {
+        final nearest = await findNearestVeterinaryClinic(
+          originLat: pickupLat.toDouble(),
+          originLng: pickupLng.toDouble(),
+        );
+        if (nearest != null) {
+          dropoffName = nearest.name;
+          dropoffAddress = nearest.address;
+          dropoffLat = nearest.lat;
+          dropoffLng = nearest.lng;
+          routingNote =
+          '$urgency case — auto-routed to nearest clinic: ${nearest.name}.';
+        } else {
+          routingNote =
+          "$urgency case — no nearby clinic found, defaulting to the partner clinic in General Trias, Cavite.";
+        }
+      }
+
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
@@ -46,9 +85,21 @@ class _RescueRequestState extends State<RescueRequest> {
         'assignedVolunteerId': uid,
         'assignedVolunteerName':
         riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
+        'dropoffName': dropoffName,
+        'dropoffAddress': dropoffAddress,
+        'dropoffLat': dropoffLat,
+        'dropoffLng': dropoffLng,
+        'shelterName': kOrgShelterName,
+        'shelterAddress': kOrgShelterAddress,
+        'shelterLat': kOrgShelterLocation.latitude,
+        'shelterLng': kOrgShelterLocation.longitude,
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Rider accepted the rescue request.',
+            'timestamp': Timestamp.now(),
+          },
+          {
+            'status': routingNote,
             'timestamp': Timestamp.now(),
           }
         ]),

@@ -48,11 +48,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   StreamSubscription<QuerySnapshot>? _casesSub;
   StreamSubscription<QuerySnapshot>? _adoptionsSub;
   final Map<String, StreamSubscription<QuerySnapshot>> _messageSubs = {};
+  final Map<String, StreamSubscription<QuerySnapshot>> _communityReportSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _checkinSubs = {};
 
   List<_NotifItem> _caseStatusItems = [];
   List<_NotifItem> _adoptionStatusItems = [];
   final Map<String, List<_NotifItem>> _messageItemsByCase = {};
+  final Map<String, List<_NotifItem>> _communityReportItemsByCase = {};
   final Map<String, List<_NotifItem>> _checkinItemsByAdoption = {};
   final Map<String, _NotifItem?> _dueItemsByAdoption = {};
 
@@ -125,10 +127,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       for (final h in history) {
         final ts = h['timestamp'];
         if (ts is! Timestamp) continue;
+        final statusMessage = h['status'] as String? ?? '';
         items.add(_NotifItem(
           refLabel: label,
-          type: 'Status Update',
-          message: h['status'] as String? ?? '',
+          type: _classifyRescueStatusType(statusMessage),
+          message: statusMessage,
           timestamp: ts.toDate(),
           kind: _NotifKind.rescue,
           docId: doc.id,
@@ -143,9 +146,64 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             .snapshots()
             .listen((msgSnap) => _onMessagesUpdate(doc.id, label, msgSnap));
       }
+
+      if (!_communityReportSubs.containsKey(doc.id)) {
+        _communityReportSubs[doc.id] = FirebaseFirestore.instance
+            .collection('cases')
+            .doc(doc.id)
+            .collection('communityReports')
+            .snapshots()
+            .listen((crSnap) => _onCommunityReportsUpdate(doc.id, label, crSnap));
+      }
     }
 
     if (mounted) setState(() => _caseStatusItems = items);
+  }
+
+  String _classifyRescueStatusType(String message) {
+    if (message.contains('expressed interest to adopt')) {
+      return 'New Adopter Interest';
+    }
+    if (message.contains('expressed interest to foster')) {
+      return 'New Foster Interest';
+    }
+    return 'Status Update';
+  }
+
+  static const Map<String, String> _communityReportTypeLabels = {
+    'still_here': 'Animal still here',
+    'moved': 'Animal moved',
+    'rescued': 'Animal rescued',
+    'no_animal': 'No animal present',
+  };
+
+  void _onCommunityReportsUpdate(String caseId, String label, QuerySnapshot snap) {
+    final uid = _uid;
+    final items = <_NotifItem>[];
+
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      // Don't notify the reporter about their own submitted report.
+      if (data['reporterId'] == uid) continue;
+
+      final ts = data['timestamp'];
+      if (ts is! Timestamp) continue;
+
+      final reporterName = data['reporterName'] as String? ?? 'Someone';
+      final typeLabel =
+          _communityReportTypeLabels[data['type'] as String?] ?? 'an update';
+
+      items.add(_NotifItem(
+        refLabel: label,
+        type: 'Community Report',
+        message: '$reporterName reported: $typeLabel.',
+        timestamp: ts.toDate(),
+        kind: _NotifKind.rescue,
+        docId: caseId,
+      ));
+    }
+
+    if (mounted) setState(() => _communityReportItemsByCase[caseId] = items);
   }
 
   void _onMessagesUpdate(String caseId, String label, QuerySnapshot snap) {
@@ -306,6 +364,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     for (final s in _messageSubs.values) {
       s.cancel();
     }
+    for (final s in _communityReportSubs.values) {
+      s.cancel();
+    }
     for (final s in _checkinSubs.values) {
       s.cancel();
     }
@@ -317,6 +378,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ..._caseStatusItems,
       ..._adoptionStatusItems,
       for (final list in _messageItemsByCase.values) ...list,
+      for (final list in _communityReportItemsByCase.values) ...list,
       for (final list in _checkinItemsByAdoption.values) ...list,
       for (final item in _dueItemsByAdoption.values)
         if (item != null) item,

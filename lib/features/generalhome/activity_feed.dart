@@ -57,9 +57,11 @@ class ActivityFeed extends StatelessWidget {
                   final rawStatus = (data['status'] as String? ?? '').toLowerCase();
                   if (dismissedStatuses.contains(rawStatus)) continue;
 
-                  // A multi-animal report shares one groupId across several case
-                  // docs (one per animal) — only the doc whose own id is that
-                  // groupId represents the group in Activity.
+                  final isEndedRescue = rawStatus == 'closed' ||
+                      rawStatus.contains('completed') ||
+                      rawStatus.contains('ended');
+                  if (isEndedRescue) continue;
+
                   final caseGroupId = data['groupId'] as String?;
                   if (caseGroupId != null && caseGroupId != doc.id) continue;
 

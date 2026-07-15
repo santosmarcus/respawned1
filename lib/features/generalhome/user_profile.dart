@@ -6,8 +6,9 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
-import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
-import 'package:respawnd1/main.dart' show AuthWrapper;
+import 'package:respawnd1/features/userauth/login_screen.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_intro.dart';
+import 'package:respawnd1/features/generalhome/history_screen.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -90,12 +91,11 @@ class _UserProfileState extends State<UserProfile> {
     if (confirmed == true){
       await FirebaseAuth.instance.signOut();
       if(mounted){
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const AuthWrapper()),
-              (route) => false,
-        );
+        Navigator.of(
+            context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false,);
       }
-    }
+    } //to be fixed
   }
 
   @override
@@ -186,7 +186,10 @@ class _UserProfileState extends State<UserProfile> {
                   _ProfileTile(
                     icon: Icons.history,
                     label: 'History',
-                    onTap: (){},
+                    onTap: (){
+                      Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const HistoryPage()),);
+                    },
                   ),
                   _ProfileTile(
                     icon: Icons.workspace_premium_outlined,
@@ -198,7 +201,7 @@ class _UserProfileState extends State<UserProfile> {
                     label: 'Create Pet Collar Tag',
                     onTap: (){
                       Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const CollarTagHomeScreen()),);
+                        MaterialPageRoute(builder: (_) => const CollarIdTagIntroScreen()),);
                     },
                   ),
                 ],
@@ -240,7 +243,7 @@ class _UserProfileState extends State<UserProfile> {
 
             Center(
               child: TextButton(
-                onPressed: _logout,
+                onPressed: _logout,//TODO:
                 child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: Colors.redAccent,
                 ),
                 ),
@@ -268,6 +271,19 @@ class _SectionLabel extends StatelessWidget{
     );
   }
 }
+
+/*class _SubSectionLabel extends StatelessWidget{
+  final String label;
+  const _SubSectionLabel({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: TextButton(onPressed: onPressed, child: child),
+    )
+  }
+}*/
 
 class _ProfileTile extends StatelessWidget {
   final IconData? icon;

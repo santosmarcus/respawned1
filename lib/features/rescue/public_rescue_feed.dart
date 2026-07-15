@@ -55,6 +55,14 @@ class PublicRescueFeed extends StatelessWidget {
           final status = (data['status'] as String? ?? '').toLowerCase();
           if (data['reporterId'] == currentUserId) continue;
           if (_dismissedStatuses.contains(status)) continue;
+          // Once a case is done — 'completed', 'closed', or any variant
+          // like 'Rescue Ended'/'rescue_completed' — it no longer belongs
+          // in the public feed
+          final isFinalStatus = status == 'closed' ||
+              status.contains('completed') ||
+              status.contains('ended');
+          if (isFinalStatus) continue;
+          if (data['hiddenFromExplore'] == true) continue;
 
           final groupId = data['groupId'] as String?;
           if (groupId != null && groupId != doc.id) continue;
@@ -81,14 +89,8 @@ class PublicRescueFeed extends StatelessWidget {
           );
         }
 
-        return ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: visible.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (context, i) => PublicRescueCard(item: visible[i]),
-        );
+        // Home preview — a swipeable carousel instead of a stacked list.
+        return _RescueCarousel(items: visible);
       },
     );
   }
@@ -116,6 +118,68 @@ class PublicRescueFeed extends StatelessWidget {
           style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.slaterspwn),
         ),
       ),
+    );
+  }
+}
+
+// Swipeable carousel used for the Home preview of the public rescue feed.
+class _RescueCarousel extends StatefulWidget {
+  final List<PublicRescueItem> items;
+  const _RescueCarousel({required this.items});
+
+  @override
+  State<_RescueCarousel> createState() => _RescueCarouselState();
+}
+
+class _RescueCarouselState extends State<_RescueCarousel> {
+  late final PageController _controller =
+  PageController(viewportFraction: 0.88);
+  int _page = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 150,
+          child: PageView.builder(
+            controller: _controller,
+            onPageChanged: (i) => setState(() => _page = i),
+            itemCount: widget.items.length,
+            itemBuilder: (context, i) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: PublicRescueCard(item: widget.items[i]),
+            ),
+          ),
+        ),
+        if (widget.items.length > 1) ...[
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(widget.items.length, (i) {
+              final active = i == _page;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: active ? 16 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: active
+                      ? AppColors.textPrimary
+                      : AppColors.slaterspwn,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              );
+            }),
+          ),
+        ],
+      ],
     );
   }
 }

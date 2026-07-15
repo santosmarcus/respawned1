@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -6,12 +7,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+// Same Google Geocoding key used elsewhere in the rescue flow (rescue_page.dart)
+// for turning a lat/lng into a human-readable address.
+const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
 
 class TrackCasePage extends StatefulWidget {
@@ -93,8 +98,15 @@ class _TrackCasePageState extends State<TrackCasePage> {
         final isReporter = FirebaseAuth.instance.currentUser?.uid != null &&
             FirebaseAuth.instance.currentUser?.uid == data?['reporterId'];
 
-        // Navigate to completed page when case is done
-        if (status == 'completed') {
+        // Navigate to completed page when case reaches any final state —
+        // covers 'completed'/'closed' as well as variants like 'Rescue
+        // Completed' or 'Rescue Ended' that other flows may write.
+        final normalizedStatus = status.toString().toLowerCase();
+        final isFinalStatus = normalizedStatus == 'closed' ||
+            normalizedStatus.contains('completed') ||
+            normalizedStatus.contains('ended');
+
+        if (isReporter && isFinalStatus) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             Navigator.pushReplacement(
               context,
@@ -120,33 +132,11 @@ class _TrackCasePageState extends State<TrackCasePage> {
           ),
           body: Column(
             children: [
-              if (isReporter && data?['riderId'] != null)
-                SizedBox(
-                  height: 200,
-                  child: _TrackCaseMap(caseId: widget.caseId),
-                )
-              else if (isReporter)
-                Container(
-                  height: 200,
-                  color: AppColors.slaterspwn,
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.map_outlined,
-                            size: 40, color: AppColors.textSecondary),
-                        const SizedBox(height: 8),
-                        Text('Map will appear once a transporter is assigned.',
-                            style: GoogleFonts.zain(
-                                fontSize: 12, color: AppColors.textSecondary)),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                _CasePhotoHeader(
-                  photoUrls: List<String>.from(data?['photoUrls'] ?? []),
-                ),
+              // The gray area always shows the submitted report photos —
+              // for everyone, reporter included.
+              _CasePhotoHeader(
+                photoUrls: List<String>.from(data?['photoUrls'] ?? []),
+              ),
 
               // Bottom panel
               Expanded(
@@ -229,86 +219,6 @@ class _TrackCasePageState extends State<TrackCasePage> {
                 ),
               ),
             ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _TrackCaseMap extends StatefulWidget {
-  final String caseId;
-  const _TrackCaseMap({required this.caseId});
-
-  @override
-  State<_TrackCaseMap> createState() => _TrackCaseMapState();
-}
-
-class _TrackCaseMapState extends State<_TrackCaseMap> {
-  GoogleMapController? _controller;
-  bool _centered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .collection('tracking')
-          .orderBy('timestamp')
-          .limitToLast(100)
-          .snapshots(),
-      builder: (context, snapshot) {
-        final points = <LatLng>[];
-        if (snapshot.hasData) {
-          for (final doc in snapshot.data!.docs) {
-            final d = doc.data() as Map<String, dynamic>;
-            final lat = d['lat'];
-            final lng = d['lng'];
-            if (lat is num && lng is num) {
-              points.add(LatLng(lat.toDouble(), lng.toDouble()));
-            }
-          }
-        }
-
-        final center = points.isNotEmpty
-            ? points.last
-            : const LatLng(14.5995, 120.9842);
-
-        if (_controller != null && points.isNotEmpty && !_centered) {
-          _centered = true;
-          _controller!.animateCamera(
-              CameraUpdate.newLatLngZoom(points.last, 15));
-        }
-
-        return ClipRRect(
-          borderRadius: BorderRadius.zero,
-          child: GoogleMap(
-            onMapCreated: (ctrl) => _controller = ctrl,
-            initialCameraPosition: CameraPosition(target: center, zoom: 14),
-            myLocationEnabled: false,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-            markers: points.isEmpty
-                ? {}
-                : {
-              Marker(
-                markerId: const MarkerId('rider_current'),
-                position: points.last,
-                infoWindow: const InfoWindow(title: 'Transporter'),
-              ),
-            },
-            polylines: points.length < 2
-                ? {}
-                : {
-              Polyline(
-                polylineId: const PolylineId('route_trail'),
-                points: points,
-                color: AppColors.textPrimary,
-                width: 4,
-              ),
-            },
           ),
         );
       },
@@ -599,11 +509,14 @@ class _TrackingTab extends StatelessWidget {
                 'Dropoff Verification',
                 List<String>.from(data['dropoffVerificationUrls'] ?? []),
               ),
-              const SizedBox(height: 8),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
 
+              // Community Reports — visible to the reporter (for
+              // situational awareness) and to every other user (who can
+              // submit sighting reports to help verify/update the case).
               _CommunityReportSection(caseId: caseId),
-
+              const SizedBox(height: 8),
+              const Divider(color: AppColors.slaterspwn),
             ],
           ),
         ),
@@ -1114,7 +1027,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           ),
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
-          _DetailRow('Reporter Mobile Number', data['reporterPhone']),
           _DetailRow('Address', data['address']),
           _DetailRow('Description', data['condition']),
           _DetailRow('Type of Animal', data['animalType']),
@@ -1339,6 +1251,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
   String? _selectedType;
   XFile? _pickedImage;
   bool _submitting = false;
+  bool _detectingLocation = false;
   final _commentController = TextEditingController();
   final _locationController = TextEditingController();
   final _picker = ImagePicker();
@@ -1389,6 +1302,102 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
         source: ImageSource.gallery, imageQuality: 80);
     if (file != null && mounted) {
       setState(() => _pickedImage = file);
+    }
+  }
+
+  // Auto-detects the reporter's current GPS location and reverse-geocodes
+  // it into a readable address, so the "Location Found" field for a
+  // moved-animal report is prefilled instead of requiring manual typing.
+  // The field stays editable afterward in case it needs correcting.
+  Future<void> _autoDetectLocation() async {
+    if (_detectingLocation) return;
+    setState(() {
+      _detectingLocation = true;
+      _locationController.text = 'Detecting your location…';
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          setState(() => _locationController.clear());
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                  'Please enable location services to auto-detect.'),
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: () => Geolocator.openLocationSettings(),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) setState(() => _locationController.clear());
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(
+        const Duration(seconds: 12),
+        onTimeout: () => Geolocator.getLastKnownPosition().then(
+              (p) =>
+          p ??
+              Position(
+                latitude: 14.5995,
+                longitude: 120.9842,
+                timestamp: DateTime.now(),
+                accuracy: 0,
+                altitude: 0,
+                altitudeAccuracy: 0,
+                heading: 0,
+                headingAccuracy: 0,
+                speed: 0,
+                speedAccuracy: 0,
+              ),
+        ),
+      );
+
+      String resolvedAddress =
+          '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
+      try {
+        final url = Uri.parse(
+          'https://maps.googleapis.com/maps/api/geocode/json'
+              '?latlng=${pos.latitude},${pos.longitude}'
+              '&key=$_geocodingApiKey',
+        );
+        final res = await http.get(url).timeout(const Duration(seconds: 10));
+        final data = jsonDecode(res.body);
+        if (res.statusCode == 200 &&
+            data['status'] == 'OK' &&
+            (data['results'] as List).isNotEmpty) {
+          resolvedAddress = data['results'][0]['formatted_address'];
+        }
+      } catch (_) {
+        // Keep the coordinate fallback already assigned above.
+      }
+
+      if (mounted) setState(() => _locationController.text = resolvedAddress);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _locationController.clear());
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content:
+              Text('Could not detect your location — please type it in.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _detectingLocation = false);
     }
   }
 
@@ -1470,21 +1479,24 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
   Widget _optionButton(String type, String iconAsset, String label) {
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedType = type),
+        onTap: () {
+          setState(() => _selectedType = type);
+          if (type == 'moved') _autoDetectLocation();
+        },
         child: Column(
           children: [
             Container(
-              width: 40,
-              height: 40,
-              decoration: const BoxDecoration(
-                color: AppColors.textPrimary,
-                shape: BoxShape.circle,
-              ),
-              child: Image.asset(
-                iconAsset,
-                width: 10,
-                height: 10,
-              )
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: AppColors.textPrimary,
+                  shape: BoxShape.circle,
+                ),
+                child: Image.asset(
+                  iconAsset,
+                  width: 10,
+                  height: 10,
+                )
             ),
             const SizedBox(height: 6),
             Text(
@@ -1514,14 +1526,14 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                 color: AppColors.textPrimary,
                 shape: BoxShape.circle,
               ),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Image.asset(
-                    _typeIconAsset(_selectedType),
-                    fit: BoxFit.contain,
-                  ),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Image.asset(
+                  _typeIconAsset(_selectedType),
+                  fit: BoxFit.contain,
                 ),
-                  ),
+              ),
+            ),
             const SizedBox(height: 8),
             Text(_typeLabel(_selectedType),
                 style: GoogleFonts.tiltWarp(
@@ -1580,6 +1592,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
               const SizedBox(height: 6),
               TextField(
                 controller: _locationController,
+                enabled: !_detectingLocation,
                 style: GoogleFonts.zain(fontSize: 13),
                 decoration: InputDecoration(
                   hintText: 'Enter the new location',
@@ -1587,6 +1600,21 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                       fontSize: 12, color: AppColors.textSecondary),
                   prefixIcon: const Icon(Icons.search,
                       size: 18, color: AppColors.textSecondary),
+                  suffixIcon: _detectingLocation
+                      ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                      : IconButton(
+                    icon: const Icon(Icons.my_location,
+                        size: 18, color: AppColors.textSecondary),
+                    tooltip: 'Use current location',
+                    onPressed: _autoDetectLocation,
+                  ),
                   contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   filled: true,
@@ -1597,6 +1625,12 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                   ),
                 ),
               ),
+              const SizedBox(height: 4),
+              Text(
+                'Auto-detected from your current location — you can edit it if needed.',
+                style: GoogleFonts.zain(
+                    fontSize: 10.5, color: AppColors.textSecondary),
+              ),
               const SizedBox(height: 10),
             ],
             TextField(
@@ -1606,7 +1640,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
               decoration: InputDecoration(
                 hintText: 'Comment',
                 hintStyle: GoogleFonts.zain(
-                    fontSize: 12, color: AppColors.textSecondary),
+                    fontSize: 14, color: AppColors.textSecondary),
                 contentPadding:
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 filled: true,
@@ -1687,16 +1721,16 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           CircleAvatar(
-            radius: 13,
+            radius: 22,
             backgroundColor: AppColors.textPrimary,
-              child: Padding(
-                padding: const EdgeInsets.all(9),
-                child: Image.asset(
-                  _typeIconAsset(r['type'] as String?),
-                  fit: BoxFit.contain,
-                ),
+            child: Padding(
+              padding: const EdgeInsets.all(9),
+              child: Image.asset(
+                _typeIconAsset(r['type'] as String?),
+                fit: BoxFit.contain,
               ),
-        ),
+            ),
+          ),
 
           const SizedBox(width: 8),
           Expanded(
@@ -1710,7 +1744,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                       child: Text(
                         '${r['reporterName'] ?? 'Someone'} · ${_typeLabel(r['type'] as String?)}',
                         style: GoogleFonts.zain(
-                            fontSize: 12,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: AppColors.textPrimary),
                       ),
@@ -1737,12 +1771,12 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                     child: Row(
                       children: [
                         const Icon(Icons.location_on_outlined,
-                            size: 12, color: AppColors.textSecondary),
+                            size: 20, color: AppColors.textSecondary),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(newAddress,
                               style: GoogleFonts.zain(
-                                  fontSize: 11, color: AppColors.textPrimary)),
+                                  fontSize: 13, color: AppColors.textPrimary)),
                         ),
                       ],
                     ),
@@ -1752,7 +1786,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                     padding: const EdgeInsets.only(top: 3),
                     child: Text(comment,
                         style: GoogleFonts.zain(
-                            fontSize: 11, color: AppColors.textSecondary)),
+                            fontSize: 14, color: AppColors.textSecondary)),
                   ),
               ],
             ),
@@ -1792,10 +1826,10 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
               children: [
                 Expanded(
                   child: Text('Community Report',
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary), textAlign: TextAlign.center,),
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary), textAlign: TextAlign.center,),
                 ),
                 GestureDetector(
                   onTap: () => setState(() => _expanded = !_expanded),

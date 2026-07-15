@@ -13,20 +13,93 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/app_theme.dart';
 
-// Google Places API key used to search for the next nearby veterinary
-// clinic automatically whenever a clinic rejects a treatment request.
-// Reuses the same project key already used for Maps/Geocoding elsewhere.
+
 const String _placesApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
 
-// Same Google Maps Platform project key, used for the Directions API —
-// draws the actual driving route on the map and verifies the rider has
-// genuinely reached a destination before letting them confirm arrival.
 const String _directionsApiKey = _placesApiKey;
 
-// How close (in meters) the rider's live location must be to a
-// destination — per Google's Directions API remaining-distance — before
-// an "arrived" confirmation is accepted.
 const double _arrivalThresholdMeters = 150;
+
+// ---------------------------------------------------------------------
+// Fixed partner locations
+// ---------------------------------------------------------------------
+// Low-urgency cases skip the nearest-clinic search and go straight to the
+// organization's regular partner clinic. For now this is a stand-in clinic
+// located in General Trias, Cavite.
+const LatLng kPartnerClinicLocation = LatLng(14.3855772, 120.8998673);
+const String kPartnerClinicName =
+    'Pet Hub Veterinary Clinic - General Trias Branch';
+const String kPartnerClinicAddress =
+    'Green Square 2 Building, Brgy. Navarro, General Trias, Cavite';
+
+// Every case's final leg — after treatment — ends at the organization's
+// shelter, LGARI Shelter-Tanza.
+const LatLng kOrgShelterLocation = LatLng(14.310590, 120.849666);
+const String kOrgShelterName = 'LGARI Shelter - Tanza';
+const String kOrgShelterAddress =
+    'LGARI Shelter - Tanza, Trece Martires City, Cavite';
+
+// Result of a nearest-veterinary-clinic Places lookup.
+class NearestClinicResult {
+  final String name;
+  final String address;
+  final double lat;
+  final double lng;
+
+  const NearestClinicResult({
+    required this.name,
+    required this.address,
+    required this.lat,
+    required this.lng,
+  });
+}
+
+
+Future<NearestClinicResult?> findNearestVeterinaryClinic({
+  required double originLat,
+  required double originLng,
+  Set<String> excludeAddresses = const {},
+}) async {
+  for (final radius in [5000, 10000, 20000, 40000]) {
+    try {
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/nearbysearch/json',
+        {
+          'location': '$originLat,$originLng',
+          'radius': '$radius',
+          'type': 'veterinary_care',
+          'key': _placesApiKey,
+        },
+      );
+      final res = await http.get(uri);
+      if (res.statusCode != 200) continue;
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final apiStatus = body['status'] as String?;
+      if (apiStatus != 'OK' && apiStatus != 'ZERO_RESULTS') continue;
+
+      final results = (body['results'] as List<dynamic>? ?? []);
+      for (final r in results) {
+        final map = r as Map<String, dynamic>;
+        final addr = (map['vicinity'] ?? map['name'] ?? '').toString();
+        if (addr.isEmpty || excludeAddresses.contains(addr)) continue;
+        final loc = map['geometry']?['location'] as Map<String, dynamic>?;
+        if (loc == null) continue;
+
+        return NearestClinicResult(
+          name: (map['name'] ?? addr).toString(),
+          address: addr,
+          lat: (loc['lat'] as num).toDouble(),
+          lng: (loc['lng'] as num).toDouble(),
+        );
+      }
+    } catch (_) {
+      // try the next, wider radius
+    }
+  }
+  return null;
+}
+
 
 // Result of a Google Directions API driving-route lookup.
 class DirectionsRoute {
@@ -43,8 +116,7 @@ class DirectionsRoute {
   });
 }
 
-// Calls the Google Directions API for a driving route between two points.
-// Returns null if the request fails or Google reports no route.
+
 Future<DirectionsRoute?> fetchDirectionsRoute(
     LatLng origin, LatLng destination) async {
   try {
@@ -112,17 +184,6 @@ List<LatLng> decodePolyline(String encoded) {
   }
   return points;
 }
-
-// Status
-// accepted         - rider accepted, not yet started
-// ongoing          - otw to pickup
-// arrived          - arrived at pickup, verify
-// treatment        - picked up, otw to clinic
-// dropoff          - arrived at a clinic, awaiting Treatment Accepted/Rejected
-// searching_clinic - clinic rejected treatment, auto-searching next nearby clinic
-// in_transit_shelter - treatment accepted, on the way to drop the pet at the shelter
-// completed        - rescue done (delivered to shelter)
-// ended            - aborted
 
 class TransitProgressPage extends StatefulWidget {
   final String caseId;
@@ -225,12 +286,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     return null;
   }
 
-  // Confirms — via Google's Directions API remaining-distance for a
-  // driving route from the rider's live position — that the rider has
-  // genuinely reached [destination] before letting an "arrived" action
-  // through. If no coordinates were recorded for this destination (older
-  // cases, address-only), verification is skipped and the action is
-  // allowed through, rather than blocking the rider on missing data.
+
   Future<bool> _verifyArrivalViaDirections(
       LatLng? destination, String destinationLabel) async {
     if (destination == null) return true;
@@ -298,8 +354,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     await _setStatus('arrived', 'Arrived at pick up location.');
   }
 
-  // Same Directions-verified arrival check, used right before the rider
-  // is allowed to swipe into the clinic drop-off decision screen.
   Future<void> _arriveAtClinic() async {
     final doc = await FirebaseFirestore.instance
         .collection('cases')
@@ -347,9 +401,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     }
   }
 
-  // Called when the rider swipes "Treatment Accepted" at a clinic.
-  // Uploads the clinic verification images then moves the case into the
-  // final leg: transporting the animal to the shelter.
   Future<void> _acceptTreatment() async {
     if (_clinicImages.every((f) => f == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
