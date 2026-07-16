@@ -20,88 +20,6 @@ const String _directionsApiKey = _placesApiKey;
 
 const double _arrivalThresholdMeters = 150;
 
-// ---------------------------------------------------------------------
-// Fixed partner locations
-// ---------------------------------------------------------------------
-// Low-urgency cases skip the nearest-clinic search and go straight to the
-// organization's regular partner clinic. For now this is a stand-in clinic
-// located in General Trias, Cavite.
-const LatLng kPartnerClinicLocation = LatLng(14.3855772, 120.8998673);
-const String kPartnerClinicName =
-    'Pet Hub Veterinary Clinic - General Trias Branch';
-const String kPartnerClinicAddress =
-    'Green Square 2 Building, Brgy. Navarro, General Trias, Cavite';
-
-// Every case's final leg — after treatment — ends at the organization's
-// shelter, LGARI Shelter-Tanza.
-const LatLng kOrgShelterLocation = LatLng(14.310590, 120.849666);
-const String kOrgShelterName = 'LGARI Shelter - Tanza';
-const String kOrgShelterAddress =
-    'LGARI Shelter - Tanza, Trece Martires City, Cavite';
-
-// Result of a nearest-veterinary-clinic Places lookup.
-class NearestClinicResult {
-  final String name;
-  final String address;
-  final double lat;
-  final double lng;
-
-  const NearestClinicResult({
-    required this.name,
-    required this.address,
-    required this.lat,
-    required this.lng,
-  });
-}
-
-
-Future<NearestClinicResult?> findNearestVeterinaryClinic({
-  required double originLat,
-  required double originLng,
-  Set<String> excludeAddresses = const {},
-}) async {
-  for (final radius in [5000, 10000, 20000, 40000]) {
-    try {
-      final uri = Uri.https(
-        'maps.googleapis.com',
-        '/maps/api/place/nearbysearch/json',
-        {
-          'location': '$originLat,$originLng',
-          'radius': '$radius',
-          'type': 'veterinary_care',
-          'key': _placesApiKey,
-        },
-      );
-      final res = await http.get(uri);
-      if (res.statusCode != 200) continue;
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      final apiStatus = body['status'] as String?;
-      if (apiStatus != 'OK' && apiStatus != 'ZERO_RESULTS') continue;
-
-      final results = (body['results'] as List<dynamic>? ?? []);
-      for (final r in results) {
-        final map = r as Map<String, dynamic>;
-        final addr = (map['vicinity'] ?? map['name'] ?? '').toString();
-        if (addr.isEmpty || excludeAddresses.contains(addr)) continue;
-        final loc = map['geometry']?['location'] as Map<String, dynamic>?;
-        if (loc == null) continue;
-
-        return NearestClinicResult(
-          name: (map['name'] ?? addr).toString(),
-          address: addr,
-          lat: (loc['lat'] as num).toDouble(),
-          lng: (loc['lng'] as num).toDouble(),
-        );
-      }
-    } catch (_) {
-      // try the next, wider radius
-    }
-  }
-  return null;
-}
-
-
-// Result of a Google Directions API driving-route lookup.
 class DirectionsRoute {
   final List<LatLng> points;
   final double distanceMeters;
@@ -115,7 +33,6 @@ class DirectionsRoute {
     required this.durationText,
   });
 }
-
 
 Future<DirectionsRoute?> fetchDirectionsRoute(
     LatLng origin, LatLng destination) async {
@@ -184,6 +101,17 @@ List<LatLng> decodePolyline(String encoded) {
   }
   return points;
 }
+
+// Status
+// accepted         - rider accepted, not yet started
+// ongoing          - otw to pickup
+// arrived          - arrived at pickup, verify
+// treatment        - picked up, otw to clinic
+// dropoff          - arrived at a clinic, awaiting Treatment Accepted/Rejected
+// searching_clinic - clinic rejected treatment, auto-searching next nearby clinic
+// in_transit_shelter - treatment accepted, on the way to drop the pet at the shelter
+// completed        - rescue done (delivered to shelter)
+// ended            - aborted
 
 class TransitProgressPage extends StatefulWidget {
   final String caseId;
@@ -286,6 +214,98 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     return null;
   }
 
+
+  // Clinic profile logging
+  static const Set<String> _clinicRelevantReasons = {
+    'Clinic at full capacity',
+    'Insufficient Medication/Treatment Supplies',
+    'No Veterinarian/Specialist Available',
+  };
+
+  String _clinicProfileId({String? placeId, required String address}) {
+    if (placeId != null && placeId.isNotEmpty) return placeId;
+    final slug = address
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return slug.isEmpty ? 'unknown_clinic' : slug;
+  }
+
+  Future<void> _logClinicDecision({
+    required String? placeId,
+    required String name,
+    required String address,
+    double? lat,
+    double? lng,
+    required bool accepted,
+    String reason = '',
+  }) async {
+    try {
+      final id = _clinicProfileId(placeId: placeId, address: address);
+      final ref =
+      FirebaseFirestore.instance.collection('clinic_profiles').doc(id);
+
+      final clinicReasons = accepted
+          ? const <String>[]
+          : reason
+          .split(',')
+          .map((r) => r.trim())
+          .where((r) => _clinicRelevantReasons.contains(r))
+          .toList();
+
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(ref);
+        final data = snap.data() ?? <String, dynamic>{};
+        final tally =
+        Map<String, dynamic>.from(data['declineReasonTally'] ?? {});
+        for (final r in clinicReasons) {
+          tally[r] = ((tally[r] as num?)?.toInt() ?? 0) + 1;
+        }
+
+        tx.set(
+          ref,
+          {
+            'name': name,
+            'address': address,
+            if (lat != null) 'lat': lat,
+            if (lng != null) 'lng': lng,
+            'declineReasonTally': tally,
+            'totalDeclines':
+            ((data['totalDeclines'] as num?)?.toInt() ?? 0) +
+                (accepted ? 0 : 1),
+            'totalAccepted':
+            ((data['totalAccepted'] as num?)?.toInt() ?? 0) +
+                (accepted ? 1 : 0),
+            'declineLog': FieldValue.arrayUnion([
+              if (!accepted)
+                {
+                  'reason': reason,
+                  'caseId': widget.caseId,
+                  'timestamp': Timestamp.now(),
+                }
+            ]),
+            'lastUpdated': Timestamp.now(),
+          },
+          SetOptions(merge: true),
+        );
+      });
+    } catch (_) {
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchClinicProfile(
+      String? placeId, String address) async {
+    try {
+      final id = _clinicProfileId(placeId: placeId, address: address);
+      final snap = await FirebaseFirestore.instance
+          .collection('clinic_profiles')
+          .doc(id)
+          .get();
+      return snap.data();
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<bool> _verifyArrivalViaDirections(
       LatLng? destination, String destinationLabel) async {
@@ -414,6 +434,12 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     setState(() => _isActing = true);
     try {
       final urls = await _uploadVerificationImages(_clinicImages, 'clinic');
+      final data = (await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .get())
+          .data() as Map<String, dynamic>? ??
+          {};
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
@@ -427,14 +453,22 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           }
         ]),
       });
+
+      unawaited(_logClinicDecision(
+        placeId: data['dropoffPlaceId'] as String?,
+        name: (data['dropoffName'] ?? data['dropoffAddress'] ?? 'Clinic')
+            .toString(),
+        address:
+        (data['dropoffAddress'] ?? data['address'] ?? '').toString(),
+        lat: (data['dropoffLat'] as num?)?.toDouble(),
+        lng: (data['dropoffLng'] as num?)?.toDouble(),
+        accepted: true,
+      ));
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
   }
 
-  // Called when the rider swipes "Treatment Rejected" at a clinic — opens the
-  // rejection reason dialog, then automatically searches for the next
-  // nearest available clinic and routes the rider there.
   Future<void> _rejectTreatment() async {
     if (_clinicImages.every((f) => f == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -457,6 +491,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           .data() as Map<String, dynamic>? ??
           {};
       final currentAddress = data['dropoffAddress'] ?? data['address'] ?? '';
+      final currentPlaceId = data['dropoffPlaceId'] as String?;
 
       await FirebaseFirestore.instance
           .collection('cases')
@@ -478,6 +513,19 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           }
         ]),
       });
+
+      // Log the decline against the clinic itself
+      // so future rescues routed near this clinic can see, ahead of time,
+      // what kinds of treatment it has and hasn't been able to accommodate.
+      unawaited(_logClinicDecision(
+        placeId: currentPlaceId,
+        name: (data['dropoffName'] ?? currentAddress).toString(),
+        address: currentAddress.toString(),
+        lat: (data['dropoffLat'] as num?)?.toDouble(),
+        lng: (data['dropoffLng'] as num?)?.toDouble(),
+        accepted: false,
+        reason: reason,
+      ));
 
       // reset verification images for the next clinic attempt
       setState(() {
@@ -513,6 +561,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       Map<String, dynamic>? candidate;
       bool sawSuccessfulResponse = false;
 
+      final flaggedByProfile = <String>{};
+
       // Widen the search radius progressively if nearby clinics have rejected
       for (final radius in [5000, 10000, 20000, 40000]) {
         final uri = Uri.https(
@@ -537,7 +587,21 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         for (final r in results) {
           final map = r as Map<String, dynamic>;
           final addr = (map['vicinity'] ?? map['name'] ?? '').toString();
+          final placeId = map['place_id'] as String?;
           if (addr.isEmpty || rejected.contains(addr)) continue;
+          if (flaggedByProfile.contains(placeId ?? addr)) continue;
+
+          final profile = await _fetchClinicProfile(placeId, addr);
+          final tally = Map<String, dynamic>.from(
+              profile?['declineReasonTally'] ?? {});
+          final capabilityDeclines = tally.entries
+              .where((e) => e.key != 'Clinic at full capacity')
+              .fold<int>(0, (sum, e) => sum + ((e.value as num?)?.toInt() ?? 0));
+          if (capabilityDeclines >= 2) {
+            flaggedByProfile.add(placeId ?? addr);
+            continue;
+          }
+
           candidate = map;
           break;
         }
@@ -567,10 +631,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       final newAddress =
       (candidate['vicinity'] ?? candidate['name'] ?? 'Nearby Clinic')
           .toString();
+      final newPlaceId = candidate['place_id'] as String?;
+      final newName = (candidate['name'] ?? newAddress).toString();
 
       await docRef.update({
         'status': 'dropoff',
         'dropoffAddress': newAddress,
+        'dropoffPlaceId': newPlaceId,
+        'dropoffName': newName,
         if (loc != null) 'dropoffLat': loc['lat'],
         if (loc != null) 'dropoffLng': loc['lng'],
         'statusHistory': FieldValue.arrayUnion([
@@ -1242,6 +1310,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   // Arrived at clinic — decide whether treatment was accepted or rejected.
   Widget _buildClinicDecisionPanel(Map<String, dynamic> data) {
     final address = data['dropoffAddress'] ?? data['address'] ?? '';
+    final placeId = data['dropoffPlaceId'] as String?;
     final canDecide = !_isActing;
 
     return Container(
@@ -1271,7 +1340,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 8),
+            _ClinicHistoryNote(
+              future: _fetchClinicProfile(placeId, address.toString()),
+            ),
+            const SizedBox(height: 6),
             Row(
               children: [
                 Text('Provide images and video to verify',
@@ -1978,6 +2051,57 @@ class _MessagesList extends StatelessWidget {
               ),
             );
           },
+        );
+      },
+    );
+  }
+}
+
+
+class _ClinicHistoryNote extends StatelessWidget {
+  final Future<Map<String, dynamic>?> future;
+  const _ClinicHistoryNote({required this.future});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: future,
+      builder: (context, snapshot) {
+        final profile = snapshot.data;
+        final tally = Map<String, dynamic>.from(
+            profile?['declineReasonTally'] ?? {});
+        if (tally.isEmpty) return const SizedBox.shrink();
+
+        final topReasons = tally.entries.toList()
+          ..sort((a, b) =>
+              ((b.value as num?) ?? 0).compareTo((a.value as num?) ?? 0));
+        final summary = topReasons
+            .take(2)
+            .map((e) => '${e.key} (${e.value}x)')
+            .join(', ');
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.orange.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.orange.withOpacity(0.4)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.history, size: 14, color: Colors.orange),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Previously declined treatment here: $summary',
+                  style: GoogleFonts.zain(
+                      fontSize: 11.5, color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
