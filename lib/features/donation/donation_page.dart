@@ -7,64 +7,9 @@ import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'donation_detail.dart';
+import 'sponsorship_detail.dart';
+import 'models.dart';
 import 'package:intl/intl.dart';
-
-
-
-//Data Model
-
-class DonationListing {
-  final int id;
-  final String title;
-  final int target;
-  final int collected;
-  final int percentage;
-  final int dateleft;
-  final String organizer;
-  final String date;
-  final String time;
-  final String description;
-  final int numdonated;
-  bool favorited;
-  bool donated;
-
-  DonationListing({
-    required this.id,
-    required this.title,
-    required this.target,
-    required this.collected,
-    required this.percentage,
-    required this.dateleft,
-    required this.organizer,
-    required this.date,
-    required this.time,
-    required this.description,
-    required this.numdonated,
-    this.favorited = false,
-    this.donated = false,
-  });
-}
-
-// Sample sponsorship pet model
-class SponsorPet {
-  final int id;
-  final String name;
-  final String breed;
-  final int age;
-  final String description;
-  final List<String> tags;
-  bool favorited;
-
-  SponsorPet({
-    required this.id,
-    required this.name,
-    required this.breed,
-    required this.age,
-    required this.description,
-    required this.tags,
-    this.favorited = false,
-  });
-}
 
 // Static Data
 
@@ -85,6 +30,7 @@ final List<DonationListing> _allDonations = [
         'bonding with friendly dogs while supporting local animal welfare efforts. '
         'No experience needed—just bring comfortable clothes and a love for dogs!',
     numdonated: 15,
+    address: '123 Animal Shelter Way, Paw City',
   ),
   DonationListing(
     id: 2,
@@ -102,6 +48,7 @@ final List<DonationListing> _allDonations = [
         'bonding with friendly dogs while supporting local animal welfare efforts. '
         'No experience needed—just bring comfortable clothes and a love for dogs!',
     numdonated: 15,
+    address: '456 Rescue Center Ave, Tail Town',
   ),
 ];
 
@@ -161,6 +108,7 @@ class _DonationPageState extends State<DonationPage> {
       time: e.time,
       description: e.description,
       numdonated: e.numdonated,
+      address: e.address,
     ))
         .toList();
     _sponsorPets = List.from(_allSponsorPets);
@@ -417,6 +365,7 @@ class _DonationPageState extends State<DonationPage> {
                   final cat = _categories[i];
                   final selected = _selectedCategory == cat;
                   return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => setState(() => _selectedCategory = cat),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -497,6 +446,7 @@ class _DonationPageState extends State<DonationPage> {
               child: _SponsorPetCard(
                 pet: pet,
                 onFavorite: () => _toggleSponsorFavorite(pet),
+                onTap: () => _openSponsorDetail(pet),
               ),
             )),
 
@@ -515,6 +465,18 @@ class _DonationPageState extends State<DonationPage> {
           donation: donation,
           onFavorite: () => _toggleFavorite(donation),
           onDonate: _markDonated,
+        ),
+      ),
+    ).then((_) => setState(() {}));
+  }
+
+  void _openSponsorDetail(SponsorPet pet) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SponsorshipDetail(
+          pet: pet,
+          onFavorite: () => _toggleSponsorFavorite(pet),
         ),
       ),
     ).then((_) => setState(() {}));
@@ -540,6 +502,7 @@ class _DonationCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -560,12 +523,15 @@ class _DonationCard extends StatelessWidget {
                 child: GestureDetector(
                   onTap: onFavorite,
                   behavior: HitTestBehavior.opaque,
-                  child: Icon(
-                    donation.favorited ? Icons.favorite : Icons.favorite_border,
-                    size: 22,
-                    color: donation.favorited
-                        ? const Color(0xFFE05C5C)
-                        : AppColors.textPrimary,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Icon(
+                      donation.favorited ? Icons.favorite : Icons.favorite_border,
+                      size: 22,
+                      color: donation.favorited
+                          ? const Color(0xFFE05C5C)
+                          : AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ),
@@ -673,81 +639,90 @@ class _PercentCircle extends StatelessWidget {
 class _SponsorPetCard extends StatelessWidget {
   final SponsorPet pet;
   final VoidCallback onFavorite;
+  final VoidCallback onTap;
 
-  const _SponsorPetCard({required this.pet, required this.onFavorite});
+  const _SponsorPetCard({required this.pet, required this.onFavorite, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-      ),
-      child: Row(
-        children: [
-          // Pet avatar
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppColors.tearspwn,
-              borderRadius: BorderRadius.circular(12),
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+        ),
+        child: Row(
+          children: [
+            // Pet avatar
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.tearspwn,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.pets, size: 28, color: AppColors.textPrimary),
             ),
-            child: const Icon(Icons.pets, size: 28, color: AppColors.textPrimary),
-          ),
-          const SizedBox(width: 12),
+            const SizedBox(width: 12),
 
-          // Info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(pet.name,
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 16, color: AppColors.textPrimary)),
-                Text(pet.breed,
-                    style: GoogleFonts.zain(
-                        fontSize: 14, color: AppColors.textPrimary)),
-                Text('${pet.age} year old',
-                    style: GoogleFonts.zain(
-                        fontSize: 14, color: AppColors.textPrimary)),
-                Text(pet.description,
-                    style: GoogleFonts.zain(
-                        fontSize: 14, color: AppColors.textPrimary)),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 4,
-                  children: pet.tags
-                      .map((tag) => Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.yellowrspwn.withOpacity(0.4),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(tag,
-                        style: GoogleFonts.zain(
-                            fontSize: 10,
-                            color: AppColors.textPrimary)),
-                  ))
-                      .toList(),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(pet.name,
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 16, color: AppColors.textPrimary)),
+                  Text(pet.breed,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                  Text('${pet.age} year old',
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                  Text(pet.description,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4,
+                    children: pet.tags
+                        .map((tag) => Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.yellowrspwn.withOpacity(0.4),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(tag,
+                          style: GoogleFonts.zain(
+                              fontSize: 10,
+                              color: AppColors.textPrimary)),
+                    ))
+                        .toList(),
+                  ),
+                ],
+              ),
+            ),
+
+            // Favorite
+            GestureDetector(
+              onTap: onFavorite,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Icon(
+                  pet.favorited ? Icons.favorite : Icons.favorite_border,
+                  size: 22,
+                  color: pet.favorited
+                      ? const Color(0xFFE05C5C)
+                      : AppColors.textPrimary,
                 ),
-              ],
+              ),
             ),
-          ),
-
-          // Favorite
-          GestureDetector(
-            onTap: onFavorite,
-            child: Icon(
-              pet.favorited ? Icons.favorite : Icons.favorite_border,
-              size: 22,
-              color: pet.favorited
-                  ? const Color(0xFFE05C5C)
-                  : AppColors.textPrimary,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

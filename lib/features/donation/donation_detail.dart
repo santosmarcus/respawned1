@@ -5,6 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
 import 'donation_page.dart';
 import 'package:intl/intl.dart';
+import 'donation_cards.dart';
+import 'donation_review.dart';
+import 'donation_review_inkind.dart';
+import 'models.dart';
 
 //Donation Detail Page
 class DonationDetail extends StatefulWidget {
@@ -29,16 +33,15 @@ class DonationDetail extends StatefulWidget {
 }
 
 class _DonationDetailPageState extends State<DonationDetail> {
-  bool _showFundTracking = false;
+  bool _showFundTracking = true;
 
   // Sample fund tracking entries
   final List<Map<String, dynamic>> _fundEntries = [
-    {'label': 'Shelter Water Bill', 'category': 'Bills and Utilities', 'amount': 350, 'date': 'March 20, 2026'},
-    {'label': 'Shelter Electricity Bill', 'category': 'Bills and Utilities', 'amount': 350, 'date': 'March 20, 2026'},
-    {'label': 'Dog Rice Sacks', 'category': 'Food', 'amount': 350, 'date': 'March 20, 2026'},
+    {'label': 'Shelter Water Bill', 'category': 'Bills and Utilities', 'amount': 350, 'date': 'March 10, 2026'},
+    {'label': 'Shelter Electricity Bill', 'category': 'Bills and Utilities', 'amount': 350, 'date': 'March 10, 2026'},
+    {'label': 'Dog Rice Sacks', 'category': 'Food', 'amount': 350, 'date': 'March 10, 2026'},
     {'label': 'Caretaker Salaries', 'category': 'Admin Tasks', 'amount': 350, 'date': 'March 10, 2026'},
     {'label': 'Confinement', 'category': 'Medicine and Treatment', 'amount': 350, 'date': 'March 10, 2026'},
-    {'label': 'Wound Cleaning', 'category': 'Medicine and Treatment', 'amount': 350, 'date': 'March 10, 2026'},
   ];
 
   @override
@@ -102,12 +105,16 @@ class _DonationDetailPageState extends State<DonationDetail> {
 
             // Date & time row
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.textPrimary),
-                const SizedBox(width: 4),
-                Text(donation.date,
-                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-                const SizedBox(width: 16),
+                Row(
+                  children: [
+                    const Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.textPrimary),
+                    const SizedBox(width: 4),
+                    Text(donation.date,
+                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                  ],
+                ),
                 Text('${donation.numdonated} people have donated',
                     style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
               ],
@@ -129,8 +136,34 @@ class _DonationDetailPageState extends State<DonationDetail> {
                 style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
             const SizedBox(height: 6),
             Text(donation.description,
-                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
 
+            const SizedBox(height: 20),
+
+            // Progress row
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: LinearProgressIndicator(
+                      value: donation.percentage / 100,
+                      backgroundColor: AppColors.tearspwn.withOpacity(0.3),
+                      valueColor: const AlwaysStoppedAnimation<Color>(AppColors.tearspwn),
+                      minHeight: 10,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '₱${_fmt(donation.collected)}',
+                  style: GoogleFonts.tiltWarp(
+                    fontSize: 18,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 20),
 
             // Stats row
@@ -139,11 +172,42 @@ class _DonationDetailPageState extends State<DonationDetail> {
               children: [
                 _StatBox(label: 'Funds received', value: '${donation.percentage}%'),
                 _StatBox(label: 'Target funds', value: '₱${_fmt(donation.target)}'),
-                _StatBox(label: 'Days left', value: '${donation.dateleft}'), //need to change
+                _StatBox(label: 'Days left', value: '${donation.dateleft}'),
               ],
             ),
 
             const SizedBox(height: 20),
+
+            // In-Kind Donations Accepted
+            Text(
+              'In-Kind Donations Accepted:',
+              style: GoogleFonts.tiltWarp(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _InKindSection(
+              title: 'Food',
+              items: [
+                'Dry Dog Food Kibbles',
+                'Wet Dog Food (Canned)',
+                'Mineral Water',
+                'Rice Sacks',
+              ],
+            ),
+            const SizedBox(height: 12),
+            _InKindSection(
+              title: 'Medication',
+              items: [
+                'Pet Vitamins',
+                'IV Fluids',
+                'Tick Preventives',
+              ],
+            ),
+
+            const SizedBox(height: 24),
 
             // Organizer
             Text('Organizer',
@@ -158,11 +222,11 @@ class _DonationDetailPageState extends State<DonationDetail> {
                 ),
                 const SizedBox(width: 10),
                 Text(donation.organizer,
-                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
               ],
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
 
             // Fund Tracking toggle
             GestureDetector(
@@ -181,36 +245,58 @@ class _DonationDetailPageState extends State<DonationDetail> {
             ),
 
             if (_showFundTracking) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               _FundTrackingPanel(entries: _fundEntries, totalCollected: donation.collected),
             ],
 
             const SizedBox(height: 24),
 
-            // Donate button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: donation.donated
-                    ? null
-                    : () => _openReviewSheet(context, donation),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  disabledBackgroundColor: AppColors.yellowrspwn.withOpacity(0.5),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  elevation: 0,
+            // Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: donation.donated
+                        ? null
+                        : () => _openReviewSheet(context, donation),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      disabledBackgroundColor: AppColors.yellowrspwn.withOpacity(0.5),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30)),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      donation.donated ? 'Donated ✓' : 'Donate',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary),
+                    ),
+                  ),
                 ),
-                child: Text(
-                  donation.donated ? 'Donated ✓' : 'Donate',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _openInKindReviewSheet(context, donation),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.yellowrspwn, width: 2),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30)),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: Text(
+                      'In-Kind',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
 
             const SizedBox(height: 32),
@@ -235,6 +321,17 @@ class _DonationDetailPageState extends State<DonationDetail> {
       ),
     ).then((_) => setState(() {}));
   }
+
+  void _openInKindReviewSheet(BuildContext context, DonationListing donation) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => InKindDonationReviewSheet(
+        donation: donation,
+      ),
+    ).then((_) => setState(() {}));
+  }
 }
 
 // ─── Stat Box ───────────────────────────────────────────────────────────────
@@ -250,12 +347,12 @@ class _StatBox extends StatelessWidget {
       children: [
         Text(value,
             style: GoogleFonts.tiltWarp(
-                fontSize: 20,
+                fontSize: 26,
                 fontWeight: FontWeight.bold,
                 color: AppColors.textPrimary)),
         const SizedBox(height: 2),
         Text(label,
-            style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary)),
+            style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
       ],
     );
   }
@@ -271,66 +368,103 @@ class _FundTrackingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        border: Border.all(color: AppColors.textPrimary.withOpacity(0.12)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Fund Tracking',
+                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            Text('As of March 12, 2026',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary.withOpacity(0.6))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        ...entries.map((e) => Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Fund Tracking',
-                  style: GoogleFonts.tiltWarp(fontSize: 13, color: AppColors.textPrimary)),
-              Text('As of March 12, 2026',
-                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withOpacity(0.6))),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ...entries.map((e) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(e['label'],
-                          style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                      Text(e['category'],
-                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withOpacity(0.6))),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('₱${e['amount']}',
-                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                    Text(e['date'],
-                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withOpacity(0.6))),
+                    Text(e['label'],
+                        style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                    Text(e['category'],
+                        style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary.withOpacity(0.6))),
                   ],
                 ),
-              ],
-            ),
-          )),
-          const Divider(color: AppColors.textPrimary, thickness: 0.5),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Total Allocated',
-                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              Text('₱$totalCollected',
-                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('₱${e['amount']}',
+                      style: GoogleFonts.tiltWarp(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                  Text(e['date'],
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary.withOpacity(0.6))),
+                  Text('View Receipt',
+                      style: GoogleFonts.zain(
+                        fontSize: 12, 
+                        color: AppColors.textPrimary.withOpacity(0.6),
+                        decoration: TextDecoration.underline,
+                      )),
+                ],
+              ),
             ],
           ),
-        ],
-      ),
+        )),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Total Allocated',
+                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            Text('₱$totalCollected',
+                style: GoogleFonts.tiltWarp(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _InKindSection extends StatelessWidget {
+  final String title;
+  final List<String> items;
+
+  const _InKindSection({required this.title, required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.zain(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        ...items.map((item) => Padding(
+          padding: const EdgeInsets.only(left: 4.0, top: 2.0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('• ', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              Expanded(
+                child: Text(
+                  item,
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ),
+        )),
+      ],
     );
   }
 }
@@ -360,7 +494,6 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
   bool _isAnonymous = false;
   double _selectedAmount = 500;
   String? _selectedPayment;
-  bool _submitting = false;
 
   final List<double> _quickAmounts = [50, 100, 200, 500];
   final List<String> _paymentMethods = ['Credit Card', 'PayPal', 'GCash', 'Maya'];
@@ -398,7 +531,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
             ),
             const SizedBox(height: 16),
 
-            Text('Review Donation',
+            Text('Monetary Donation',
                 style: GoogleFonts.tiltWarp(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -432,11 +565,6 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                           style: GoogleFonts.zain(
                               fontSize: 14,
                               color: AppColors.textPrimary.withOpacity(0.7))),
-                      Text('Write your wishes...',
-                          style: GoogleFonts.zain(
-                              fontSize: 14,
-                              color: AppColors.textPrimary.withOpacity(0.5),
-                              fontStyle: FontStyle.italic)),
                     ],
                   ),
                 ),
@@ -452,84 +580,79 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
               children: [
                 Text('Donate as anonymous',
                     style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-                Radio<bool>(
-                  value: true,
-                  groupValue: _isAnonymous ? true : null,
-                  activeColor: AppColors.textPrimary,
-                  onChanged: (v) => setState(() => _isAnonymous = !_isAnonymous),
+                Switch(
+                  value: _isAnonymous,
+                  activeColor: AppColors.yellowrspwn,
+                  onChanged: (v) => setState(() => _isAnonymous = v),
                 ),
               ],
             ),
 
             const SizedBox(height: 12),
             const Divider(thickness: 0.5),
+
             // Amount input
             Text('Enter Amount',
-                style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
             const SizedBox(height: 8),
-            Container(
-              height: 44,
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('₱',
-                        style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-                  ),
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: _selectedAmount.toInt().toString(),
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) => setState(() => _selectedAmount = double.tryParse(v) ?? _selectedAmount),
-                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-                      decoration: const InputDecoration(border: InputBorder.none),
-                    ),
-                  ),
-                ],
+            TextFormField(
+              initialValue: _selectedAmount.toInt().toString(),
+              keyboardType: TextInputType.number,
+              onChanged: (v) => setState(() => _selectedAmount = double.tryParse(v) ?? _selectedAmount),
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                prefixText: '₱ ',
+                prefixStyle: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppColors.textPrimary.withOpacity(0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.yellowrspwn, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
             ),
 
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
 
             // Quick amounts
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: _quickAmounts.map((amt) => GestureDetector(
-                onTap: () => setState(() => _selectedAmount = amt),
-                child: Container(
-                  width: 68,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: _selectedAmount == amt
-                        ? AppColors.textPrimary
-                        : AppColors.background,
-                    border: Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
-                    borderRadius: BorderRadius.circular(8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _quickAmounts.map((amt) => ChoiceChip(
+                label: Text('₱${amt.toInt()}', style: GoogleFonts.zain(fontSize: 13)),
+                selected: _selectedAmount == amt,
+                onSelected: (selected) {
+                  if (selected) {
+                    setState(() {
+                      _selectedAmount = amt;
+                    });
+                  }
+                },
+                selectedColor: AppColors.yellowrspwn,
+                backgroundColor: AppColors.background,
+                labelStyle: TextStyle(
+                  color: AppColors.textPrimary,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: _selectedAmount == amt ? AppColors.yellowrspwn : AppColors.textPrimary.withOpacity(0.2),
                   ),
-                  alignment: Alignment.center,
-                  child: Text('₱${amt.toInt()}',
-                      style: GoogleFonts.zain(
-                          fontSize: 13,
-                          color: _selectedAmount == amt
-                              ? AppColors.background
-                              : AppColors.textPrimary)),
                 ),
               )).toList(),
             ),
 
-            const SizedBox(height: 16),
-            const Divider(thickness: 0.5),
+            const SizedBox(height: 24),
 
             // Payment method
             Text('Select Payment Method',
-                style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
             const SizedBox(height: 8),
             ..._paymentMethods.map((method) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.only(bottom: 8),
               child: GestureDetector(
                 onTap: () => setState(() => _selectedPayment = method),
                 child: Container(
@@ -537,13 +660,13 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                   decoration: BoxDecoration(
                     border: Border.all(
                       color: _selectedPayment == method
-                          ? AppColors.textPrimary
+                          ? AppColors.yellowrspwn
                           : AppColors.textPrimary.withOpacity(0.2),
                       width: _selectedPayment == method ? 1.5 : 1,
                     ),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                     color: _selectedPayment == method
-                        ? AppColors.yellowrspwn.withOpacity(0.3)
+                        ? AppColors.yellowrspwn.withOpacity(0.1)
                         : Colors.transparent,
                   ),
                   child: Row(
@@ -551,10 +674,11 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                       Radio<String>(
                         value: method,
                         groupValue: _selectedPayment,
-                        activeColor: AppColors.textPrimary,
+                        activeColor: AppColors.yellowrspwn,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         onChanged: (v) => setState(() => _selectedPayment = v),
                       ),
+                      const SizedBox(width: 8),
                       Text(method,
                           style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                     ],
@@ -563,8 +687,9 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
               ),
             )),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             const Divider(thickness: 0.5),
+            const SizedBox(height: 8),
 
             // Donation value summary
             Row(
@@ -573,17 +698,17 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                 Text('Donation Value',
                     style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                 Text('₱${_selectedAmount.toInt()}',
-                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                    style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
               ],
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
 
             // Send Donation button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: (_selectedPayment == null || _submitting)
+                onPressed: _selectedPayment == null
                     ? null
                     : _submit,
                 style: ElevatedButton.styleFrom(
@@ -595,14 +720,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   elevation: 0,
                 ),
-                child: _submitting
-                    ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.textPrimary),
-                )
-                    : Text('Send Donation',
+                child: Text('Continue',
                     style: GoogleFonts.tiltWarp(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -615,18 +733,271 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
     );
   }
 
-  Future<void> _submit() async {
-    setState(() => _submitting = true);
-    try {
-      await widget.onDonate(
-        donation: widget.donation,
-        amount: _selectedAmount,
-        paymentMethod: _selectedPayment!,
-        isAnonymous: _isAnonymous,
+  void _submit() {
+    final nav = Navigator.of(context);
+    final donation = widget.donation;
+    final amount = _selectedAmount;
+    final payment = _selectedPayment;
+
+    nav.pop(); // Dismiss sheet
+
+    if (payment == 'Credit Card') {
+      nav.push(
+        MaterialPageRoute(
+          builder: (context) => DonationCreditCardScreen(
+            fundraiserId: donation.id.toString(),
+            organizationName: donation.organizer,
+            campaignName: donation.title,
+            amount: amount,
+            isAnonymous: _isAnonymous,
+          ),
+        ),
       );
-      if (mounted) Navigator.pop(context);
-    } finally {
-      if (mounted) setState(() => _submitting = false);
+    } else {
+      nav.push(
+        MaterialPageRoute(
+          builder: (context) => DonationReviewScreen(
+            params: DonationReviewParams(
+              fundraiserId: donation.id.toString(),
+              organizationName: donation.organizer,
+              donationMethod: payment!,
+              item: DonationItem(
+                description: donation.title,
+                amount: amount,
+              ),
+              isAnonymous: _isAnonymous,
+            ),
+          ),
+        ),
+      );
     }
+  }
+}
+
+// ─── In-Kind Donation Review Sheet ──────────────────────────────────────────
+
+class InKindDonationReviewSheet extends StatefulWidget {
+  final DonationListing donation;
+
+  const InKindDonationReviewSheet({
+    super.key,
+    required this.donation,
+  });
+
+  @override
+  State<InKindDonationReviewSheet> createState() => _InKindDonationReviewSheetState();
+}
+
+class _InKindDonationReviewSheetState extends State<InKindDonationReviewSheet> {
+  bool _isAnonymous = false;
+  String? _selectedCategory;
+  final TextEditingController _clarificationController = TextEditingController();
+
+  final List<String> _categories = [
+    'Food & Water',
+    'Medicine & Treatment',
+    'Supplies & Equipment',
+    'Hygiene & Cleaning',
+    'Others'
+  ];
+
+  @override
+  void dispose() {
+    _clarificationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final donation = widget.donation;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle bar
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textPrimary.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            Text('In-Kind Donation',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+
+            const SizedBox(height: 16),
+
+            // Donation info row
+            Row(
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: AppColors.tearspwn,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(donation.title,
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text(donation.organizer,
+                          style: GoogleFonts.zain(
+                              fontSize: 14,
+                              color: AppColors.textPrimary.withOpacity(0.7))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+            const Divider(thickness: 0.5),
+
+            // Anonymous toggle
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Donate as anonymous',
+                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                Switch(
+                  value: _isAnonymous,
+                  activeColor: AppColors.yellowrspwn,
+                  onChanged: (v) => setState(() => _isAnonymous = v),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            const Divider(thickness: 0.5),
+
+            // Categories
+            Text('Select Item Category',
+                style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _categories.map((cat) => ChoiceChip(
+                label: Text(cat, style: GoogleFonts.zain(fontSize: 13)),
+                selected: _selectedCategory == cat,
+                onSelected: (selected) {
+                  setState(() {
+                    _selectedCategory = selected ? cat : null;
+                  });
+                },
+                selectedColor: AppColors.yellowrspwn,
+                backgroundColor: AppColors.background,
+                labelStyle: TextStyle(
+                  color: _selectedCategory == cat ? AppColors.textPrimary : AppColors.textPrimary.withOpacity(0.7),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: _selectedCategory == cat ? AppColors.yellowrspwn : AppColors.textPrimary.withOpacity(0.2),
+                  ),
+                ),
+              )).toList(),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Clarification Text Field
+            Text('Clarification / Details',
+                style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _clarificationController,
+              maxLines: 3,
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'e.g. 5kg Dog Food, 10 bottles of Alcohol...',
+                hintStyle: GoogleFonts.zain(color: AppColors.textPrimary.withOpacity(0.4)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppColors.textPrimary.withOpacity(0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.yellowrspwn, width: 2),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // Submit button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _selectedCategory == null || _clarificationController.text.isEmpty
+                    ? null
+                    : () {
+                        final nav = Navigator.of(context);
+                        nav.pop(); // Dismiss sheet
+                        nav.push(
+                          MaterialPageRoute(
+                            builder: (context) => DonationReviewInKindScreen(
+                              params: InKindDonationReviewParams(
+                                fundraiserId: donation.id.toString(),
+                                organizationName: donation.organizer,
+                                category: _selectedCategory!,
+                                clarification: _clarificationController.text,
+                                isAnonymous: _isAnonymous,
+                                address: donation.address,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.yellowrspwn,
+                  foregroundColor: AppColors.textPrimary,
+                  disabledBackgroundColor: AppColors.yellowrspwn.withOpacity(0.5),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  elevation: 0,
+                ),
+                child: Text('Continue',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
