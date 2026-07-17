@@ -57,6 +57,8 @@ class _RescuePageState extends State<RescuePage> {
   final TextEditingController _conditionController = TextEditingController();
   final TextEditingController _witnessNameController = TextEditingController();
   final TextEditingController _witnessNumberController = TextEditingController();
+  final TextEditingController _accessInstructionsController = TextEditingController();
+  final TextEditingController _bestTimeContactController = TextEditingController();
 
   String? _selectedUrgency;
   String? _selectedRescueType;
@@ -64,6 +66,12 @@ class _RescuePageState extends State<RescuePage> {
   String? _adoptionChoice;
   String? _selectedAnimalType;
   bool _isLoading = false;
+
+  // Additional stray-rescue triage questions
+  String? _containmentStatus; // 'contained' | 'could_escape'
+  String? _strayTemperament;
+  String? _onSiteChoice; // 'yes' | 'no'
+  bool _reportAnonymously = false;
 
   bool? _isOwner;
   String? _scannedTagId;
@@ -88,45 +96,77 @@ class _RescuePageState extends State<RescuePage> {
 
   bool get _isLostPetType => _selectedRescueType == 'Lost Pet';
 
-  // Rescue Type options
+  // Rescue Type options — each type carries its own inherent urgency level,
+  // so reporters are no longer asked to separately self-assess urgency.
   static const List<Map<String, String>> _rescueTypeOptions = [
     {
       'label': 'Illness',
       'description':
       'Appears weak, vomiting, coughing, skin disease; suspected illness',
+      'urgency': 'Medium',
     },
     {
       'label': 'Injury',
       'description': 'Visible wounds, fractures, bleeding',
+      'urgency': 'Critical',
     },
     {
       'label': 'Abandonment',
       'description': 'Animal left without care',
+      'urgency': 'Medium',
     },
     {
       'label': 'Neglect or Abuse',
       'description':
       'Suspected animal cruelty, starvation, chaining, hoarding',
+      'urgency': 'Critical',
     },
     {
       'label': 'Pet Surrender',
       'description': 'Voluntary ownership surrender',
+      'urgency': 'Low',
     },
     {
       'label': 'Lost Pet',
       'description': 'Owner reporting a missing pet for reunification',
+      'urgency': 'Low',
     },
     {
       'label': 'Trapped/Disaster',
       'description':
       'Affected by natural disasters / Stuck in debris, infrastructure',
+      'urgency': 'Critical',
     },
     {
       'label': 'Aggressive Animal',
       'description':
       'Displaying aggressive behavior and posing a safety concern',
+      'urgency': 'Critical',
     },
   ];
+
+  // Looks up the inherent urgency level for a given rescue type label.
+  static String? _urgencyForRescueType(String? label) {
+    if (label == null) return null;
+    for (final option in _rescueTypeOptions) {
+      if (option['label'] == label) return option['urgency'];
+    }
+    return null;
+  }
+
+  // Small color cue per urgency level, reusing existing app palette.
+  static Color _urgencyColor(String? urgency) {
+    switch (urgency) {
+      case 'Critical':
+        return Colors.redAccent;
+      case 'Medium':
+        return AppColors.yellowrspwn;
+      case 'Low':
+        return AppColors.greenrspwn;
+      default:
+        return AppColors.slaterspwn;
+    }
+  }
 
   final List<_MediaItem?> _mediaFiles = [null, null, null, null];
   final ImagePicker _picker = ImagePicker();
@@ -151,6 +191,8 @@ class _RescuePageState extends State<RescuePage> {
     _conditionController.dispose();
     _witnessNameController.dispose();
     _witnessNumberController.dispose();
+    _accessInstructionsController.dispose();
+    _bestTimeContactController.dispose();
     _petNameController.dispose();
     _lostBreedController.dispose();
     _lostColorController.dispose();
@@ -417,15 +459,43 @@ class _RescuePageState extends State<RescuePage> {
                   itemBuilder: (context, index) {
                     final option = _rescueTypeOptions[index];
                     final isSelected = option['label'] == _selectedRescueType;
+                    final urgency = option['urgency'];
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        option['label']!,
-                        style: GoogleFonts.zain(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
+                      title: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              option['label']!,
+                              style: GoogleFonts.zain(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          if (urgency != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: _urgencyColor(urgency).withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: _urgencyColor(urgency), width: 1),
+                              ),
+                              child: Text(
+                                urgency,
+                                style: GoogleFonts.zain(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       subtitle: Text(
                         option['description']!,
@@ -450,7 +520,10 @@ class _RescuePageState extends State<RescuePage> {
     );
 
     if (selected != null) {
-      setState(() => _selectedRescueType = selected);
+      setState(() {
+        _selectedRescueType = selected;
+        _selectedUrgency = _urgencyForRescueType(selected);
+      });
     }
   }
 
@@ -1106,6 +1179,36 @@ class _RescuePageState extends State<RescuePage> {
                   const SizedBox(height: 20),
 
                   if (!_isLostPetType) ...[
+                    if (_selectedRescueType != null) ...[
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: _urgencyColor(_selectedUrgency),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Urgency level: ${_selectedUrgency ?? 'N/A'}',
+                            style: GoogleFonts.zain(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Set automatically based on the rescue type you chose.',
+                        style: GoogleFonts.zain(
+                            fontSize: 11, color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
                     // Describe Condition
                     _buildLabel('Describe Condition', required: true),
                     const SizedBox(height: 6),
@@ -1147,12 +1250,65 @@ class _RescuePageState extends State<RescuePage> {
 
                     const SizedBox(height: 20),
 
-                    // Select Urgency
-                    _buildLabel('Select Urgency', required: true),
+                    // Containment / escape risk
+                    _buildLabel(
+                        'Is the animal contained, or could it escape before help arrives?',
+                        required: true),
                     const SizedBox(height: 8),
-                    _buildCheckboxOption('Low'),
-                    _buildCheckboxOption('Medium'),
-                    _buildCheckboxOption('Critical'),
+                    _buildCheckboxOption2(
+                        'Contained / cannot escape',
+                        _containmentStatus,
+                            (val) => setState(() => _containmentStatus = val)),
+                    _buildCheckboxOption2(
+                        'Could escape / is moving around',
+                        _containmentStatus,
+                            (val) => setState(() => _containmentStatus = val)),
+
+                    const SizedBox(height: 20),
+
+                    // Approachability / bite risk
+                    _buildLabel('Approachability / bite risk', required: false),
+                    const SizedBox(height: 8),
+                    _buildCheckboxOption2(
+                        'Friendly, approachable',
+                        _strayTemperament,
+                            (val) => setState(() => _strayTemperament = val)),
+                    _buildCheckboxOption2(
+                        'Nervous, may run',
+                        _strayTemperament,
+                            (val) => setState(() => _strayTemperament = val)),
+                    _buildCheckboxOption2(
+                        'Can be defensive / bite risk',
+                        _strayTemperament,
+                            (val) => setState(() => _strayTemperament = val)),
+
+                    const SizedBox(height: 20),
+
+                    // On-site presence
+                    _buildLabel('Are you currently on-site with the animal?',
+                        required: true),
+                    const SizedBox(height: 8),
+                    _buildCheckboxOption2('Yes, I am on-site', _onSiteChoice,
+                            (val) => setState(() => _onSiteChoice = val)),
+                    _buildCheckboxOption2(
+                        'No, I am reporting remotely', _onSiteChoice,
+                            (val) => setState(() => _onSiteChoice = val)),
+
+                    const SizedBox(height: 20),
+
+                    // Access instructions
+                    _buildLabel('Access instructions', required: false),
+                    const SizedBox(height: 6),
+                    _lostPetTextField(_accessInstructionsController,
+                        'e.g. Gated compound, ask guard for entry'),
+
+                    const SizedBox(height: 20),
+
+                    // Best time to contact
+                    _buildLabel('Best time to reach you', required: false),
+                    const SizedBox(height: 6),
+                    _lostPetTextField(_bestTimeContactController,
+                        'e.g. Anytime after 3PM'),
 
                     const SizedBox(height: 20),
 
@@ -1228,11 +1384,13 @@ class _RescuePageState extends State<RescuePage> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          'No, but I can refer you to witnesses who can assist.',
-                          style: GoogleFonts.zain(
-                            fontSize: 14,
-                            color: AppColors.textPrimary,
+                        Expanded(
+                          child: Text(
+                            'No, but I can refer you to witnesses who can assist.',
+                            style: GoogleFonts.zain(
+                              fontSize: 14,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                         ),
                       ],
@@ -1364,6 +1522,31 @@ class _RescuePageState extends State<RescuePage> {
                         ),
                       ],
                     ),
+
+                    if (_selectedRescueType == 'Neglect or Abuse') ...[
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Keep my identity confidential from the alleged owner',
+                              style: GoogleFonts.zain(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          Switch(
+                            value: _reportAnonymously,
+                            activeColor: AppColors.textPrimary,
+                            onChanged: (v) =>
+                                setState(() => _reportAnonymously = v),
+                          ),
+                        ],
+                      ),
+                    ],
                   ] else ...[
                     ..._buildLostPetFields(),
                   ],
@@ -1413,12 +1596,14 @@ class _RescuePageState extends State<RescuePage> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          text,
-          style: GoogleFonts.zain(
-            fontWeight: FontWeight.w700,
-            fontSize: 16,
-            color: AppColors.textPrimary,
+        Expanded(
+          child: Text(
+            text,
+            style: GoogleFonts.zain(
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              color: AppColors.textPrimary,
+            ),
           ),
         ),
         if (required) ...[
@@ -1516,11 +1701,13 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              label,
-              style: GoogleFonts.zain(
-                fontSize: 14,
-                color: AppColors.textPrimary,
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  color: AppColors.textPrimary,
+                ),
               ),
             ),
           ],
@@ -1552,9 +1739,11 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
             const SizedBox(width: 8),
-            Text(label,
-                style: GoogleFonts.zain(
-                    fontSize: 14, color: AppColors.textPrimary)),
+            Expanded(
+              child: Text(label,
+                  style: GoogleFonts.zain(
+                      fontSize: 14, color: AppColors.textPrimary)),
+            ),
           ],
         ),
       ),
@@ -1812,7 +2001,7 @@ class _RescuePageState extends State<RescuePage> {
         ],
       ),
       const SizedBox(height: 20),
-      _buildLabel('Color / Markings', required: true),
+      _buildLabel('Color / Distinguishing markings', required: true),
       const SizedBox(height: 6),
       _lostPetTextField(
           _lostColorController, 'e.g. Brown and white, torn left ear'),
@@ -1870,7 +2059,7 @@ class _RescuePageState extends State<RescuePage> {
       const SizedBox(height: 8),
       _buildCheckboxOption2('Friendly, approachable', _temperament,
               (val) => setState(() => _temperament = val)),
-      _buildCheckboxOption2('Skittish, may run', _temperament,
+      _buildCheckboxOption2('Nervous, may run', _temperament,
               (val) => setState(() => _temperament = val)),
       _buildCheckboxOption2('Can be defensive / bite risk', _temperament,
               (val) => setState(() => _temperament = val)),
@@ -2095,7 +2284,7 @@ class _RescuePageState extends State<RescuePage> {
             ],
           ),
           const SizedBox(height: 10),
-          _lostPetTextField(entry.colorController, 'Color / markings'),
+          _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
         ],
       ),
     );
@@ -2116,6 +2305,8 @@ class _RescuePageState extends State<RescuePage> {
         _selectedRescueType == null ||
         _selectedUrgency == null ||
         validAnimals.isEmpty ||
+        _containmentStatus == null ||
+        _onSiteChoice == null ||
         _coordinateChoice == null ||
         _adoptionChoice == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2166,6 +2357,13 @@ class _RescuePageState extends State<RescuePage> {
           'rescueType': _selectedRescueType,
           'condition': condition,
           'urgency': _selectedUrgency,
+          'containmentStatus': _containmentStatus,
+          'strayTemperament': _strayTemperament,
+          'onSite': _onSiteChoice,
+          'accessInstructions': _accessInstructionsController.text.trim(),
+          'bestTimeToContact': _bestTimeContactController.text.trim(),
+          'reportAnonymously':
+          _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
           'address': _addressController.text.trim(),
           'lat': _pinnedLocation.latitude,
           'lng': _pinnedLocation.longitude,
