@@ -6,7 +6,6 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
-import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_intro.dart';
 import 'package:respawnd1/features/generalhome/history_screen.dart';
 
@@ -91,11 +90,18 @@ class _UserProfileState extends State<UserProfile> {
     if (confirmed == true){
       await FirebaseAuth.instance.signOut();
       if(mounted){
-        Navigator.of(
-            context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false,);
+        // Don't push a brand-new LoginScreen here — pushAndRemoveUntil
+        // with (route) => false wipes out AuthWrapper's own root route
+        // too, leaving a LoginScreen with no AuthWrapper anywhere above
+        // it. The next successful login then has nothing left in the
+        // tree to react to the auth state change and route it anywhere,
+        // which is what caused the stuck "loading forever" screen.
+        // AuthWrapper is still sitting at the bottom of the stack — by
+        // the time we pop back to it, signOut() has already completed,
+        // so it will render LoginScreen on its own, correctly wrapped.
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
-    } //to be fixed
+    }
   }
 
   @override

@@ -63,17 +63,45 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
       if (mounted) {
         // Go to user type selection after account created
+        setState(() => _isLoading = false);
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        // This can happen if an earlier attempt created the Auth account
+        // but something after it (e.g. a Firestore write) failed, or the
+        // person tapped Sign Up twice. Instead of dead-ending, try signing
+        // them into the account that already exists with these credentials.
+        try {
+          await _authService.signIn(
+            email: _emailController.text.trim(),
+            password: _passwordController.text.trim(),
+          );
+          if (mounted) {
+            setState(() => _isLoading = false);
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
+            );
+          }
+          return;
+        } catch (_) {
+          // Wrong password, or it's genuinely someone else's account.
+          if (mounted) {
+            setState(() {
+              _errorMessage = 'An account already exists with this email.';
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      }
+
       setState(() {
         switch (e.code) {
-          case 'email-already-in-use':
-            _errorMessage = 'An account already exists with this email.';
-            break;
           case 'invalid-email':
             _errorMessage = 'Please enter a valid email address.';
             break;

@@ -1,8 +1,9 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
@@ -21,7 +22,25 @@ void main() async {
   );
 
   GoogleFonts.config.allowRuntimeFetching = false;
-  await FirebaseAuth.instance.signOut();
+
+  // flutter_facebook_auth requires an explicit web init before login() can
+  // be called on Flutter Web — otherwise the Facebook button fails silently.
+  // Replace 'YOUR_FACEBOOK_APP_ID' with the app ID from developers.facebook.com.
+  if (kIsWeb) {
+    await FacebookAuth.instance.webAndDesktopInitialize(
+      appId: "YOUR_FACEBOOK_APP_ID",
+      cookie: true,
+      xfbml: true,
+      version: "v19.0",
+    );
+  }
+
+  // NOTE: previously this force-signed-out the user on every cold start,
+  // which meant email, phone, and Facebook logins never persisted between
+  // app launches — every open of the app looked like login "wasn't
+  // working" because it silently logged the user right back out.
+  // Removed so Firebase's normal persisted-session behavior applies.
+
   runApp(const ResPAWndApp());
 }
 
@@ -40,8 +59,32 @@ class ResPAWndApp extends StatelessWidget {
 }
 
 // Automatically routes user based on login state
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  String? _cachedUid;
+  Future<DocumentSnapshot>? _userDocFuture;
+
+  // Reuses the same Future for the same uid. authStateChanges() can
+  // legitimately emit more than once around a sign-in transition (e.g.
+  // right after logging back in following a logout). Without this cache,
+  // every one of those emissions would rebuild this widget and create a
+  // BRAND NEW .get() call inline, resetting the inner FutureBuilder back
+  // to "waiting" each time — which is what made the screen look stuck on
+  // a loading animation even though sign-in had actually succeeded.
+  Future<DocumentSnapshot> _userDocFor(String uid) {
+    if (_cachedUid != uid || _userDocFuture == null) {
+      _cachedUid = uid;
+      _userDocFuture =
+          FirebaseFirestore.instance.collection('users').doc(uid).get();
+    }
+    return _userDocFuture!;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,15 +100,17 @@ class AuthWrapper extends StatelessWidget {
 
         // Not logged in
         if (!snapshot.hasData) {
+          // Clear the cache so the *next* sign-in (possibly a different
+          // user) always fetches fresh data instead of reusing a stale
+          // future from the previous session.
+          _cachedUid = null;
+          _userDocFuture = null;
           return const LoginScreen();
         }
 
         // Logged in — check if they need onboarding
         return FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance
-              .collection('users')
-              .doc(snapshot.data!.uid)
-              .get(),
+          future: _userDocFor(snapshot.data!.uid),
           builder: (context, userSnapshot) {
             if (userSnapshot.connectionState == ConnectionState.waiting) {
               return const Scaffold(
@@ -109,5 +154,3 @@ class AuthWrapper extends StatelessWidget {
     );
   }
 }
-
-
