@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/pettransporter/service_filter_sheet.dart';
 import 'package:respawnd1/features/pettransporter/rescue_request.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
+import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
+import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
@@ -72,26 +74,23 @@ class _ServiceScreenState extends State<ServiceScreen> {
               label: 'My Profile',
             ),
           ],
-          /* onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          }
-          if (index == 1) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
-            );
-          }
-          if (index == 2) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },*/
+          onTap: (index) {
+            if (index == 1) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) =>
+                    const TransporterNotifications()),
+              );
+            }
+            if (index == 2) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const TransporterProfile()),
+              );
+            }
+          },
         ),
         body: _isOnline ? _buildOnlineView() : _buildOfflineView(),
       ),

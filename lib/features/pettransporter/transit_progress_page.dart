@@ -11,7 +11,10 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
+import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
 
 
 const String _placesApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
@@ -202,6 +205,35 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   Future<void> _startTrip() async {
     await _setStatus('ongoing', 'On the way to pick up location.');
     _beginLocationStreaming();
+  }
+
+  // Places a phone call to the given number, if available.
+  Future<void> _launchCall(String? phone) async {
+    final number = phone?.trim();
+    if (number == null || number.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No phone number available.')),
+        );
+      }
+      return;
+    }
+    final uri = Uri(scheme: 'tel', path: number);
+    try {
+      final launched =
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start the call.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start the call.')),
+        );
+      }
+    }
   }
 
   // Reads a lat/lng pair off the case document, if present.
@@ -1277,6 +1309,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         onEnd: _showEndReasonDialog,
         confirmLabel: 'Animal Rescued',
         isActing: _isActing,
+        data: data,
+        showContacts: true,
       );
     }
 
@@ -1533,38 +1567,77 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         color: AppColors.background,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: Column(
-        children: [
-          const SizedBox(height: 16),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            const SizedBox(height: 16),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Ongoing Request',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 15, color: AppColors.textPrimary)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Ongoing Request',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 15, color: AppColors.textPrimary)),
+              ),
             ),
-          ),
 
-          const SizedBox(height: 10),
+            const SizedBox(height: 10),
 
-          // Address card
-          _AddressCard(
-            pickup: data['address'] ?? '',
-            dropoff: data['dropoffAddress'] ?? data['address'] ?? '',
-          ),
+            // Address card
+            _AddressCard(
+              pickup: data['address'] ?? '',
+              dropoff: data['dropoffAddress'] ?? data['address'] ?? '',
+            ),
 
-          const SizedBox(height: 20),
+            const SizedBox(height: 12),
 
-          // Swipe button
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-            child: _buildSwipeButton(status),
-          ),
-        ],
+            // Reporter/witness and organization contact rows
+            ..._buildContactRows(data),
+
+            const SizedBox(height: 8),
+
+            // Swipe button
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: _buildSwipeButton(status),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  // Builds the tappable Reporter/Witness and Organization contact rows.
+  List<Widget> _buildContactRows(Map<String, dynamic> data) {
+    final reporterName = (data['reporterName'] as String?)?.trim() ?? '';
+    final witnessName = (data['witnessName'] as String?)?.trim() ?? '';
+    final reporterPhone = (data['reporterPhone'] as String?)?.trim() ?? '';
+    final witnessPhone = (data['witnessPhone'] as String?)?.trim() ?? '';
+
+    final contactName = reporterName.isNotEmpty
+        ? reporterName
+        : (witnessName.isNotEmpty ? witnessName : 'Reporter/Witness Name');
+    final contactPhone =
+    reporterPhone.isNotEmpty ? reporterPhone : witnessPhone;
+
+    final organizationName =
+        (data['organizationName'] as String?)?.trim() ?? '';
+    final organizationPhone =
+        (data['organizationPhone'] as String?)?.trim() ?? '';
+
+    return [
+      _ContactRow(
+        name: contactName,
+        onCall: () => _launchCall(contactPhone),
+      ),
+      _ContactRow(
+        name: organizationName.isNotEmpty
+            ? organizationName
+            : 'Loved by the Gapz',
+        onCall: () => _launchCall(organizationPhone),
+      ),
+    ];
   }
 
   Widget _buildSwipeButton(String status) {
@@ -1604,6 +1677,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     required String confirmLabel,
     required bool isActing,
     VoidCallback? onEnd,
+    Map<String, dynamic>? data,
+    bool showContacts = false,
   }) {
     return Container(
       decoration: const BoxDecoration(
@@ -1694,6 +1769,12 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               ],
             ),
 
+            // Reporter/witness and organization contact rows
+            if (showContacts && data != null) ...[
+              const SizedBox(height: 12),
+              ..._buildContactRows(data),
+            ],
+
             const SizedBox(height: 20),
 
             // Confirm button
@@ -1764,7 +1845,25 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             activeIcon: Icon(Icons.person),
             label: 'My Profile'),
       ],
-      onTap: (_) {},
+      onTap: (index) {
+        if (index == 0) {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+        } else if (index == 1) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => const TransporterNotifications()),
+          );
+        } else if (index == 2) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => const TransporterProfile()),
+          );
+        }
+      },
     );
   }
 }
@@ -1969,6 +2068,51 @@ class _AddressCard extends StatelessWidget {
               ),
             ),
             const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Contact row — name/label with a tappable call button
+class _ContactRow extends StatelessWidget {
+  final String name;
+  final VoidCallback onCall;
+  const _ContactRow({required this.name, required this.onCall});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                name,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onCall,
+              child: const Icon(Icons.call,
+                  size: 20, color: AppColors.textPrimary),
+            ),
           ],
         ),
       ),
