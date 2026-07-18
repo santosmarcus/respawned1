@@ -21,6 +21,52 @@ import 'package:firebase_storage/firebase_storage.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
+// Species + breed picklists shared by every "animal" card in this flow
+// (owner's own pet, and each found/stray animal entry).
+const String _dogSpecies = 'Dog';
+const String _catSpecies = 'Cat';
+const String _othersBreedLabel = 'Others / Not sure';
+
+const List<String> _dogBreeds = [
+  'Aspin (Mixed/Native)',
+  'Shih Tzu',
+  'Poodle',
+  'Pomeranian',
+  'Chihuahua',
+  'Labrador Retriever',
+  'Golden Retriever',
+  'German Shepherd',
+  'Beagle',
+  'Dachshund',
+  'Siberian Husky',
+  'Rottweiler',
+  'French Bulldog',
+  'Corgi',
+  'Shiba Inu',
+  'Japanese Spitz',
+  _othersBreedLabel,
+];
+
+const List<String> _catBreeds = [
+  'Puspin (Mixed/Native)',
+  'Persian',
+  'Siamese',
+  'British Shorthair',
+  'Maine Coon',
+  'Scottish Fold',
+  'Ragdoll',
+  'American Shorthair',
+  'Himalayan',
+  'Bengal',
+  _othersBreedLabel,
+];
+
+List<String> _breedOptionsFor(String? species) {
+  if (species == _dogSpecies) return _dogBreeds;
+  if (species == _catSpecies) return _catBreeds;
+  return const [_othersBreedLabel];
+}
+
 //Media
 class _MediaItem {
   final XFile file;
@@ -32,16 +78,22 @@ class _MediaItem {
 }
 
 class _FoundAnimalEntry {
-  final TextEditingController speciesController = TextEditingController();
-  final TextEditingController breedController = TextEditingController();
+  String? species; // 'Dog' | 'Cat'
+  String? breed; // one of _breedOptionsFor(species), or _othersBreedLabel
+  final TextEditingController breedOtherController = TextEditingController();
   final TextEditingController colorController = TextEditingController();
   String? sex;
   String? size;
 
   void dispose() {
-    speciesController.dispose();
-    breedController.dispose();
+    breedOtherController.dispose();
     colorController.dispose();
+  }
+
+  String get speciesText => species ?? '';
+  String get breedText {
+    if (breed == null) return '';
+    return breed == _othersBreedLabel ? breedOtherController.text.trim() : breed!;
   }
 }
 
@@ -78,7 +130,8 @@ class _RescuePageState extends State<RescuePage> {
 
   // Owner-side controllers
   final TextEditingController _petNameController = TextEditingController();
-  final TextEditingController _lostBreedController = TextEditingController();
+  String? _lostBreed;
+  final TextEditingController _lostBreedOtherController = TextEditingController();
   final TextEditingController _lostColorController = TextEditingController();
   DateTime? _lastSeenDate;
   TimeOfDay? _lastSeenTime;
@@ -87,6 +140,13 @@ class _RescuePageState extends State<RescuePage> {
   String? _lostSex;
   String? _temperament;
   bool _offerReward = false;
+
+  String get _lostBreedText {
+    if (_lostBreed == null) return '';
+    return _lostBreed == _othersBreedLabel
+        ? _lostBreedOtherController.text.trim()
+        : _lostBreed!;
+  }
 
   // Finder-side: one card per animal found (supports a multi-animal group case)
   final List<_FoundAnimalEntry> _foundAnimals = [_FoundAnimalEntry()];
@@ -194,7 +254,7 @@ class _RescuePageState extends State<RescuePage> {
     _accessInstructionsController.dispose();
     _bestTimeContactController.dispose();
     _petNameController.dispose();
-    _lostBreedController.dispose();
+    _lostBreedOtherController.dispose();
     _lostColorController.dispose();
     _rewardAmountController.dispose();
     _ownerContactController.dispose();
@@ -1621,6 +1681,79 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
+  // Species dropdown ('Dog' / 'Cat') shared by the owner's pet and every
+  // found/stray animal card.
+  Widget _speciesDropdown({
+    required String? value,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isDense: true,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: 'Select species',
+        hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+        border: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary),
+        ),
+      ),
+      items: const [
+        DropdownMenuItem(value: _dogSpecies, child: Text('Dog')),
+        DropdownMenuItem(value: _catSpecies, child: Text('Cat')),
+      ],
+      onChanged: onChanged,
+    );
+  }
+
+  // Breed dropdown, filtered by whichever species is selected. Picking
+  // "Others / Not sure" reveals a small text field for a custom breed.
+  Widget _breedDropdown({
+    required String? species,
+    required String? breedValue,
+    required ValueChanged<String?> onChanged,
+    required TextEditingController otherController,
+  }) {
+    final options = _breedOptionsFor(species);
+    final validValue =
+    (breedValue != null && options.contains(breedValue)) ? breedValue : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          value: validValue,
+          isDense: true,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: species == null ? 'Select species first' : 'Select breed',
+            hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+            border: const UnderlineInputBorder(
+              borderSide: BorderSide(color: AppColors.textPrimary),
+            ),
+          ),
+          items: species == null
+              ? const []
+              : options
+              .map((b) => DropdownMenuItem(
+            value: b,
+            child: Text(
+              b,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+            ),
+          ))
+              .toList(),
+          onChanged: species == null ? null : onChanged,
+        ),
+        if (validValue == _othersBreedLabel) ...[
+          const SizedBox(height: 8),
+          _lostPetTextField(otherController, 'Enter breed'),
+        ],
+      ],
+    );
+  }
+
   Widget _buildMediaBox(int index) {
     final item = _mediaFiles[index];
     final progress = _uploadProgress[index];
@@ -1955,13 +2088,17 @@ class _RescuePageState extends State<RescuePage> {
       _lostPetTextField(_petNameController, 'Enter pet name'),
       const SizedBox(height: 20),
       _buildLabel('Species', required: true),
-      const SizedBox(height: 8),
-      _buildCheckboxOption2('Dog', _selectedAnimalType,
-              (val) => setState(() => _selectedAnimalType = val)),
-      _buildCheckboxOption2('Cat', _selectedAnimalType,
-              (val) => setState(() => _selectedAnimalType = val)),
+      const SizedBox(height: 6),
+      _speciesDropdown(
+        value: _selectedAnimalType,
+        onChanged: (v) => setState(() {
+          _selectedAnimalType = v;
+          _lostBreed = null;
+        }),
+      ),
       const SizedBox(height: 20),
       Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Column(
@@ -1969,7 +2106,12 @@ class _RescuePageState extends State<RescuePage> {
               children: [
                 _buildLabel('Breed', required: false),
                 const SizedBox(height: 6),
-                _lostPetTextField(_lostBreedController, 'Mixed / unknown'),
+                _breedDropdown(
+                  species: _selectedAnimalType,
+                  breedValue: _lostBreed,
+                  onChanged: (v) => setState(() => _lostBreed = v),
+                  otherController: _lostBreedOtherController,
+                ),
               ],
             ),
           ),
@@ -2231,13 +2373,25 @@ class _RescuePageState extends State<RescuePage> {
           ),
           const SizedBox(height: 8),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _lostPetTextField(entry.speciesController, 'Species'),
+                child: _speciesDropdown(
+                  value: entry.species,
+                  onChanged: (v) => setState(() {
+                    entry.species = v;
+                    entry.breed = null;
+                  }),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _lostPetTextField(entry.breedController, 'Breed / mixed'),
+                child: _breedDropdown(
+                  species: entry.species,
+                  breedValue: entry.breed,
+                  onChanged: (v) => setState(() => entry.breed = v),
+                  otherController: entry.breedOtherController,
+                ),
               ),
             ],
           ),
@@ -2299,7 +2453,7 @@ class _RescuePageState extends State<RescuePage> {
     final condition = _conditionController.text.trim();
     final filledCount = _mediaFiles.where((f) => f != null).length;
     final validAnimals =
-    _foundAnimals.where((a) => a.speciesController.text.trim().isNotEmpty).toList();
+    _foundAnimals.where((a) => a.speciesText.isNotEmpty).toList();
 
     if (condition.isEmpty ||
         _selectedRescueType == null ||
@@ -2349,8 +2503,8 @@ class _RescuePageState extends State<RescuePage> {
           'reporterName': reporterName,
           'reporterPhone': userData?['phone'] ?? '',
           'groupId': groupId, // backfilled below once the first doc exists
-          'animalType': animal.speciesController.text.trim(),
-          'breed': animal.breedController.text.trim(),
+          'animalType': animal.speciesText,
+          'breed': animal.breedText,
           'sex': animal.sex,
           'size': animal.size,
           'colorMarkings': animal.colorController.text.trim(),
@@ -2457,7 +2611,7 @@ class _RescuePageState extends State<RescuePage> {
       }
     } else {
       final hasEmptySpecies = _foundAnimals
-          .any((a) => a.speciesController.text.trim().isEmpty);
+          .any((a) => a.speciesText.isEmpty);
       if (hasEmptySpecies ||
           _conditionController.text.trim().isEmpty ||
           _animalStatus == null ||
@@ -2499,7 +2653,7 @@ class _RescuePageState extends State<RescuePage> {
           'contactNumber': _ownerContactController.text.trim(),
           'petName': _petNameController.text.trim(),
           'species': _selectedAnimalType,
-          'breed': _lostBreedController.text.trim(),
+          'breed': _lostBreedText,
           'sex': _lostSex,
           'colorMarkings': _lostColorController.text.trim(),
           'temperament': _temperament,
@@ -2530,7 +2684,7 @@ class _RescuePageState extends State<RescuePage> {
             'reporterId': uid,
             'reporterName': reporterName,
             'reporterPhone': _finderContactController.text.trim(),
-            'animalType': _foundAnimals.first.speciesController.text.trim(),
+            'animalType': _foundAnimals.first.speciesText,
             'rescueType': 'Lost Pet',
             'condition': _conditionController.text.trim(),
             'urgency': _selectedUrgency,
@@ -2561,8 +2715,8 @@ class _RescuePageState extends State<RescuePage> {
             'reporterId': uid,
             'reporterName': reporterName,
             'contactNumber': _finderContactController.text.trim(),
-            'species': a.speciesController.text.trim(),
-            'breed': a.breedController.text.trim(),
+            'species': a.speciesText,
+            'breed': a.breedText,
             'sex': a.sex,
             'size': a.size,
             'colorMarkings': a.colorController.text.trim(),
@@ -2601,7 +2755,7 @@ class _RescuePageState extends State<RescuePage> {
       final oppositeType = _isOwner == true ? 'found' : 'lost';
       final firstSpecies = _isOwner == true
           ? _selectedAnimalType
-          : _foundAnimals.first.speciesController.text.trim();
+          : _foundAnimals.first.speciesText;
       final candidates = await alertsCollection
           .where('type', isEqualTo: oppositeType)
           .where('status', isEqualTo: 'open')

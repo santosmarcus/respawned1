@@ -133,62 +133,14 @@ class _TrackCasePageState extends State<TrackCasePage> {
           ),
           body: Column(
             children: [
-              // Reporter: live transit-progress map as soon as the rider
-              // has accepted and started the trip — riderLastLat/Lng only
-              // get written once _startTrip() begins location streaming,
-              // so their presence is the real "accepted" signal (being
-              // merely assigned isn't enough yet). Before that — and for
-              // everyone who isn't the reporter — the gray area shows the
-              // submitted report photos instead.
-              if (isReporter && data?['riderLastLat'] != null)
-                SizedBox(
-                  height: 200,
-                  child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
-                )
-              else if (isReporter && data?['riderId'] != null)
-                Container(
-                  height: 200,
-                  color: AppColors.slaterspwn,
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.map_outlined,
-                            size: 40, color: AppColors.textSecondary),
-                        const SizedBox(height: 8),
-                        Text(
-                            'The transit map will appear once your transporter accepts and starts the pickup.',
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.zain(
-                                fontSize: 12, color: AppColors.textSecondary)),
-                      ],
-                    ),
-                  ),
-                )
-              else if (isReporter)
-                  Container(
-                    height: 200,
-                    color: AppColors.slaterspwn,
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.map_outlined,
-                              size: 40, color: AppColors.textSecondary),
-                          const SizedBox(height: 8),
-                          Text(
-                              'The transit map will appear once a transporter is assigned.',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.zain(
-                                  fontSize: 12, color: AppColors.textSecondary)),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  _CasePhotoHeader(
-                    photoUrls: List<String>.from(data?['photoUrls'] ?? []),
-                  ),
+              // The map is always the top element on this page — it shows
+              // the case's pickup pin plus, once a transporter has been
+              // assigned/starts moving, the drop-off pin, live transporter
+              // position, and the route traveled so far.
+              SizedBox(
+                height: 200,
+                child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
+              ),
 
               // Bottom panel
               Expanded(
@@ -317,11 +269,11 @@ class _TabButton extends StatelessWidget {
   }
 }
 
-// Reporter-only transit progress map: pickup marker, drop-off marker, the
-// transporter's live position, and the route actually traveled so far
-// (built from the periodic location pings the transporter's app writes to
-// cases/{caseId}/tracking). Gives the reporter a clear "pickup → now →
-// drop-off" picture of the rescue in progress.
+// Transit progress map shown to everyone viewing this case — pickup marker,
+// drop-off marker (once assigned), the transporter's live position, and the
+// route actually traveled so far (built from the periodic location pings
+// the transporter's app writes to cases/{caseId}/tracking). Before a
+// transporter is assigned this just shows the reported pickup location.
 class _TrackCaseMap extends StatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
@@ -375,7 +327,7 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
         // case doc itself.
         final riderPos = trail.isNotEmpty ? trail.last : riderLastKnown;
 
-        final center = riderPos ?? pickup ?? dropoff ?? const LatLng(14.5995, 120.9842);
+        final center = riderPos ?? pickup ?? dropoff ?? const LatLng(14.5416, 121.0644);
 
         if (_controller != null && riderPos != null && !_centered) {
           _centered = true;
@@ -1329,90 +1281,6 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
-// Hero header shown to everyone who is NOT the reporter — since they have
-// no live rider to track, the gray area simply shows the submitted report
-// photo instead of a map.
-class _CasePhotoHeader extends StatefulWidget {
-  final List<String> photoUrls;
-  const _CasePhotoHeader({required this.photoUrls});
-
-  @override
-  State<_CasePhotoHeader> createState() => _CasePhotoHeaderState();
-}
-
-class _CasePhotoHeaderState extends State<_CasePhotoHeader> {
-  int _page = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final urls = widget.photoUrls;
-    return SizedBox(
-      height: 200,
-      width: double.infinity,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          urls.isEmpty
-              ? Container(
-            color: AppColors.slaterspwn,
-            child: const Center(
-              child: Icon(Icons.pets, size: 40, color: AppColors.textSecondary),
-            ),
-          )
-              : PageView.builder(
-            itemCount: urls.length,
-            onPageChanged: (i) => setState(() => _page = i),
-            itemBuilder: (context, i) {
-              return Image.network(
-                urls[i],
-                fit: BoxFit.cover,
-                width: double.infinity,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return Container(
-                    color: AppColors.slaterspwn,
-                    child: const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                  );
-                },
-                errorBuilder: (context, _, __) => Container(
-                  color: AppColors.slaterspwn,
-                  child: const Center(
-                    child: Icon(Icons.broken_image_outlined,
-                        size: 36, color: AppColors.textSecondary),
-                  ),
-                ),
-              );
-            },
-          ),
-          if (urls.length > 1)
-            Positioned(
-              bottom: 10,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(urls.length, (i) {
-                  return Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: i == _page
-                          ? AppColors.textPrimary
-                          : Colors.white.withOpacity(0.8),
-                    ),
-                  );
-                }),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 // Community Report — lets any viewer (reporter included) see a feed of
 // sighting/status updates from the community, and lets them submit one of
 // four quick report types to help verify the case is still accurate.
@@ -1532,8 +1400,8 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
               (p) =>
           p ??
               Position(
-                latitude: 14.5995,
-                longitude: 120.9842,
+                latitude: 14.5416,
+                longitude: 121.0644,
                 timestamp: DateTime.now(),
                 accuracy: 0,
                 altitude: 0,
