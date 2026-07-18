@@ -19,7 +19,7 @@ const _vehicleTypeOptions = [
   _VehicleTypeOption('Motorcycle', 'Less than 5 kg breeds'),
   _VehicleTypeOption('Sedan', 'Small to medium sized breeds'),
   _VehicleTypeOption('SUV', 'Medium sized breeds'),
-  _VehicleTypeOption('Cargo Van', 'Medium to large sized breeds'),
+  _VehicleTypeOption('Cargo Van/L300', 'Medium to large sized breeds'),
 ];
 
 class TransporterVerificationScreen extends StatefulWidget {
@@ -51,7 +51,6 @@ class _TransporterVerificationScreenState
   File? _portrait;
   String? _vehicleType;
   final _licensePlateCtrl = TextEditingController();
-  File? _vehicleRegistration;
   File? _antiRabiesRecord;
 
   bool _submitting = false;
@@ -116,15 +115,6 @@ class _TransporterVerificationScreenState
       setState(() => _errorMessage = 'Please enter your license plate number.');
       return;
     }
-    if (_vehicleRegistration == null) {
-      setState(() => _errorMessage = 'Please upload your vehicle registration.');
-      return;
-    }
-    if (_antiRabiesRecord == null) {
-      setState(() =>
-      _errorMessage = 'Please upload an anti-rabies vaccination record.');
-      return;
-    }
 
     setState(() => _submitting = true);
 
@@ -135,10 +125,9 @@ class _TransporterVerificationScreenState
       final licenseBackUrl =
       await _uploadImage(_licenseBack!, uid, 'license_back.jpg');
       final portraitUrl = await _uploadImage(_portrait!, uid, 'portrait.jpg');
-      final vehicleRegUrl = await _uploadImage(
-          _vehicleRegistration!, uid, 'vehicle_registration.jpg');
-      final antiRabiesUrl =
-      await _uploadImage(_antiRabiesRecord!, uid, 'anti_rabies.jpg');
+      final antiRabiesUrl = _antiRabiesRecord != null
+          ? await _uploadImage(_antiRabiesRecord!, uid, 'anti_rabies.jpg')
+          : null;
 
       final verificationData = {
         'name': _nameCtrl.text.trim(),
@@ -148,7 +137,6 @@ class _TransporterVerificationScreenState
         'portraitUrl': portraitUrl,
         'vehicleType': _vehicleType,
         'licensePlate': _licensePlateCtrl.text.trim(),
-        'vehicleRegistrationUrl': vehicleRegUrl,
         'antiRabiesUrl': antiRabiesUrl,
         'status': 'pending',
         'submittedAt': FieldValue.serverTimestamp(),
@@ -257,6 +245,15 @@ class _TransporterVerificationScreenState
               const SizedBox(height: 20),
 
               _uploadBox(
+                label: 'Portrait of Self',
+                file: _portrait,
+                onTap: () => _pickImage((f) => _portrait = f,
+                    source: ImageSource.camera),
+              ),
+
+              const SizedBox(height: 20),
+
+              _uploadBox(
                 label: "Driver's License Front",
                 file: _licenseFront,
                 onTap: () => _pickImage((f) => _licenseFront = f),
@@ -268,15 +265,6 @@ class _TransporterVerificationScreenState
                 label: "Driver's License Back",
                 file: _licenseBack,
                 onTap: () => _pickImage((f) => _licenseBack = f),
-              ),
-
-              const SizedBox(height: 20),
-
-              _uploadBox(
-                label: 'Portrait of Self',
-                file: _portrait,
-                onTap: () => _pickImage((f) => _portrait = f,
-                    source: ImageSource.camera),
               ),
 
               const SizedBox(height: 20),
@@ -301,17 +289,21 @@ class _TransporterVerificationScreenState
               const SizedBox(height: 20),
 
               _uploadBox(
-                label: 'Vehicle Registration',
-                file: _vehicleRegistration,
-                onTap: () => _pickImage((f) => _vehicleRegistration = f),
-              ),
-
-              const SizedBox(height: 20),
-
-              _uploadBox(
-                label: 'Anti-Rabies Vaccination Record',
+                label: 'Anti-Rabies Vaccination Record (Optional)',
                 file: _antiRabiesRecord,
                 onTap: () => _pickImage((f) => _antiRabiesRecord = f),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Optional: You may upload your anti-rabies vaccination '
+                    'record. While not required, we strongly recommend that '
+                    'all pet transporters have a valid anti-rabies '
+                    'vaccination, as transporting animals may involve '
+                    'unexpected bites or scratches that could expose them '
+                    'to rabies. Being vaccinated helps protect both you and '
+                    'the animals during transport.',
+                style: GoogleFonts.zain(
+                    fontSize: 12, color: AppColors.textSecondary),
               ),
 
               if (_errorMessage != null) ...[

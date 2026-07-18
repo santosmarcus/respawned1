@@ -5,6 +5,7 @@ import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
 import '../../app_theme.dart';
 import 'activity_item.dart';
 
@@ -14,13 +15,19 @@ class ActivityCard extends StatelessWidget{
 
   const ActivityCard({super.key, required this.item});
 
-  Color get _accentColor => item.type == ActivityType.rescue
-      ? AppColors.lavenderrspwn
-      : AppColors.greenrspwn;
+  Color get _accentColor => switch (item.type) {
+    ActivityType.rescue => AppColors.lavenderrspwn,
+    ActivityType.adoption => AppColors.greenrspwn,
+    ActivityType.lostFoundPet =>
+    item.alertKind == 'lost' ? AppColors.lavenderrspwn : AppColors.tearspwn,
+  };
 
-  IconData get _icon => item.type == ActivityType.rescue
-      ? Icons.pets_outlined
-      : Icons.favorite_border;
+  IconData get _icon => switch (item.type) {
+    ActivityType.rescue => Icons.pets_outlined,
+    ActivityType.adoption => Icons.favorite_border,
+    ActivityType.lostFoundPet =>
+    item.alertKind == 'lost' ? Icons.search : Icons.pets,
+  };
 
   String get _dateLabel{
     final d = item.createdAt;
@@ -97,6 +104,15 @@ class ActivityCard extends StatelessWidget{
     }
   }
 
+  void _viewPetAlert(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LostFoundTrackCasePage(alertId: item.docId),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return  GestureDetector(
@@ -109,6 +125,8 @@ class ActivityCard extends StatelessWidget{
           );
         } else if (item.type == ActivityType.adoption){
           _viewAdoption(context);
+        } else if (item.type == ActivityType.lostFoundPet) {
+          _viewPetAlert(context);
         }
       },
       child: Container(
@@ -168,8 +186,9 @@ class ActivityCard extends StatelessWidget{
 
                   const SizedBox(height: 6),
 
-                  // Address and Animal type row (rescue only)
-                  if (item.type == ActivityType.rescue &&
+                  // Address and Animal type row (rescue + lost/found pet)
+                  if ((item.type == ActivityType.rescue ||
+                      item.type == ActivityType.lostFoundPet) &&
                       item.animalType.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Row(children: [
@@ -217,7 +236,8 @@ class ActivityCard extends StatelessWidget{
                         ),
                       ),
                       if (item.type == ActivityType.rescue ||
-                          item.type == ActivityType.adoption)
+                          item.type == ActivityType.adoption ||
+                          item.type == ActivityType.lostFoundPet)
                         Text(
                           'View details →',
                           style: GoogleFonts.zain(

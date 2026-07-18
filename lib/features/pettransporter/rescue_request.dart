@@ -22,6 +22,7 @@ class RescueRequest extends StatefulWidget {
 
 class _RescueRequestState extends State<RescueRequest> {
   bool _isAccepting = false;
+  bool _isDeclining = false;
 
   Future<void> _startNow() async {
     setState(() => _isAccepting = true);
@@ -72,6 +73,249 @@ class _RescueRequestState extends State<RescueRequest> {
       }
     } finally {
       if (mounted) setState(() => _isAccepting = false);
+    }
+  }
+
+  Future<void> _decline(List<String> reasons) async {
+    setState(() => _isDeclining = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final caseRef =
+      FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
+      final snap = await caseRef.get();
+      final currentStatus = (snap.data() as Map<String, dynamic>?)?['status'];
+      final wasAssignedToMe =
+          (snap.data() as Map<String, dynamic>?)?['assignedVolunteerId'] == uid;
+
+      final reasonText = reasons.join('; ');
+
+      final updateData = <String, dynamic>{
+        'declinedBy': FieldValue.arrayUnion([uid]),
+        'declineReasons': FieldValue.arrayUnion([
+          {
+            'riderId': uid,
+            'reasons': reasons,
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': reasonText.isEmpty
+                ? 'A rider declined this request.'
+                : 'A rider declined this request: $reasonText.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      };
+
+      if (wasAssignedToMe && currentStatus == 'assigned') {
+        updateData['status'] = 'pending';
+        updateData['assignedVolunteerId'] = null;
+        updateData['assignedVolunteerName'] = null;
+      }
+
+      await caseRef.update(updateData);
+
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to decline request: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDeclining = false);
+    }
+  }
+
+  static const _declineReasonOptions = [
+    'Already assigned to another pickup',
+    'Pickup/Drop off location is too far',
+    'Insufficient equipment (crate, leash, medical supplies)',
+    'Capacity is full',
+    'Total transaction time conflicts with schedule',
+    'Road closure or heavy traffic prevents timely transit',
+  ];
+
+  Future<void> _showDeclineReasonSheet() async {
+    final selected = <String>{};
+    bool otherChecked = false;
+    final otherController = TextEditingController();
+    String? errorText;
+
+    final result = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 12,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Decline Reason',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    for (final reason in _declineReasonOptions)
+                      _DeclineReasonCheckbox(
+                        label: reason,
+                        value: selected.contains(reason),
+                        onChanged: (v) => setModalState(() {
+                          if (v == true) {
+                            selected.add(reason);
+                          } else {
+                            selected.remove(reason);
+                          }
+                        }),
+                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Checkbox(
+                            value: otherChecked,
+                            side: const BorderSide(
+                                color: AppColors.textPrimary, width: 1.5),
+                            activeColor: AppColors.textPrimary,
+                            materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                            onChanged: (v) => setModalState(
+                                    () => otherChecked = v ?? false),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Text('Other:',
+                                    style: GoogleFonts.zain(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textPrimary)),
+                              ),
+                              if (otherChecked)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: TextField(
+                                    controller: otherController,
+                                    style: GoogleFonts.zain(fontSize: 13),
+                                    decoration: InputDecoration(
+                                      hintText: 'Please specify',
+                                      hintStyle: GoogleFonts.zain(
+                                          fontSize: 13,
+                                          color: AppColors.textSecondary),
+                                      contentPadding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 10),
+                                      filled: true,
+                                      fillColor: Colors.white,
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                        BorderRadius.circular(10),
+                                        borderSide: const BorderSide(
+                                            color: AppColors.slaterspwn),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(errorText!,
+                            style: GoogleFonts.zain(
+                                fontSize: 12, color: Colors.redAccent)),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: AppColors.background,
+                          side: BorderSide(
+                              color: AppColors.slaterspwn, width: 1),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                        ),
+                        onPressed: () {
+                          final finalReasons = [...selected];
+                          if (otherChecked &&
+                              otherController.text.trim().isNotEmpty) {
+                            finalReasons
+                                .add('Other: ${otherController.text.trim()}');
+                          }
+                          if (finalReasons.isEmpty) {
+                            setModalState(() => errorText =
+                            'Please select or specify at least one reason.');
+                            return;
+                          }
+                          Navigator.pop(ctx, finalReasons);
+                        },
+                        child: Text(
+                          'Confirm',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    otherController.dispose();
+
+    if (result != null && result.isNotEmpty) {
+      _decline(result);
     }
   }
 
@@ -309,32 +553,68 @@ class _RescueRequestState extends State<RescueRequest> {
           // Start now / already accepted footer
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: alreadyAccepted || _isAccepting ? null : _startNow,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+            child: Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: alreadyAccepted || _isAccepting || _isDeclining
+                        ? null
+                        : _startNow,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _isAccepting
+                        ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: AppColors.textPrimary),
+                    )
+                        : Text(
+                      alreadyAccepted ? 'Already Accepted' : 'Start now',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 16, color: AppColors.textPrimary),
+                    ),
                   ),
-                  elevation: 0,
                 ),
-                child: _isAccepting
-                    ? const SizedBox(
-                  height: 22,
-                  width: 22,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.5, color: AppColors.textPrimary),
-                )
-                    : Text(
-                  alreadyAccepted ? 'Already Accepted' : 'Start now',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 16, color: AppColors.textPrimary),
-                ),
-              ),
+                if (!alreadyAccepted) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _isAccepting || _isDeclining
+                          ? null
+                          : _showDeclineReasonSheet,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.yellowrspwn, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                      ),
+                      child: _isDeclining
+                          ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.5, color: AppColors.textPrimary),
+                      )
+                          : Text(
+                        'Decline',
+                        style: GoogleFonts.tiltWarp(
+                            fontSize: 16, color: AppColors.textPrimary),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -366,6 +646,55 @@ class _RescueRequestState extends State<RescueRequest> {
                   padding: const EdgeInsets.all(6),
                   child: const Icon(Icons.close,
                       color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeclineReasonCheckbox extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool?> onChanged;
+
+  const _DeclineReasonCheckbox({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Checkbox(
+                value: value,
+                side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                activeColor: AppColors.textPrimary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: onChanged,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  label,
+                  style: GoogleFonts.zain(
+                      fontSize: 14, color: AppColors.textPrimary),
                 ),
               ),
             ),

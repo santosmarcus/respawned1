@@ -468,6 +468,8 @@ class _AnimalPageState extends State<AnimalPage> {
                   ),
 
                   const SizedBox(height: 8),
+
+                  _ViewStatusButton(animal: animal),
                 ],
               ),
             ),
@@ -478,6 +480,85 @@ class _AnimalPageState extends State<AnimalPage> {
   }
 }
 
+class _ViewStatusButton extends StatelessWidget {
+  final Animal animal;
+  const _ViewStatusButton({required this.animal});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('adoptions')
+          .where('personal.animalId', isEqualTo: animal.id)
+          .where('personal.adopterId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        QueryDocumentSnapshot? activeDoc;
+        QueryDocumentSnapshot? completedDoc;
+        for (final doc in snapshot.data!.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final status = data['status'] as String? ?? '';
+          if (status == 'rejected' || status == 'withdrawn') continue;
+          if (status == 'completed' ||
+              status == 'return_requested' ||
+              status == 'return_approved') {
+            completedDoc = doc;
+          } else {
+            activeDoc = doc;
+          }
+        }
+
+        final targetDoc = completedDoc ?? activeDoc;
+        if (targetDoc == null) return const SizedBox.shrink();
+        final isCompleted = completedDoc != null;
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => isCompleted
+                        ? PostAdoptionMonitoringPage(adoptionId: targetDoc.id)
+                        : AdoptionProcess(
+                      animal: animal,
+                      existingAdoptionId: targetDoc.id,
+                    ),
+                  ),
+                );
+              },
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppColors.greenrspwn, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: Text(
+                'View Status',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
 // Shared sub-widgets
 class _SectionHeader extends StatelessWidget {

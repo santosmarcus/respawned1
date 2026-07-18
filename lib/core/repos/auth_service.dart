@@ -31,19 +31,29 @@ class AuthService {
 
     //await credential.user!.updateDisplayName(name);
 
-    // CREATE the doc with set() not update()
-    await _firestore.collection('users').doc(credential.user!.uid).set({
-      'uid': credential.user!.uid,
-      'name': '',
-      'firstName': '',
-      'lastName': '',
-      'email': email,
-      'phone': '',
-      'role': '',               // filled during onboarding
-      'isVerified': false,
-      'photoUrl': '',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      // CREATE the doc with set() not update()
+      await _firestore.collection('users').doc(credential.user!.uid).set({
+        'uid': credential.user!.uid,
+        'name': '',
+        'firstName': '',
+        'lastName': '',
+        'email': email,
+        'phone': '',
+        'role': '',               // filled during onboarding
+        'isVerified': false,
+        'photoUrl': '',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // The Auth account was created successfully — that's the part that
+      // matters here. Don't fail the whole sign-up over a Firestore write
+      // hiccup (e.g. a transient network error or rules check). AuthWrapper
+      // treats a missing user doc exactly like an empty role and routes to
+      // onboarding, where the profile gets written anyway. Swallowing this
+      // also prevents the "email-already-in-use on every retry" loop that
+      // happens when this used to throw and strand a role-less account.
+    }
 
     return credential;
   }
@@ -66,16 +76,29 @@ class AuthService {
   }
 
   Future<UserCredential?> signInWithFacebook() async {
-    final LoginResult result = await FacebookAuth.instance.login();
-    if (result.status != LoginStatus.success) return null; // user cancelled
+    final LoginResult result = await FacebookAuth.instance.login(
+      permissions: ['public_profile', 'email'],
+    );
 
-    final OAuthCredential credential =
-    FacebookAuthProvider.credential(result.accessToken!.tokenString);
+    switch (result.status) {
+      case LoginStatus.success:
+        final OAuthCredential credential =
+        FacebookAuthProvider.credential(result.accessToken!.tokenString);
 
-    final userCredential =
-    await firebaseAuth.signInWithCredential(credential);
-    await _createUserDocIfNew(userCredential.user!);
-    return userCredential;
+        final userCredential =
+        await firebaseAuth.signInWithCredential(credential);
+        await _createUserDocIfNew(userCredential.user!);
+        return userCredential;
+
+      case LoginStatus.cancelled:
+        return null; // user backed out — not an error, don't show a message
+
+      case LoginStatus.failed:
+      case LoginStatus.operationInProgress:
+        throw Exception(
+          result.message ?? 'Facebook sign-in failed. Please try again.',
+        );
+    }
   }
 
   // Step 1: Send OTP
@@ -88,11 +111,21 @@ class AuthService {
     await firebaseAuth.verifyPhoneNumber(
       phoneNumber: phoneNumber,
       verificationCompleted: (PhoneAuthCredential credential) async {
-        // Auto-verified on some Android devices without the user typing an OTP.
-        final userCredential =
-        await firebaseAuth.signInWithCredential(credential);
-        await _createUserDocIfNew(userCredential.user!);
-        onAutoVerified?.call(userCredential);
+        // Auto-verified on some Android devices without the user typing an
+        // OTP. This callback fires later, outside the caller's try/catch,
+        // so anything thrown in here must be caught locally and routed
+        // through onError — otherwise it becomes an unhandled async
+        // exception that only shows up in logcat, never on screen.
+        try {
+          final userCredential =
+          await firebaseAuth.signInWithCredential(credential);
+          await _createUserDocIfNew(userCredential.user!);
+          onAutoVerified?.call(userCredential);
+        } on FirebaseAuthException catch (e) {
+          onError(e.message ?? 'Verification failed.');
+        } catch (e) {
+          onError('Something went wrong verifying your number. Please try again.');
+        }
       },
       verificationFailed: (FirebaseAuthException e) {
         onError(e.message ?? 'Verification failed');

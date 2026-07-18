@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
-import '../rescue/track_case_page.dart';
+import 'track_case_page.dart';
 import 'public_rescue_item.dart';
 
 class PublicRescueCard extends StatelessWidget {
@@ -31,7 +31,7 @@ class PublicRescueCard extends StatelessWidget {
           MaterialPageRoute(
             builder: (_) => TrackCasePage(
               caseId: item.caseId,
-              initialTabIndex: 1,
+              initialTabIndex: 0,
             ),
           ),
         );
@@ -57,8 +57,8 @@ class PublicRescueCard extends StatelessWidget {
               child: item.photoUrls.isNotEmpty
                   ? Image.network(
                 item.photoUrls.first,
-                width: 64,
-                height: 64,
+                width: 100,
+                height: 100,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => _placeholderThumb(),
               )
