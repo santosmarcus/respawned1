@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../app_theme.dart';
+import '../../../app_theme.dart';
 import 'adoption_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 enum _AdoptionProcess {
   intro,           // 1st step - Lets start
@@ -10,20 +15,26 @@ enum _AdoptionProcess {
   timeToMeet,      // 4th step  – Appointment confirmed
   adoptionDay,     // 5th step  – Adoption Day! (success)
   appReject,       // 5th step  – Application Update (rejected)
+  withdrawn,       // 5th step  – Application withdrawn by adopter
 }
 
 const List<String> _stepLabels = [
   'Fill out adoption form',
   'Book appointment',
   'Application review',
-  'Time to meet!',
+  'Time to meet! | Adoption Fee',
   'Adoption Day',
 ];
 
 
 class AdoptionProcess extends StatefulWidget {
   final Animal animal;
-  const AdoptionProcess({super.key, required this.animal});
+  final String? existingAdoptionId;
+  const AdoptionProcess({
+    super.key,
+    required this.animal,
+    this.existingAdoptionId,
+  });
   @override
   State<AdoptionProcess> createState() => _AdoptionProcessState();
 }
@@ -34,18 +45,155 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   // Form fields
   final _formKey = GlobalKey<FormState>();
+
+  // Personal Information
   final _nameCtrl = TextEditingController();
+  final _ageCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _addressCtrl = TextEditingController();
+  String? _city;
+
+  // Household & Living Information
+  String? _residenceType;
+  final _residenceOtherCtrl = TextEditingController();
+  String? _ownershipStatus;
+  int _householdMembers = 0;
+
+  //Pet Experience
+  bool _hadPetsBefore = false;
+  int _currentDogs = 0;
+  int _currentCats = 0;
+  int _currentBirds = 0;
+  int _currentFish = 0;
+  int _currentReptiles = 0;
+  int _currentOther = 0;
+  final _currentOtherTypeCtrl = TextEditingController();
+  String? _petsVaccinated;
+  String? _petsSpayedNeutered;
+
+  //Lifestyle & Care
+  String? _hoursAlone;
+  final _caregiverCtrl = TextEditingController();
+  String? _petStayLocation;
+  bool _canAffordFood = false;
+  bool _canAffordVaccinations = false;
+  bool _canAffordVetVisits = false;
+  bool _canAffordEmergencyCare = false;
+  bool _canAffordGrooming = false;
+  bool _canAffordCareSupplies= false;
+  String? _monthlyBudget;
   final _reasonCtrl = TextEditingController();
+
+  //Required Uploads
+  File? _governmentIdFile;
+  File? _proofOfAddressFile;
+  //File? _digitalSignatureFile;
+  File? _homePhotosFile;
+
+  String? _governmentIdUrl;
+  String? _proofOfAddressUrl;
+  //String? _digitalSignatureUrl;
+  String? _homePhotosUrl;
+
+  bool _isUploadingGovId = false;
+  bool _isUploadingProof = false;
+  bool _isUploadingSignature = false;
+  bool _isUploadingHomePhotos = false;
+
+  final _picker = ImagePicker();
+
+  // Agreements
+  bool _agreeCare = false;
+  bool _agreeNoAbandon = false;
+  bool _agreeFollowup = false;
+  bool _agreeAccurate = false;
+  bool _agreeNotGuaranteed = false;
+
+  String? _adoptionId;
+  bool _isSubmitting = false;
+  bool _isLoadingExisting = false;
+
+  // Adoption fee / payment
+  static const double adoptionFeeAmount = 500;
+  bool _feePaid = false;
+  String? _paymentMethod;
+
+  // Appointment
+  DateTime? _appointmentDate;
+  String _appointmentType = 'On-site Visit';
+  String? _appointmentTime;
+
+  _AdoptionProcess? _reviewStep;
+
+  _AdoptionProcess get _displayStep => _reviewStep ?? _step;
+
+  bool get _isReadOnly => _reviewStep != null;
+
+  // The 5 circles on the tracker, left to right.
+  static const List<_AdoptionProcess> _trackerSteps = [
+    _AdoptionProcess.intro,
+    _AdoptionProcess.bookAppointment,
+    _AdoptionProcess.appReview,
+    _AdoptionProcess.timeToMeet,
+    _AdoptionProcess.adoptionDay,
+  ];
+
+  int get _displayIndex {
+    final idx = _trackerSteps.indexOf(_displayStep);
+    return idx == -1 ? _activeStepIndex : idx;
+  }
+
+  void _onTrackerTap(int index) {
+    if (index > _activeStepIndex) return; // hasn't reached that phase yet
+    final target = _trackerSteps[index];
+    setState(() => _reviewStep = target == _step ? null : target);
+  }
+
+  // timeslots
+  static const Map<int, List<String>> _timeSlots = {
+    0: ['9:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
+    1: [
+      '9:00 AM',
+      '10:00 AM',
+      '11:00 AM',
+      '1:00 PM',
+      '2:00 PM',
+      '3:00 PM',
+      '4:00 PM'
+    ],
+    2: ['10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM'],
+    3: ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '3:00 PM', '4:00 PM'],
+    4: ['9:00 AM', '10:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
+    5: ['10:00 AM', '11:00 AM', '12:00 PM'],
+    6: [], // Sunday – closed
+  };
+
+  List<String> get _slotsForDate {
+    if (_appointmentDate == null) return [];
+    final dow = (_appointmentDate!.weekday - 1) % 7;
+    return _timeSlots[dow] ?? [];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.existingAdoptionId != null) {
+      _isLoadingExisting = true;
+      _loadExistingAdoption();
+    } else {
+      _prefillFromAccount();
+    }
+  }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _ageCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
-    _addressCtrl.dispose();
+    _residenceOtherCtrl.dispose();
+    _currentOtherTypeCtrl.dispose();
+    _caregiverCtrl.dispose();
     _reasonCtrl.dispose();
     super.dispose();
   }
@@ -64,31 +212,32 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         return 4;
       case _AdoptionProcess.appReject:
         return 2; // rejected stays at review
+      case _AdoptionProcess.withdrawn:
+        return 2; // withdrawn stays at review
     }
   }
 
-  // Helpers
-  // Appointment
-  DateTime? _appointmentDate;
-  String _appointmentType = 'On-site Visit';
-  String? _appointmentTime;
+  //select image
+  Future<void> _pickUploadFile({
+    required void Function(File) onPicked,
+  }) async {
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+      maxWidth: 1280,
+    );
+    if (picked != null) {
+      onPicked(File(picked.path));
+    }
+  }
 
-  // timeslots --- to be changed
-  static const Map<int, List<String>> _timeSlots = {
-    0: ['9:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    1: ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    2: ['10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM'],
-    3: ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '3:00 PM', '4:00 PM'],
-    4: ['9:00 AM', '10:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    5: ['10:00 AM', '11:00 AM', '12:00 PM'],
-    6: [],  // Sunday – closed
-  };
-
-  List<String> get _slotsForDate {
-    if (_appointmentDate == null) return [];
-    // weekday: 1=Mon … 7=Sun → convert to 0-based Mon-Sun
-    final dow = (_appointmentDate!.weekday - 1) % 7;
-    return _timeSlots[dow] ?? [];
+  //upload helper
+  Future<String?> _uploadFile(File? file, String pathSegment, String adoptionId) async {
+    if (file == null) return null;
+    final ref = FirebaseStorage.instance
+        .ref('adoptions/$adoptionId/$pathSegment.jpg');
+    await ref.putFile(file);
+    return await ref.getDownloadURL();
   }
 
   Future<void> _pickDate() async {
@@ -117,34 +266,530 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   String _formatDate(DateTime d) =>
       '${_monthName(d.month)} ${d.day}, ${d.year}';
 
-  String _monthName(int m) => const [
-    '', 'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ][m];
+  String _monthName(int m) =>
+      const [
+        '', 'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ][m];
 
 
+  //Firestore Helpers
+  Future<void> _prefillFromAccount() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+
+      final data = doc.data();
+      if (data == null) return;
+
+      setState(() {
+        _nameCtrl.text =
+            '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
+        _phoneCtrl.text =
+            data['phone'] ?? '';
+        _emailCtrl.text =
+            FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
+        _city = data['city'];
+      });
+    } catch (_) {}
+  }
+
+  _AdoptionProcess _stepForStatus(String? status) {
+    switch (status) {
+      case 'pending_appointment':
+        return _AdoptionProcess.bookAppointment;
+      case 'under_review':
+        return _AdoptionProcess.appReview;
+      case 'appointment_confirmed':
+        return _AdoptionProcess.timeToMeet;
+      case 'completed':
+        return _AdoptionProcess.adoptionDay;
+      case 'return_requested':
+        return _AdoptionProcess.adoptionDay;
+      case 'return_approved':
+        return _AdoptionProcess.adoptionDay;
+      case 'rejected':
+        return _AdoptionProcess.appReject;
+      case 'withdrawn':
+        return _AdoptionProcess.withdrawn;
+      default:
+        return _AdoptionProcess.intro;
+    }
+  }
+
+  // Reloads every saved answer
+  Future<void> _loadExistingAdoption() async {
+    final id = widget.existingAdoptionId;
+    if (id == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(id)
+          .get();
+
+      final data = doc.data();
+      if (data == null) {
+        if (mounted) setState(() => _isLoadingExisting = false);
+        return;
+      }
+
+      final loadedStatus = data['status'] as String?;
+      if (loadedStatus == 'withdrawn' || loadedStatus == 'rejected') {
+        if (mounted) setState(() => _isLoadingExisting = false);
+        await _prefillFromAccount();
+        return;
+      }
+
+      final personal = (data['personal'] as Map?) ?? {};
+      final household = (data['household'] as Map?) ?? {};
+      final petExperience = (data['petExperience'] as Map?) ?? {};
+      final currentPets = (petExperience['currentPets'] as Map?) ?? {};
+      final lifestyle = (data['lifestyle'] as Map?) ?? {};
+      final canAfford = (lifestyle['canAfford'] as Map?) ?? {};
+      final uploads = (data['uploads'] as Map?) ?? {};
+      final agreement = (data['agreement'] as Map?) ?? {};
+
+      final appointmentTs = data['appointmentDate'];
+
+      setState(() {
+        _adoptionId = id;
+
+        // Personal Information
+        _nameCtrl.text = personal['adopterName'] as String? ?? '';
+        _emailCtrl.text = personal['adopterEmail'] as String? ?? '';
+        _ageCtrl.text = personal['adopterAge'] as String? ?? '';
+        _phoneCtrl.text = personal['adopterPhone'] as String? ?? '';
+        _city = personal['adopterCity'] as String?;
+
+        // Household & Living Information
+        _residenceType = household['residenceType'] as String?;
+        _residenceOtherCtrl.text =
+            household['residenceOther'] as String? ?? '';
+        _ownershipStatus = household['ownershipStatus'] as String?;
+        _householdMembers = household['householdMembers'] as int? ?? 0;
+
+        // Pet Experience
+        _hadPetsBefore = petExperience['hadPetsBefore'] as bool? ?? false;
+        _currentDogs = currentPets['dogs'] as int? ?? 0;
+        _currentCats = currentPets['cats'] as int? ?? 0;
+        _currentBirds = currentPets['birds'] as int? ?? 0;
+        _currentFish = currentPets['fish'] as int? ?? 0;
+        _currentReptiles = currentPets['reptiles'] as int? ?? 0;
+        _currentOther = currentPets['other'] as int? ?? 0;
+        _currentOtherTypeCtrl.text = currentPets['otherType'] as String? ?? '';
+        _petsVaccinated = petExperience['currentPetsVaccinated'] as String?;
+        _petsSpayedNeutered =
+        petExperience['currentPetsSpayedNeutered'] as String?;
+
+        // Lifestyle & Care
+        _hoursAlone = lifestyle['hoursAlone'] as String?;
+        _caregiverCtrl.text = lifestyle['primaryCaregiver'] as String? ?? '';
+        _petStayLocation = lifestyle['petStayLocation'] as String?;
+        _canAffordFood = canAfford['food'] as bool? ?? false;
+        _canAffordVaccinations = canAfford['vaccinations'] as bool? ?? false;
+        _canAffordVetVisits = canAfford['vetVisits'] as bool? ?? false;
+        _canAffordEmergencyCare =
+            canAfford['emergencyMedicalCare'] as bool? ?? false;
+        _canAffordGrooming = canAfford['grooming'] as bool? ?? false;
+        _canAffordCareSupplies = canAfford['careSupplies'] as bool? ?? false;
+        _monthlyBudget = lifestyle['monthlyBudget'] as String?;
+        _reasonCtrl.text = agreement['reason'] as String? ?? '';
+
+        // Required Uploads (already uploaded — keep the saved URLs)
+        _governmentIdUrl = uploads['governmentId'] as String?;
+        _proofOfAddressUrl = uploads['proofOfAddress'] as String?;
+        //_digitalSignatureUrl = uploads['digitalSignature'] as String?;
+        _homePhotosUrl = uploads['homePhotos'] as String?;
+
+        // Agreements
+        _agreeCare = agreement['care'] as bool? ?? false;
+        _agreeNoAbandon = agreement['noAbandon'] as bool? ?? false;
+        _agreeFollowup = agreement['followUp'] as bool? ?? false;
+        _agreeAccurate = agreement['infoAccurate'] as bool? ?? false;
+        _agreeNotGuaranteed =
+            agreement['approvalNotGuaranteed'] as bool? ?? false;
+
+        // Appointment
+        if (appointmentTs is Timestamp) {
+          _appointmentDate = appointmentTs.toDate();
+        }
+        _appointmentType = data['appointmentType'] as String? ?? _appointmentType;
+        _appointmentTime = data['appointmentTime'] as String?;
+
+        // Adoption fee / payment
+        final payment = (data['payment'] as Map?) ?? {};
+        _feePaid = payment['status'] == 'paid';
+        _paymentMethod = payment['method'] as String?;
+
+        _step = _stepForStatus(data['status'] as String?);
+        _isLoadingExisting = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingExisting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load your application: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _submitAdoptionForm() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    if (!_agreeCare ||
+        !_agreeNoAbandon ||
+        !_agreeFollowup ||
+        !_agreeAccurate ||
+        !_agreeNotGuaranteed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please accept all agreements before submitting.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final existing = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .where('personal.animalId', isEqualTo: widget.animal.id)
+          .get();
+
+      final stillActiveOrDone = existing.docs.any((doc) {
+        final data = doc.data();
+        final status = data['status'] as String? ?? '';
+        return status != 'rejected' && status != 'withdrawn';
+      });
+
+      if (stillActiveOrDone) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  '${widget.animal.name} already has an ongoing or completed adoption.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          setState(() => _isSubmitting = false);
+        }
+        return;
+      }
+
+      final docRef = FirebaseFirestore.instance.collection('adoptions').doc();
+
+      final results = await Future.wait([
+        _uploadFile(_governmentIdFile, 'government_id', docRef.id),
+        _uploadFile(_proofOfAddressFile, 'proof_of_address', docRef.id),
+        //_uploadFile(_digitalSignatureFile, 'digital_signature', docRef.id),
+        _uploadFile(_homePhotosFile, 'home_photos', docRef.id),
+      ]);
+
+      _governmentIdUrl = results[0];
+      _proofOfAddressUrl = results[1];
+      ///_digitalSignatureUrl = results[2];
+      _homePhotosUrl = results[3];
+
+      await docRef.set({
+        'personal': {
+          'adopterId': uid,
+          'animalId': widget.animal.id,
+          'animalName': widget.animal.name,
+          'adopterName': _nameCtrl.text.trim(),
+          'adopterEmail': _emailCtrl.text.trim(),
+          'adopterAge': _ageCtrl.text.trim(),
+          'adopterPhone': _phoneCtrl.text.trim(),
+          'adopterCity': _city,
+        },
+        'household': {
+          'residenceType': _residenceType,
+          'residenceOther': _residenceType == 'Other'
+              ? _residenceOtherCtrl.text.trim()
+              : null,
+          'ownershipStatus': _ownershipStatus,
+          'householdMembers': _householdMembers,
+        },
+        'petExperience': {
+          'hadPetsBefore': _hadPetsBefore,
+          'currentPets': {
+            'dogs': _currentDogs,
+            'cats': _currentCats,
+            'birds': _currentBirds,
+            'fish': _currentFish,
+            'reptiles': _currentReptiles,
+            'other': _currentOther,
+            'otherType': _currentOtherTypeCtrl.text.trim(),
+          },
+          'currentPetsVaccinated': _petsVaccinated,
+          'currentPetsSpayedNeutered': _petsSpayedNeutered,
+        },
+        'lifestyle': {
+          'hoursAlone': _hoursAlone,
+          'primaryCaregiver': _caregiverCtrl.text.trim(),
+          'petStayLocation': _petStayLocation,
+          'canAfford': {
+            'food': _canAffordFood,
+            'vaccinations': _canAffordVaccinations,
+            'vetVisits': _canAffordVetVisits,
+            'emergencyMedicalCare': _canAffordEmergencyCare,
+            'grooming': _canAffordGrooming,
+            'careSupplies':  _canAffordCareSupplies,
+
+          },
+          'monthlyBudget': _monthlyBudget,
+        },
+        'uploads': {
+          'governmentId': _governmentIdUrl,
+          'proofOfAddress': _proofOfAddressUrl,
+          //'digitalSignature': _digitalSignatureUrl,
+          'homePhotos': _homePhotosUrl,
+        },
+        'agreement': {
+          'reason': _reasonCtrl.text.trim(),
+          'care': _agreeCare,
+          'noAbandon': _agreeNoAbandon,
+          'followUp': _agreeFollowup,
+          'infoAccurate': _agreeAccurate,
+          'approvalNotGuaranteed': _agreeNotGuaranteed,
+        },
+        'status': 'pending_appointment',
+        'statusHistory': [
+          {
+            'status': 'Form submitted.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      setState(() {
+        _adoptionId = docRef.id;
+        _step = _AdoptionProcess.bookAppointment;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _saveAppointment() async {
+    if (_adoptionId == null) return;
+    setState(() => _isSubmitting = true);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(_adoptionId).update({
+        'appointmentType': _appointmentType,
+        'appointmentDate': Timestamp.fromDate(_appointmentDate!),
+        'appointmentTime': _appointmentTime,
+        'status': 'under_review',
+        'statusHistory': FieldValue.arrayUnion([{
+          'status': 'Appointment booked.',
+          'timestamp': Timestamp.now(),
+        }
+        ]),
+      });
+
+      setState(() => _step = _AdoptionProcess.appReview);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to book appointment: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _updateStatus(String status,
+      String statusMessage,
+      _AdoptionProcess nextStep,) async {
+    if (_adoptionId == null) return;
+    setState(() => _isSubmitting = true);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(_adoptionId)
+          .update({
+        'status': status,
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': statusMessage,
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+
+      setState(() => _step = nextStep);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  // Clears every field back to a blank application
+  void _resetProcessState() {
+    _adoptionId = null;
+    _step = _AdoptionProcess.intro;
+    _reviewStep = null;
+
+    _residenceType = null;
+    _residenceOtherCtrl.clear();
+    _ownershipStatus = null;
+    _householdMembers = 0;
+
+    _hadPetsBefore = false;
+    _currentDogs = 0;
+    _currentCats = 0;
+    _currentBirds = 0;
+    _currentFish = 0;
+    _currentReptiles = 0;
+    _currentOther = 0;
+    _currentOtherTypeCtrl.clear();
+    _petsVaccinated = null;
+    _petsSpayedNeutered = null;
+
+    _hoursAlone = null;
+    _caregiverCtrl.clear();
+    _petStayLocation = null;
+    _canAffordFood = false;
+    _canAffordVaccinations = false;
+    _canAffordVetVisits = false;
+    _canAffordEmergencyCare = false;
+    _canAffordGrooming = false;
+    _canAffordCareSupplies = false;
+    _monthlyBudget = null;
+    _reasonCtrl.clear();
+
+    _governmentIdFile = null;
+    _proofOfAddressFile = null;
+    //_digitalSignatureFile = null;
+    _homePhotosFile = null;
+    _governmentIdUrl = null;
+    _proofOfAddressUrl = null;
+    //_digitalSignatureUrl = null;
+    _homePhotosUrl = null;
+
+    _agreeCare = false;
+    _agreeNoAbandon = false;
+    _agreeFollowup = false;
+    _agreeAccurate = false;
+    _agreeNotGuaranteed = false;
+
+    _appointmentDate = null;
+    _appointmentType = 'On-site Visit';
+    _appointmentTime = null;
+  }
+
+  Future<void> _withdrawApplication() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Withdraw Application?',
+          style: GoogleFonts.tiltWarp(
+              fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+        ),
+        content: Text(
+          'Are you sure you want to withdraw your adoption application for ${widget.animal.name}? This action cannot be undone.',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.zain(
+                  fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              'Withdraw',
+              style: GoogleFonts.zain(
+                  fontWeight: FontWeight.w700, color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || _adoptionId == null || !mounted) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(_adoptionId)
+          .update({
+        'status': 'withdrawn',
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Application withdrawn by adopter.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+
+      setState(() => _step = _AdoptionProcess.withdrawn);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to withdraw: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+
+  //Build
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_outlined),
-              activeIcon: Icon(Icons.notifications),
-              label: 'Notifications'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'My Profile'),
-        ],
-        onTap: (_) {},
-      ),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,12 +804,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                         size: 22, color: AppColors.textPrimary),
                   ),
                   const SizedBox(width: 16),
-                  Text(
-                    'Adopt ${widget.animal.name}',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary,
+                  Expanded(
+                    child: Text(
+                      'Adopt ${widget.animal.name}',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                   ),
                 ],
@@ -173,23 +820,66 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
             const SizedBox(height: 20),
 
-            // Tracker
+            // Tracker — tap a circle for a phase you've already reached to
+            // review it (read-only); tap the current one again to return.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: _StepTracker(
                 labels: _stepLabels,
                 activeIndex: _activeStepIndex,
-                rejected: _step == _AdoptionProcess.appReject,
+                displayIndex: _displayIndex,
+                rejected: _step == _AdoptionProcess.appReject ||
+                    _step == _AdoptionProcess.withdrawn,
+                onStepTap: _onTrackerTap,
               ),
             ),
+
+            if (_isReadOnly) ...[
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.slaterspwn.withOpacity(0.35),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.visibility_outlined,
+                          size: 16, color: AppColors.textPrimary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Viewing a previous step — read only. Tap your '
+                              'current step\'s circle above to return.',
+                          style: GoogleFonts.zain(
+                              fontSize: 12, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
 
             const SizedBox(height: 24),
 
             // body
             Expanded(
-              child: SingleChildScrollView(
+              child: _isLoadingExisting
+                  ? const Center(
+                child: CircularProgressIndicator(
+                    color: AppColors.greenrspwn),
+              )
+                  : SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _buildStepBody(),
+                child: IgnorePointer(
+                  ignoring: _isReadOnly,
+                  child: _buildStepBody(),
+                ),
               ),
             ),
           ],
@@ -199,9 +889,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // switcher
-
   Widget _buildStepBody() {
-    switch (_step) {
+    switch (_displayStep) {
       case _AdoptionProcess.intro:
         return _buildIntro();
       case _AdoptionProcess.bookAppointment:
@@ -214,11 +903,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         return _buildAdoptionDay();
       case _AdoptionProcess.appReject:
         return _buildAppUpdate();
+      case _AdoptionProcess.withdrawn:
+        return _buildWithdrawn();
     }
   }
 
-  // 1st step --- fill out form
-
+  // 1st step - fill out form
   Widget _buildIntro() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,7 +922,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Ready to give a rescue a loving forever generalhome?',
+          'Ready to give a rescue a loving forever home?',
           style: GoogleFonts.zain(
               fontSize: 15,
               fontWeight: FontWeight.w600,
@@ -241,31 +931,368 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 4),
         Text(
           'Fill out this quick form to help us match you with the right rescue and confirm eligibility for adoption.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 24),
 
-        // Form
         Form(
           key: _formKey,
           child: Column(
             children: [
-              _FormField(controller: _nameCtrl, label: 'Full Name', hint: 'Juan dela Cruz'),
+              // Personal Information
+              _SectionTitle('Personal Information'),
               const SizedBox(height: 12),
-              _FormField(controller: _emailCtrl, label: 'Email', hint: 'juan@email.com',
+              _FormField(controller: _nameCtrl, label: 'Name', hint: ' '),
+              const SizedBox(height: 12),
+              _FormField(
+                  controller: _emailCtrl,
+                  label: 'Email',
+                  hint: 'Email@email.com',
                   keyboardType: TextInputType.emailAddress),
               const SizedBox(height: 12),
-              _FormField(controller: _phoneCtrl, label: 'Phone Number', hint: '09XXXXXXXXX',
-                  keyboardType: TextInputType.phone),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: _FormField(
+                        controller: _phoneCtrl,
+                        label: 'Number',
+                        hint: '+63 989 989 989',
+                        keyboardType: TextInputType.phone),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _FormField(
+                        controller: _ageCtrl,
+                        label: 'Age',
+                        hint: ' ',
+                        keyboardType: TextInputType.number),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
-              _FormField(controller: _addressCtrl, label: 'Home Address', hint: '123 Street, City'),
+              _DropdownField<String>(
+                label: 'City',
+                value: _city,
+                items: const [
+                  'Quezon City',
+                  'Manila',
+                  'Caloocan',
+                  'Taguig',
+                  'Paranaque',
+                  'Valenzuela',
+                  'Las Pinas',
+                  'Muntinlupa',
+                  'Makati',
+                  'Mandaluyong',
+                  'Malabon',
+                  'Marikina',
+                  'Navotas',
+                  'Pasig',
+                  'Pateros',
+                  'San Juan',
+                  'Other'
+                ],
+                onChanged: (v) => setState(() => _city = v),
+              ),
+
+              const SizedBox(height: 22),
+
+              // Household & Living Information
+              _SectionTitle('Household & Living Information'),
+              const SizedBox(height: 8),
+              _RadioGroup<String>(
+                label: 'Residence Type',
+                value: _residenceType,
+                options: const [
+                  'House',
+                  'Apartment',
+                  'Condominium',
+                  'Townhouse',
+                  'Other'
+                ],
+                onChanged: (v) => setState(() => _residenceType = v),
+              ),
+              if (_residenceType == 'Other') ...[
+                const SizedBox(height: 8),
+                _FormField(
+                    controller: _residenceOtherCtrl,
+                    label: 'Please specify',
+                    hint: ' '),
+              ],
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Ownership Status',
+                value: _ownershipStatus,
+                options: const ['Owned', 'Renting (Allowed Pets)', 'Living with Parents'],
+                onChanged: (v) => setState(() => _ownershipStatus = v),
+              ),
+              const SizedBox(height: 12),
+              _CounterField(
+                label: 'Number of Household Members',
+                value: _householdMembers,
+                onChanged: (v) => setState(() => _householdMembers = v),
+              ),
+
+              const SizedBox(height: 22),
+
+              // Pet Experience
+              _SectionTitle('Pet Experience'),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('Owned pets before?',
+                    style: GoogleFonts.zain(fontSize: 14)),
+                value: _hadPetsBefore,
+                onChanged: (v) => setState(() => _hadPetsBefore = v!),
+              ),
+              const SizedBox(height: 8),
+              Text('Current pets',
+                  style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              _CounterField(
+                  label: 'Dogs',
+                  value: _currentDogs,
+                  onChanged: (v) => setState(() => _currentDogs = v)),
+              _CounterField(
+                  label: 'Cats',
+                  value: _currentCats,
+                  onChanged: (v) => setState(() => _currentCats = v)),
+              _CounterField(
+                  label: 'Birds',
+                  value: _currentBirds,
+                  onChanged: (v) => setState(() => _currentBirds = v)),
+              _CounterField(
+                  label: 'Fish',
+                  value: _currentFish,
+                  onChanged: (v) => setState(() => _currentFish = v)),
+              _CounterField(
+                  label: 'Reptiles',
+                  value: _currentReptiles,
+                  onChanged: (v) => setState(() => _currentReptiles = v)),
+              _CounterField(
+                  label: 'Other',
+                  value: _currentOther,
+                  onChanged: (v) => setState(() => _currentOther = v)),
+              if (_currentOther > 0) ...[
+                const SizedBox(height: 8),
+                _FormField(
+                    controller: _currentOtherTypeCtrl,
+                    label: 'Specify other pet type',
+                    hint: ' '),
+              ],
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Are all current pets vaccinated?',
+                value: _petsVaccinated,
+                options: const ['Yes', 'Some', 'None', 'Not Applicable'],
+                onChanged: (v) => setState(() => _petsVaccinated = v),
+              ),
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Are all current pets spayed/neutered?',
+                value: _petsSpayedNeutered,
+                options: const ['Yes', 'Some', 'None', 'Not Applicable'],
+                onChanged: (v) => setState(() => _petsSpayedNeutered = v),
+              ),
+
+              const SizedBox(height: 22),
+
+              // Lifestyle & Care
+              _SectionTitle('Lifestyle & Care'),
+              const SizedBox(height: 8),
+              _RadioGroup<String>(
+                label: 'Hours animal will be left alone',
+                value: _hoursAlone,
+                options: const [
+                  'Less than 2 hours',
+                  '2-4',
+                  '5-8',
+                  'More than 8 hours'
+                ],
+                onChanged: (v) => setState(() => _hoursAlone = v),
+              ),
+              const SizedBox(height: 12),
+              _FormField(
+                  controller: _caregiverCtrl,
+                  label: 'Primary Caregiver',
+                  hint: 'Enter'),
+              const SizedBox(height: 16),
+              _RadioGroup<String>(
+                label: 'Where will pet stay?',
+                value: _petStayLocation,
+                options: const ['Indoors', 'Outdoors', 'Mixed'],
+                onChanged: (v) => setState(() => _petStayLocation = v),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text('Can you afford? (check all that apply)',
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(width: 4),
+                  const _InfoTooltip(
+                    message:
+                    'According to the McDuffy 2026 Guide, the starter budget for owning a pet in the Philippines is approximately ₱2,400 per month. This covers essential expenses such as food, veterinary care, grooming, supplies, treats, and emergency savings.\n\n'
+                        'Estimated monthly costs:\n'
+                        '• Food – ₱500\n'
+                        '• Vaccines – ₱250\n'
+                        '• Flea & Tick Prevention – ₱500\n'
+                        '• Grooming – ₱250\n'
+                        '• Supplies & Replacements – ₱300\n'
+                        '• Treats – ₱200\n'
+                        '• Emergency Fund – ₱250\n'
+                        '• Miscellaneous – ₱150',
+                  ),
+                ],
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Food'),
+                value: _canAffordFood,
+                onChanged: (v) => setState(() => _canAffordFood = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Vaccinations'),
+                value: _canAffordVaccinations,
+                onChanged: (v) =>
+                    setState(() => _canAffordVaccinations = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Vet Visits'),
+                value: _canAffordVetVisits,
+                onChanged: (v) => setState(() => _canAffordVetVisits = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Emergency Medical Care'),
+                value: _canAffordEmergencyCare,
+                onChanged: (v) =>
+                    setState(() => _canAffordEmergencyCare = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Grooming'),
+                value: _canAffordGrooming,
+                onChanged: (v) =>
+                    setState(() => _canAffordGrooming = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Care Supplies'),
+                value: _canAffordCareSupplies,
+                onChanged: (v) =>
+                    setState(() => _canAffordCareSupplies = v!),
+              ),
+              const SizedBox(height: 12),
+              _RadioGroup<String>(
+                label: 'Monthly Pet Budget',
+                value: _monthlyBudget,
+                options: const [
+                  'Under P1,000',
+                  'P1,000-P3,000',
+                  'P3,000-P5,000',
+                  'Above P5,000'
+                ],
+                onChanged: (v) => setState(() => _monthlyBudget = v),
+              ),
               const SizedBox(height: 12),
               _FormField(
                 controller: _reasonCtrl,
                 label: 'Why do you want to adopt?',
-                hint: 'Tell us a little about yourself…',
+                hint: 'Enter',
                 maxLines: 4,
+              ),
+
+              const SizedBox(height: 22),
+
+              // Required Uploads
+              _SectionTitle('Required Uploads'),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 14,
+                runSpacing: 14,
+                children: [
+                  _UploadBox(
+                    label: 'Government ID',
+                    file: _governmentIdFile,
+                    isUploading: _isUploadingGovId,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _governmentIdFile = f),
+                    ),
+                  ),
+                  _UploadBox(
+                    label: 'Proof of Address',
+                    file: _proofOfAddressFile,
+                    isUploading: _isUploadingProof,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _proofOfAddressFile = f),
+                    ),
+                  ),
+                  /*_UploadBox(
+                    label: 'Digital Signature',
+                    file: _digitalSignatureFile,
+                    isUploading: _isUploadingSignature,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _digitalSignatureFile = f),
+                    ),
+                  ),*/
+                  _UploadBox(
+                    label: 'Home Photos',
+                    file: _homePhotosFile,
+                    isUploading: _isUploadingHomePhotos,
+                    onTap: () => _pickUploadFile(
+                      onPicked: (f) => setState(() => _homePhotosFile = f),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 22),
+
+              // Agreements
+              _SectionTitle('Agreements'),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('I will provide proper care'),
+                value: _agreeCare,
+                onChanged: (v) => setState(() => _agreeCare = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('I will not abandon the animal'),
+                value: _agreeNoAbandon,
+                onChanged: (v) => setState(() => _agreeNoAbandon = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('I agree to post-adoption follow ups'),
+                value: _agreeFollowup,
+                onChanged: (v) => setState(() => _agreeFollowup = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Information provided is accurate'),
+                value: _agreeAccurate,
+                onChanged: (v) => setState(() => _agreeAccurate = v!),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title:
+                const Text('I understand approval is not guaranteed'),
+                value: _agreeNotGuaranteed,
+                onChanged: (v) => setState(() => _agreeNotGuaranteed = v!),
               ),
             ],
           ),
@@ -273,22 +1300,24 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
         const SizedBox(height: 28),
 
-        _PrimaryButton(
-          label: "Let's Start",
-          onTap: () {
-            if (_formKey.currentState?.validate() ?? false) {
-              setState(() => _step = _AdoptionProcess.bookAppointment);
-            }
-          },
-        ),
+        if (!_isReadOnly) ...[
+          _PrimaryButton(
+            label: _isSubmitting ? 'Submitting...' : "Submit",
+            onTap: _isSubmitting ? null : _submitAdoptionForm,
+          ),
+          const SizedBox(height: 10),
+          _SecondaryButton(
+            label: 'Cancel',
+            onTap: _isSubmitting ? null : () => Navigator.pop(context),
+          ),
+        ],
 
         const SizedBox(height: 24),
       ],
     );
   }
 
-  // 2nd step --- book appointment
-
+  // 2nd step book appointment
   Widget _buildBookAppointment() {
     final slots = _slotsForDate;
     final isSunday = _appointmentDate != null &&
@@ -312,7 +1341,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         Text(
           'As part of this process, we\'d like to schedule an interview with the organization to further assess suitability and answer any questions you may have.\n\nPlease choose a date that works best for you, and we\'ll confirm your appointment once your application has been reviewed.',
           style: GoogleFonts.zain(
-              fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 20),
@@ -353,16 +1382,25 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.greenrspwn, width: 1.2),
           ),
-          child: CalendarDatePicker(
-            initialDate: _appointmentDate ??
-                DateTime.now().add(const Duration(days: 1)),
-            firstDate: DateTime.now().add(const Duration(days: 1)),
-            lastDate: DateTime.now().add(const Duration(days: 90)),
-            onDateChanged: (picked) {
-              setState(() {
-                _appointmentDate = picked;
-                _appointmentTime = null;
-              });
+          child: Builder(
+            builder: (context) {
+              final firstDate = DateTime.now().add(const Duration(days: 1));
+              final lastDate = DateTime.now().add(const Duration(days: 90));
+              var initialDate = _appointmentDate ?? firstDate;
+              if (initialDate.isBefore(firstDate)) initialDate = firstDate;
+              if (initialDate.isAfter(lastDate)) initialDate = lastDate;
+
+              return CalendarDatePicker(
+                initialDate: initialDate,
+                firstDate: firstDate,
+                lastDate: lastDate,
+                onDateChanged: (picked) {
+                  setState(() {
+                    _appointmentDate = picked;
+                    _appointmentTime = null;
+                  });
+                },
+              );
             },
           ),
         ),
@@ -382,66 +1420,67 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         if (_appointmentDate == null)
           Text('Select a date above to see available times.',
               style: GoogleFonts.zain(
-                  fontSize: 13, color: AppColors.textSecondary))
-        else if (isSunday || slots.isEmpty)
-          Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.slaterspwn.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              isSunday
-                  ? 'Closed on Sundays — please pick another day.'
-                  : 'No slots available for this date.',
-              style: GoogleFonts.zain(
-                  fontSize: 13, color: AppColors.textSecondary),
-            ),
-          )
+                  fontSize: 13, color: AppColors.textPrimary))
         else
-          SizedBox(
-            height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: slots.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, i) {
-                final slot = slots[i];
-                final selected = _appointmentTime == slot;
-                return GestureDetector(
-                  onTap: () => setState(() => _appointmentTime = slot),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? AppColors.greenrspwn
-                          : AppColors.background,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
+          if (isSunday || slots.isEmpty)
+            Container(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.slaterspwn.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                isSunday
+                    ? 'Closed on Sundays — please pick another day.'
+                    : 'No slots available for this date.',
+                style: GoogleFonts.zain(
+                    fontSize: 13, color: AppColors.textPrimary),
+              ),
+            )
+          else
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: slots.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
+                  final slot = slots[i];
+                  final selected = _appointmentTime == slot;
+                  return GestureDetector(
+                    onTap: () => setState(() => _appointmentTime = slot),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
                         color: selected
                             ? AppColors.greenrspwn
-                            : AppColors.slaterspwn,
-                        width: 1.2,
+                            : AppColors.background,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: selected
+                              ? AppColors.greenrspwn
+                              : AppColors.slaterspwn,
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Text(
+                        slot,
+                        style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: AppColors.textPrimary,
+                        ),
                       ),
                     ),
-                    child: Text(
-                      slot,
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
 
         // summary
         if (_appointmentDate != null && _appointmentTime != null) ...[
@@ -459,7 +1498,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '$_appointmentType  ·  ${_formatDate(_appointmentDate!)}  ·  $_appointmentTime',
+                    '$_appointmentType  ·  ${_formatDate(
+                        _appointmentDate!)}  ·  $_appointmentTime',
                     style: GoogleFonts.zain(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -473,12 +1513,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
         const SizedBox(height: 28),
 
-        _PrimaryButton(
-          label: 'Book',
-          onTap: (_appointmentDate == null || _appointmentTime == null)
-              ? null
-              : () => setState(() => _step = _AdoptionProcess.appReview),
-        ),
+        if (!_isReadOnly)
+          _PrimaryButton(
+            label: _isSubmitting ? 'Booking...' : 'Book',
+            onTap: (_appointmentDate == null || _appointmentTime == null ||
+                _isSubmitting)
+                ? null
+                : _saveAppointment,
+          ),
 
         const SizedBox(height: 24),
       ],
@@ -486,7 +1528,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 3rd step --- application review
-
   Widget _buildAppReview() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -509,44 +1550,54 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 4),
         Text(
           'Please allow us time to review your form and confirm your appointment. If you need to reschedule, kindly update your meeting date at least 3 days before your appointment.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
-        const SizedBox(height: 28),
-        Row(
-          children: [
-            Expanded(
-              child: _PrimaryButton(
-                label: 'Change date',
-                onTap: () async {
-                  await _pickDate();
-                },
-              ),
-            ),
-          ],
-        ),
+        if (!_isReadOnly) ...[
+          const SizedBox(height: 28),
+          _PrimaryButton(
+            label: 'Change date',
+            onTap: _isSubmitting ? null : _pickDate,
+          ),
 
-        const SizedBox(height: 12),
+          const SizedBox(height: 12),
+          _SecondaryButton(
+            label: 'Withdraw Application',
+            onTap: _isSubmitting ? null : _withdrawApplication,
+          ),
 
-        // ---------- for testing only!!
-        Row(
-          children: [
-            Expanded(
-              child: _SecondaryButton(
-                label: 'Approved →',
-                onTap: () => setState(() => _step = _AdoptionProcess.timeToMeet),
+          const SizedBox(height: 12),
+
+          // ---------- for testing only!!
+          Row(
+            children: [
+              Expanded(
+                child: _SecondaryButton(
+                  label: 'Approved →',
+                  onTap: _isSubmitting
+                      ? null
+                      : () =>
+                      _updateStatus('appointment_confirmed',
+                        'Application approved. Appointment confirmed.',
+                        _AdoptionProcess.timeToMeet,),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _SecondaryButton(
-                label: 'Rejected →',
-                onTap: () => setState(() => _step = _AdoptionProcess.appReject),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SecondaryButton(
+                  label: 'Rejected →',
+                  onTap: _isSubmitting
+                      ? null
+                      : () =>
+                      _updateStatus('rejected', 'Application was not approved.',
+                        _AdoptionProcess.appReject,),
+                ),
               ),
-            ),
-          ],
-        ),
-        // ---------- for testing only ^^^^
+            ],
+          ),
+          // ---------- for testing only ^^^^
+        ],
 
         const SizedBox(height: 24),
       ],
@@ -554,13 +1605,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 4th step --- meeting
-
   Widget _buildTimeToMeet() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Time to meet!',
+          'Time to meet! | Adoption Fee',
           style: GoogleFonts.tiltWarp(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -568,8 +1618,28 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 12),
         Text(
-          'Your adoption application and interview appointment have been confirmed! We are excited to get to know you as a potential adopter for ${widget.animal.name} for today!',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          'Your adoption application and interview appointment have been '
+              'confirmed!',
+          style: GoogleFonts.zain(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+              height: 1.4),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _feePaid
+              ? 'Your adoption fee payment has been confirmed. We\'ll finalize '
+              'the remaining requirements and prepare ${widget.animal.name} '
+              'for their forever home.'
+              : 'The next step is to complete your adoption fee payment to '
+              'proceed with the adoption process. Once your payment has '
+              'been confirmed, we\'ll finalize the remaining requirements '
+              'and prepare your fur baby for their forever home. We are '
+              'excited to get to know you as a potential adopter for '
+              '${widget.animal.name}!',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         if (_appointmentDate != null) ...[
@@ -586,7 +1656,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                     color: AppColors.greenrspwn, size: 20),
                 const SizedBox(width: 10),
                 Text(
-                  '${_appointmentType}  ·  ${_formatDate(_appointmentDate!)}',
+                  '${_appointmentType}  ·  ${_formatDate(_appointmentDate!)} ·  ${_appointmentTime!}',
                   style: GoogleFonts.zain(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -597,20 +1667,93 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           ),
         ],
 
-        const SizedBox(height: 28),
+        if (_feePaid) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.greenrspwn.withOpacity(0.25),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle,
+                    color: AppColors.greenrspwn, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Adoption fee paid'
+                        '${_paymentMethod != null ? ' via $_paymentMethod' : ''}.',
+                    style: GoogleFonts.zain(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
 
-        _PrimaryButton(
-          label: 'Adoption Day!',
-          onTap: () => setState(() => _step = _AdoptionProcess.adoptionDay),
-        ),
+        if (!_isReadOnly) ...[
+          const SizedBox(height: 28),
+          if (!_feePaid)
+            _PrimaryButton(
+              label: 'Make Payment',
+              onTap: _openReviewPayment,
+            )
+          else
+            _PrimaryButton(
+              label: _isSubmitting ? 'Updating...' : 'Adoption Day!',
+              onTap: _isSubmitting
+                  ? null
+                  : () =>
+                  _updateStatus('completed', 'Adoption Completed!',
+                    _AdoptionProcess.adoptionDay,),
+            ),
+        ],
 
         const SizedBox(height: 24),
       ],
     );
   }
 
-  // 5th step -- adoption success
+  // Opens the adoption-fee payment sheet (same presentation as the
+  // donation flow's DonationReviewSheet). On a confirmed payment, the
+  // sheet itself writes the 'payment' map + status history onto the
+  // adoption doc and pops back with `true`, so we just flip local state to
+  // reveal the "Adoption Day!" action without waiting for a full reload.
+  Future<void> _openReviewPayment() async {
+    if (_adoptionId == null) return;
+    final paid = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ReviewPaymentSheet(
+        adoptionId: _adoptionId!,
+        animalName: widget.animal.name,
+        organizationName: 'Loved by the Gapz',
+        feeAmount: adoptionFeeAmount,
+      ),
+    );
 
+    if (paid == true && mounted) {
+      setState(() => _feePaid = true);
+      // Pull the confirmed method back from Firestore so the banner text
+      // above is accurate without duplicating the write logic here.
+      final doc = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(_adoptionId)
+          .get();
+      final payment = (doc.data()?['payment'] as Map?) ?? {};
+      if (mounted) {
+        setState(() => _paymentMethod = payment['method'] as String?);
+      }
+    }
+  }
+
+  // 5th step -- adoption success
   Widget _buildAdoptionDay() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -632,8 +1775,42 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          'The organization will safely deliver your pet to your generalhome. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies.\n\nWe\'re so happy for you and your new best friend!',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          'The organization will safely deliver your pet to your generalhome. You\'ll also receive an adoption agreement outlining terms and conditions, post-adoption guidelines, and return policies. For your convenience, you may review the Terms and Conditions in advance below.',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'We\'re so happy for you and your new best friend!',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+
+        const SizedBox(height: 16),
+
+        Center(
+          child: GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => _TermsAndConditionsPage(
+                    animalName: widget.animal.name,
+                  ),
+                ),
+              );
+            },
+            child: Text(
+              'View Terms and Conditions',
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+                decoration: TextDecoration.underline,
+                decorationColor: AppColors.textPrimary,
+              ),
+            ),
+          ),
         ),
 
         const SizedBox(height: 28),
@@ -652,7 +1829,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   // 5th step --- adoption failed
-
   Widget _buildAppUpdate() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -675,7 +1851,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         const SizedBox(height: 6),
         Text(
           'After careful review, we feel this may not be the best match at this time.\n\nWe truly appreciate your willingness to give a rescue a loving generalhome, and we encourage you to consider other pets in need — your perfect companion could be waiting!',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
         const SizedBox(height: 28),
@@ -689,104 +1866,680 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       ],
     );
   }
+
+  // 5th step --- application withdrawn by the adopter
+  Widget _buildWithdrawn() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Application Withdrawn',
+          style: GoogleFonts.tiltWarp(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'You\'ve withdrawn your adoption application for ${widget.animal.name}.',
+          style: GoogleFonts.zain(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'No further action is needed on your end. If you change your mind, you\'re welcome to submit a new application for this pet or explore other rescues looking for their forever home.',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+
+        const SizedBox(height: 28),
+
+        _PrimaryButton(
+          label: 'Okay',
+          onTap: _isReadOnly
+              ? null
+              : () {
+            // Confirming the withdrawal notice resets the whole process
+            _resetProcessState();
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const AdoptionPage()),
+                  (route) => false,
+            );
+          },
+        ),
+
+        const SizedBox(height: 24),
+      ],
+    );
+  }
 }
 
-// Step tracker widget
 
-class _StepTracker extends StatelessWidget {
-  final List<String> labels;
-  final int activeIndex;
-  final bool rejected;
+// Review Payment sheet (Adoption Fee) — mirrors DonationReviewSheet's
+// bottom-sheet design (donation_detail.dart) exactly: same handle bar,
+// divider rhythm, bordered info/payment rows, and button styling, so the
+// adoption fee flow feels like the same payment surface as donations.
+//
+// In production, "Pay" should call a Cloud Function that creates a
+// PayMongo Payment Intent/Source for the selected method and amount, then
+// either opens the returned checkout URL (card/e-wallet authorization) or
+// polls/receives a webhook-driven update once PayMongo confirms the
+// charge. That backend + webhook infrastructure isn't available in this
+// environment, so the confirmation here is simulated — clearly marked
+// below — while the surrounding UI, state, and Firestore write are the
+// real integration points to keep when wiring PayMongo in.
+class _ReviewPaymentSheet extends StatefulWidget {
+  final String adoptionId;
+  final String animalName;
+  final String organizationName;
+  final double feeAmount;
 
-  const _StepTracker({
-    required this.labels,
-    required this.activeIndex,
-    this.rejected = false,
+  const _ReviewPaymentSheet({
+    required this.adoptionId,
+    required this.animalName,
+    required this.organizationName,
+    required this.feeAmount,
   });
 
   @override
+  State<_ReviewPaymentSheet> createState() => _ReviewPaymentSheetState();
+}
+
+class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
+  String? _selectedPayment;
+  bool _submitting = false;
+
+  static const List<String> _paymentMethods = [
+    'Credit Card',
+    'PayPal',
+    'GCash',
+    'Maya',
+  ];
+
+  String get _formattedFee => widget.feeAmount % 1 == 0
+      ? widget.feeAmount.toInt().toString()
+      : widget.feeAmount.toStringAsFixed(2);
+
+  @override
   Widget build(BuildContext context) {
-    return Column(
-      children: List.generate(labels.length, (i) {
-        final isDone = i < activeIndex;
-        final isActive = i == activeIndex;
-        final isRejected = rejected && i == activeIndex;
-
-        Color dotColor;
-        if (isRejected) {
-          dotColor = Colors.redAccent;
-        } else if (isDone) {
-          dotColor = AppColors.lavenderrspwn;
-        } else if (isActive) {
-          dotColor = AppColors.lavenderrspwn;
-        } else {
-          dotColor = AppColors.slaterspwn;
-        }
-
-        return Row(
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Dot + vertical line
-            Column(
+            // Handle bar
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textPrimary.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            Text('Review Payment',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+
+            const SizedBox(height: 16),
+
+            // Adoption info row
+            Row(
               children: [
                 Container(
-                  width: 14,
-                  height: 14,
+                  width: 60,
+                  height: 60,
                   decoration: BoxDecoration(
-                    color: dotColor,
-                    shape: BoxShape.circle,
-                    border: isActive
-                        ? Border.all(color: AppColors.textPrimary, width: 2)
-                        : null,
+                    color: AppColors.tearspwn,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  child: isDone
-                      ? const Icon(Icons.check, size: 9, color: AppColors.textPrimary)
-                      : null,
+                  child: const Icon(Icons.pets,
+                      size: 26, color: AppColors.textPrimary),
                 ),
-                if (i < labels.length - 1)
-                  Container(
-                    width: 2,
-                    height: 28,
-                    color: i < activeIndex
-                        ? AppColors.greenrspwn
-                        : AppColors.slaterspwn,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Adopt ${widget.animalName}',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text(widget.organizationName,
+                          style: GoogleFonts.zain(
+                              fontSize: 14,
+                              color: AppColors.textPrimary.withOpacity(0.7))),
+                    ],
                   ),
+                ),
               ],
             ),
 
-            const SizedBox(width: 12),
+            const SizedBox(height: 16),
+            const Divider(thickness: 0.5),
 
-            Padding(
-              padding: const EdgeInsets.only(top: 0),
-              child: Text(
-                labels[i],
+            // Adoption fee (fixed by the organization — shown, not editable)
+            Text('Adoption Fee',
                 style: GoogleFonts.zain(
-                  fontSize: 14,
-                  fontWeight:
-                  isActive ? FontWeight.w700 : FontWeight.w500,
-                  color: isActive
-                      ? AppColors.textPrimary
-                      : AppColors.textSecondary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            Container(
+              height: 44,
+              decoration: BoxDecoration(
+                border:
+                Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('₱',
+                        style: GoogleFonts.zain(
+                            fontSize: 16, color: AppColors.textPrimary)),
+                  ),
+                  Text(_formattedFee,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+            const Divider(thickness: 0.5),
+
+            // Payment method
+            Text('Select Payment Method',
+                style: GoogleFonts.zain(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            ..._paymentMethods.map((method) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: GestureDetector(
+                onTap: _submitting
+                    ? null
+                    : () => setState(() => _selectedPayment = method),
+                child: Container(
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: _selectedPayment == method
+                          ? AppColors.textPrimary
+                          : AppColors.textPrimary.withOpacity(0.2),
+                      width: _selectedPayment == method ? 1.5 : 1,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    color: _selectedPayment == method
+                        ? AppColors.yellowrspwn.withOpacity(0.3)
+                        : Colors.transparent,
+                  ),
+                  child: Row(
+                    children: [
+                      Radio<String>(
+                        value: method,
+                        groupValue: _selectedPayment,
+                        activeColor: AppColors.textPrimary,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        onChanged: _submitting
+                            ? null
+                            : (v) => setState(() => _selectedPayment = v),
+                      ),
+                      Text(method,
+                          style: GoogleFonts.zain(
+                              fontSize: 14, color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+              ),
+            )),
+
+            const SizedBox(height: 12),
+            const Divider(thickness: 0.5),
+
+            // Adoption fee summary
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Adoption Fee',
+                    style: GoogleFonts.zain(
+                        fontSize: 14, color: AppColors.textPrimary)),
+                Text('₱$_formattedFee',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 14, color: AppColors.textPrimary)),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // Pay button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: (_selectedPayment == null || _submitting)
+                    ? null
+                    : _pay,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.yellowrspwn,
+                  foregroundColor: AppColors.textPrimary,
+                  disabledBackgroundColor:
+                  AppColors.yellowrspwn.withOpacity(0.5),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  elevation: 0,
+                ),
+                child: _submitting
+                    ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.textPrimary),
+                )
+                    : Text('Pay',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary)),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pay() async {
+    if (_selectedPayment == null) return;
+    setState(() => _submitting = true);
+    try {
+      // ---- Simulated PayMongo confirmation (see class comment above) ----
+      await Future.delayed(const Duration(milliseconds: 900));
+      // --------------------------------------------------------------
+
+      await FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(widget.adoptionId)
+          .set({
+        'payment': {
+          'method': _selectedPayment,
+          'amount': widget.feeAmount,
+          'status': 'paid',
+          'paidAt': Timestamp.now(),
+          'paidBy': FirebaseAuth.instance.currentUser?.uid,
+        },
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status':
+            'Adoption fee payment received via $_selectedPayment.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      }, SetOptions(merge: true));
+
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment failed: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+}
+
+// Terms and Conditions page (Adoption Day)
+class _TermsAndConditionsPage extends StatelessWidget {
+  final String animalName;
+
+  const _TermsAndConditionsPage({required this.animalName});
+
+  List<String> get _terms => [
+    'I am over eighteen (18) years of age and can legally adopt.',
+    '$animalName, hereinafter referred to as the pet, is being transferred '
+        'to the adopting owner with the understanding that the adopter is '
+        'taking possession of the pet to treat and be responsible for it as '
+        'their own pet.',
+    'The pet will be treated as a family member with loving care and '
+        'affection. I/we will do my/our best to ensure the pet\'s safety and '
+        'well-being.',
+    'I/we will feed the pet at least twice a day and provide a fresh water '
+        'supply at all times.',
+    'I will not leave the pet outside my home and will not let it be '
+        'isolated from the family. I will walk my pet on a leash or '
+        'accompanied lead whenever I take my pet out, and will never keep it '
+        'chained or tied up in a yard, garage, patio, balcony, or pen, or '
+        'leave the pet outdoors, even in a fenced yard.',
+    'I will not have the pet attack-trained, and will not use it for any '
+        'purpose other than companionship. I will not have the pet\'s ears '
+        'cropped, nor will I have its tail docked. I will never allow any '
+        'physical, mental, or emotional abuse of the pet.',
+    'I will take the pet to a licensed veterinarian when shots are due, but '
+        'in no event later than one year after its last vet visit. I will '
+        'ensure required and/or needed veterinary care, including rabies '
+        'shots as required every one to three years, yearly booster shots '
+        '(e.g. 5-in-1, 6-in-1 vaccines), and prompt treatment by a licensed '
+        'veterinarian for any illness or injury.',
+    'I/we affirm that no member of my household is allergic to or objects '
+        'to keeping the pet, and that all household members have agreed to '
+        'welcome the pet into the home.',
+    'I/we agree to allow the organization to conduct reasonable post-'
+        'adoption home visits or follow-up check-ins to ensure the pet\'s '
+        'continued well-being.',
+    'I/we understand that if, for any reason, I/we are no longer able to '
+        'care for the pet, I/we will first return the pet to the '
+        'organization rather than rehoming, abandoning, or surrendering it '
+        'to another shelter or individual.',
+    'I/we agree that a formal Adoption Agreement containing these terms '
+        'will be reviewed and signed by both parties on the day of the '
+        'adoption, and that this signed agreement will govern the adoption.',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: const Icon(Icons.chevron_left,
+                    size: 30, color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Terms and Conditions',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Please read and agree to the following terms and '
+                          'conditions before you continue. A formal Adoption '
+                          'Agreement containing these terms will be reviewed '
+                          'and signed by both parties on the day of the '
+                          'adoption.',
+                      style: GoogleFonts.zain(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                          height: 1.5),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'I hereby confirm the following terms and conditions '
+                          'that:',
+                      style: GoogleFonts.zain(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...List.generate(_terms.length, (i) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 22,
+                              child: Text(
+                                '${i + 1}.',
+                                style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                _terms[i],
+                                style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  color: AppColors.textPrimary,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
                 ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Step tracker widget
+class _StepTracker extends StatelessWidget {
+  final List<String> labels;
+  final int activeIndex;
+  final int? displayIndex;
+  final bool rejected;
+  final ValueChanged<int>? onStepTap;
+
+  const _StepTracker({
+    required this.labels,
+    required this.activeIndex,
+    this.displayIndex,
+    this.rejected = false,
+    this.onStepTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(labels.length, (index) {
+        final isDone = index < activeIndex;
+        final isActive = index == activeIndex;
+        final isReachable = index <= activeIndex;
+        final isBeingViewed = displayIndex != null && index == displayIndex;
+
+        return Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: isReachable && onStepTap != null
+                ? () => onStepTap!(index)
+                : null,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    if (index != 0)
+                      Expanded(
+                        child: Container(
+                          height: 2,
+                          color: isDone
+                              ? AppColors.lavenderrspwn
+                              : AppColors.slaterspwn,
+                        ),
+                      ),
+
+                    Container(
+                      width: isBeingViewed ? 18 : 14,
+                      height: isBeingViewed ? 18 : 14,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isDone || isActive
+                            ? AppColors.lavenderrspwn
+                            : Colors.transparent,
+                        border: Border.all(
+                          color: isBeingViewed
+                              ? AppColors.yellowrspwn
+                              : (isDone || isActive
+                              ? AppColors.lavenderrspwn
+                              : AppColors.slaterspwn),
+                          width: isBeingViewed ? 2.5 : 1,
+                        ),
+                      ),
+                      child: isDone
+                          ? const Icon(
+                        Icons.check,
+                        size: 9,
+                        color: AppColors.textPrimary,
+                      )
+                          : null,
+                    ),
+
+                    if (index != labels.length - 1)
+                      Expanded(
+                        child: Container(
+                          height: 2,
+                          color: index < activeIndex
+                              ? AppColors.lavenderrspwn
+                              : AppColors.slaterspwn,
+                        ),
+                      ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                SizedBox(
+                  width: 70,
+                  child: Text(
+                    labels[index],
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(
+                      fontSize: 11,
+                      fontWeight:
+                      isActive ? FontWeight.w700 : FontWeight.w500,
+                      color: isActive
+                          ? AppColors.textPrimary
+                          : AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       }),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Reusable form field
-// ---------------------------------------------------------------------------
+class _InfoTooltip extends StatefulWidget {
+  final String message;
 
+  const _InfoTooltip({required this.message});
+
+  @override
+  State<_InfoTooltip> createState() => _InfoTooltipState();
+}
+
+class _InfoTooltipState extends State<_InfoTooltip> {
+  final GlobalKey<TooltipState> _tooltipKey = GlobalKey<TooltipState>();
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        final dynamic tooltip = _tooltipKey.currentState;
+        tooltip?.ensureTooltipVisible();
+      },
+      child: Tooltip(
+        key: _tooltipKey,
+        message: widget.message,
+        preferBelow: true,
+        triggerMode: TooltipTriggerMode.manual,
+        showDuration: const Duration(seconds: 10),
+        textStyle: GoogleFonts.zain(fontSize: 14, color: Colors.white),
+        decoration: BoxDecoration(
+          color: AppColors.textPrimary.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        child: Icon(
+          Icons.info_outline,
+          size: 16,
+          color: AppColors.textPrimary,
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String title;
+  const _SectionTitle(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: GoogleFonts.tiltWarp(
+          fontSize: 15,
+          fontWeight: FontWeight.bold,
+          color: AppColors.textPrimary),
+    );
+  }
+}
+
+// Reusable form field
 class _FormField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final String hint;
   final TextInputType keyboardType;
   final int maxLines;
+  final bool readOnly;
 
   const _FormField({
     required this.controller,
@@ -794,6 +2547,7 @@ class _FormField extends StatelessWidget {
     required this.hint,
     this.keyboardType = TextInputType.text,
     this.maxLines = 1,
+    this.readOnly = false,
   });
 
   @override
@@ -806,7 +2560,7 @@ class _FormField extends StatelessWidget {
           style: GoogleFonts.zain(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: AppColors.textSecondary,
+            color: AppColors.textPrimary,
           ),
         ),
         const SizedBox(height: 4),
@@ -814,15 +2568,17 @@ class _FormField extends StatelessWidget {
           controller: controller,
           keyboardType: keyboardType,
           maxLines: maxLines,
+          readOnly: readOnly,
           style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
           validator: (v) =>
           (v == null || v.trim().isEmpty) ? 'This field is required' : null,
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: GoogleFonts.zain(
-                fontSize: 14, color: AppColors.textSecondary),
+                fontSize: 14, color: AppColors.textPrimary),
             filled: true,
-            fillColor: AppColors.yellowrspwn.withOpacity(0.3),
+            fillColor: readOnly
+                ? AppColors.slaterspwn.withOpacity(0.3) : AppColors.yellowrspwn.withOpacity(0.3),
             contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             border: OutlineInputBorder(
@@ -856,8 +2612,266 @@ class _FormField extends StatelessWidget {
   }
 }
 
-// buttons
+class _DropdownField<T> extends StatelessWidget {
+  final String label;
+  final T? value;
+  final List<T> items;
+  final ValueChanged<T?> onChanged;
 
+  const _DropdownField({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 4),
+        DropdownButtonFormField<T>(
+          value: value,
+          items: items
+              .map((e) => DropdownMenuItem(value: e, child: Text(e.toString())))
+              .toList(),
+          onChanged: onChanged,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: AppColors.yellowrspwn.withOpacity(0.3),
+            contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppColors.slaterspwn, width: 1),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RadioGroup<T> extends StatelessWidget {
+  final String label;
+  final T? value;
+  final List<T> options;
+  final ValueChanged<T?> onChanged;
+
+  const _RadioGroup({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 2),
+        ...options.map((o) {
+          return InkWell(
+            onTap: () => onChanged(o),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Radio<T>(
+                    value: o,
+                    groupValue: value,
+                    onChanged: onChanged,
+                    activeColor: AppColors.greenrspwn,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      o.toString(),
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+class _CounterField extends StatelessWidget {
+  final String label;
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _CounterField({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.zain(
+                  fontSize: 14, color: AppColors.textPrimary),
+            ),
+          ),
+          _CounterButton(
+            icon: Icons.remove,
+            onTap: value > 0 ? () => onChanged(value - 1) : null,
+          ),
+          SizedBox(
+            width: 28,
+            child: Text(
+              '$value',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
+            ),
+          ),
+          _CounterButton(
+            icon: Icons.add,
+            onTap: () => onChanged(value + 1),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CounterButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _CounterButton({required this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 26,
+        height: 26,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: onTap == null
+                ? AppColors.slaterspwn.withOpacity(0.5)
+                : AppColors.slaterspwn,
+          ),
+        ),
+        child: Icon(icon,
+            size: 14,
+            color: onTap == null
+                ? AppColors.textPrimary.withOpacity(0.5)
+                : AppColors.textPrimary),
+      ),
+    );
+  }
+}
+
+class _UploadBox extends StatelessWidget {
+  final String label;
+  final File? file;
+  final bool isUploading;
+  final VoidCallback onTap;
+
+  const _UploadBox({
+    required this.label,
+    required this.file,
+    required this.onTap,
+    this.isUploading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 130,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: isUploading ? null : onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: 130,
+              height: 110,
+              decoration: BoxDecoration(
+                color: AppColors.yellowrspwn.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: file != null
+                      ? AppColors.greenrspwn
+                      : AppColors.greenrspwn.withOpacity(0.6),
+                  width: 1.2,
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: isUploading
+                  ? const Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+                  : file == null
+                  ? const Center(
+                child: Icon(Icons.add,
+                    size: 26, color: AppColors.greenrspwn),
+              )
+                  : Image.file(file!, fit: BoxFit.cover),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// buttons
 class _PrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
@@ -877,7 +2891,7 @@ class _PrimaryButton extends StatelessWidget {
           foregroundColor: AppColors.textPrimary,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(30),
           ),
         ),
         child: Text(

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
-import '../../app_theme.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../../app_theme.dart';
 import 'adoption_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 
 // Extended detail data
 class _AnimalDetail {
@@ -86,8 +88,12 @@ const Map<String, _AnimalDetail> _detailMap = {
 // Animal page
 class AnimalPage extends StatefulWidget {
   final Animal animal;
+  final VoidCallback onFavoriteToggle;
 
-  const AnimalPage({super.key, required this.animal});
+  const AnimalPage({
+    super.key,
+    required this.animal,
+    required this.onFavoriteToggle,});
 
   @override
   State<AnimalPage> createState() => _AnimalPageState();
@@ -95,26 +101,133 @@ class AnimalPage extends StatefulWidget {
 
 class _AnimalPageState extends State<AnimalPage> {
   late bool _favorited;
+  bool _checkingAdoption = false;
 
-  _AnimalDetail get _detail =>
-      _detailMap[widget.animal.name] ??
-          _AnimalDetail(
-            dateOfBirth: 'Unknown',
-            size: 'Medium',
-            coatLength: 'Short',
-            health: widget.animal.healthTags,
-            keyCharacteristics:
-            widget.animal.badge != null ? [widget.animal.badge!] : [],
-            rescueBackground: ['Rescued from street'],
-            description: widget.animal.description,
-            organization: 'ResPAWnd Partner',
-            orgSubtitle: 'Verified rescue organization',
-          );
+  _AnimalDetail get _detail {
+    final animal = widget.animal;
+    final fallback = _detailMap[animal.name];
+    return _AnimalDetail(
+      dateOfBirth: fallback?.dateOfBirth ?? 'Unknown',
+      size: animal.size,
+      coatLength: animal.coatLength,
+      health: animal.healthTags,
+      keyCharacteristics: animal.keyCharacteristics.isNotEmpty
+          ? animal.keyCharacteristics
+          : (animal.badge != null ? [animal.badge!] : []),
+      rescueBackground: animal.rescueBackground.isNotEmpty
+          ? animal.rescueBackground
+          : ['Rescued from street'],
+      description: fallback?.description ?? animal.description,
+      organization: fallback?.organization ?? 'ResPAWnd Partner',
+      orgSubtitle: fallback?.orgSubtitle ?? 'Verified rescue organization',
+    );
+  }
 
   @override
   void initState() {
     super.initState();
     _favorited = widget.animal.favorited;
+  }
+
+  Future<void> _handleAdoptTap() async {
+    if (_checkingAdoption) return;
+    setState(() => _checkingAdoption = true);
+
+    final animal = widget.animal;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('adoptions')
+          .where('personal.animalId', isEqualTo: animal.id)
+          .get();
+
+      QueryDocumentSnapshot? blockingDoc;
+      QueryDocumentSnapshot? myActiveDoc;
+      QueryDocumentSnapshot? myCompletedDoc;
+
+      for (final doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = data['status'] as String? ?? '';
+        if (status == 'rejected') continue; // doesn't block re-adoption
+
+        final personal = (data['personal'] as Map?) ?? {};
+        final adopterId = personal['adopterId'] as String?;
+
+        if (adopterId == uid) {
+          if (status == 'completed' ||
+              status == 'return_requested' ||
+              status == 'return_approved') {
+            myCompletedDoc = doc;
+          } else {
+            myActiveDoc = doc;
+          }
+        } else {
+          blockingDoc = doc;
+        }
+      }
+
+      if (!mounted) return;
+
+      if (myCompletedDoc != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                PostAdoptionMonitoringPage(adoptionId: myCompletedDoc!.id),
+          ),
+        );
+        return;
+      }
+
+      if (blockingDoc != null) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: AppColors.background,
+            title: Text('Not Available',
+                style: GoogleFonts.tiltWarp(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+            content: Text(
+              '${animal.name} already has an ongoing or completed adoption and isn\'t available right now.',
+              style: GoogleFonts.zain(color: AppColors.textPrimary),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('OK',
+                    style: GoogleFonts.zain(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AdoptionProcess(
+            animal: animal,
+            existingAdoptionId: myActiveDoc?.id,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => AdoptionProcess(animal: animal),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _checkingAdoption = false);
+    }
   }
 
   @override
@@ -124,35 +237,6 @@ class _AnimalPageState extends State<AnimalPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-                  (route) => false,
-            );
-          }
-        },
-      ),
       body: Column(
         children: [
           // photo of animal
@@ -197,7 +281,12 @@ class _AnimalPageState extends State<AnimalPage> {
                 top: MediaQuery.of(context).padding.top + 8,
                 right: 14,
                 child: GestureDetector(
-                  onTap: () => setState(() => _favorited = !_favorited),
+                  onTap: () {
+                    setState(() {
+                      _favorited = !_favorited;
+                    });
+                    widget.onFavoriteToggle();
+                  },
                   child: Icon(
                     _favorited ? Icons.favorite : Icons.favorite_border,
                     size: 26,
@@ -345,6 +434,10 @@ class _AnimalPageState extends State<AnimalPage> {
                     ],
                   ),
 
+                  const SizedBox(height: 20),
+
+                  _SponsorsRow(animalId: animal.id),
+
                   const SizedBox(height: 28),
 
                   // Adopt me button
@@ -352,15 +445,9 @@ class _AnimalPageState extends State<AnimalPage> {
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                AdoptionProcess(animal: animal),
-                          ),
-                        );
-                      },
+                      onPressed: _checkingAdoption
+                          ? null
+                          : () => _handleAdoptTap(),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.yellowrspwn,
                         foregroundColor: AppColors.textPrimary,
@@ -370,7 +457,7 @@ class _AnimalPageState extends State<AnimalPage> {
                         ),
                       ),
                       child: Text(
-                        'Adopt Me',
+                        _checkingAdoption ? 'Checking...' : 'Adopt Me',
                         style: GoogleFonts.tiltWarp(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -381,6 +468,8 @@ class _AnimalPageState extends State<AnimalPage> {
                   ),
 
                   const SizedBox(height: 8),
+
+                  _ViewStatusButton(animal: animal),
                 ],
               ),
             ),
@@ -391,6 +480,85 @@ class _AnimalPageState extends State<AnimalPage> {
   }
 }
 
+class _ViewStatusButton extends StatelessWidget {
+  final Animal animal;
+  const _ViewStatusButton({required this.animal});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('adoptions')
+          .where('personal.animalId', isEqualTo: animal.id)
+          .where('personal.adopterId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        QueryDocumentSnapshot? activeDoc;
+        QueryDocumentSnapshot? completedDoc;
+        for (final doc in snapshot.data!.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final status = data['status'] as String? ?? '';
+          if (status == 'rejected' || status == 'withdrawn') continue;
+          if (status == 'completed' ||
+              status == 'return_requested' ||
+              status == 'return_approved') {
+            completedDoc = doc;
+          } else {
+            activeDoc = doc;
+          }
+        }
+
+        final targetDoc = completedDoc ?? activeDoc;
+        if (targetDoc == null) return const SizedBox.shrink();
+        final isCompleted = completedDoc != null;
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => isCompleted
+                        ? PostAdoptionMonitoringPage(adoptionId: targetDoc.id)
+                        : AdoptionProcess(
+                      animal: animal,
+                      existingAdoptionId: targetDoc.id,
+                    ),
+                  ),
+                );
+              },
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppColors.greenrspwn, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: Text(
+                'View Status',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
 // Shared sub-widgets
 class _SectionHeader extends StatelessWidget {
@@ -491,6 +659,39 @@ class _YellowTag extends StatelessWidget {
           color: AppColors.textPrimary,
         ),
       ),
+    );
+  }
+}
+// Sponsors row
+class _SponsorsRow extends StatelessWidget {
+  final int animalId;
+  const _SponsorsRow({required this.animalId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('sponsors')
+          .where('animalId', isEqualTo: animalId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final count = snapshot.data?.docs.length ?? 0;
+        final label = count == 1 ? '1 sponsor' : '$count sponsors';
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _SectionHeader(label: 'Sponsors'),
+            Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 15,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
