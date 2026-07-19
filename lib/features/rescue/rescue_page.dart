@@ -2371,6 +2371,7 @@ class _RescuePageState extends State<RescuePage> {
           'witnessName': _witnessNameController.text.trim(),
           'witnessPhone': _witnessNumberController.text.trim(),
           'interestedToAdopt': _adoptionChoice,
+          'scannedTagId': _scannedTagId,
           'status': 'pending',
           'statusHistory': [
             {

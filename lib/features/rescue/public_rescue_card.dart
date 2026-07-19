@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'track_case_page.dart';
 import 'public_rescue_item.dart';
 
@@ -70,7 +71,7 @@ class PublicRescueCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '#${item.caseId.substring(0, 7).toUpperCase()}',
+                    '#${shortCaseId(item.caseId)}',
                     style: GoogleFonts.tiltWarp(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,

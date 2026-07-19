@@ -154,12 +154,25 @@ class AuthService {
 
 
   Future<void> signOut() async {
+    final googleSignIn = GoogleSignIn();
+    // signOut() clears the cached session Google Play Services uses to
+    // silently reauth on the next sign-in attempt (this is what actually
+    // controls whether the account picker reappears vs. the same account
+    // getting reused automatically). disconnect() additionally revokes the
+    // app's OAuth grant. Run both independently — previously disconnect()
+    // was gated behind isSignedIn() and any failure was silently swallowed,
+    // so if it ever threw, neither ran and Play Services kept the account
+    // cached, which looked like "always defaults to the last account" even
+    // after signing out.
     try {
-      final googleSignIn = GoogleSignIn();
-      if (await googleSignIn.isSignedIn()) {
-        await googleSignIn.disconnect();
-      }
-    } catch (_) {
+      await googleSignIn.signOut();
+    } catch (e) {
+      debugPrint('GoogleSignIn.signOut failed (non-fatal): $e');
+    }
+    try {
+      await googleSignIn.disconnect();
+    } catch (e) {
+      debugPrint('GoogleSignIn.disconnect failed (non-fatal): $e');
     }
 
     try {
@@ -167,7 +180,8 @@ class AuthService {
       if (fbStatus != null) {
         await FacebookAuth.instance.logOut();
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Facebook sign-out cleanup failed (non-fatal): $e');
     }
     await firebaseAuth.signOut();
   }

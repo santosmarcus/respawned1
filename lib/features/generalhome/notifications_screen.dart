@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
@@ -121,7 +122,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final label = '#${doc.id.length >= 7 ? doc.id.substring(0, 7).toUpperCase() : doc.id.toUpperCase()}';
+      final label = '#${shortCaseId(doc.id)}';
       final history = (data['statusHistory'] as List?)?.cast<Map>() ?? [];
 
       for (final h in history) {
