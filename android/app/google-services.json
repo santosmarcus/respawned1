@@ -12,36 +12,7 @@
           "package_name": "com.dlsu.cap2507.respawnd1"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "790537497506-ld61olpdq4iud4e3u6i168h51betnalg.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.dlsu.cap2507.respawnd1",
-            "certificate_hash": "9fd1725eb4c4a39f01ce36646c030c966ac740c2"
-          }
-        },
-        {
-          "client_id": "790537497506-qr9r8u9670gckmn5vjv5g60brub5ngef.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.dlsu.cap2507.respawnd1",
-            "certificate_hash": "4f1d696fb82f7f10ba948041d2dd369249f8929c"
-          }
-        },
-        {
-          "client_id": "790537497506-v53ubjuvev276vacfgnkog4gnf7mncli.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.dlsu.cap2507.respawnd1",
-            "certificate_hash": "3a7745ab7f5d54ece5232c1878e1039dc09b545b"
-          }
-        },
-        {
-          "client_id": "790537497506-6glr4ieglapamgsqkjldn0j00ne89cta.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
           "current_key": "AIzaSyCuO16U6W5K1Wb2L10cm5istT7xjcX82n8"
@@ -49,19 +20,7 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "790537497506-6glr4ieglapamgsqkjldn0j00ne89cta.apps.googleusercontent.com",
-              "client_type": 3
-            },
-            {
-              "client_id": "790537497506-19ftmldemn2hi68028r2dbnkl8el20uv.apps.googleusercontent.com",
-              "client_type": 2,
-              "ios_info": {
-                "bundle_id": "com.dlsu.cap2507.respawnd1"
-              }
-            }
-          ]
+          "other_platform_oauth_client": []
         }
       }
     }
