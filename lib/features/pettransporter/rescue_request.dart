@@ -370,16 +370,28 @@ class _RescueRequestState extends State<RescueRequest> {
     // vetClinicAddress is the admin's actual Select Clinic choice; dropoff*
     // is normally mirrored from it (see RescueCaseRepository.assignClinic),
     // but this fallback still shows the right clinic for any case assigned
-    // before that mirroring existed.
-    final dropoffAddress = d['dropoffAddress'] ?? d['vetClinicAddress'] ?? address;
+    // before that mirroring existed. Deliberately never falls back further
+    // to the pickup address — showing the pickup pin as the "drop off"
+    // would misrepresent "no clinic assigned yet" as an actual destination.
+    final rawDropoffAddress =
+    (d['dropoffAddress'] as String?)?.trim().isNotEmpty == true
+        ? d['dropoffAddress'] as String
+        : (d['vetClinicAddress'] as String?)?.trim();
+    final dropoffAddress = (rawDropoffAddress == null || rawDropoffAddress.isEmpty)
+        ? 'Clinic not yet assigned'
+        : rawDropoffAddress;
     final condition = d['condition'] ?? '';
     final animalType = d['animalType'] ?? '';
     final photoUrls = List<String>.from(d['photoUrls'] ?? []);
     // A pending admin offer (widget.assignmentId != null) leaves the
     // case's own raw status at 'accepted' while awaiting THIS rider's
     // response — that must never read as "already accepted" here.
+    // 'assigned' is the status acceptAssignment() actually sets once
+    // accepted, so it counts as already-accepted too.
     final alreadyAccepted = widget.assignmentId == null &&
-        (d['status'] == 'accepted' || d['status'] == 'ongoing');
+        (d['status'] == 'assigned' ||
+            d['status'] == 'accepted' ||
+            d['status'] == 'ongoing');
 
     return Scaffold(
       backgroundColor: AppColors.background,

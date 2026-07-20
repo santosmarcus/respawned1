@@ -120,8 +120,6 @@ class _ServiceScreenState extends State<ServiceScreen> {
   }
 
   Widget _buildOfflineView() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-
     return Column(
       children: [
         Expanded(
@@ -195,52 +193,42 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
         const SizedBox(height: 16),
 
-        // Admin-assigned offers (and any job this rider already accepted)
-        // still need to reach them even while offline — going offline only
-        // opts out of the ambient nearby pool, not of a job the admin
-        // specifically sent them. Falls back to the old static placeholder
-        // if there's no signed-in rider to query for.
-        if (uid == null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Service Request',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 16, color: AppColors.textPrimary)),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  decoration: BoxDecoration(color: AppColors.background,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(
-                        color: AppColors.slaterspwn,
-                        blurRadius: 1,
-                        offset: Offset(0, 3),)
-                      ]
-                  ),
-                  child: Column(
-                    children: [
-                      Text('There are no requests for now.',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 16, color: AppColors.slaterspwn)),
-                      Text('Go Online.', style: GoogleFonts.tiltWarp(
-                          fontSize: 16, color: AppColors.slaterspwn)),
-                    ],
-                  ),
-                )
-
-              ],),)
-        else
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 260),
-            child: _ServiceRequestList(
-              currentRiderUid: uid,
-              includeOpenPool: false,
-            ),
+        // Pet transporters must not see any rescue cases — admin-assigned
+        // or otherwise — while offline. No live query here at all; going
+        // online is the only way to see anything in Service Request.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Service Request',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 16, color: AppColors.textPrimary)),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                decoration: BoxDecoration(color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [BoxShadow(
+                      color: AppColors.slaterspwn,
+                      blurRadius: 1,
+                      offset: Offset(0, 3),)
+                    ]
+                ),
+                child: Column(
+                  children: [
+                    Text('There are no requests for now.',
+                        style: GoogleFonts.tiltWarp(
+                            fontSize: 16, color: AppColors.slaterspwn)),
+                    Text('Go Online.', style: GoogleFonts.tiltWarp(
+                        fontSize: 16, color: AppColors.slaterspwn)),
+                  ],
+                ),
+              )
+            ],
           ),
+        ),
       ],
     );
   }
@@ -579,17 +567,25 @@ class _ServiceRequestList extends StatelessWidget {
               final declinedBy =
               List<String>.from(d['declinedBy'] ?? const <String>[]);
 
+              // acceptAssignment() (the real admin-offer acceptance path)
+              // sets status to 'assigned' — that's the only place in the
+              // whole app that ever writes this status, and only after the
+              // rider has already accepted, so it belongs alongside
+              // 'accepted'/'ongoing' as an active trip. There's no longer a
+              // reachable "offered but undecided, status already flipped to
+              // assigned" case to distinguish it from — an undecided offer
+              // now stays at 'accepted' (awaiting-assignment) until
+              // acceptAssignment/rejectAssignment resolves it, and is
+              // surfaced via isOfferedToMe below instead.
               final isMineActive = assignedId == currentRiderUid &&
-                  (status == 'accepted' || status == 'ongoing');
-              final isMineAssigned =
-                  assignedId == currentRiderUid && status == 'assigned';
+                  (status == 'assigned' || status == 'accepted' || status == 'ongoing');
               final isOpenNearby = includeOpenPool &&
                   status == 'pending' &&
                   (assignedId == null || assignedId == '') &&
                   !declinedBy.contains(currentRiderUid);
               final isOfferedToMe = offeredCaseIds.containsKey(doc.id);
 
-              return isMineActive || isMineAssigned || isOpenNearby || isOfferedToMe;
+              return isMineActive || isOpenNearby || isOfferedToMe;
             }).toList();
 
             if (visible.isEmpty) {
@@ -627,7 +623,8 @@ class _ServiceRequestList extends StatelessWidget {
                         final assignmentId = offeredCaseIds[doc.id];
                         final isMine = data['assignedVolunteerId'] == currentRiderUid;
                         final isActiveTrip = isMine &&
-                            (data['status'] == 'accepted' ||
+                            (data['status'] == 'assigned' ||
+                                data['status'] == 'accepted' ||
                                 data['status'] == 'ongoing') &&
                             assignmentId == null;
 
@@ -717,8 +714,16 @@ class _RequestCard extends StatelessWidget {
     final address = data['address'] ?? '';
     // Fallback to the admin's actual Select Clinic choice for any case
     // assigned before dropoff* was mirrored from it — see
-    // RescueCaseRepository.assignClinic.
-    final dropoffAddress = data['dropoffAddress'] ?? data['vetClinicAddress'] ?? address;
+    // RescueCaseRepository.assignClinic. Deliberately never falls back
+    // further to the pickup address — that would misrepresent "no clinic
+    // assigned yet" as an actual destination.
+    final rawDropoffAddress =
+    (data['dropoffAddress'] as String?)?.trim().isNotEmpty == true
+        ? data['dropoffAddress'] as String
+        : (data['vetClinicAddress'] as String?)?.trim();
+    final dropoffAddress = (rawDropoffAddress == null || rawDropoffAddress.isEmpty)
+        ? 'Clinic not yet assigned'
+        : rawDropoffAddress;
     final condition = data['condition'] ?? '';
     final status = data['status'] ?? 'pending';
 
@@ -735,6 +740,7 @@ class _RequestCard extends StatelessWidget {
         badgeColor = Colors.lightGreen;
     }
 
+    if (status == 'assigned') badgeLabel = 'Accepted';
     if (status == 'accepted') badgeLabel = 'Accepted';
     if (status == 'ongoing') badgeLabel = 'Ongoing';
     // A pending admin offer leaves the case's own status at 'accepted' —

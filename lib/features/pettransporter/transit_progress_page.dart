@@ -268,6 +268,19 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         _latLngFrom(data, 'vetClinicLat', 'vetClinicLng');
   }
 
+  // Same idea for the clinic's display address: dropoffAddress falling
+  // back to vetClinicAddress. Deliberately never falls back further to the
+  // pickup address (data['address']) — showing the pickup location as if
+  // it were the assigned clinic would misrepresent "no clinic assigned
+  // yet" as an actual destination.
+  String _clinicAddressFrom(Map<String, dynamic> data) {
+    final dropoff = (data['dropoffAddress'] as String?)?.trim();
+    if (dropoff != null && dropoff.isNotEmpty) return dropoff;
+    final vet = (data['vetClinicAddress'] as String?)?.trim();
+    if (vet != null && vet.isNotEmpty) return vet;
+    return '';
+  }
+
 
   // Clinic profile logging
   static const Set<String> _clinicRelevantReasons = {
@@ -511,10 +524,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
       unawaited(_logClinicDecision(
         placeId: data['dropoffPlaceId'] as String?,
-        name: (data['dropoffName'] ?? data['dropoffAddress'] ?? 'Clinic')
+        name: (data['dropoffName'] ?? data['dropoffAddress'] ?? data['vetClinicAddress'] ?? 'Clinic')
             .toString(),
-        address:
-        (data['dropoffAddress'] ?? data['address'] ?? '').toString(),
+        address: _clinicAddressFrom(data),
         lat: (data['dropoffLat'] as num?)?.toDouble(),
         lng: (data['dropoffLng'] as num?)?.toDouble(),
         accepted: true,
@@ -545,7 +557,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           .get())
           .data() as Map<String, dynamic>? ??
           {};
-      final currentAddress = data['dropoffAddress'] ?? data['address'] ?? '';
+      final currentAddress = _clinicAddressFrom(data);
       final currentPlaceId = data['dropoffPlaceId'] as String?;
 
       await FirebaseFirestore.instance
@@ -739,6 +751,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     late final String nextStatus;
     late final String label;
     switch (currentStatus) {
+      case 'assigned':
       case 'accepted':
         nextStatus = 'ongoing';
         label = '[TEST] Skipped — on the way to pick up location.';
@@ -1478,7 +1491,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
   // Arrived at clinic — decide whether treatment was accepted or rejected.
   Widget _buildClinicDecisionPanel(Map<String, dynamic> data) {
-    final address = data['dropoffAddress'] ?? data['address'] ?? '';
+    final address = _clinicAddressFrom(data);
     final placeId = data['dropoffPlaceId'] as String?;
     final canDecide = !_isActing;
 
@@ -1596,7 +1609,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
   Widget _buildSearchingClinicPanel(Map<String, dynamic> data) {
     final rejectionReason = data['lastRejectionReason'] ?? '';
-    final lastAddress = data['dropoffAddress'] ?? data['address'] ?? '';
+    final lastAddress = _clinicAddressFrom(data);
 
     return Container(
       decoration: const BoxDecoration(
@@ -1724,7 +1737,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             // Address card
             _AddressCard(
               pickup: data['address'] ?? '',
-              dropoff: data['dropoffAddress'] ?? data['address'] ?? '',
+              dropoff: _clinicAddressFrom(data).isEmpty
+                  ? 'Clinic not yet assigned'
+                  : _clinicAddressFrom(data),
             ),
 
             const SizedBox(height: 12),
@@ -1740,7 +1755,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               child: Column(
                 children: [
                   _buildSwipeButton(status),
-                  if (status == 'accepted' ||
+                  if (status == 'assigned' ||
+                      status == 'accepted' ||
                       status == 'ongoing' ||
                       status == 'treatment') ...[
                     const SizedBox(height: 10),
@@ -1792,6 +1808,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     VoidCallback? onSwipe;
 
     switch (status) {
+      case 'assigned':
       case 'accepted':
         label = 'On the way to pick up location';
         onSwipe = _startTrip;
