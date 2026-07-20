@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
-//import 'package:respawnd1/features/generalhome/home_screen.dart';
-//import 'package:respawnd1/features/userauth/forgotpass_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
-import 'package:respawnd1/features/userauth/onboard_screen.dart';
+import 'package:respawnd1/features/userauth/phonelogin_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -39,7 +38,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() { _errorMessage = null; _isLoading = true; });
 
     if (/*_nameController.text.trim().isEmpty ||*/
-        _emailController.text.trim().isEmpty ||
+    _emailController.text.trim().isEmpty ||
         _passwordController.text.trim().isEmpty) {
       setState(() {
         _errorMessage = 'Please fill in all fields.';
@@ -65,17 +64,45 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
       if (mounted) {
         // Go to user type selection after account created
+        setState(() => _isLoading = false);
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        // This can happen if an earlier attempt created the Auth account
+        // but something after it (e.g. a Firestore write) failed, or the
+        // person tapped Sign Up twice. Instead of dead-ending, try signing
+        // them into the account that already exists with these credentials.
+        try {
+          await _authService.signIn(
+            email: _emailController.text.trim(),
+            password: _passwordController.text.trim(),
+          );
+          if (mounted) {
+            setState(() => _isLoading = false);
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
+            );
+          }
+          return;
+        } catch (_) {
+          // Wrong password, or it's genuinely someone else's account.
+          if (mounted) {
+            setState(() {
+              _errorMessage = 'An account already exists with this email.';
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      }
+
       setState(() {
         switch (e.code) {
-          case 'email-already-in-use':
-            _errorMessage = 'An account already exists with this email.';
-            break;
           case 'invalid-email':
             _errorMessage = 'Please enter a valid email address.';
             break;
@@ -87,6 +114,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
         }
         _isLoading = false;
       });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Something went wrong creating your profile. '
+              'Please try again.';
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -94,17 +129,70 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() { _isLoading = true; _errorMessage = null; });
     try {
       final result = await _authService.signInWithGoogle();
-      if (result != null && mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const /*OnboardingRoleScreen()*/EnterDetailsScreen()),
-        );
+      if (result?.user != null && mounted) {
+        await _routeAfterSocialSignIn(result!.user!.uid);
+      } else if (mounted) {
+        setState(() => _isLoading = false); // user cancelled the picker
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Google sign-in failed.';
-        _isLoading = false;
-      });
+      // Was a generic "Google sign-in failed." with no detail — on an
+      // emulator this is almost always PlatformException(sign_in_failed,
+      // ..., 10, ...) = DEVELOPER_ERROR (debug SHA-1 not registered with
+      // the Firebase/OAuth client) or missing Google Play Services on the
+      // emulator image. Surfacing the real message makes that diagnosable.
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Google sign-in failed: $e';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleFacebookSignUp() async {
+    setState(() { _isLoading = true; _errorMessage = null; });
+    try {
+      final result = await _authService.signInWithFacebook();
+      if (result?.user != null && mounted) {
+        await _routeAfterSocialSignIn(result!.user!.uid);
+      } else if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Facebook sign-in failed: $e';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // Both social sign-in paths used to unconditionally push EnterDetailsScreen
+  // — including for a returning user who already finished onboarding (e.g.
+  // they tapped "Sign Up" instead of "Log In", or re-authenticated). That
+  // forced them back through the whole details+role flow every time.
+  //
+  // Note: AuthService._createUserDoc gives every new social sign-in
+  // `role: 'general'` immediately, so AuthService.isNewUser (which checks
+  // for an EMPTY role) is always false here and can't be used to detect
+  // "first time" for Google/Facebook — only for the email/password path,
+  // which explicitly starts with role: ''. `firstName` is never set by
+  // _createUserDoc, so its absence is the real "still needs the details
+  // form" signal for social sign-in.
+  Future<void> _routeAfterSocialSignIn(String uid) async {
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final firstName = (doc.data()?['firstName'] as String?)?.trim() ?? '';
+    if (!mounted) return;
+    if (firstName.isEmpty) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
+      );
+    } else {
+      // Already onboarded — let AuthWrapper (main.dart) route based on
+      // their existing role instead of re-forcing onboarding.
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
 
@@ -221,27 +309,74 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
               const SizedBox(height: 16),
 
-              // Google sign up
+              // Social / phone sign up
               Center(
-                child: GestureDetector(
-                  onTap: _isLoading ? null : _handleGoogleSignUp,
-                  child: Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: AppColors.slaterspwn,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.textSecondary),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GestureDetector(
+                      onTap: _isLoading ? null : _handleGoogleSignUp,
+                      child: Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.textSecondary),
+                        ),
+                        child: const Center(
+                          // Replace with Image.asset('assets/icons/google.png')
+                          child: Text('G',
+                              style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary)),
+                        ),
+                      ),
                     ),
-                    child: const Center(
-                      // Replace with Image.asset('assets/icons/google.png')
-                      child: Text('G',
-                          style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary)),
+                    const SizedBox(width: 16),
+                    GestureDetector(
+                      onTap: _isLoading ? null : _handleFacebookSignUp,
+                      child: Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.textSecondary),
+                        ),
+                        child: const Center(
+                          child: Icon(Icons.facebook,
+                              size: 26, color: AppColors.textPrimary),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 16),
+                    GestureDetector(
+                      onTap: _isLoading
+                          ? null
+                          : () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const PhoneLoginScreen()),
+                        );
+                      },
+                      child: Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.textSecondary),
+                        ),
+                        child: const Center(
+                          child: Icon(Icons.phone_outlined,
+                              size: 22, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
 

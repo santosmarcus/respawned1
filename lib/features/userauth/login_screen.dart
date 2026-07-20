@@ -5,7 +5,10 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:respawnd1/features/userauth/signup_screen.dart';
+import 'package:respawnd1/features/userauth/phonelogin_screen.dart';
+import 'package:respawnd1/features/userauth/forgotpass_screen.dart';
 
 
 class LoginScreen extends StatefulWidget {
@@ -52,15 +55,18 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // Success — AuthWrapper handles navigation, don't setState here
+
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
 
     } on FirebaseAuthException catch (e) {
       String message;
       switch (e.code) {
         case 'user-not-found':
         case 'wrong-password':
-        case 'invalid-credential':        // ← new Firebase error code
-        case 'INVALID_LOGIN_CREDENTIALS': // ← another variant
+        case 'invalid-credential':
+        case 'INVALID_LOGIN_CREDENTIALS':
           message = 'Incorrect email or password.';
           break;
         case 'invalid-email':
@@ -73,9 +79,9 @@ class _LoginScreenState extends State<LoginScreen> {
           message = 'Too many attempts. Please try again later.';
           break;
         default:
-          message = 'Login failed (${e.code})'; // show code so you can debug
+          message = 'Login failed (${e.code})';
       }
-      // Only setState on error
+
       if (mounted) {
         setState(() {
           _errorMessage = message;
@@ -92,13 +98,12 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     }
-    // ← NO finally block — it was causing setState after successful login
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ResPAWnd')),
+      appBar: AppBar(),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -107,18 +112,13 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 48),
 
               // Logo placeholder
-              Container(
-                width: 140,
-                height: 140,
-                decoration: const BoxDecoration(
-                  color: AppColors.slaterspwn,
-                  shape: BoxShape.circle,
-                ),
-                // Replace with your actual logo:
-                // child: Image.asset('assets/images/logo.png'),
+              Image.asset(
+                'assets/Image/logo.png',
+                width: 250,
+                height: 250,
               ),
 
-              const SizedBox(height: 48),
+              const SizedBox(height: 16),
 
               // Email field
               TextFormField(
@@ -158,7 +158,13 @@ class _LoginScreenState extends State<LoginScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const ForgotPasswordScreen()),
+                    );
+                  },
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.textPrimary,
                     padding: EdgeInsets.zero,
@@ -172,6 +178,32 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
+
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline,
+                          color: Colors.red.shade700, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(_errorMessage!,
+                            style: GoogleFonts.zain(
+                                fontSize: 13,
+                                color: Colors.red.shade700)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 32),
 
@@ -242,11 +274,23 @@ class _LoginScreenState extends State<LoginScreen> {
                 label: 'Continue with Google',
                 icon: 'assets/icons/Google__G__logo.svg', // add a google icon to assets
                 onTap: () async {
+                  setState(() => _errorMessage = null);
                   try {
-                    await _authService.signInWithGoogle();
-                    // AuthWrapper handles navigation automatically
+                    final result = await _authService.signInWithGoogle();
+                    if (result != null && mounted) {
+                      Navigator.of(context).popUntil((route) => route.isFirst);
+                    }
                   } catch (e) {
-                    setState(() => _errorMessage = 'Google sign-in failed.');
+                    // Was a generic "Google sign-in failed." with no detail
+                    // — on an emulator this is almost always
+                    // PlatformException(sign_in_failed, ..., 10, ...) =
+                    // DEVELOPER_ERROR (debug SHA-1 not registered with the
+                    // Firebase/OAuth client), or the emulator image has no
+                    // Google Play Services at all. Surfacing the real
+                    // message makes that diagnosable instead of a dead end.
+                    if (mounted) {
+                      setState(() => _errorMessage = 'Google sign-in failed: $e');
+                    }
                   }
                 },
               ),
@@ -254,29 +298,35 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 12),
 
 // Facebook button
-              /*_SocialButton(
+              _SocialButton(
                 label: 'Continue with Facebook',
-                icon: 'assets/icons/facebook.png',
+                iconData: Icons.facebook,
                 onTap: () async {
+                  setState(() => _errorMessage = null);
                   try {
-                    await _authService.signInWithFacebook();
+                    final result = await _authService.signInWithFacebook();
+                    if (result != null && mounted) {
+                      Navigator.of(context).popUntil((route) => route.isFirst);
+                    }
                   } catch (e) {
-                    setState(() => _errorMessage = 'Facebook sign-in failed.');
+                    if (mounted) {
+                      setState(() => _errorMessage = 'Facebook sign-in failed: $e');
+                    }
                   }
                 },
               ),
 
-              const SizedBox(height: 12),*/
+              const SizedBox(height: 12),
 
-// Phone button — uncomment when PhoneLoginScreen is ready
-// _SocialButton(
-//   label: 'Continue with Phone',
-//   iconData: Icons.phone_outlined,
-//   onTap: () {
-//     Navigator.push(context,
-//       MaterialPageRoute(builder: (_) => const PhoneLoginScreen()));
-//   },
-// ),
+// Phone button
+              _SocialButton(
+                label: 'Continue with Phone',
+                iconData: Icons.phone_outlined,
+                onTap: () {
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const PhoneLoginScreen()));
+                },
+              ),
             ],
           ),
         ),
@@ -288,14 +338,14 @@ class _LoginScreenState extends State<LoginScreen> {
 class _SocialButton extends StatelessWidget {
   final String label;
   final String? icon;
-  //final IconData? iconData;
+  final IconData? iconData;
   final VoidCallback onTap;
 
   const _SocialButton({
     required this.label,
     required this.onTap,
     this.icon,
-    //this.iconData,
+    this.iconData,
   });
 
   @override
@@ -310,21 +360,26 @@ class _SocialButton extends StatelessWidget {
         backgroundColor: Colors.white,
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (icon != null)
-            Image.asset(icon!, width: 22, height: 22),
-          //else if (iconData != null)
-            //Icon(iconData, size: 22, color: AppColors.textPrimary),
+            SvgPicture.asset(
+              icon!,
+              width: 22,
+              height: 22,
+            )
+          else if (iconData != null)
+            Icon(iconData, size: 22, color: AppColors.textPrimary),
           const SizedBox(width: 10),
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
+          Flexible(
+              child: Text(
+                label,
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              )
           ),
         ],
       ),
