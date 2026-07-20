@@ -1,0 +1,717 @@
+import 'dart:math' as math;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/community_report.dart';
+import 'package:respawnd1/core/models/rescue/referral.dart';
+import 'package:respawnd1/core/models/rescue/referral_type.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
+import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
+import 'package:respawnd1/core/models/rescue/rescue_report.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+
+/// Firestore access for the admin rescue module. Reads/writes the existing
+/// `cases` collection (shared with the reporter and pet-transporter apps —
+/// see the doc comment on [RescueCase]) plus its new
+/// `reports` / `referrals` / `activityLogs` subcollections.
+///
+/// Every write here is a partial `update()`/`set(..., merge: true)` or a
+/// transaction — never a full-document overwrite — so fields owned by
+/// other features are never clobbered.
+class RescueCaseRepository {
+  RescueCaseRepository({FirebaseFirestore? firestore})
+      : _db = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _db;
+
+  CollectionReference<Map<String, dynamic>> get _cases => _db.collection('cases');
+  DocumentReference<Map<String, dynamic>> _caseDoc(String caseId) => _cases.doc(caseId);
+  CollectionReference<Map<String, dynamic>> _reportsOf(String caseId) =>
+      _caseDoc(caseId).collection('reports');
+  CollectionReference<Map<String, dynamic>> _referralsOf(String caseId) =>
+      _caseDoc(caseId).collection('referrals');
+  CollectionReference<Map<String, dynamic>> _activityLogsOf(String caseId) =>
+      _caseDoc(caseId).collection('activityLogs');
+  // Same subcollection the user-side track_case_page.dart's
+  // _CommunityReportSection already reads/writes — reused here read-only,
+  // not a second storage structure.
+  CollectionReference<Map<String, dynamic>> _communityReportsOf(String caseId) =>
+      _caseDoc(caseId).collection('communityReports');
+  CollectionReference<Map<String, dynamic>> _transportAssignmentsOf(String caseId) =>
+      _caseDoc(caseId).collection('transportAssignments');
+  CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
+
+  // ---- Reads ----------------------------------------------------------
+
+  /// Streams every case whose status resolves to one of [statuses]. Client
+  /// filters (urgency/species/date/location/search) are applied on top by
+  /// the caller — Firestore can't combine an array-membership status query
+  /// with several other equality/range filters efficiently on this schema.
+  ///
+  /// Multi-animal group reports (e.g. a cat + a dog logged together in one
+  /// rescue_page.dart submission) are stored as one `cases` doc per animal,
+  /// linked by a shared `groupId` (the primary doc's own id) — see the doc
+  /// comment on `_AnimalGroupSection` in rescue_detail_page.dart. Only the
+  /// primary doc is surfaced in these pipeline queues (Review/Assign/
+  /// Ongoing/Treatment/Intake); the sibling animal docs are fetched by
+  /// RescueDetailPage's groupId query when the admin opens that card. This
+  /// mirrors the same filter already applied in activity_feed.dart,
+  /// public_rescue_feed.dart, and history_screen.dart, so a group report
+  /// reads as a single case everywhere in the app, not one per animal.
+  Stream<List<RescueCase>> streamCasesByStatuses(List<RescueStatus> statuses) {
+    final values = statuses.expand((s) => s.queryValues).toSet().toList();
+    if (values.isEmpty) return Stream.value(const []);
+    // Firestore whereIn supports up to 30 values; our alias lists are well
+    // under that even for the broadest status (ongoing).
+    return _cases
+        .where('status', whereIn: values)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+        .where((doc) {
+      final groupId = doc.data()['groupId'] as String?;
+      return groupId == null || groupId == doc.id;
+    })
+        .map(RescueCase.fromFirestore)
+        .toList());
+  }
+
+  Stream<RescueCase?> streamCase(String caseId) {
+    return _caseDoc(caseId).snapshots().map(
+          (doc) => doc.exists ? RescueCase.fromFirestore(doc) : null,
+    );
+  }
+
+  Stream<List<RescueReport>> streamReports(String caseId) {
+    return _reportsOf(caseId).orderBy('submittedAt').snapshots().map(
+          (snap) => snap.docs.map((d) => RescueReport.fromFirestore(d, caseId)).toList(),
+    );
+  }
+
+  Stream<List<Referral>> streamReferrals(String caseId) {
+    return _referralsOf(caseId).orderBy('createdAt', descending: true).snapshots().map(
+          (snap) => snap.docs.map((d) => Referral.fromFirestore(d, caseId)).toList(),
+    );
+  }
+
+  Stream<List<ActivityLogEntry>> streamActivityLogs(String caseId) {
+    return _activityLogsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
+          (snap) => snap.docs.map((d) => ActivityLogEntry.fromFirestore(d, caseId)).toList(),
+    );
+  }
+
+  Stream<List<CommunityReport>> streamCommunityReports(String caseId) {
+    return _communityReportsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
+          (snap) => snap.docs.map(CommunityReport.fromFirestore).toList(),
+    );
+  }
+
+  /// Every account with role == 'pet_transporter' — the exact string
+  /// onboard_screen.dart / role_screen.dart write to `users/{uid}.role`.
+  /// Excludes general users, org admins/staff, and rescue volunteers, none
+  /// of which share that value. If Firestore ever needs a composite index
+  /// for this (it currently doesn't — it's a single equality filter with no
+  /// orderBy), the console error surfaces a direct link to create it.
+  Stream<List<PetTransporter>> streamPetTransporters() {
+    return _users.where('role', isEqualTo: 'pet_transporter').snapshots().map(
+          (snap) => snap.docs.map(PetTransporter.fromFirestore).toList(),
+    );
+  }
+
+  /// The most recently offered rider assignment for a case, regardless of
+  /// its status — this is what gates AdminTrackCasePage between the
+  /// Pending / Rejected / actual tracking views. A newer offer (e.g. after
+  /// "Choose Another Rider" following a rejection) naturally supersedes an
+  /// older rejected one just by having a later `offeredAt`.
+  Stream<TransportAssignment?> streamLatestAssignment(String caseId) {
+    return _transportAssignmentsOf(caseId)
+        .orderBy('offeredAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .map((snap) => snap.docs.isEmpty ? null : TransportAssignment.fromFirestore(snap.docs.first, caseId));
+  }
+
+  /// Each transporter's status, derived from their single most-recent
+  /// assignment doc across ALL cases (any status) — one collection-group
+  /// query instead of one per rider card. The caller (Assign Transporter's
+  /// availability bucketing) treats a `rejected` latest assignment the same
+  /// as `accepted` — i.e. Busy, not immediately Available again — per the
+  /// current testing workflow's requirement that a transporter who just
+  /// declined doesn't loop straight back into the selectable pool; only a
+  /// later `completed`/`cancelled` (or no assignment at all) reads as
+  /// Available. Requires a Firestore collection-group index on
+  /// `transportAssignments` for `offeredAt` (single-field, collection-group
+  /// scope) — the first live query prints the console's direct
+  /// create-index link if it's still missing.
+  Stream<Map<String, TransportAssignmentStatus>> streamActiveAssignmentsByRider() {
+    return _db
+        .collectionGroup('transportAssignments')
+        .orderBy('offeredAt', descending: true)
+        .snapshots()
+        .map((snap) {
+      final latestByRider = <String, TransportAssignmentStatus>{};
+      for (final doc in snap.docs) {
+        final riderId = doc.data()['riderId'] as String?;
+        // Docs arrive newest-first, so the first one seen per rider is
+        // already their most recent — never overwrite after that.
+        if (riderId == null || latestByRider.containsKey(riderId)) continue;
+        latestByRider[riderId] = TransportAssignmentStatus.fromName(doc.data()['status'] as String?);
+      }
+      return latestByRider;
+    });
+  }
+
+  /// Naive possible-duplicate lookup: other active cases (pending/awaiting
+  /// assignment/ongoing) of the same species, ranked by distance from
+  /// [source]. There's no geohashing index on this collection, so this
+  /// pulls a bounded window of same-species active cases and computes
+  /// distance client-side rather than doing a true geo query.
+  Future<List<RescueCase>> findPossibleDuplicates(
+      RescueCase source, {
+        double radiusKm = 1.0,
+        int limit = 20,
+      }) async {
+    if (source.animalType == null || source.lat == null || source.lng == null) {
+      return const [];
+    }
+    final activeStatuses = [
+      RescueStatus.pendingReview,
+      RescueStatus.awaitingAssignment,
+      RescueStatus.ongoing,
+    ].expand((s) => s.queryValues).toSet().toList();
+
+    final snap = await _cases
+        .where('animalType', isEqualTo: source.animalType)
+        .where('status', whereIn: activeStatuses)
+        .limit(50)
+        .get();
+
+    final candidates = snap.docs
+        .map(RescueCase.fromFirestore)
+        .where((c) => c.id != source.id && c.lat != null && c.lng != null)
+        .toList();
+
+    candidates.sort((a, b) {
+      final da = _distanceKm(source.lat!, source.lng!, a.lat!, a.lng!);
+      final db = _distanceKm(source.lat!, source.lng!, b.lat!, b.lng!);
+      return da.compareTo(db);
+    });
+
+    return candidates
+        .where((c) => _distanceKm(source.lat!, source.lng!, c.lat!, c.lng!) <= radiusKm)
+        .take(limit)
+        .toList();
+  }
+
+  double distanceKmBetween(RescueCase a, RescueCase b) {
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
+      return double.infinity;
+    }
+    return _distanceKm(a.lat!, a.lng!, b.lat!, b.lng!);
+  }
+
+  static double _distanceKm(double lat1, double lng1, double lat2, double lng2) {
+    const earthRadiusKm = 6371.0;
+    double deg2rad(double deg) => deg * (math.pi / 180.0);
+    final dLat = deg2rad(lat2 - lat1);
+    final dLng = deg2rad(lng2 - lng1);
+    final a = math.pow(math.sin(dLat / 2), 2) +
+        math.cos(deg2rad(lat1)) * math.cos(deg2rad(lat2)) * math.pow(math.sin(dLng / 2), 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  // ---- Actions ----------------------------------------------------------
+
+  /// [openForTransfer] only saves a flag on the case (RescueCase.openForTransfer)
+  /// — there is no open-transfer listing, cross-org browsing, or transfer
+  /// request/acceptance workflow yet. That's intentionally deferred.
+  Future<void> acceptCase({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    bool openForTransfer = false,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.awaitingAssignment.firestoreValue,
+      'openForTransfer': openForTransfer,
+      'statusHistory': FieldValue.arrayUnion([
+        {
+          'status': openForTransfer
+              ? 'Rescue case has been accepted and marked open for transfer to another organization.'
+              : 'Rescue case has been accepted.',
+          'timestamp': Timestamp.now(),
+        }
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'accepted',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'openForTransfer': openForTransfer},
+    );
+  }
+
+  Future<void> rejectCase({
+    required String caseId,
+    required RejectionReason reason,
+    String? otherText,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.rejected.firestoreValue,
+      'rejectionReason': reason.name,
+      if (reason == RejectionReason.other && otherText != null)
+        'rejectionReasonOther': otherText,
+      'statusHistory': FieldValue.arrayUnion([
+        {
+          'status': 'Case rejected: ${reason == RejectionReason.other ? (otherText ?? reason.label) : reason.label}.',
+          'timestamp': Timestamp.now(),
+        }
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'rejected',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'reason': reason.name, if (otherText != null) 'otherText': otherText},
+    );
+  }
+
+  Future<void> flagPossibleDuplicate({
+    required String caseId,
+    required String duplicateOfCaseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.possibleDuplicate.firestoreValue,
+      'possibleDuplicateOfCaseId': duplicateOfCaseId,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Flagged as a possible duplicate report.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'flagged_possible_duplicate',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'duplicateOfCaseId': duplicateOfCaseId},
+    );
+  }
+
+  /// Reverts a possibleDuplicate case back to normal triage after the org
+  /// decides the two reports are NOT the same incident.
+  Future<void> keepSeparate({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.pendingReview.firestoreValue,
+      'possibleDuplicateOfCaseId': FieldValue.delete(),
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Confirmed as a separate, unrelated report.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'kept_separate',
+      actorUid: actorUid,
+      actorName: actorName,
+    );
+  }
+
+  /// Merges [duplicateCaseId] into [primaryCaseId]. The duplicate case is
+  /// never deleted: it's marked `merged` with `mergedIntoCaseId` set, its
+  /// own reporter/media/location/description are copied into a new report
+  /// under the primary case's `reports` subcollection, and both case docs
+  /// get a matching statusHistory entry so each reporter's own tracker
+  /// (which reads its own case doc) sees the update. Each case's private
+  /// `messages` subcollection is untouched, so per-reporter chats stay
+  /// private while both see the same shared status update.
+  Future<void> mergeDuplicate({
+    required String primaryCaseId,
+    required String duplicateCaseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final primaryRef = _caseDoc(primaryCaseId);
+    final duplicateRef = _caseDoc(duplicateCaseId);
+    final newReportRef = _reportsOf(primaryCaseId).doc(duplicateCaseId);
+
+    await _db.runTransaction((tx) async {
+      final primarySnap = await tx.get(primaryRef);
+      final duplicateSnap = await tx.get(duplicateRef);
+      if (!primarySnap.exists || !duplicateSnap.exists) {
+        throw StateError('Both cases must exist to merge.');
+      }
+      final duplicateData = duplicateSnap.data()!;
+
+      tx.set(newReportRef, {
+        'reporterId': duplicateData['reporterId'],
+        'reporterName': duplicateData['reporterName'],
+        'reporterPhone': duplicateData['reporterPhone'],
+        'description': duplicateData['condition'],
+        'photoUrls': duplicateData['photoUrls'] ?? const [],
+        'address': duplicateData['address'],
+        'lat': duplicateData['lat'],
+        'lng': duplicateData['lng'],
+        'species': duplicateData['animalType'],
+        'urgency': duplicateData['urgency'],
+        'submittedAt': duplicateData['createdAt'] ?? FieldValue.serverTimestamp(),
+        'isPrimary': false,
+        'sourceCaseId': duplicateCaseId,
+      });
+
+      final sharedUpdateText =
+          'This report was merged with another matching report for the same rescue.';
+
+      tx.update(duplicateRef, {
+        'status': RescueStatus.merged.firestoreValue,
+        'mergedIntoCaseId': primaryCaseId,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': sharedUpdateText, 'timestamp': Timestamp.now()}
+        ]),
+      });
+
+      tx.update(primaryRef, {
+        'mergedCaseIds': FieldValue.arrayUnion([duplicateCaseId]),
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'A duplicate report for this case was merged in.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+
+      final logBase = ActivityLogEntry(
+        id: '',
+        caseId: '',
+        action: 'merged',
+        actorUid: actorUid,
+        actorName: actorName,
+      );
+      tx.set(_activityLogsOf(primaryCaseId).doc(), {
+        ...logBase.toFirestore(),
+        'details': {'duplicateCaseId': duplicateCaseId, 'role': 'primary'},
+      });
+      tx.set(_activityLogsOf(duplicateCaseId).doc(), {
+        ...logBase.toFirestore(),
+        'details': {'mergedIntoCaseId': primaryCaseId, 'role': 'duplicate'},
+      });
+    });
+  }
+
+  Future<String> referToOrganization({
+    required String caseId,
+    required String targetOrgId,
+    required String targetOrgName,
+    String? note,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final referralRef = _referralsOf(caseId).doc();
+    await referralRef.set({
+      'type': ReferralType.anotherOrganization.name,
+      'status': ReferralStatus.referredPending.name,
+      'createdAt': FieldValue.serverTimestamp(),
+      'createdByUid': actorUid,
+      'createdByName': actorName,
+      'note': note,
+      'targetOrgId': targetOrgId,
+      'targetOrgName': targetOrgName,
+    });
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.referred.firestoreValue,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Referred to $targetOrgName for review.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'referred_to_organization',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'targetOrgId': targetOrgId, 'targetOrgName': targetOrgName},
+    );
+    return referralRef.id;
+  }
+
+  Future<String> referToLgu({
+    required String caseId,
+    required String barangay,
+    required LguReferralReason reason,
+    required String explanation,
+    bool attachReportMedia = true,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final caseSnap = await _caseDoc(caseId).get();
+    final mediaUrls = attachReportMedia
+        ? List<String>.from(caseSnap.data()?['photoUrls'] ?? const [])
+        : <String>[];
+
+    final referralRef = _referralsOf(caseId).doc();
+    await referralRef.set({
+      'type': ReferralType.localGovernmentUnit.name,
+      'status': ReferralStatus.notified.name,
+      'createdAt': FieldValue.serverTimestamp(),
+      'createdByUid': actorUid,
+      'createdByName': actorName,
+      'barangay': barangay,
+      'lguReason': reason.name,
+      'lguExplanation': explanation,
+      'attachedMediaUrls': mediaUrls,
+    });
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.referred.firestoreValue,
+      'statusHistory': FieldValue.arrayUnion([
+        {
+          'status': 'Referred to the $barangay LGU/barangay: ${reason.label}.',
+          'timestamp': Timestamp.now(),
+        }
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'referred_to_lgu',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'barangay': barangay, 'reason': reason.name},
+    );
+    return referralRef.id;
+  }
+
+  /// TODO: rescue-volunteer referral has no assignment/matching logic yet.
+  /// This only records the referral so the modal has something to call;
+  /// wire up actual volunteer notification once that flow is designed.
+  Future<String> referToVolunteer({
+    required String caseId,
+    String? note,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final referralRef = _referralsOf(caseId).doc();
+    await referralRef.set({
+      'type': ReferralType.rescueVolunteer.name,
+      'status': ReferralStatus.referredPending.name,
+      'createdAt': FieldValue.serverTimestamp(),
+      'createdByUid': actorUid,
+      'createdByName': actorName,
+      'note': note,
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'referred_to_volunteer',
+      actorUid: actorUid,
+      actorName: actorName,
+    );
+    return referralRef.id;
+  }
+
+  /// Saves a clinic (picked via the map/Places search in
+  /// select_clinic_sheet.dart) onto the case as flat `vetClinic*` fields —
+  /// the same convention already read by treatment_detail_page.dart /
+  /// intake_detail_page.dart for `vetClinicName`. Also mirrors the same
+  /// clinic onto the `dropoff*` fields the pet-transporter app's own live
+  /// routing reads (rescue_request.dart, service_screen.dart,
+  /// transit_progress_page.dart, track_case_page.dart) — these were two
+  /// separate "assigned clinic" schemas that were never reconciled, so the
+  /// transporter never saw the admin's actual clinic choice and fell back
+  /// to showing the pickup address instead. `_findAndRouteToNextClinic`'s
+  /// auto-search after a rejection still writes `dropoff*` directly for its
+  /// own reassignment, independent of this admin-initiated path.
+  Future<void> assignClinic({
+    required String caseId,
+    required String clinicName,
+    String? clinicAddress,
+    String? clinicPlaceId,
+    double? clinicLat,
+    double? clinicLng,
+    String? clinicPhone,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'vetClinicName': clinicName,
+      'vetClinicAddress': clinicAddress,
+      'vetClinicPlaceId': clinicPlaceId,
+      'vetClinicLat': clinicLat,
+      'vetClinicLng': clinicLng,
+      'vetClinicPhone': clinicPhone,
+      'vetClinicSelectedAt': Timestamp.now(),
+      // Mirrored so the pet-transporter app shows/routes to the actual
+      // admin-assigned clinic instead of falling back to the pickup
+      // address.
+      'dropoffAddress': clinicAddress ?? clinicName,
+      'dropoffPlaceId': clinicPlaceId,
+      'dropoffName': clinicName,
+      'dropoffLat': clinicLat,
+      'dropoffLng': clinicLng,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Assigned to clinic: $clinicName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'assigned_clinic',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'clinicPlaceId': clinicPlaceId, 'clinicName': clinicName},
+    );
+  }
+
+  /// Creates a new pending rider offer. Guarded by a transaction against
+  /// creating a second active (pending/accepted) offer for the same case —
+  /// the case doc's own `currentAssignmentId` pointer is read and checked
+  /// inside the same transaction, so two admins tapping "Confirm" at the
+  /// same moment can't both succeed. Does NOT touch the case's own
+  /// RescueStatus or assignedVolunteer* fields — those only change once the
+  /// rider actually accepts (see [acceptAssignment]).
+  Future<String> createAssignmentOffer({
+    required String caseId,
+    required String riderId,
+    required String riderName,
+    required String riderType,
+    bool isDemo = false,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final assignmentsCol = _transportAssignmentsOf(caseId);
+    final newRef = assignmentsCol.doc();
+
+    await _db.runTransaction((tx) async {
+      final caseSnap = await tx.get(caseRef);
+      final currentId = caseSnap.data()?['currentAssignmentId'] as String?;
+      if (currentId != null) {
+        final currentSnap = await tx.get(assignmentsCol.doc(currentId));
+        final currentStatus = currentSnap.data()?['status'] as String?;
+        if (currentStatus == 'pending' || currentStatus == 'accepted') {
+          throw StateError('This case already has an active rider assignment.');
+        }
+      }
+      tx.set(newRef, {
+        'caseId': caseId,
+        'riderId': riderId,
+        'riderName': riderName,
+        'riderType': riderType,
+        'status': 'pending',
+        'offeredAt': Timestamp.now(),
+        'respondedAt': null,
+        'acceptedAt': null,
+        'rejectedAt': null,
+        'rejectionReason': null,
+        'completedAt': null,
+        'isDemo': isDemo,
+      });
+      tx.update(caseRef, {'currentAssignmentId': newRef.id});
+    });
+    return newRef.id;
+  }
+
+  /// Marks an offer accepted and, in the same transaction, updates the
+  /// case's existing assignedVolunteer*/status fields the same way the
+  /// original direct-write flow did — so treatment_detail_page.dart,
+  /// intake_detail_page.dart, etc. keep working unmodified. A no-op if the
+  /// offer is no longer pending (already accepted/rejected elsewhere),
+  /// guarding against a double-accept (e.g. a duplicate demo timer or two
+  /// taps racing each other).
+  Future<void> acceptAssignment({
+    required String caseId,
+    required String assignmentId,
+    required String riderId,
+    required String riderName,
+    required String riderVehicle,
+    required String riderPlate,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
+
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(assignmentRef);
+      if (!snap.exists || snap.data()?['status'] != 'pending') return;
+      final now = Timestamp.now();
+      tx.update(assignmentRef, {
+        'status': 'accepted',
+        'respondedAt': now,
+        'acceptedAt': now,
+      });
+      tx.update(caseRef, {
+        'status': 'assigned',
+        'riderId': riderId,
+        'assignedVolunteerId': riderId,
+        'assignedVolunteerName': riderName,
+        'assignedVehicle': riderVehicle,
+        'assignedPlate': riderPlate,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Pet transporter assigned: $riderName.', 'timestamp': now},
+        ]),
+      });
+    });
+  }
+
+  /// Marks an offer rejected with [reason]. Deliberately never changes the
+  /// rescue case's own RescueStatus or clears assignedVolunteer* fields —
+  /// those were never set for a merely-pending offer in the first place, so
+  /// the case is already back in its assignable state as soon as this
+  /// resolves; a rider's rejection is not a rescue-case rejection. A no-op
+  /// if the offer is no longer pending, guarding against a double-reject.
+  Future<void> rejectAssignment({
+    required String caseId,
+    required String assignmentId,
+    required String reason,
+  }) async {
+    final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(assignmentRef);
+      if (!snap.exists || snap.data()?['status'] != 'pending') return;
+      final now = Timestamp.now();
+      tx.update(assignmentRef, {
+        'status': 'rejected',
+        'respondedAt': now,
+        'rejectedAt': now,
+        'rejectionReason': reason,
+      });
+    });
+  }
+
+  /// Closes out an accepted assignment once the animal has reached
+  /// treatment — this is what frees a demo/real rider back to "Available"
+  /// (streamActiveAssignmentsByRider only counts pending/accepted).
+  Future<void> completeAssignment({
+    required String caseId,
+    required String assignmentId,
+  }) async {
+    await _transportAssignmentsOf(caseId).doc(assignmentId).update({
+      'status': 'completed',
+      'completedAt': Timestamp.now(),
+    });
+  }
+
+  Future<void> addActivityLog({
+    required String caseId,
+    required String action,
+    String? actorUid,
+    String? actorName,
+    String? actorRole,
+    Map<String, dynamic>? details,
+  }) async {
+    await _activityLogsOf(caseId).add(
+      ActivityLogEntry(
+        id: '',
+        caseId: caseId,
+        action: action,
+        actorUid: actorUid,
+        actorName: actorName,
+        actorRole: actorRole,
+        details: details,
+      ).toFirestore(),
+    );
+  }
+}

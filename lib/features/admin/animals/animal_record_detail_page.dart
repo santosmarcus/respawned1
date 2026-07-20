@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 
 class AnimalRecordDetailPage extends StatefulWidget {
   final String animalId;
@@ -768,7 +769,7 @@ class _AdminTab extends StatelessWidget {
                   style: GoogleFonts.zain(
                       fontSize: 12, color: AppColors.textSecondary)),
               Text(
-                'CASE ID: ${(data['linkedCaseId'] ?? '').toString().substring(0, min(5, (data['linkedCaseId'] ?? '').toString().length)).toUpperCase()}',
+                'CASE ID: ${shortCaseId(data['linkedCaseId']?.toString())}',
                 style: GoogleFonts.zain(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -1388,5 +1389,3 @@ class _YellowTag extends StatelessWidget {
             color: AppColors.textPrimary)),
   );
 }
-
-int min(int a, int b) => a < b ? a : b;

@@ -1,4 +1,4 @@
-enum ActivityType { rescue, adoption}
+enum ActivityType { rescue, adoption, lostFoundPet }
 
 class ActivityItem{
   final String id;
@@ -10,6 +10,7 @@ class ActivityItem{
   final String urgency;
   final DateTime? createdAt;
   final String docId;
+  final String alertKind;
 
   const ActivityItem({
     required this.id,
@@ -21,6 +22,7 @@ class ActivityItem{
     required this.urgency,
     required this.createdAt,
     required this.docId,
+    this.alertKind = '',
   });
 
 }

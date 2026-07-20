@@ -3,8 +3,25 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'activity_card.dart';
 import 'activity_item.dart';
+
+String _animalSummary(List animals) {
+  final counts = <String, int>{};
+  final order = <String>[];
+  for (final a in animals) {
+    final species = (a is Map ? a['species'] : null) as String?;
+    if (species == null || species.isEmpty) continue;
+    if (!counts.containsKey(species)) order.add(species);
+    counts[species] = (counts[species] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return '';
+  return order.map((s) {
+    final c = counts[s]!;
+    return '$c ${c == 1 ? s : '${s}s'}';
+  }).join(', ');
+}
 
 class ActivityFeed extends StatelessWidget {
   ActivityFeed({super.key});
@@ -28,92 +45,157 @@ class ActivityFeed extends StatelessWidget {
               .where('personal.adopterId', isEqualTo: uid)
               .snapshots(),
           builder: (context, adoptionsSnap) {
-            final loading = caseSnap.connectionState ==
-                ConnectionState.waiting ||
-                adoptionsSnap.connectionState == ConnectionState.waiting;
+            return StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('petAlerts')
+                  .where('reporterId', isEqualTo: uid)
+                  .snapshots(),
+              builder: (context, alertsSnap) {
+                final loading = caseSnap.connectionState ==
+                    ConnectionState.waiting ||
+                    adoptionsSnap.connectionState == ConnectionState.waiting ||
+                    alertsSnap.connectionState == ConnectionState.waiting;
 
-            if (loading) {
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 32),
-                child: Center(
-                  child: CircularProgressIndicator(color: AppColors.greenrspwn),
-                ),
-              );
-            }
+                if (loading) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(
+                      child: CircularProgressIndicator(color: AppColors.greenrspwn),
+                    ),
+                  );
+                }
 
-            final items = <ActivityItem>[];
+                final items = <ActivityItem>[];
 
-            for (final doc in caseSnap.data?.docs ?? []) {
-              final data = doc.data() as Map<String, dynamic>;
-              final history =
-                  (data['statusHistory'] as List?)?.cast<Map>() ?? [];
-              final latestStatus = history.isNotEmpty
-                  ? history.last['status'] as String? ?? 'Pending'
-                  : 'Pending';
-              final ts = data['createdAt'] as Timestamp?;
-              final createdAt = ts is Timestamp ? ts.toDate() : null;
+                const dismissedStatuses = {'dismissed', 'cancelled', 'withdrawn', 'rejected'};
 
-              items.add(ActivityItem(
-                id: doc.id,
-                type: ActivityType.rescue,
-                title: 'Rescue Report #${doc.id.substring(0, 7).toUpperCase()}',
-                subtitle: data['address'] as String? ?? '-',
-                status: latestStatus,
-                animalType: data['animalType'] as String? ?? '',
-                urgency: data['urgency'] as String? ?? '',
-                createdAt: createdAt,
-                docId: doc.id,
-              ));
-            }
+                for (final doc in caseSnap.data?.docs ?? []) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final rawStatus = (data['status'] as String? ?? '').toLowerCase();
+                  if (dismissedStatuses.contains(rawStatus)) continue;
 
-            for (final doc in adoptionsSnap.data?.docs ?? []) {
-              final data = doc.data() as Map<String, dynamic>;
-              final status = data['status'] as String? ?? '';
+                  final isEndedRescue = rawStatus == 'closed' ||
+                      rawStatus.contains('completed') ||
+                      rawStatus.contains('ended');
+                  if (isEndedRescue) continue;
 
-              if (status == 'completed' ||
-                  status == 'return_requested' ||
-                  status == 'return_approved' ||
-                  status == 'withdrawn') {
-                continue;
-              }
+                  final caseGroupId = data['groupId'] as String?;
+                  if (caseGroupId != null && caseGroupId != doc.id) continue;
 
-              final personal = (data['personal'] as Map?) ?? {};
-              final history =
-                  (data['statusHistory'] as List?)?.cast<Map>() ?? [];
-              final latestStatus = history.isNotEmpty
-                  ? history.last['status'] as String? ?? 'Pending'
-                  : 'Pending';
-              final ts = data['createdAt'] as Timestamp?;
+                  final history =
+                      (data['statusHistory'] as List?)?.cast<Map>() ?? [];
+                  final latestStatus = history.isNotEmpty
+                      ? history.last['status'] as String? ?? 'Pending'
+                      : 'Pending';
+                  final ts = data['createdAt'] as Timestamp?;
+                  final createdAt = ts is Timestamp ? ts.toDate() : null;
 
-              items.add(ActivityItem(
-                id: doc.id,
-                type: ActivityType.adoption,
-                title: 'Adoption - ${personal['animalName'] ?? 'Animal'}',
-                subtitle: '',
-                status: latestStatus,
-                animalType: '',
-                urgency: '',
-                createdAt: ts?.toDate(),
-                docId: doc.id,
-              ));
-            }
+                  final animals = data['animals'] as List?;
+                  final animalSummary = (animals != null && animals.isNotEmpty)
+                      ? _animalSummary(animals)
+                      : (data['animalType'] as String? ?? '');
 
-            items.sort((a, b) =>
-                (b.createdAt ?? DateTime(0))
-                    .compareTo(a.createdAt ?? DateTime(0)));
+                  items.add(ActivityItem(
+                    id: doc.id,
+                    type: ActivityType.rescue,
+                    title: 'Rescue Report #${shortCaseId(doc.id)}',
+                    subtitle: data['address'] as String? ?? '-',
+                    status: latestStatus,
+                    animalType: animalSummary,
+                    urgency: data['urgency'] as String? ?? '',
+                    createdAt: createdAt,
+                    docId: doc.id,
+                  ));
+                }
 
-            if (items.isEmpty) {
-              return _emptyState(
-                  'No activity yet.');
-            }
+                for (final doc in adoptionsSnap.data?.docs ?? []) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final status = data['status'] as String? ?? '';
 
-            return ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => ActivityCard(item: items[i]),
+                  const finishedAdoptionStatuses = {
+                    'completed',
+                    'return_requested',
+                    'return_approved',
+                    'withdrawn',
+                    'rejected',
+                  };
+                  if (finishedAdoptionStatuses.contains(status)) {
+                    continue;
+                  }
+
+                  final personal = (data['personal'] as Map?) ?? {};
+                  final history =
+                      (data['statusHistory'] as List?)?.cast<Map>() ?? [];
+                  final latestStatus = history.isNotEmpty
+                      ? history.last['status'] as String? ?? 'Pending'
+                      : 'Pending';
+                  final ts = data['createdAt'] as Timestamp?;
+
+                  items.add(ActivityItem(
+                    id: doc.id,
+                    type: ActivityType.adoption,
+                    title: 'Adoption - ${personal['animalName'] ?? 'Animal'}',
+                    subtitle: '',
+                    status: latestStatus,
+                    animalType: '',
+                    urgency: '',
+                    createdAt: ts?.toDate(),
+                    docId: doc.id,
+                  ));
+                }
+
+                for (final doc in alertsSnap.data?.docs ?? []) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final groupId = data['groupId'] as String?;
+                  if (groupId != null && groupId != doc.id) continue;
+
+                  final status = (data['status'] as String? ?? 'open').toLowerCase();
+                  if (dismissedStatuses.contains(status)) continue;
+
+                  final kind = data['type'] as String? ?? 'lost'; // 'lost' | 'found'
+                  final statusLabel = switch (status) {
+                    'verified' => 'Match verified — coordinating handover',
+                    'resolved' => 'Resolved',
+                    _ => kind == 'lost'
+                        ? 'Searching for possible matches'
+                        : 'Checking against open lost pet alerts',
+                  };
+                  final ts = data['createdAt'] as Timestamp?;
+
+                  items.add(ActivityItem(
+                    id: doc.id,
+                    type: ActivityType.lostFoundPet,
+                    title: kind == 'lost'
+                        ? 'Lost Pet Report #${shortCaseId(doc.id)}'
+                        : 'Found Pet Report #${shortCaseId(doc.id)}',
+                    subtitle: data['address'] as String? ?? '-',
+                    status: statusLabel,
+                    animalType: data['species'] as String? ?? '',
+                    urgency: '',
+                    createdAt: ts?.toDate(),
+                    docId: doc.id,
+                    alertKind: kind,
+                  ));
+                }
+
+                items.sort((a, b) =>
+                    (b.createdAt ?? DateTime(0))
+                        .compareTo(a.createdAt ?? DateTime(0)));
+
+                if (items.isEmpty) {
+                  return _emptyState(
+                      'No activity yet.');
+                }
+
+                return ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, i) => ActivityCard(item: items[i]),
+                );
+              },
             );
           },
         );

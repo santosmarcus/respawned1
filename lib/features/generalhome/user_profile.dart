@@ -6,8 +6,8 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
-import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
-import 'package:respawnd1/main.dart' show AuthWrapper;
+import 'package:respawnd1/features/collartag/collar_id_tag_intro.dart';
+import 'package:respawnd1/features/generalhome/history_screen.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -90,10 +90,16 @@ class _UserProfileState extends State<UserProfile> {
     if (confirmed == true){
       await FirebaseAuth.instance.signOut();
       if(mounted){
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const AuthWrapper()),
-              (route) => false,
-        );
+        // Don't push a brand-new LoginScreen here — pushAndRemoveUntil
+        // with (route) => false wipes out AuthWrapper's own root route
+        // too, leaving a LoginScreen with no AuthWrapper anywhere above
+        // it. The next successful login then has nothing left in the
+        // tree to react to the auth state change and route it anywhere,
+        // which is what caused the stuck "loading forever" screen.
+        // AuthWrapper is still sitting at the bottom of the stack — by
+        // the time we pop back to it, signOut() has already completed,
+        // so it will render LoginScreen on its own, correctly wrapped.
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     }
   }
@@ -186,7 +192,10 @@ class _UserProfileState extends State<UserProfile> {
                   _ProfileTile(
                     icon: Icons.history,
                     label: 'History',
-                    onTap: (){},
+                    onTap: (){
+                      Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const HistoryPage()),);
+                    },
                   ),
                   _ProfileTile(
                     icon: Icons.workspace_premium_outlined,
@@ -198,7 +207,7 @@ class _UserProfileState extends State<UserProfile> {
                     label: 'Create Pet Collar Tag',
                     onTap: (){
                       Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const CollarTagHomeScreen()),);
+                        MaterialPageRoute(builder: (_) => const CollarIdTagIntroScreen()),);
                     },
                   ),
                 ],
@@ -240,7 +249,7 @@ class _UserProfileState extends State<UserProfile> {
 
             Center(
               child: TextButton(
-                onPressed: _logout,
+                onPressed: _logout,//TODO:
                 child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: Colors.redAccent,
                 ),
                 ),
@@ -268,6 +277,19 @@ class _SectionLabel extends StatelessWidget{
     );
   }
 }
+
+/*class _SubSectionLabel extends StatelessWidget{
+  final String label;
+  const _SubSectionLabel({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: TextButton(onPressed: onPressed, child: child),
+    )
+  }
+}*/
 
 class _ProfileTile extends StatelessWidget {
   final IconData? icon;

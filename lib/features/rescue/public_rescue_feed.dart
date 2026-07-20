@@ -1,9 +1,11 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../app_theme.dart';
-import 'public_rescue_item.dart';
 import 'public_rescue_card.dart';
+import 'public_rescue_item.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
 
 class PublicRescueFeed extends StatelessWidget {
   final int? previewCount;
@@ -14,19 +16,24 @@ class PublicRescueFeed extends StatelessWidget {
     this.previewCount,
     this.standalone = false,
   });
-  Stream<QuerySnapshot<Map<String, dynamic>>> get _stream =>
-      FirebaseFirestore.instance
-          .collection('cases')
-          .where('status', isEqualTo: 'assigned') // "Ongoing" — same as admin
-          .orderBy('createdAt', descending: true)
-          .snapshots();
+
+  static const _dismissedStatuses = {
+    'dismissed',
+    'cancelled',
+    'withdrawn',
+    'rejected',
+  };
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _stream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+      stream: FirebaseFirestore.instance
+          .collection('cases')
+          .orderBy('serverCreatedAt', descending: true)
+          .limit(100)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 32),
             child: Center(
@@ -35,39 +42,55 @@ class PublicRescueFeed extends StatelessWidget {
           );
         }
 
-        if (snapshot.hasError) {
-          return _emptyState('Could not load community reports right now.');
+        if (snap.hasError) {
+          return _emptyState('Could not load reports right now.');
         }
 
-        final approvedDocs = (snapshot.data?.docs ?? [])
-            .where((d) => (d.data()['adminApproved'] as bool?) == true)
-            .toList();
+        final docs = snap.data?.docs ?? [];
+        final items = <PublicRescueItem>[];
+        final currentUserId = FirebaseAuth.instance.currentUser?.uid;
 
-        final docs = previewCount != null
-            ? approvedDocs.take(previewCount!).toList()
-            : approvedDocs;
+        for (final doc in docs) {
+          final data = doc.data();
+          final status = (data['status'] as String? ?? '').toLowerCase();
+          if (data['reporterId'] == currentUserId) continue;
+          if (_dismissedStatuses.contains(status)) continue;
+          // Once a case is done — 'completed', 'closed', or any variant
+          // like 'Rescue Ended'/'rescue_completed' — it no longer belongs
+          // in the public feed
+          final isFinalStatus = status == 'closed' ||
+              status.contains('completed') ||
+              status.contains('ended');
+          if (isFinalStatus) continue;
+          if (data['hiddenFromExplore'] == true) continue;
 
-        if (docs.isEmpty) {
-          return _emptyState(
-              'No ongoing rescues to explore yet. Check back soon!');
+          final groupId = data['groupId'] as String?;
+          if (groupId != null && groupId != doc.id) continue;
+
+          items.add(PublicRescueItem.fromDoc(doc));
         }
 
-        final items = docs.map(PublicRescueItem.fromDoc).toList();
-
-        if (previewCount != null) {
-          return _RescueCarousel(items: items);
+        if (items.isEmpty) {
+          return _emptyState('No public reports yet.');
         }
 
-        return ListView.separated(
-          shrinkWrap: !standalone,
-          physics: standalone
-              ? const AlwaysScrollableScrollPhysics()
-              : const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: items.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (context, i) => PublicRescueCard(item: items[i]),
-        );
+        final visible = (!standalone &&
+            previewCount != null &&
+            previewCount! < items.length)
+            ? items.sublist(0, previewCount!)
+            : items;
+
+        if (standalone) {
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: visible.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (context, i) => PublicRescueCard(item: visible[i]),
+          );
+        }
+
+        // Home preview — a swipeable carousel instead of a stacked list.
+        return _RescueCarousel(items: visible);
       },
     );
   }
@@ -92,14 +115,14 @@ class PublicRescueFeed extends StatelessWidget {
         child: Text(
           message,
           textAlign: TextAlign.center,
-          style:
-          GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.slaterspwn),
+          style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.slaterspwn),
         ),
       ),
     );
   }
 }
 
+// Swipeable carousel used for the Home preview of the public rescue feed.
 class _RescueCarousel extends StatefulWidget {
   final List<PublicRescueItem> items;
   const _RescueCarousel({required this.items});
@@ -109,7 +132,8 @@ class _RescueCarousel extends StatefulWidget {
 }
 
 class _RescueCarouselState extends State<_RescueCarousel> {
-  final _controller = PageController();
+  late final PageController _controller =
+  PageController(viewportFraction: 0.88);
   int _page = 0;
 
   @override
@@ -123,13 +147,13 @@ class _RescueCarouselState extends State<_RescueCarousel> {
     return Column(
       children: [
         SizedBox(
-          height: 160,
+          height: 150,
           child: PageView.builder(
             controller: _controller,
-            itemCount: widget.items.length,
             onPageChanged: (i) => setState(() => _page = i),
+            itemCount: widget.items.length,
             itemBuilder: (context, i) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
               child: PublicRescueCard(item: widget.items[i]),
             ),
           ),
@@ -143,11 +167,13 @@ class _RescueCarouselState extends State<_RescueCarousel> {
               return AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.symmetric(horizontal: 3),
-                width: active ? 9 : 7,
-                height: active ? 9 : 7,
+                width: active ? 16 : 6,
+                height: 6,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: active ? AppColors.textPrimary : AppColors.slaterspwn,
+                  color: active
+                      ? AppColors.textPrimary
+                      : AppColors.slaterspwn,
+                  borderRadius: BorderRadius.circular(4),
                 ),
               );
             }),

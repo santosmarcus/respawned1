@@ -84,8 +84,10 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         },
         onAutoVerified: (_) {
           // Some Android devices auto-verify without the user typing an OTP.
-          // AuthWrapper handles navigation once Firebase reports signed in.
-          if (mounted) setState(() => _isLoading = false);
+          if (mounted) {
+            setState(() => _isLoading = false);
+            Navigator.of(context).popUntil((route) => route.isFirst);
+          }
         },
       );
     } catch (e) {
@@ -116,7 +118,10 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         verificationId: _verificationId!,
         otp: _otpController.text.trim(),
       );
-      // Success — AuthWrapper handles navigation, don't setState here
+      if (mounted) {
+        setState(() => _isLoading = false);
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } catch (e) {
       if (mounted) {
         setState(() {

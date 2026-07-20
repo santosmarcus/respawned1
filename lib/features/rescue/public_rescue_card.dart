@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
-import '../rescue/track_case_page.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
+import 'track_case_page.dart';
 import 'public_rescue_item.dart';
 
 class PublicRescueCard extends StatelessWidget {
@@ -31,7 +32,7 @@ class PublicRescueCard extends StatelessWidget {
           MaterialPageRoute(
             builder: (_) => TrackCasePage(
               caseId: item.caseId,
-              initialTabIndex: 1,
+              initialTabIndex: 0,
             ),
           ),
         );
@@ -57,8 +58,8 @@ class PublicRescueCard extends StatelessWidget {
               child: item.photoUrls.isNotEmpty
                   ? Image.network(
                 item.photoUrls.first,
-                width: 64,
-                height: 64,
+                width: 100,
+                height: 100,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => _placeholderThumb(),
               )
@@ -70,7 +71,7 @@ class PublicRescueCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '#${item.caseId.substring(0, 7).toUpperCase()}',
+                    '#${shortCaseId(item.caseId)}',
                     style: GoogleFonts.tiltWarp(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -102,6 +103,20 @@ class PublicRescueCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 4),
+                  if (item.animalType.isNotEmpty)
+                    Row(children: [
+                      const Icon(Icons.pets, size: 12, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          item.animalType,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ]),
                   const SizedBox(height: 4),
                   Row(children: [
                     const Icon(Icons.info_outline, size: 12, color: AppColors.textSecondary),

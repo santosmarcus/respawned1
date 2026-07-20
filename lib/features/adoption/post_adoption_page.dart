@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../app_theme.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
+import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
 
 
 // Check-in interval schedule
@@ -18,6 +21,19 @@ class Checkpoint {
   final String label;
   final DateTime dueDate;
   const Checkpoint(this.id, this.label, this.dueDate);
+
+  // Each check-in stays open for a 3-day window starting on its due date,
+  // instead of a single-day deadline.
+  static const int windowDays = 3;
+
+  DateTime get windowEnd => dueDate.add(const Duration(days: windowDays));
+
+  bool isOpen(DateTime now) => !dueDate.isAfter(now);
+
+  bool isWithinWindow(DateTime now) =>
+      isOpen(now) && !now.isAfter(windowEnd);
+
+  bool isOverdue(DateTime now) => isOpen(now) && now.isAfter(windowEnd);
 }
 
 DateTime _addMonths(DateTime d, int months) {
@@ -386,8 +402,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                 final now = DateTime.now();
                 Checkpoint? currentDue;
                 for (final c in schedule) {
-                  if (!submittedIds.contains(c.id) &&
-                      !c.dueDate.isAfter(now)) {
+                  if (!submittedIds.contains(c.id) && c.isOpen(now)) {
                     currentDue = c;
                     break;
                   }
@@ -411,6 +426,18 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                             ),
                           ),
                           _BackHeader(onTap: () => Navigator.pop(context)),
+                          _MoreOptionsButton(
+                            onTap: () => _showPetOptionsDialog(
+                              context,
+                              adoptionId: adoptionId,
+                              animalName: animalName,
+                              data: data,
+                              isReturnRequested: isReturnRequested,
+                              isReturnApproved: isReturnApproved,
+                              adopterName: adopterName,
+                              adoptedDate: adoptedDate,
+                            ),
+                          ),
                         ],
                       ),
                       Padding(
@@ -563,6 +590,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                             ...schedule.map((c) {
                               final done = submittedIds.contains(c.id);
                               final isCurrent = currentDue?.id == c.id;
+                              final overdue = !done && c.isOverdue(now);
                               return Padding(
                                 padding: const EdgeInsets.symmetric(
                                     vertical: 4),
@@ -577,21 +605,41 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                       size: done ? 15 : 8,
                                       color: done
                                           ? AppColors.greenrspwn
+                                          : (overdue
+                                          ? Colors.redAccent
                                           : (isCurrent
                                           ? AppColors.textPrimary
-                                          : AppColors.slaterspwn),
+                                          : AppColors.slaterspwn)),
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
-                                      child: Text(
-                                        '${c.label} - ${_formatDate(c.dueDate)}',
-                                        style: GoogleFonts.zain(
-                                          fontSize: 13,
-                                          color: AppColors.textPrimary,
-                                          fontWeight: isCurrent && !done
-                                              ? FontWeight.w700
-                                              : FontWeight.normal,
-                                        ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${c.label} - ${_formatDate(c.dueDate)}',
+                                            style: GoogleFonts.zain(
+                                              fontSize: 13,
+                                              color: AppColors.textPrimary,
+                                              fontWeight: isCurrent && !done
+                                                  ? FontWeight.w700
+                                                  : FontWeight.normal,
+                                            ),
+                                          ),
+                                          if (isCurrent && !done)
+                                            Text(
+                                              overdue
+                                                  ? 'Overdue since ${_formatDate(c.windowEnd)}'
+                                                  : 'Available until ${_formatDate(c.windowEnd)}',
+                                              style: GoogleFonts.zain(
+                                                fontSize: 11,
+                                                color: overdue
+                                                    ? Colors.redAccent
+                                                    : AppColors.textSecondary,
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
                                   ],
@@ -623,28 +671,21 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                 );
                               },
                             ),
-                            const SizedBox(height: 10),
-                            if (!isReturnApproved)
-                              _SecondaryBtn(
-                                label: isReturnRequested
-                                    ? 'Return Already Requested'
-                                    : 'Request Return',
-                                onTap: isReturnRequested
-                                    ? null
-                                    : () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => AdoptionReturnForm(
-                                        adoptionId: adoptionId,
-                                        animalName: animalName,
-                                        adopterName: adopterName,
-                                        adoptionDate: adoptedDate,
-                                      ),
-                                    ),
-                                  );
-                                },
+                            if (currentDue != null) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                currentDue.isOverdue(now)
+                                    ? 'This check-in is overdue — please submit as soon as possible.'
+                                    : 'Available until ${_formatDate(currentDue.windowEnd)} (${Checkpoint.windowDays}-day window).',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.zain(
+                                  fontSize: 11,
+                                  color: currentDue.isOverdue(now)
+                                      ? Colors.redAccent
+                                      : AppColors.textSecondary,
+                                ),
                               ),
+                            ],
                           ],
                         ),
                       ),
@@ -654,6 +695,491 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
               },
             );
           },
+        ),
+      ),
+    );
+  }
+
+  // ---- Pet options menu (three-dot button) ----
+
+  void _showPetOptionsDialog(
+      BuildContext context, {
+        required String adoptionId,
+        required String animalName,
+        required Map<String, dynamic> data,
+        required bool isReturnRequested,
+        required bool isReturnApproved,
+        required String adopterName,
+        required DateTime? adoptedDate,
+      }) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          '$animalName Options',
+          style: GoogleFonts.tiltWarp(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _DialogOptionButton(
+              icon: Icons.error_outline,
+              label: 'Report Lost Pet',
+              onTap: () {
+                Navigator.pop(dialogContext);
+                _reportLostPet(
+                  context,
+                  adoptionId: adoptionId,
+                  animalName: animalName,
+                  data: data,
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+            _DialogOptionButton(
+              icon: Icons.assignment_return_outlined,
+              label: isReturnRequested
+                  ? 'Return Already Requested'
+                  : 'Request Return',
+              enabled: !isReturnRequested && !isReturnApproved,
+              onTap: () {
+                Navigator.pop(dialogContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AdoptionReturnForm(
+                      adoptionId: adoptionId,
+                      animalName: animalName,
+                      adopterName: adopterName,
+                      adoptionDate: adoptedDate,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Cancel',
+                style: GoogleFonts.zain(color: AppColors.textSecondary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- Report Lost Pet: reuses the collar/NFC tag + pet_found_chat
+  // reunification flow instead of building a parallel one. An adopted pet
+  // reported lost this way is linked to its registered tag (identity
+  // already verified), which is what distinguishes it from a "fresh",
+  // unidentified lost/stray report filed through the general Rescue form. ----
+
+  // Single integration point for wiring in the animal-info-page → adoption
+  // listing tag mirroring later. Not implemented yet (set aside per
+  // requirements), but every read in this file goes through here so that
+  // whichever convention the mirroring lands on, only this method needs to
+  // change — nothing else in the report-lost flow does.
+  //
+  // Currently checked, in order:
+  //   1. Top-level 'collarTagId' on the adoption doc — the simplest form of
+  //      mirroring, written once when the animal's tag is linked.
+  //   2. 'personal.collarTagId' — nested alongside the other animal fields
+  //      already mirrored here (animalName, organizationName), in case the
+  //      mirror write-path follows that existing convention instead.
+  //
+  // Deferred / not yet implemented:
+  //   3. A live fallback lookup by animalId (e.g. reading
+  //      'animals/{animalId}.collarTagId' directly) for the window before
+  //      mirroring exists. Add it here — and only here — once the animal
+  //      document's field name/collection is finalized; this would make the
+  //      method async, so callers already `await` it in anticipation.
+  String? _resolveCollarTagId(Map<String, dynamic> data) {
+    final direct = data['collarTagId'] as String?;
+    if (direct != null && direct.isNotEmpty) return direct;
+
+    final personal = (data['personal'] as Map?) ?? {};
+    final nested = personal['collarTagId'] as String?;
+    if (nested != null && nested.isNotEmpty) return nested;
+
+    return null;
+  }
+
+  Future<void> _reportLostPet(
+      BuildContext context, {
+        required String adoptionId,
+        required String animalName,
+        required Map<String, dynamic> data,
+      }) async {
+    final collarTagId = _resolveCollarTagId(data);
+
+    if (collarTagId == null || collarTagId.isEmpty) {
+      _promptNoLinkedTag(
+        context,
+        adoptionId: adoptionId,
+        animalName: animalName,
+        data: data,
+      );
+      return;
+    }
+
+    try {
+      final tagRef =
+      FirebaseFirestore.instance.collection('collarTags').doc(collarTagId);
+      final tagDoc = await tagRef.get();
+
+      if (!tagDoc.exists) {
+        if (context.mounted) {
+          _promptNoLinkedTag(
+            context,
+            adoptionId: adoptionId,
+            animalName: animalName,
+            data: data,
+          );
+        }
+        return;
+      }
+
+      final tag = CollarTagData.fromFirestore(tagDoc.data()!, tagDoc.id);
+
+      // Already reported — just take them straight to the ID card, where
+      // the "Pet Found!" banner and chat will surface automatically once
+      // someone scans the tag.
+      if (tag.status == 'lost') {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content:
+              Text('$animalName is already reported lost — opening their ID card.'),
+            ),
+          );
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CollarIdTagCardScreen(tagData: tag),
+            ),
+          );
+        }
+        return;
+      }
+
+      if (!context.mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: AppColors.background,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'Report $animalName as lost?',
+            style: GoogleFonts.tiltWarp(
+                fontSize: 16, color: AppColors.textPrimary),
+          ),
+          content: Text(
+            'This uses $animalName\'s registered ID tag. Their status '
+                'switches to "Lost", your contact info becomes visible to '
+                'anyone who scans the tag, and you\'ll be notified here to '
+                'chat the moment someone finds them.',
+            style:
+            GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text('Cancel',
+                  style: GoogleFonts.zain(color: AppColors.textSecondary)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30)),
+              ),
+              child: Text('Report Lost',
+                  style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true || !context.mounted) return;
+
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final ownerId = tag.ownerId ?? uid;
+
+      final update = <String, dynamic>{
+        'status': 'lost',
+        // Marks this as originating from an already-identified adopted pet
+        // (verified via its registered tag) rather than a fresh, unknown
+        // sighting — admin/matching views can rely on the tag scan instead
+        // of heuristic species/photo matching.
+        'lastReportSource': 'adoption',
+        'linkedAdoptionId': adoptionId,
+      };
+
+      await tagRef.set(update, SetOptions(merge: true));
+
+      if (ownerId != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(ownerId)
+            .collection('collarTags')
+            .doc(collarTagId)
+            .set(update, SetOptions(merge: true));
+      }
+
+      // Cross-post to the shared Lost & Found board so the community can
+      // help keep an eye out too — flagged with the same 'adoption' source
+      // so it's treated as identity-verified rather than a fresh report.
+      final personal = (data['personal'] as Map?) ?? {};
+      await FirebaseFirestore.instance.collection('petAlerts').add({
+        'type': 'lost',
+        'source': 'adoption',
+        'collarTagId': collarTagId,
+        'linkedAdoptionId': adoptionId,
+        'reporterId': uid,
+        'petName': tag.name.isNotEmpty ? tag.name : animalName,
+        'species': personal['species'],
+        'breed': tag.breed,
+        'colorMarkings': tag.colorMarkings,
+        'photoUrls': tag.petImageUrl != null && tag.petImageUrl!.isNotEmpty
+            ? [tag.petImageUrl]
+            : [],
+        'status': 'open',
+        'createdAt': Timestamp.now(),
+        'serverCreatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '$animalName reported lost. You\'ll be notified here the moment their tag is scanned.'),
+            backgroundColor: AppColors.greenrspwn,
+          ),
+        );
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CollarIdTagCardScreen(
+              tagData: CollarTagData.fromFirestore(
+                {...tagDoc.data()!, ...update},
+                tagDoc.id,
+              ),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not report lost pet: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  void _promptNoLinkedTag(
+      BuildContext context, {
+        required String adoptionId,
+        required String animalName,
+        required Map<String, dynamic> data,
+      }) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'No ID tag linked yet',
+          style: GoogleFonts.tiltWarp(
+              fontSize: 16, color: AppColors.textPrimary),
+        ),
+        content: Text(
+          '$animalName doesn\'t have a registered collar/NFC ID tag linked '
+              'to this adoption yet. Linking one gives the fastest path to '
+              'reunification if $animalName ever goes missing — anyone who '
+              'scans the tag can reach you directly.\n\nYou can still file '
+              'a basic lost report now, or link a tag first for the full '
+              'scan-and-chat reunification flow.',
+          style:
+          GoogleFonts.zain(fontSize: 13.5, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Cancel',
+                style: GoogleFonts.zain(color: AppColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _fileBasicLostReportWithoutTag(
+                context,
+                adoptionId: adoptionId,
+                animalName: animalName,
+                data: data,
+              );
+            },
+            child: Text('File Basic Report',
+                style: GoogleFonts.zain(color: AppColors.textPrimary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CollarTagHomeScreen(),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.yellowrspwn,
+              foregroundColor: AppColors.textPrimary,
+              elevation: 0,
+              shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            ),
+            child: Text('Link ID Tag',
+                style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _fileBasicLostReportWithoutTag(
+      BuildContext context, {
+        required String adoptionId,
+        required String animalName,
+        required Map<String, dynamic> data,
+      }) async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final personal = (data['personal'] as Map?) ?? {};
+
+      await FirebaseFirestore.instance.collection('petAlerts').add({
+        'type': 'lost',
+        // No verified tag on file yet — matching still has to fall back to
+        // manual/heuristic review, same as a fresh report, so this is kept
+        // distinguishable from the tag-verified 'adoption' source above.
+        'source': 'adoption_no_tag',
+        'linkedAdoptionId': adoptionId,
+        'reporterId': uid,
+        'petName': animalName,
+        'species': personal['species'],
+        'status': 'open',
+        'createdAt': Timestamp.now(),
+        'serverCreatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '$animalName has been reported lost. Consider linking an ID tag for faster reunification.'),
+            backgroundColor: AppColors.greenrspwn,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not file lost report: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+}
+
+class _MoreOptionsButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _MoreOptionsButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 6,
+      right: 10,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: const BoxDecoration(
+            color: AppColors.background,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.more_vert,
+              size: 26, color: AppColors.textPrimary),
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogOptionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool enabled;
+
+  const _DialogOptionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: enabled ? onTap : null,
+        icon: Icon(
+          icon,
+          size: 18,
+          color: enabled
+              ? AppColors.textPrimary
+              : AppColors.textPrimary.withOpacity(0.4),
+        ),
+        label: Text(
+          label,
+          style: GoogleFonts.zain(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: enabled
+                ? AppColors.textPrimary
+                : AppColors.textPrimary.withOpacity(0.4),
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(
+            color: enabled ? AppColors.greenrspwn : AppColors.slaterspwn,
+            width: 1.5,
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          alignment: Alignment.centerLeft,
         ),
       ),
     );

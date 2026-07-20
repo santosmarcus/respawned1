@@ -1,9 +1,11 @@
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
@@ -56,8 +58,24 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
     if (_selectedRole == null) return;
     setState(() => _isLoading = true);
 
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      // Session was lost between onboarding steps (e.g. token expired).
+      // Failing here used to be silent — nothing was saved, and restarting
+      // the app just landed back on this same screen with no explanation.
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your session expired. Please sign in again.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      return;
+    }
+
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
       final fullName = '${widget.firstName} ${widget.lastName}';
 
       await FirebaseFirestore.instance
@@ -76,11 +94,13 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       }, SetOptions(merge: true));
 
       if (mounted) {
+        // Matches AuthWrapper's role -> screen mapping in main.dart, so the
+        // very first screen after onboarding is the same one a restart
+        // would land on (previously 'rescue_volunteer' fell through to
+        // HomeScreen here but ServiceScreen on restart — an inconsistency).
         Widget nextPage;
 
-        if(_selectedRole == 'general'){
-          nextPage = const HomeScreen();
-        } else if (_selectedRole == 'pet_transporter'){
+        if (_selectedRole == 'pet_transporter') {
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -92,6 +112,8 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
             ),
           );
           return;
+        } else if (_selectedRole == 'rescue_volunteer') {
+          nextPage = const ServiceScreen();
         } else {
           nextPage = const HomeScreen();
         }
@@ -102,8 +124,19 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
         );
       }
     } catch (e) {
-      print('Error saving user details: $e');
-      if (mounted) setState(() => _isLoading = false);
+      // Previously this only printed to the debug console — on a real
+      // device that's invisible, so a failed write looked like nothing
+      // happened. The role never got saved, so every app restart sent the
+      // user right back through onboarding to this same screen.
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not save your details: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
   }
 
