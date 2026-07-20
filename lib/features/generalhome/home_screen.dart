@@ -1,20 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
-import 'package:respawnd1/features/adoption/post_adoption_page.dart';
-import 'package:respawnd1/features/donation/donation_page.dart';
-import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
-import 'package:respawnd1/features/organization/organization_list_page.dart';
-import 'package:respawnd1/features/generalhome/activity_feed.dart';
-import 'package:respawnd1/features/rescue/public_rescue_feed.dart';
-import 'package:respawnd1/features/rescue/all_explore_page.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -23,21 +11,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 80,
-        title: FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance
-              .collection('users')
-              .doc(FirebaseAuth.instance.currentUser?.uid)
-              .get(),
-          builder: (context, snapshot){
-            if(!snapshot.hasData){
-              return const Text('Welcome!');
-            }
-            final data = snapshot.data!.data() as Map<String, dynamic>?;
-            final firstName = data?['firstName'] ?? 'User';
-
-            return Text('Welcome, $firstName!');
-          },),
+        title: const Text('Welcome, User!'),
         automaticallyImplyLeading: false,
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -60,22 +34,7 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
         onTap: (index) {
-          // NOTE: this must be push, not pushReplacement. HomeScreen isn't
-          // reached via Navigator.push — it's the widget AuthWrapper
-          // returns directly inside the app's single root route.
-          // pushReplacement here would replace that entire route, evicting
-          // AuthWrapper (and its authStateChanges listener) from the tree
-          // for the rest of the session — which is why re-logging in
-          // afterward had nothing left to route it anywhere.
-          if (index == 1) {
-            Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-            );
-          } else if (index == 2) {
-            Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const UserProfile()),
-            );
-          }
+          // TODO: navigation
         },
       ),
       body: SingleChildScrollView(
@@ -83,6 +42,19 @@ class HomeScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 16),
+
+            // Hero banner area
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              height: 180,
+              decoration: BoxDecoration(
+                color: AppColors.slaterspwn,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              // Replace with Image.asset or a Lottie animation
+            ),
+
+            const SizedBox(height: 24),
 
             // Quick action cards
             SizedBox(
@@ -102,13 +74,13 @@ class HomeScreen extends StatelessWidget {
                         ),
                       );
                     },
-                  ),
+                    ),
                   _QuickActionCard(
                     label: 'Adopt a\nRescue',
                     color: AppColors.greenrspwn,
                     onTap: (){
                       Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => AdoptionPage(),
+                          builder: (context) => AdoptionPage(),
                       ),
                       );
                     },
@@ -116,32 +88,10 @@ class HomeScreen extends StatelessWidget {
                   _QuickActionCard(
                     label: 'Donate or\nSponsor',
                     color: AppColors.pinkrspwn,
-                    onTap: (){
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => DonationPage(),
-                      ),
-                      );
-                    },
                   ),
                   _QuickActionCard(
                     label: 'Volunteer',
                     color: AppColors.yellowrspwn,
-                    onTap: (){
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => VolunteerPage(),
-                      ),
-                      );
-                    },
-                  ),
-                  _QuickActionCard(
-                    label: 'Organization',
-                    color: AppColors.lavenderrspwn,
-                    onTap: (){
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => OrganizationsListPage(),
-                      ),
-                      );
-                    },
                   ),
                 ],
               ),
@@ -163,63 +113,49 @@ class HomeScreen extends StatelessWidget {
 
             const SizedBox(height: 20),
 
-            ActivityFeed(),
-
-            const SizedBox(height: 28),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Explore Reports',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      fontWeight: FontWeight.normal,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AllExploreReportsPage(),
+            // Case card placeholder
+            Card(
+              color: AppColors.bgres,
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    // Animal photo placeholder
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: AppColors.background,
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: Text(
-                      'See All',
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
+                    const SizedBox(width: 30),
+                    // Case details — fill in when you have real data
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('#123ABCD',
+                              style: Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 4),
+                          Text('February 12, 2026 11:00 AM ',
+                              style: Theme.of(context).textTheme.titleSmall),
+                          const SizedBox(height: 4),
+                          Text('123 A. B. Street, Pasay, Metro Manila 1234 ',
+                              style: Theme.of(context).textTheme.titleSmall),
+                          const SizedBox(height: 4),
+                          Text('Status: Pending',
+                              style: Theme.of(context).textTheme.titleSmall),
+                        ],
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            const PublicRescueFeed(previewCount: 3),
-
-            const SizedBox(height: 28),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Post Adoption',
-                style: GoogleFonts.tiltWarp(
-                  fontSize: 16,
-                  fontWeight: FontWeight.normal,
-                  color: AppColors.textPrimary,
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 20),
 
-            const PostAdoption(),
-
-            const SizedBox(height: 24)
+            const SizedBox(height: 24),
           ],
         ),
       ),
@@ -234,40 +170,40 @@ class _QuickActionCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _QuickActionCard({required this.label, required this.color, this.onTap,
-  });
+    });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 111,
-        height: 139,
-        margin: const EdgeInsets.only(right: 12),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsetsGeometry.all(12),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Spacer(),
-                  Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 13,
-                      fontWeight: FontWeight.normal,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ]),
-          ),
-        ),
+      width: 111,
+      height: 139,
+      margin: const EdgeInsets.only(right: 12),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
       ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsetsGeometry.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Spacer(),
+            Text(
+            label,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.tiltWarp(
+              fontSize: 14,
+              fontWeight: FontWeight.normal,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ]),
+      ),
+      ),
+    ),
     );
   }
 }

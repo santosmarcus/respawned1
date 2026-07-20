@@ -31,29 +31,19 @@ class AuthService {
 
     //await credential.user!.updateDisplayName(name);
 
-    try {
-      // CREATE the doc with set() not update()
-      await _firestore.collection('users').doc(credential.user!.uid).set({
-        'uid': credential.user!.uid,
-        'name': '',
-        'firstName': '',
-        'lastName': '',
-        'email': email,
-        'phone': '',
-        'role': '',               // filled during onboarding
-        'isVerified': false,
-        'photoUrl': '',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-    } catch (_) {
-      // The Auth account was created successfully — that's the part that
-      // matters here. Don't fail the whole sign-up over a Firestore write
-      // hiccup (e.g. a transient network error or rules check). AuthWrapper
-      // treats a missing user doc exactly like an empty role and routes to
-      // onboarding, where the profile gets written anyway. Swallowing this
-      // also prevents the "email-already-in-use on every retry" loop that
-      // happens when this used to throw and strand a role-less account.
-    }
+    // CREATE the doc with set() not update()
+    await _firestore.collection('users').doc(credential.user!.uid).set({
+      'uid': credential.user!.uid,
+      'name': '',
+      'firstName': '',
+      'lastName': '',
+      'email': email,
+      'phone': '',
+      'role': '',               // filled during onboarding
+      'isVerified': false,
+      'photoUrl': '',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
 
     return credential;
   }
@@ -76,56 +66,29 @@ class AuthService {
   }
 
   Future<UserCredential?> signInWithFacebook() async {
-    final LoginResult result = await FacebookAuth.instance.login(
-      permissions: ['public_profile', 'email'],
-    );
+    final LoginResult result = await FacebookAuth.instance.login();
+    if (result.status != LoginStatus.success) return null; // user cancelled
 
-    switch (result.status) {
-      case LoginStatus.success:
-        final OAuthCredential credential =
-        FacebookAuthProvider.credential(result.accessToken!.tokenString);
+    final OAuthCredential credential =
+    FacebookAuthProvider.credential(result.accessToken!.tokenString);
 
-        final userCredential =
-        await firebaseAuth.signInWithCredential(credential);
-        await _createUserDocIfNew(userCredential.user!);
-        return userCredential;
-
-      case LoginStatus.cancelled:
-        return null; // user backed out — not an error, don't show a message
-
-      case LoginStatus.failed:
-      case LoginStatus.operationInProgress:
-        throw Exception(
-          result.message ?? 'Facebook sign-in failed. Please try again.',
-        );
-    }
+    final userCredential =
+    await firebaseAuth.signInWithCredential(credential);
+    await _createUserDocIfNew(userCredential.user!);
+    return userCredential;
   }
 
-  // Step 1: Send OTP
+  /*// Step 1: Send OTP
   Future<void> sendOtp({
     required String phoneNumber, // format: +639XXXXXXXXX
     required Function(String verificationId) onCodeSent,
     required Function(String error) onError,
-    Function(UserCredential)? onAutoVerified,
   }) async {
-    await firebaseAuth.verifyPhoneNumber(
+    await _auth.verifyPhoneNumber(
       phoneNumber: phoneNumber,
       verificationCompleted: (PhoneAuthCredential credential) async {
-        // Auto-verified on some Android devices without the user typing an
-        // OTP. This callback fires later, outside the caller's try/catch,
-        // so anything thrown in here must be caught locally and routed
-        // through onError — otherwise it becomes an unhandled async
-        // exception that only shows up in logcat, never on screen.
-        try {
-          final userCredential =
-          await firebaseAuth.signInWithCredential(credential);
-          await _createUserDocIfNew(userCredential.user!);
-          onAutoVerified?.call(userCredential);
-        } on FirebaseAuthException catch (e) {
-          onError(e.message ?? 'Verification failed.');
-        } catch (e) {
-          onError('Something went wrong verifying your number. Please try again.');
-        }
+        // Auto-verified on some Android devices
+        await _auth.signInWithCredential(credential);
       },
       verificationFailed: (FirebaseAuthException e) {
         onError(e.message ?? 'Verification failed');
@@ -146,43 +109,15 @@ class AuthService {
       verificationId: verificationId,
       smsCode: otp,
     );
-    final userCredential = await firebaseAuth.signInWithCredential(credential);
+    final userCredential = await _auth.signInWithCredential(credential);
     await _createUserDocIfNew(userCredential.user!);
     return userCredential;
-  }
-
+  }*/
 
 
   Future<void> signOut() async {
-    final googleSignIn = GoogleSignIn();
-    // signOut() clears the cached session Google Play Services uses to
-    // silently reauth on the next sign-in attempt (this is what actually
-    // controls whether the account picker reappears vs. the same account
-    // getting reused automatically). disconnect() additionally revokes the
-    // app's OAuth grant. Run both independently — previously disconnect()
-    // was gated behind isSignedIn() and any failure was silently swallowed,
-    // so if it ever threw, neither ran and Play Services kept the account
-    // cached, which looked like "always defaults to the last account" even
-    // after signing out.
-    try {
-      await googleSignIn.signOut();
-    } catch (e) {
-      debugPrint('GoogleSignIn.signOut failed (non-fatal): $e');
-    }
-    try {
-      await googleSignIn.disconnect();
-    } catch (e) {
-      debugPrint('GoogleSignIn.disconnect failed (non-fatal): $e');
-    }
-
-    try {
-      final fbStatus = await FacebookAuth.instance.accessToken;
-      if (fbStatus != null) {
-        await FacebookAuth.instance.logOut();
-      }
-    } catch (e) {
-      debugPrint('Facebook sign-out cleanup failed (non-fatal): $e');
-    }
+    await GoogleSignIn().disconnect();
+    await FacebookAuth.instance.logOut();
     await firebaseAuth.signOut();
   }
 
