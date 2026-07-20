@@ -15,9 +15,20 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 /// shelter-location flow; Intake Details itself never shows one.
 ///
 /// Returns `true` via Navigator.pop if a location was actually saved.
+///
+/// Exactly one of [organizationId] / [userId] should be provided:
+/// [organizationId] saves onto that organization's shared shelter location
+/// (`organizations/{orgId}.shelter*`); [userId] is the
+/// no-organization-linked fallback (see IntakeDetailPage's TODO on why this
+/// exists), saving onto that user's own `temporaryShelter*` fields instead
+/// so the Intake flow can still be exercised without organization
+/// membership set up yet.
 class ShelterLocationPickerPage extends ConsumerStatefulWidget {
-  final String organizationId;
-  const ShelterLocationPickerPage({super.key, required this.organizationId});
+  final String? organizationId;
+  final String? userId;
+  const ShelterLocationPickerPage({super.key, this.organizationId, this.userId})
+      : assert(organizationId != null || userId != null,
+            'ShelterLocationPickerPage needs either an organizationId or a userId to save to.');
 
   @override
   ConsumerState<ShelterLocationPickerPage> createState() => _ShelterLocationPickerPageState();
@@ -71,14 +82,26 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
     if (selected == null || _saving) return;
     setState(() => _saving = true);
     try {
-      await ref.read(organizationDirectoryRepositoryProvider).saveShelterLocation(
-            organizationId: widget.organizationId,
-            name: selected.name,
-            address: selected.address,
-            placeId: selected.placeId,
-            lat: selected.lat,
-            lng: selected.lng,
-          );
+      final repo = ref.read(organizationDirectoryRepositoryProvider);
+      if (widget.organizationId != null) {
+        await repo.saveShelterLocation(
+          organizationId: widget.organizationId!,
+          name: selected.name,
+          address: selected.address,
+          placeId: selected.placeId,
+          lat: selected.lat,
+          lng: selected.lng,
+        );
+      } else {
+        await repo.saveUserShelterLocation(
+          uid: widget.userId!,
+          name: selected.name,
+          address: selected.address,
+          placeId: selected.placeId,
+          lat: selected.lat,
+          lng: selected.lng,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {

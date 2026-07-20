@@ -1,6 +1,10 @@
+import 'dart:io';
+
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
@@ -45,7 +49,10 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
 
   // Update form state
   TreatmentUpdateType? _selectedType;
-  DateTime? _updateDateTime;
+  // Date only, no time-of-day — defaults to today whenever the form opens
+  // (see _resetFormToDefaults). createdAt (server timestamp) is the
+  // separate audit/order concept, stamped by the repository itself.
+  DateTime? _treatmentDate;
   final _notesController = TextEditingController();
   String? _selectedCondition;
 
@@ -60,8 +67,25 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   final _postTreatmentInstructionsController = TextEditingController();
   String? _selectedCauseOfDeath;
 
+  // Image selection/upload state for the current update.
+  final _picker = ImagePicker();
+  final List<XFile> _pickedMedia = [];
+  bool _isUploadingMedia = false;
+  String? _mediaError;
+
   // Post-treatment disposition
   String? _selectedNextStep;
+
+  @override
+  void initState() {
+    super.initState();
+    _treatmentDate = _todayDateOnly();
+  }
+
+  static DateTime _todayDateOnly() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
 
   @override
   void dispose() {
@@ -80,7 +104,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   bool get _isDischarge => _selectedType == TreatmentUpdateType.discharge;
 
   bool _canSubmit() {
-    if (_selectedType == null || _updateDateTime == null) return false;
+    if (_selectedType == null || _treatmentDate == null) return false;
     if (_isDeathReport) return _selectedCauseOfDeath != null;
     if (_isDischarge) {
       return _finalCondition != null && _dischargeNotesController.text.trim().isNotEmpty;
@@ -88,9 +112,83 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     return _selectedCondition != null && _notesController.text.trim().isNotEmpty;
   }
 
+  Future<void> _pickFromGallery() async {
+    final files = await _picker.pickMultiImage(imageQuality: 80);
+    if (files.isNotEmpty && mounted) {
+      setState(() {
+        _pickedMedia.addAll(files);
+        _mediaError = null;
+      });
+    }
+  }
+
+  Future<void> _pickFromCamera() async {
+    final file = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+    if (file != null && mounted) {
+      setState(() {
+        _pickedMedia.add(file);
+        _mediaError = null;
+      });
+    }
+  }
+
+  void _removeMedia(int index) => setState(() => _pickedMedia.removeAt(index));
+
+  /// Uploads to `cases/{caseId}/treatmentUpdates/{logId}/{index}.{ext}` —
+  /// same FirebaseStorage.instance.ref(path)/putFile/getDownloadURL
+  /// convention already used by collar_tag_form_screen.dart's own image
+  /// upload, just parameterized by this update's own path. Rethrows on
+  /// failure (unlike that page's silent-null pattern) so _addUpdate can
+  /// stop before ever creating a misleading "successful" log entry, and can
+  /// keep the picked images in the form for Retry.
+  Future<(String url, String path)> _uploadMedia(XFile file, String storagePath) async {
+    final ref = FirebaseStorage.instance.ref(storagePath);
+    await ref.putFile(File(file.path));
+    final url = await ref.getDownloadURL();
+    return (url, storagePath);
+  }
+
   Future<void> _addUpdate() async {
     if (_isSaving || !_canSubmit()) return;
-    setState(() => _isSaving = true);
+    setState(() {
+      _isSaving = true;
+      _mediaError = null;
+    });
+
+    final repo = ref.read(rescueCaseRepositoryProvider);
+    final logId = repo.newTreatmentLogId(widget.caseId);
+
+    final mediaUrls = <String>[];
+    final mediaTypes = <String>[];
+    final storagePaths = <String>[];
+
+    if (_pickedMedia.isNotEmpty) {
+      setState(() => _isUploadingMedia = true);
+      try {
+        for (var i = 0; i < _pickedMedia.length; i++) {
+          final file = _pickedMedia[i];
+          final ext = file.path.contains('.') ? file.path.split('.').last : 'jpg';
+          final storagePath = 'cases/${widget.caseId}/treatmentUpdates/$logId/$i.$ext';
+          final (url, path) = await _uploadMedia(file, storagePath);
+          mediaUrls.add(url);
+          storagePaths.add(path);
+          mediaTypes.add('image');
+        }
+      } catch (e) {
+        // Never create a treatment update whose media silently failed to
+        // upload — leave the picked images in the form so Save can be
+        // retried without having to re-pick them.
+        if (mounted) {
+          setState(() {
+            _isSaving = false;
+            _isUploadingMedia = false;
+            _mediaError = 'Could not upload image: $e';
+          });
+        }
+        return;
+      }
+      if (mounted) setState(() => _isUploadingMedia = false);
+    }
 
     final entry = TreatmentLogEntry(
       id: '',
@@ -113,20 +211,23 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       finalCondition: _isDischarge ? _finalCondition : null,
       postTreatmentInstructions:
           _isDischarge ? _postTreatmentInstructionsController.text.trim() : null,
-      dateOfDeath: _isDeathReport ? _updateDateTime : null,
+      dateOfDeath: _isDeathReport ? _treatmentDate : null,
       causeOfDeath: _isDeathReport ? _selectedCauseOfDeath : null,
+      treatmentDate: _treatmentDate,
+      mediaUrls: mediaUrls,
+      mediaTypes: mediaTypes,
+      storagePaths: storagePaths,
       createdBy: 'Admin Staff',
-      timestamp: _updateDateTime,
     );
 
     try {
-      await ref.read(rescueCaseRepositoryProvider).addTreatmentLog(caseId: widget.caseId, entry: entry);
+      await repo.addTreatmentLog(caseId: widget.caseId, entry: entry, logId: logId);
       if (mounted) {
         setState(() {
           _showUpdateForm = false;
           _isSaving = false;
           _selectedType = null;
-          _updateDateTime = null;
+          _treatmentDate = _todayDateOnly();
           _selectedCondition = null;
           _finalCondition = null;
           _selectedCauseOfDeath = null;
@@ -138,6 +239,8 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _vaccineDoseController.clear();
           _dischargeNotesController.clear();
           _postTreatmentInstructionsController.clear();
+          _pickedMedia.clear();
+          _mediaError = null;
         });
       }
     } catch (e) {
@@ -315,9 +418,34 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
 
             const SizedBox(height: 24),
 
-            if (_showUpdateForm) _buildUpdateForm(),
-
-            const SizedBox(height: 24),
+            // Add Update — kept directly above Cost Tracking (not below it)
+            // so the button and the form it opens stay together, instead of
+            // the old layout where tapping "Add Update" revealed a form the
+            // admin had already scrolled past.
+            if (!c.isDeceased) ...[
+              if (c.readyForDischarge)
+                const _DischargedNotice()
+              else ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => setState(() => _showUpdateForm = !_showUpdateForm),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.textPrimary),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: Text(_showUpdateForm ? 'Hide Form' : 'Add Update',
+                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  ),
+                ),
+                if (_showUpdateForm) ...[
+                  const SizedBox(height: 16),
+                  _buildUpdateForm(),
+                ],
+              ],
+              const SizedBox(height: 24),
+            ],
 
             _CostTrackingSection(
               caseId: widget.caseId,
@@ -344,57 +472,41 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                       style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
                 ),
               )
-            else ...[
+            // The post-treatment dropdown only becomes available once a
+            // Discharge update has actually been saved — never enabled just
+            // because the animal "seems" ready.
+            else if (c.readyForDischarge) ...[
+              Text('Post-Treatment Disposition',
+                  style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              _NextStepDropdown(
+                value: _selectedNextStep,
+                allowRelease: (c.interestedToAdopt ?? '').toLowerCase() == 'yes',
+                onChanged: (v) => setState(() => _selectedNextStep = v),
+              ),
+              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => setState(() => _showUpdateForm = !_showUpdateForm),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.textPrimary),
+                child: ElevatedButton(
+                  onPressed: (_selectedNextStep == null || _isActingOnNextStep)
+                      ? null
+                      : () => _confirmNextStep(c, data),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    disabledBackgroundColor: AppColors.slaterspwn,
+                    elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: Text(_showUpdateForm ? 'Hide Form' : 'Add Update',
-                      style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  child: _isActingOnNextStep
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                      : Text(_nextStepButtonLabel(),
+                          style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                 ),
               ),
-              // The post-treatment dropdown only becomes available once a
-              // Discharge update has actually been saved — never enabled
-              // just because the animal "seems" ready.
-              if (c.readyForDischarge) ...[
-                const SizedBox(height: 20),
-                Text('Post-Treatment Disposition',
-                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                const SizedBox(height: 8),
-                _NextStepDropdown(
-                  value: _selectedNextStep,
-                  allowRelease: (c.interestedToAdopt ?? '').toLowerCase() == 'yes',
-                  onChanged: (v) => setState(() => _selectedNextStep = v),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: (_selectedNextStep == null || _isActingOnNextStep)
-                        ? null
-                        : () => _confirmNextStep(c, data),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      disabledBackgroundColor: AppColors.slaterspwn,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    child: _isActingOnNextStep
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                        : Text(_nextStepButtonLabel(),
-                            style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                  ),
-                ),
-              ],
             ],
 
             const SizedBox(height: 32),
@@ -419,17 +531,20 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
         const SizedBox(height: 16),
 
-        _FieldLabel('Date & Time', required: true),
+        // Date only — defaults to today when the form opens (see initState /
+        // _addUpdate's reset), never a time picker. Only a manual change
+        // via this date picker moves it off today.
+        _FieldLabel('Date', required: true),
         GestureDetector(
           onTap: () async {
             final now = DateTime.now();
             final picked = await showDatePicker(
               context: context,
-              initialDate: now,
+              initialDate: _treatmentDate ?? _todayDateOnly(),
               firstDate: DateTime(2020),
               lastDate: now,
             );
-            if (picked != null) setState(() => _updateDateTime = picked);
+            if (picked != null) setState(() => _treatmentDate = DateTime(picked.year, picked.month, picked.day));
           },
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -440,12 +555,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  _updateDateTime == null
+                  _treatmentDate == null
                       ? 'mm/dd/yyyy'
-                      : '${_updateDateTime!.month}/${_updateDateTime!.day}/${_updateDateTime!.year}',
+                      : '${_treatmentDate!.month}/${_treatmentDate!.day}/${_treatmentDate!.year}',
                   style: GoogleFonts.zain(
                       fontSize: 14,
-                      color: _updateDateTime == null ? AppColors.textSecondary : AppColors.textPrimary),
+                      color: _treatmentDate == null ? AppColors.textSecondary : AppColors.textPrimary),
                 ),
                 const Icon(Icons.calendar_today_outlined, size: 18, color: AppColors.textPrimary),
               ],
@@ -562,17 +677,54 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         _TextInput(controller: _notesController, hint: 'Enter notes'),
 
         const SizedBox(height: 16),
-        _FieldLabel('Include images and videos'),
+        _FieldLabel('Include images'),
         const SizedBox(height: 8),
-        Container(
-          width: 80,
-          height: 80,
-          decoration: BoxDecoration(
-            border: Border.all(color: AppColors.greenrspwn, width: 1.5),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Center(child: Icon(Icons.add, size: 28, color: AppColors.greenrspwn)),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var i = 0; i < _pickedMedia.length; i++) _PickedImageThumb(file: _pickedMedia[i], onRemove: _isSaving ? null : () => _removeMedia(i)),
+            GestureDetector(
+              onTap: _isSaving ? null : _pickFromGallery,
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.greenrspwn, width: 1.5),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.add_photo_alternate_outlined, size: 24, color: AppColors.greenrspwn),
+              ),
+            ),
+            GestureDetector(
+              onTap: _isSaving ? null : _pickFromCamera,
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.slaterspwn, width: 1.5),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.camera_alt_outlined, size: 24, color: AppColors.textSecondary),
+              ),
+            ),
+          ],
         ),
+        if (_isUploadingMedia) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const SizedBox(
+                  width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: 8),
+              Text('Uploading images…', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            ],
+          ),
+        ],
+        if (_mediaError != null) ...[
+          const SizedBox(height: 10),
+          Text(_mediaError!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+        ],
 
         const SizedBox(height: 24),
         Center(
@@ -590,7 +742,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                     height: 20,
                     width: 20,
                     child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                : Text('Add', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+                : Text(_mediaError != null ? 'Retry' : 'Add', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
           ),
         ),
       ],
@@ -602,6 +754,38 @@ String _monthName(int month) => const [
       'January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December',
     ][month - 1];
+
+/// Replaces the "Add Update" button once `readyForDischarge == true` —
+/// disabled rather than hidden, so it's clear the option existed and is now
+/// closed off, not just missing. The actual enforcement is in the
+/// repository (RescueCaseRepository.addTreatmentLog); this is the UI half.
+class _DischargedNotice extends StatelessWidget {
+  const _DischargedNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OutlinedButton(
+          onPressed: null,
+          style: OutlinedButton.styleFrom(
+            disabledForegroundColor: AppColors.textSecondary,
+            side: const BorderSide(color: AppColors.slaterspwn),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          child: Text('Treatment Discharged',
+              style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+        ),
+        const SizedBox(height: 6),
+        Text('No further treatment updates can be added after discharge.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+      ],
+    );
+  }
+}
 
 class _NextStepDropdown extends StatelessWidget {
   final String? value;
@@ -690,10 +874,18 @@ class _CostTrackingSection extends StatelessWidget {
                 onPressed: () => showAddEditExpenseSheet(context, caseId: caseId),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
+                  // Explicit foreground — without it this falls back to the
+                  // theme's ColorScheme.onPrimary, which (since the app
+                  // theme overrides `primary` to yellowrspwn without
+                  // recomputing onPrimary to match) is too close to the
+                  // yellow background to read. Same fix as the other
+                  // primary yellow buttons in this file.
+                  foregroundColor: AppColors.textPrimary,
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
-                child: Text('Add Expense', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+                child: Text('Add Expense',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
               ),
               OutlinedButton(
                 onPressed: outstandingBalance <= 0
@@ -752,11 +944,11 @@ class _TreatmentLogCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ts = log.timestamp;
-    final timeStr = ts != null
-        ? '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')} ${ts.hour >= 12 ? 'PM' : 'AM'}'
-        : '';
-    final dateStr = ts != null ? '${_monthName(ts.month)} ${ts.day}, ${ts.year}' : '';
+    // Prefers the admin-selected treatmentDate; falls back to the
+    // server-stamped createdAt (timestamp) for logs saved before
+    // treatmentDate existed — see TreatmentLogEntry.displayDate.
+    final d = log.displayDate;
+    final dateStr = d != null ? '${_monthName(d.month)} ${d.day}, ${d.year}' : '';
 
     final subLines = <String>[
       if (log.medicationName != null && log.medicationName!.isNotEmpty)
@@ -769,59 +961,246 @@ class _TreatmentLogCard extends StatelessWidget {
       if (log.causeOfDeath != null && log.causeOfDeath!.isNotEmpty) 'Cause: ${log.causeOfDeath}',
     ];
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.tearspwn.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(12),
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => showModalBottomSheet(
+        context: context,
+        backgroundColor: AppColors.background,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        builder: (_) => _TreatmentLogDetailSheet(log: log),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(8)),
-            child: log.mediaUrls.isNotEmpty
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.network(log.mediaUrls.first, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported_outlined, size: 18)),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.tearspwn.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
               children: [
-                Text(log.type,
-                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                if (log.notes.isNotEmpty)
-                  Text(log.notes, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                for (final line in subLines)
-                  Text(line, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                if (log.createdBy != null && log.createdBy!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text('By ${log.createdBy}',
-                        style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(8)),
+                  child: log.mediaUrls.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(log.mediaUrls.first,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (_, child, progress) => progress == null
+                                  ? child
+                                  : const Center(child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
+                              errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported_outlined, size: 18)),
+                        )
+                      : const Icon(Icons.description_outlined, size: 18, color: AppColors.textSecondary),
+                ),
+                if (log.mediaUrls.length > 1)
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(color: AppColors.textPrimary, borderRadius: BorderRadius.circular(8)),
+                      child: Text('+${log.mediaUrls.length - 1}',
+                          style: GoogleFonts.zain(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ),
                   ),
               ],
             ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(log.type,
+                      style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  if (log.notes.isNotEmpty)
+                    Text(log.notes,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  for (final line in subLines)
+                    Text(line,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                  if (log.createdBy != null && log.createdBy!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text('By ${log.createdBy}',
+                          style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                    ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (log.condition != null && log.condition!.isNotEmpty)
+                  Text(log.condition!,
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                Text(dateStr, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void _showFullTreatmentImage(BuildContext context, String url) {
+  showDialog(
+    context: context,
+    barrierColor: Colors.black87,
+    builder: (_) => Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(12),
+      child: GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: InteractiveViewer(
+          child: Image.network(
+            url,
+            loadingBuilder: (_, child, progress) =>
+                progress == null ? child : const Center(child: CircularProgressIndicator(color: Colors.white)),
+            errorBuilder: (_, __, ___) =>
+                const Icon(Icons.broken_image_outlined, color: Colors.white, size: 48),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+        ),
+      ),
+    ),
+  );
+}
+
+/// Expandable detail view for a single treatment log — every saved field
+/// (not just the two-line preview shown in the list) plus full media, each
+/// image tappable to a larger preview. Old logs saved with no media just
+/// show no image section at all.
+const String _kNotProvided = 'Not provided';
+
+/// One centralized renderer for every treatment-log detail view — so old
+/// and new logs (and every update type) are shown consistently. Every
+/// applicable question from the Add Update form gets its own row here
+/// unconditionally, falling back to "Not provided" rather than being
+/// hidden, so a submitted-but-empty-looking answer is never confused with a
+/// field that was never asked. Required fields (Notes, and whichever of
+/// Overall Condition / Cause of Death / Final Condition + Discharge Notes
+/// applies to this update's type) should never actually show "Not
+/// provided" once form validation is correct — if one does, that's a real
+/// gap, not expected behavior.
+class _TreatmentLogDetailSheet extends StatelessWidget {
+  final TreatmentLogEntry log;
+  const _TreatmentLogDetailSheet({required this.log});
+
+  String _fmtDateTime(DateTime d) =>
+      '${_monthName(d.month)} ${d.day}, ${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final displayDate = log.displayDate;
+    final dateStr = displayDate != null
+        ? '${_monthName(displayDate.month)} ${displayDate.day}, ${displayDate.year}'
+        : _kNotProvided;
+
+    String orNotProvided(String? v) => (v == null || v.isEmpty) ? _kNotProvided : v;
+
+    // Every question from the Add Update form, in the same order it
+    // appears there — always rendered, never conditionally hidden, so
+    // nothing submitted is ever silently dropped from view.
+    final rows = <(String, String)>[
+      ('Update Type', log.type),
+      ('Date', dateStr),
+      ('Overall Condition', orNotProvided(log.condition)),
+      ('Notes', orNotProvided(log.notes)),
+      ('Medication Name', orNotProvided(log.medicationName)),
+      ('Dose', orNotProvided(log.medicationDose)),
+      ('Procedure', orNotProvided(log.procedurePerformed)),
+      ('Vaccine', orNotProvided(log.vaccineName)),
+      ('Vaccine Dose', orNotProvided(log.vaccineDose)),
+      ('Next Schedule', log.nextScheduleAt != null ? _fmtDateTime(log.nextScheduleAt!) : _kNotProvided),
+      ('Discharge Notes', orNotProvided(log.dischargeNotes)),
+      ('Final Condition', orNotProvided(log.finalCondition)),
+      ('Post-treatment Instructions', orNotProvided(log.postTreatmentInstructions)),
+      ('Cause of Death', orNotProvided(log.causeOfDeath)),
+    ];
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 20, right: 20, top: 20,
+          bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              if (log.condition != null && log.condition!.isNotEmpty)
-                Text(log.condition!,
-                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              Text(timeStr, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
-              Text(dateStr, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+              Text(log.type, style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              for (final (label, value) in rows) ...[
+                Text(label, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                const SizedBox(height: 2),
+                Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                const SizedBox(height: 12),
+              ],
+              Text('Images and Videos', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              if (log.mediaUrls.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(_kNotProvided, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                )
+              else ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final url in log.mediaUrls)
+                      GestureDetector(
+                        onTap: () => _showFullTreatmentImage(context, url),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.network(
+                            url,
+                            width: 84,
+                            height: 84,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (_, child, progress) => progress == null
+                                ? child
+                                : Container(
+                                    width: 84,
+                                    height: 84,
+                                    color: AppColors.tearspwn,
+                                    child: const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+                                  ),
+                            errorBuilder: (_, __, ___) => Container(
+                              width: 84,
+                              height: 84,
+                              color: AppColors.tearspwn,
+                              child: const Icon(Icons.broken_image_outlined, color: AppColors.textSecondary),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12),
+              Text('Created By', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              const SizedBox(height: 2),
+              Text(orNotProvided(log.createdBy), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              Text('Created At', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              const SizedBox(height: 2),
+              Text(log.timestamp != null ? _fmtDateTime(log.timestamp!) : _kNotProvided,
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -884,6 +1263,42 @@ class _TextInput extends StatelessWidget {
         contentPadding: const EdgeInsets.only(bottom: 8),
       ),
       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+    );
+  }
+}
+
+class _PickedImageThumb extends StatelessWidget {
+  final XFile file;
+  final VoidCallback? onRemove;
+  const _PickedImageThumb({required this.file, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 72,
+      height: 72,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(File(file.path), width: 72, height: 72, fit: BoxFit.cover),
+          ),
+          if (onRemove != null)
+            Positioned(
+              top: -6,
+              right: -6,
+              child: GestureDetector(
+                onTap: onRemove,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

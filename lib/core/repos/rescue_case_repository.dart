@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
@@ -658,19 +659,39 @@ class RescueCaseRepository {
     );
   }
 
-  /// Creates a new pending rider offer. Guarded by a transaction against
-  /// creating a second active (pending/accepted) offer for the same case —
-  /// the case doc's own `currentAssignmentId` pointer is read and checked
-  /// inside the same transaction, so two admins tapping "Confirm" at the
-  /// same moment can't both succeed. Does NOT touch the case's own
+  /// Creates a new pending transporter offer. Guarded by a transaction
+  /// against creating a second active (pending/accepted) offer for the same
+  /// case — the case doc's own `currentAssignmentId` pointer is read and
+  /// checked inside the same transaction, so two admins tapping "Confirm" at
+  /// the same moment can't both succeed. Does NOT touch the case's own
   /// RescueStatus or assignedVolunteer* fields — those only change once the
-  /// rider actually accepts (see [acceptAssignment]).
+  /// transporter actually accepts (see [acceptAssignment]).
+  ///
+  /// Deliberately never looks at `acceptedBy`/the accepting admin's uid, or
+  /// the case's own RescueStatus — a case being accepted (by any admin) is
+  /// a separate concept from a transporter being assigned, and does not
+  /// block this call on its own. The only thing that can block a new offer
+  /// is the assignment document the pointer resolves to, read fresh inside
+  /// this same transaction:
+  ///  - pointer -> pending assignment: blocked, [ActiveAssignmentConflictException]
+  ///  - pointer -> accepted assignment: blocked unless [allowReassign] is
+  ///    true (the explicit Reassign Transporter path), in which case the
+  ///    prior assignment is marked `cancelled` (superseded) in the same
+  ///    transaction so that transporter frees back up elsewhere.
+  ///  - pointer -> rejected/cancelled/completed, or a missing (dangling)
+  ///    document: never blocks — the stale pointer is simply overwritten by
+  ///    the new offer's id below, which is itself the reconciliation (no
+  ///    separate clear-then-write race is possible since it's all one
+  ///    transaction).
   Future<String> createAssignmentOffer({
     required String caseId,
     required String riderId,
     required String riderName,
     required String riderType,
     bool isDemo = false,
+    bool allowReassign = false,
+    String? vehicle,
+    String? plate,
   }) async {
     final caseRef = _caseDoc(caseId);
     final assignmentsCol = _transportAssignmentsOf(caseId);
@@ -681,10 +702,36 @@ class RescueCaseRepository {
       final currentId = caseSnap.data()?['currentAssignmentId'] as String?;
       if (currentId != null) {
         final currentSnap = await tx.get(assignmentsCol.doc(currentId));
-        final currentStatus = currentSnap.data()?['status'] as String?;
-        if (currentStatus == 'pending' || currentStatus == 'accepted') {
-          throw StateError('This case already has an active rider assignment.');
+        final currentData = currentSnap.data();
+        final currentStatus = currentData?['status'] as String?;
+
+        if (currentStatus == 'pending') {
+          throw ActiveAssignmentConflictException.fromMap(currentId, currentData!);
         }
+        if (currentStatus == 'accepted') {
+          if (!allowReassign) {
+            throw ActiveAssignmentConflictException.fromMap(currentId, currentData!);
+          }
+          // Explicit Reassign Transporter workflow: supersede the prior
+          // accepted assignment rather than leaving it dangling as
+          // "accepted" forever (which would otherwise keep that
+          // transporter showing Busy elsewhere).
+          final now = Timestamp.now();
+          tx.update(assignmentsCol.doc(currentId), {
+            'status': 'cancelled',
+            'respondedAt': now,
+            'cancelledAt': now,
+            'cancellationReason': 'Reassigned to a different transporter',
+          });
+        } else if (currentStatus == null && kDebugMode) {
+          // Dangling pointer: currentId is set but the doc it references no
+          // longer exists. Not an error — just logged for visibility — the
+          // pointer is reconciled below by being overwritten unconditionally.
+          debugPrint(
+              'RescueCaseRepository: currentAssignmentId=$currentId on case $caseId points to a missing assignment document — clearing.');
+        }
+        // rejected / cancelled / completed: nothing to do here, the
+        // pointer overwrite below is the reconciliation.
       }
       tx.set(newRef, {
         'caseId': caseId,
@@ -699,6 +746,8 @@ class RescueCaseRepository {
         'rejectionReason': null,
         'completedAt': null,
         'isDemo': isDemo,
+        if (vehicle != null) 'vehicle': vehicle,
+        if (plate != null) 'plate': plate,
       });
       tx.update(caseRef, {'currentAssignmentId': newRef.id});
     });
@@ -731,6 +780,8 @@ class RescueCaseRepository {
         'status': 'accepted',
         'respondedAt': now,
         'acceptedAt': now,
+        'vehicle': riderVehicle,
+        'plate': riderPlate,
       });
       tx.update(caseRef, {
         'status': 'assigned',
@@ -820,6 +871,12 @@ class RescueCaseRepository {
 
   // ---- Treatment ----------------------------------------------------
 
+  /// Pre-allocates an id for a new treatment log entry, without writing
+  /// anything — lets the caller upload media to
+  /// `cases/{caseId}/treatmentUpdates/{logId}/...` under a Storage path that
+  /// matches the eventual log document's id, before that document exists.
+  String newTreatmentLogId(String caseId) => _treatmentLogsOf(caseId).doc().id;
+
   /// Appends one treatment log entry (never edits/overwrites a prior one)
   /// and updates the case-level "latest state" fields that drive the
   /// Treatment Details header and the Rescue Reports card: currentCondition,
@@ -827,11 +884,26 @@ class RescueCaseRepository {
   /// Discharge entry additionally sets readyForDischarge/dischargedAt; a
   /// Death Report entry sets deceasedAt/causeOfDeath (and the legacy
   /// animalStatus:'Deceased' flag some older screens still read).
+  ///
+  /// [logId] should come from [newTreatmentLogId] when the caller already
+  /// uploaded media under that id; omitted, a fresh id is allocated here.
+  ///
+  /// Enforced here (not just in the UI): once a case has
+  /// `readyForDischarge == true`, no further treatment update of any kind
+  /// can be added — a disabled button alone wouldn't stop a direct
+  /// repository call, so this is the actual source of truth for the rule.
   Future<void> addTreatmentLog({
     required String caseId,
     required TreatmentLogEntry entry,
+    String? logId,
   }) async {
-    await _treatmentLogsOf(caseId).add(entry.toFirestore());
+    final caseSnap = await _caseDoc(caseId).get();
+    if (caseSnap.data()?['readyForDischarge'] == true) {
+      throw StateError('No further treatment updates can be added after discharge.');
+    }
+
+    final logRef = logId != null ? _treatmentLogsOf(caseId).doc(logId) : _treatmentLogsOf(caseId).doc();
+    await logRef.set(entry.toFirestore());
 
     final now = Timestamp.now();
     final isDischarge = entry.type == TreatmentUpdateType.discharge.label;
@@ -1094,6 +1166,9 @@ class RescueCaseRepository {
   // ---- Cost tracking --------------------------------------------------
 
   Future<void> addExpense({required String caseId, required Expense expense}) async {
+    if (expense.title.trim().isEmpty) {
+      throw ArgumentError('Expense title is required.');
+    }
     if (expense.amount <= 0) {
       throw ArgumentError('Expense amount must be greater than zero.');
     }
@@ -1104,6 +1179,9 @@ class RescueCaseRepository {
   }
 
   Future<void> updateExpense({required String caseId, required Expense expense}) async {
+    if (expense.title.trim().isEmpty) {
+      throw ArgumentError('Expense title is required.');
+    }
     if (expense.amount <= 0) {
       throw ArgumentError('Expense amount must be greater than zero.');
     }

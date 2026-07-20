@@ -57,8 +57,17 @@ class TreatmentLogEntry {
   final DateTime? dateOfDeath;
   final String? causeOfDeath;
   final List<String> mediaUrls;
+  final List<String> mediaTypes;
+  final List<String> storagePaths;
   final String? createdBy;
   final DateTime? timestamp;
+
+  /// The calendar date the admin selected for this update (date only, no
+  /// time-of-day) — distinct from [timestamp], which is the server-stamped
+  /// moment the entry was actually saved (used for ordering/audit). Older
+  /// entries saved before this field existed have it null; display falls
+  /// back to [timestamp]'s date in that case.
+  final DateTime? treatmentDate;
   final bool isLegacy;
 
   const TreatmentLogEntry({
@@ -79,8 +88,11 @@ class TreatmentLogEntry {
     this.dateOfDeath,
     this.causeOfDeath,
     this.mediaUrls = const [],
+    this.mediaTypes = const [],
+    this.storagePaths = const [],
     this.createdBy,
     this.timestamp,
+    this.treatmentDate,
     this.isLegacy = false,
   });
 
@@ -138,11 +150,19 @@ class TreatmentLogEntry {
       dateOfDeath: ts('dateOfDeath'),
       causeOfDeath: data['causeOfDeath'] as String?,
       mediaUrls: List<String>.from(data['mediaUrls'] ?? const []),
+      mediaTypes: List<String>.from(data['mediaTypes'] ?? const []),
+      storagePaths: List<String>.from(data['storagePaths'] ?? const []),
       createdBy: data['createdBy'] as String?,
       timestamp: ts('timestamp'),
+      treatmentDate: ts('treatmentDate'),
       isLegacy: isLegacy,
     );
   }
+
+  /// The date to actually display for this entry — the admin-selected
+  /// [treatmentDate] when present, falling back to [timestamp]'s date for
+  /// entries saved before this field existed.
+  DateTime? get displayDate => treatmentDate ?? timestamp;
 
   Map<String, dynamic> toFirestore() => {
         'type': type,
@@ -161,8 +181,13 @@ class TreatmentLogEntry {
           'postTreatmentInstructions': postTreatmentInstructions,
         if (dateOfDeath != null) 'dateOfDeath': Timestamp.fromDate(dateOfDeath!),
         if (causeOfDeath != null && causeOfDeath!.isNotEmpty) 'causeOfDeath': causeOfDeath,
+        if (treatmentDate != null) 'treatmentDate': Timestamp.fromDate(treatmentDate!),
         'mediaUrls': mediaUrls,
+        if (mediaTypes.isNotEmpty) 'mediaTypes': mediaTypes,
+        if (storagePaths.isNotEmpty) 'storagePaths': storagePaths,
         if (createdBy != null) 'createdBy': createdBy,
-        'timestamp': Timestamp.now(),
+        // Server-stamped audit/order time — deliberately never the
+        // caller-selected treatmentDate, which is saved separately above.
+        'timestamp': FieldValue.serverTimestamp(),
       };
 }

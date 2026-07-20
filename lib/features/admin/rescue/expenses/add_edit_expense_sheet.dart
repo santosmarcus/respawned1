@@ -37,13 +37,32 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   late final _amountController =
       TextEditingController(text: widget.existing != null ? widget.existing!.amount.toStringAsFixed(0) : '');
   late final _notesController = TextEditingController(text: widget.existing?.notes ?? '');
-  late ExpenseCategory _category = widget.existing?.category ?? ExpenseCategory.other;
-  late FundingSource _fundingSource = widget.existing?.fundingSource ?? FundingSource.unfunded;
+  // Category/Funding Source start unselected (null) for a new expense —
+  // rather than silently defaulting to Other/Unfunded — so "must be
+  // selected" is a real, checkable requirement instead of one that's
+  // trivially satisfied by a default nobody chose.
+  ExpenseCategory? _category;
+  FundingSource? _fundingSource;
   late DateTime _incurredAt = widget.existing?.incurredAt ?? DateTime.now();
+
+  // Field-level errors — shown directly under each field, not only as one
+  // generic message. _errorMessage is reserved for the actual write
+  // failing (network/Firestore error), which isn't a "which field" problem.
+  String? _titleError;
+  String? _categoryError;
+  String? _amountError;
+  String? _fundingSourceError;
   String? _errorMessage;
   bool _saving = false;
 
   bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _category = widget.existing?.category;
+    _fundingSource = widget.existing?.fundingSource;
+  }
 
   @override
   void dispose() {
@@ -57,12 +76,16 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
     final title = _titleController.text.trim();
     final amount = double.tryParse(_amountController.text.trim());
 
-    if (title.isEmpty) {
-      setState(() => _errorMessage = 'Please enter a title.');
-      return;
-    }
-    if (amount == null || amount <= 0) {
-      setState(() => _errorMessage = 'Amount must be greater than zero.');
+    // Every required field is checked at once (not short-circuited on the
+    // first failure) so every problem is visible in one pass.
+    setState(() {
+      _titleError = title.isEmpty ? 'Title is required.' : null;
+      _categoryError = _category == null ? 'Select a category.' : null;
+      _amountError = (amount == null || amount <= 0) ? 'Enter an amount greater than zero.' : null;
+      _fundingSourceError = _fundingSource == null ? 'Select a funding source.' : null;
+    });
+
+    if (_titleError != null || _categoryError != null || _amountError != null || _fundingSourceError != null) {
       return;
     }
 
@@ -75,9 +98,9 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       id: widget.existing?.id ?? '',
       caseId: widget.caseId,
       title: title,
-      category: _category,
-      amount: amount,
-      fundingSource: _fundingSource,
+      category: _category!,
+      amount: amount!,
+      fundingSource: _fundingSource!,
       notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       incurredAt: _incurredAt,
       createdBy: widget.existing?.createdBy ?? 'Admin Staff',
@@ -127,23 +150,38 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                 style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
             const SizedBox(height: 16),
 
-            _Label('Title'),
-            _Input(controller: _titleController, hint: 'e.g. Anti-rabies vaccine'),
+            _Label('Title', required: true),
+            _Input(
+              controller: _titleController,
+              hint: 'e.g. Anti-rabies vaccine',
+              onChanged: (_) {
+                if (_titleError != null) setState(() => _titleError = null);
+              },
+            ),
+            if (_titleError != null) _FieldError(_titleError!),
             const SizedBox(height: 14),
 
-            _Label('Category'),
+            _Label('Category', required: true),
             _EnumDropdown<ExpenseCategory>(
               value: _category,
+              hint: 'Select',
               items: ExpenseCategory.values,
               labelOf: (c) => c.label,
-              onChanged: (v) => setState(() => _category = v!),
+              onChanged: (v) => setState(() {
+                _category = v;
+                _categoryError = null;
+              }),
             ),
+            if (_categoryError != null) _FieldError(_categoryError!),
             const SizedBox(height: 14),
 
-            _Label('Amount'),
+            _Label('Amount', required: true),
             TextField(
               controller: _amountController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) {
+                if (_amountError != null) setState(() => _amountError = null);
+              },
               decoration: InputDecoration(
                 prefixText: '₱ ',
                 hintText: '0',
@@ -156,18 +194,24 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
               ),
               style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
             ),
+            if (_amountError != null) _FieldError(_amountError!),
             const SizedBox(height: 14),
 
-            _Label('Funding Source'),
+            _Label('Funding Source', required: true),
             _EnumDropdown<FundingSource>(
               value: _fundingSource,
+              hint: 'Select',
               items: FundingSource.values,
               labelOf: (s) => s.label,
-              onChanged: (v) => setState(() => _fundingSource = v!),
+              onChanged: (v) => setState(() {
+                _fundingSource = v;
+                _fundingSourceError = null;
+              }),
             ),
+            if (_fundingSourceError != null) _FieldError(_fundingSourceError!),
             const SizedBox(height: 14),
 
-            _Label('Date Incurred'),
+            _Label('Date', required: true),
             GestureDetector(
               onTap: () async {
                 final picked = await showDatePicker(
@@ -245,24 +289,44 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
 
 class _Label extends StatelessWidget {
   final String text;
-  const _Label(this.text);
+  final bool required;
+  const _Label(this.text, {this.required = false});
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 4),
-        child: Text(text,
-            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+        child: Row(
+          children: [
+            Text(text,
+                style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            if (required) const Text(' *', style: TextStyle(color: Colors.red, fontSize: 12)),
+          ],
+        ),
+      );
+}
+
+/// Shown directly under a field when it fails validation — field-level,
+/// not just a single generic message at the bottom of the sheet.
+class _FieldError extends StatelessWidget {
+  final String message;
+  const _FieldError(this.message);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(message, style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent)),
       );
 }
 
 class _Input extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
-  const _Input({required this.controller, required this.hint});
+  final ValueChanged<String>? onChanged;
+  const _Input({required this.controller, required this.hint, this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      onChanged: onChanged,
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
@@ -278,16 +342,24 @@ class _Input extends StatelessWidget {
 }
 
 class _EnumDropdown<T> extends StatelessWidget {
-  final T value;
+  final T? value;
+  final String hint;
   final List<T> items;
   final String Function(T) labelOf;
   final ValueChanged<T?> onChanged;
-  const _EnumDropdown({required this.value, required this.items, required this.labelOf, required this.onChanged});
+  const _EnumDropdown({
+    required this.value,
+    required this.hint,
+    required this.items,
+    required this.labelOf,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<T>(
       value: value,
+      hint: Text(hint, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
       decoration: const InputDecoration(
         isDense: true,

@@ -17,6 +17,7 @@ class OrganizationDirectoryRepository {
   final FirebaseFirestore _db;
 
   CollectionReference<Map<String, dynamic>> get _organizations => _db.collection('organizations');
+  CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
 
   Future<List<OrgReferralCandidate>> search({
     String? nameQuery,
@@ -98,6 +99,58 @@ class OrganizationDirectoryRepository {
       'shelterLat': lat,
       'shelterLng': lng,
       'shelterUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // TODO: Remove the user-scoped shelter fallback once organization
+  // membership is required for every admin/NGO account. Until then, this
+  // lets an account with no organizationId (or no membership doc at all)
+  // still exercise the Intake flow end-to-end for testing, by saving a
+  // temporary shelter location directly on their own user doc instead of an
+  // organization's.
+
+  /// Reads the temporary `temporaryShelter*` fields saved by
+  /// [saveUserShelterLocation] onto `users/{uid}` — the fallback destination
+  /// source used only when [resolveShelterLocation] found nothing (no
+  /// organization linked, or the linked organization has no shelter saved
+  /// yet). Returns null if the user hasn't saved one either.
+  Future<({String name, String? address, String? placeId, double? lat, double? lng})?>
+      resolveUserShelterLocation(String? uid) async {
+    if (uid == null || uid.isEmpty) return null;
+    final doc = await _users.doc(uid).get();
+    final data = doc.data();
+    if (data == null) return null;
+
+    final name = data['temporaryShelterName'] as String?;
+    if (name == null || name.trim().isEmpty) return null;
+    return (
+      name: name.trim(),
+      address: data['temporaryShelterAddress'] as String?,
+      placeId: data['temporaryShelterPlaceId'] as String?,
+      lat: (data['temporaryShelterLat'] as num?)?.toDouble(),
+      lng: (data['temporaryShelterLng'] as num?)?.toDouble(),
+    );
+  }
+
+  /// Saves a per-user temporary shelter/intake location — same shape and
+  /// merge-write pattern as [saveShelterLocation], just scoped to
+  /// `users/{uid}` instead of `organizations/{orgId}` for accounts with no
+  /// organization membership yet.
+  Future<void> saveUserShelterLocation({
+    required String uid,
+    required String name,
+    String? address,
+    String? placeId,
+    required double lat,
+    required double lng,
+  }) async {
+    await _users.doc(uid).set({
+      'temporaryShelterName': name,
+      'temporaryShelterAddress': address,
+      'temporaryShelterPlaceId': placeId,
+      'temporaryShelterLat': lat,
+      'temporaryShelterLng': lng,
+      'temporaryShelterUpdatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 }

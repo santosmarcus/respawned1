@@ -11,7 +11,6 @@ import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 
 typedef ShelterDestination = ({String name, String? address, String? placeId, double? lat, double? lng});
@@ -27,6 +26,7 @@ class IntakeDetailPage extends ConsumerStatefulWidget {
 
 class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   bool _isConfirmingIntake = false;
+  bool _isConfirmingReceived = false;
   bool _isStartingQuarantine = false;
   bool _isEndingQuarantine = false;
   bool _isSkippingQuarantine = false;
@@ -49,11 +49,12 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     super.dispose();
   }
 
-  /// Resolves the org's saved shelter location as the Intake destination —
-  /// no hardcoded fallback: if the organization hasn't configured a shelter
-  /// location yet (and has no legacy `location` field either), the
-  /// destination stays null and the UI prompts "Set Shelter Location"
-  /// instead of silently defaulting to a placeholder address.
+  /// Resolves the Intake destination in priority order: the linked
+  /// organization's saved shelter location -> this account's own temporary
+  /// saved shelter location (see the TODO on the user-scoped fallback below
+  /// — testing-only, for accounts with no organization membership yet) ->
+  /// null, in which case the UI prompts "Set Shelter Location" instead of
+  /// silently defaulting to a placeholder address.
   Future<void> _resolveDestination() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     ShelterDestination? resolved;
@@ -61,7 +62,11 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     if (uid != null) {
       final membership = await OrgMembershipService().getMembership(uid);
       orgId = membership?.organizationId;
-      resolved = await ref.read(organizationDirectoryRepositoryProvider).resolveShelterLocation(orgId);
+      final repo = ref.read(organizationDirectoryRepositoryProvider);
+      resolved = await repo.resolveShelterLocation(orgId);
+      // TODO: Remove the user-scoped shelter fallback once organization
+      // membership is required for every admin/NGO account.
+      resolved ??= await repo.resolveUserShelterLocation(uid);
     }
     if (mounted) {
       setState(() {
@@ -73,18 +78,23 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
   Future<void> _openShelterPicker() async {
     final orgId = _currentOrganizationId;
-    if (orgId == null) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (orgId == null && (uid == null || uid.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No organization is linked to this account yet.'),
+          content: Text('Sign in to set a shelter location.'),
           backgroundColor: Colors.redAccent,
         ),
       );
       return;
     }
+    // No organization linked -> save onto this account's own temporary
+    // shelter fields instead, so Intake can still be exercised end-to-end.
     final saved = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(builder: (_) => ShelterLocationPickerPage(organizationId: orgId)),
+      MaterialPageRoute(
+        builder: (_) => ShelterLocationPickerPage(organizationId: orgId, userId: orgId == null ? uid : null),
+      ),
     );
     if (saved == true) _resolveDestination();
   }
@@ -176,6 +186,43 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
           SnackBar(content: Text('Could not confirm intake: $e'), backgroundColor: Colors.redAccent),
         );
       }
+    }
+  }
+
+  /// Marks the animal as physically received at the shelter — reuses
+  /// RescueCaseRepository.confirmAnimalReceived exactly as Track Case's own
+  /// intake-mode "Confirm Animal Received" button already does, just
+  /// exposed here too so the admin doesn't have to leave Intake Details to
+  /// take this action. Stamps intakeReceivedAt (server timestamp), and —
+  /// when a transport assignment is on file — completes it in the same
+  /// call, which is what frees the transporter back to Available. Never
+  /// touches the case's own RescueStatus: the case stays in Intake.
+  Future<void> _confirmAnimalReceived(RescueCase c) async {
+    if (_isConfirmingReceived) return;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Confirm Animal Received',
+      message: 'Confirm that the animal has arrived at the shelter?\n\n'
+          'This will complete the transport assignment and allow animal records to be created.',
+      confirmLabel: 'Confirm Received',
+    );
+    if (!confirmed || !mounted) return;
+
+    setState(() => _isConfirmingReceived = true);
+    try {
+      final assignment = ref.read(currentAssignmentProvider(widget.caseId)).asData?.value;
+      await ref.read(rescueCaseRepositoryProvider).confirmAnimalReceived(
+            caseId: widget.caseId,
+            currentAssignmentId: assignment?.id,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not confirm receipt: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isConfirmingReceived = false);
     }
   }
 
@@ -283,6 +330,40 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text('Intake Details', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+        // Reassign Transporter / Change Intake Destination live here instead
+        // of as standalone buttons in the body — Reassign is only offered
+        // while there's still something to reassign (before the animal is
+        // marked received); Change Destination stays available throughout.
+        actions: [
+          if (c.intakeConfirmedAt != null)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppColors.background),
+              onSelected: (value) {
+                switch (value) {
+                  case 'reassign':
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AssignRiderPage(
+                          caseId: widget.caseId,
+                          data: c.raw,
+                          postAcceptTrackingMode: TrackingMode.intakeTransfer,
+                        ),
+                      ),
+                    );
+                    break;
+                  case 'change_destination':
+                    _openShelterPicker();
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                if (c.intakeReceivedAt == null)
+                  const PopupMenuItem(value: 'reassign', child: Text('Reassign Transporter')),
+                const PopupMenuItem(value: 'change_destination', child: Text('Change Intake Destination')),
+              ],
+            ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -338,52 +419,39 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 _InfoItem('Address', c.intakeDestinationAddress!),
               const SizedBox(height: 16),
 
-              _SectionHeader('Transporter'),
-              if (latestAssignment != null && latestAssignment.status == TransportAssignmentStatus.accepted)
-                TransporterDetailsCard(assignment: latestAssignment)
-              else if (latestAssignment != null && latestAssignment.status == TransportAssignmentStatus.completed)
+              // Compact transport summary only — the full transporter card
+              // (avatar, vehicle, Message/Call, Busy chip) already lives on
+              // Track Case and isn't repeated here. Reassign Transporter
+              // moved to the overflow menu (see AppBar actions above).
+              _SectionHeader('Clinic-to-Shelter Transport'),
+              if (c.intakeReceivedAt != null)
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                  decoration: BoxDecoration(
+                    color: AppColors.greenrspwn.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                   child: Row(
                     children: [
                       const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text('${latestAssignment.riderName} — transport complete.',
-                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Animal received',
+                                style: GoogleFonts.zain(
+                                    fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                            Text(
+                                'Received ${_monthName(c.intakeReceivedAt!.month)} '
+                                '${c.intakeReceivedAt!.day}, ${c.intakeReceivedAt!.year}',
+                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 )
-              else
-                Text('No transporter on this leg yet.',
-                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AssignRiderPage(
-                      caseId: widget.caseId,
-                      data: c.raw,
-                      postAcceptTrackingMode: TrackingMode.intakeTransfer,
-                    ),
-                  ),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-                child: Text('Reassign Transporter', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
-              ),
-
-              const SizedBox(height: 16),
-              _SectionHeader('Clinic-to-Shelter Transport'),
-              if (c.intakeReceivedAt != null)
-                Text('Animal received at the shelter.',
-                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.greenrspwn))
               else
                 Text('Transport in progress.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
               const SizedBox(height: 8),
@@ -407,6 +475,35 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                 ),
               ),
+              // Prominent — only shown before receipt is confirmed; once
+              // intakeReceivedAt is set, the green "Animal received" card
+              // above replaces this entirely (derived from the live case
+              // stream, not local state, so it flips automatically).
+              if (c.intakeReceivedAt == null) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isConfirmingReceived ? null : () => _confirmAnimalReceived(c),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      disabledBackgroundColor: AppColors.slaterspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      disabledForegroundColor: AppColors.textSecondary,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: _isConfirmingReceived
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                        : Text('Confirm Animal Received',
+                            style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 20),
               _QuarantineSection(
@@ -428,6 +525,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 data: c.raw,
                 totalAnimals: totalAnimals,
                 completedCount: completedIndexes.length,
+                received: c.intakeReceivedAt != null,
               ),
             ],
 
@@ -698,11 +796,28 @@ class _QuarantineSection extends StatelessWidget {
     }
 
     if (c.hasQuarantineDecision) {
-      final label = c.quarantineStatus == 'skipped'
+      final isSkipped = c.quarantineStatus == 'skipped';
+      final detail = isSkipped
           ? 'Quarantine was skipped for this case.'
           : 'Quarantine completed'
               '${c.quarantineEndedAt != null ? ' on ${_fmtDate(c.quarantineEndedAt!)}' : ''}.';
-      return Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OutlinedButton(
+            onPressed: null,
+            style: OutlinedButton.styleFrom(
+              disabledForegroundColor: AppColors.textSecondary,
+              side: const BorderSide(color: AppColors.slaterspwn),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            ),
+            child: Text(isSkipped ? 'Quarantine Skipped' : 'Quarantine Completed',
+                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+          ),
+          const SizedBox(height: 6),
+          Text(detail, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+        ],
+      );
     }
 
     // Not yet decided — offer Start/Skip.
@@ -739,12 +854,22 @@ class _QuarantineSection extends StatelessWidget {
                 onPressed: isStarting ? null : onStart,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
+                  disabledBackgroundColor: AppColors.slaterspwn,
+                  // Explicit foreground — without it, ElevatedButton falls
+                  // back to the theme's ColorScheme.onPrimary, which (since
+                  // the app theme overrides `primary` to yellowrspwn without
+                  // recomputing onPrimary to match) ends up too close to the
+                  // yellow background to read. Every other yellow button in
+                  // this file already sets this explicitly; this one didn't.
+                  foregroundColor: AppColors.textPrimary,
+                  disabledForegroundColor: AppColors.textSecondary,
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                 ),
                 child: isStarting
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text('Start Quarantine', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                    : Text('Start Quarantine',
+                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
               ),
             ),
             const SizedBox(width: 10),
@@ -770,47 +895,60 @@ class _QuarantineSection extends StatelessWidget {
   String _fmtDate(DateTime d) => '${_monthName(d.month)} ${d.day}, ${d.year}';
 }
 
+/// Disabled — with a real, always-visible reason, not just a greyed-out
+/// button — until the animal has actually arrived at the shelter
+/// (RescueCase.intakeReceivedAt). Enforced again in
+/// CreateAnimalRecordPage._createRecord itself, so this UI gate is backup,
+/// not the only line of defense.
 class _AnimalRecordsSection extends StatelessWidget {
   final String caseId;
   final Map<String, dynamic> data;
   final int totalAnimals;
   final int completedCount;
+  final bool received;
 
   const _AnimalRecordsSection({
     required this.caseId,
     required this.data,
     required this.totalAnimals,
     required this.completedCount,
+    required this.received,
   });
 
   @override
   Widget build(BuildContext context) {
     final allDone = completedCount >= totalAnimals;
-    final label = allDone
-        ? '$completedCount of $totalAnimals records created'
-        : '$completedCount of $totalAnimals records created';
     final buttonLabel = allDone ? 'View Animal Records' : (completedCount == 0 ? 'Create Animal Records' : 'Continue Animal Records');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionHeader('Animal Records'),
-        Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+        Text(
+          received ? '$completedCount of $totalAnimals records created' : 'Waiting for the animal to arrive.',
+          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+        ),
         const SizedBox(height: 8),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => AnimalRecordsFlowPage(caseId: caseId, caseData: data)),
-            ),
+            onPressed: !received
+                ? null
+                : () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => AnimalRecordsFlowPage(caseId: caseId, caseData: data)),
+                    ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellowrspwn,
+              disabledBackgroundColor: AppColors.slaterspwn,
+              foregroundColor: AppColors.textPrimary,
+              disabledForegroundColor: AppColors.textSecondary,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            child: Text(buttonLabel, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+            child: Text(received ? buttonLabel : 'Create Animal Records',
+                style: GoogleFonts.tiltWarp(fontSize: 15)),
           ),
         ),
       ],
