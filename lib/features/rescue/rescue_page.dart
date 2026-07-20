@@ -21,8 +21,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
-// Species + breed picklists shared by every "animal" card in this flow
-// (owner's own pet, and each found/stray animal entry).
 const String _dogSpecies = 'Dog';
 const String _catSpecies = 'Cat';
 const String _othersBreedLabel = 'Others / Not sure';
@@ -625,10 +623,13 @@ class _RescuePageState extends State<RescuePage> {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined,
                   color: AppColors.textPrimary),
-              title: Text('Choose photo from gallery',
+              title: Text('Choose photos from gallery',
                   style: GoogleFonts.zain(
                       fontSize: 15, color: AppColors.textPrimary)),
-              onTap: () => Navigator.pop(context, 'photo_gallery'),
+              subtitle: Text('Select up to ${_mediaFiles.length} at once',
+                  style: GoogleFonts.zain(
+                      fontSize: 12, color: AppColors.textSecondary)),
+              onTap: () => Navigator.pop(context, 'photo_gallery_multi'),
             ),
             ListTile(
               leading: const Icon(Icons.videocam_outlined,
@@ -664,6 +665,11 @@ class _RescuePageState extends State<RescuePage> {
 
     if (action == null || action == 'remove') return;
 
+    if (action == 'photo_gallery_multi') {
+      await _pickMultipleImages(startIndex: index);
+      return;
+    }
+
     XFile? file;
     bool isVideo = false;
 
@@ -671,10 +677,6 @@ class _RescuePageState extends State<RescuePage> {
       case 'photo_camera':
         file = await _picker.pickImage(
             source: ImageSource.camera, imageQuality: 80, maxWidth: 1280);
-        break;
-      case 'photo_gallery':
-        file = await _picker.pickImage(
-            source: ImageSource.gallery, imageQuality: 80, maxWidth: 1280);
         break;
       case 'video_camera':
         file = await _picker.pickVideo(
@@ -692,6 +694,39 @@ class _RescuePageState extends State<RescuePage> {
 
     if (file != null && mounted) {
       setState(() => _mediaFiles[index] = _MediaItem(file: file!, isVideo: isVideo));
+    }
+  }
+
+  Future<void> _pickMultipleImages({required int startIndex}) async {
+    final picked = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1280);
+    if (picked.isEmpty || !mounted) return;
+
+    final emptySlots = [
+      if (_mediaFiles[startIndex] == null) startIndex,
+      for (int i = 0; i < _mediaFiles.length; i++)
+        if (i != startIndex && _mediaFiles[i] == null) i,
+    ];
+
+    final placeCount =
+    picked.length < emptySlots.length ? picked.length : emptySlots.length;
+
+    setState(() {
+      for (int i = 0; i < placeCount; i++) {
+        _mediaFiles[emptySlots[i]] = _MediaItem(file: picked[i], isVideo: false);
+      }
+    });
+
+    if (placeCount < picked.length && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            placeCount == 0
+                ? 'You already have ${_mediaFiles.length} photos/videos added — remove one first.'
+                : 'Only $placeCount of ${picked.length} photos were added (max ${_mediaFiles.length} total).',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     }
   }
 
@@ -1116,6 +1151,14 @@ class _RescuePageState extends State<RescuePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildLabel('Include images and videos', required: true),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Tap any box, then "Choose photos from gallery" to '
+                        'select several at once — no need to tap each box. '
+                        'At least 2 are required, up to 4 total.',
+                    style: GoogleFonts.zain(
+                        fontSize: 11, color: AppColors.textSecondary),
+                  ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
@@ -1681,8 +1724,7 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
-  // Species dropdown ('Dog' / 'Cat') shared by the owner's pet and every
-  // found/stray animal card.
+
   Widget _speciesDropdown({
     required String? value,
     required ValueChanged<String?> onChanged,
@@ -1706,8 +1748,6 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
-  // Breed dropdown, filtered by whichever species is selected. Picking
-  // "Others / Not sure" reveals a small text field for a custom breed.
   Widget _breedDropdown({
     required String? species,
     required String? breedValue,
@@ -2316,10 +2356,6 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
-  // Shared by every rescue type (not just Lost Pet finder reports): renders
-  // the repeatable animal cards plus "Add another animal" so any report —
-  // illness, injury, abandonment, a litter turned in together, etc. — can
-  // cover more than one animal as a single grouped case.
   List<Widget> _buildAnimalEntryFields() {
     return [
       for (int i = 0; i < _foundAnimals.length; i++) _buildFoundAnimalCard(i),
@@ -2494,62 +2530,64 @@ class _RescuePageState extends State<RescuePage> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
       final casesCollection = FirebaseFirestore.instance.collection('cases');
-      String? groupId;
-      final createdDocIds = <String>[];
 
-      for (final animal in validAnimals) {
-        final docRef = await casesCollection.add({
-          'reporterId': uid,
-          'reporterName': reporterName,
-          'reporterPhone': userData?['phone'] ?? '',
-          'groupId': groupId, // backfilled below once the first doc exists
-          'animalType': animal.speciesText,
-          'breed': animal.breedText,
-          'sex': animal.sex,
-          'size': animal.size,
-          'colorMarkings': animal.colorController.text.trim(),
-          'rescueType': _selectedRescueType,
-          'condition': condition,
-          'urgency': _selectedUrgency,
-          'containmentStatus': _containmentStatus,
-          'strayTemperament': _strayTemperament,
-          'onSite': _onSiteChoice,
-          'accessInstructions': _accessInstructionsController.text.trim(),
-          'bestTimeToContact': _bestTimeContactController.text.trim(),
-          'reportAnonymously':
-          _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
-          'address': _addressController.text.trim(),
-          'lat': _pinnedLocation.latitude,
-          'lng': _pinnedLocation.longitude,
-          'coordinateWithShelter': _coordinateChoice,
-          'witnessName': _witnessNameController.text.trim(),
-          'witnessPhone': _witnessNumberController.text.trim(),
-          'interestedToAdopt': _adoptionChoice,
-          'scannedTagId': _scannedTagId,
-          'status': 'pending',
-          'statusHistory': [
-            {
-              'status': 'Rescue case is being reviewed.',
-              'timestamp': Timestamp.now(),
-            }
-          ],
-          'photoUrls': [],
-          'createdAt': Timestamp.now(),
-          'serverCreatedAt' : FieldValue.serverTimestamp(),
-        });
-        groupId ??= docRef.id;
-        createdDocIds.add(docRef.id);
-      }
-      for (final id in createdDocIds) {
-        await casesCollection.doc(id).update({'groupId': groupId});
-      }
+      final animalsPayload = [
+        for (final animal in validAnimals)
+          {
+            'species': animal.speciesText,
+            'breed': animal.breedText,
+            'sex': animal.sex,
+            'size': animal.size,
+            'colorMarkings': animal.colorController.text.trim(),
+          }
+      ];
+      final firstAnimal = validAnimals.first;
 
-      final primaryCaseId = createdDocIds.first;
+      final docRef = await casesCollection.add({
+        'reporterId': uid,
+        'reporterName': reporterName,
+        'reporterPhone': userData?['phone'] ?? '',
+        'animals': animalsPayload,
+        'animalCount': animalsPayload.length,
+        'animalType': firstAnimal.speciesText,
+        'breed': firstAnimal.breedText,
+        'sex': firstAnimal.sex,
+        'size': firstAnimal.size,
+        'colorMarkings': firstAnimal.colorController.text.trim(),
+        'rescueType': _selectedRescueType,
+        'condition': condition,
+        'urgency': _selectedUrgency,
+        'containmentStatus': _containmentStatus,
+        'strayTemperament': _strayTemperament,
+        'onSite': _onSiteChoice,
+        'accessInstructions': _accessInstructionsController.text.trim(),
+        'bestTimeToContact': _bestTimeContactController.text.trim(),
+        'reportAnonymously':
+        _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
+        'address': _addressController.text.trim(),
+        'lat': _pinnedLocation.latitude,
+        'lng': _pinnedLocation.longitude,
+        'coordinateWithShelter': _coordinateChoice,
+        'witnessName': _witnessNameController.text.trim(),
+        'witnessPhone': _witnessNumberController.text.trim(),
+        'interestedToAdopt': _adoptionChoice,
+        'scannedTagId': _scannedTagId,
+        'status': 'pending',
+        'statusHistory': [
+          {
+            'status': 'Rescue case is being reviewed.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'photoUrls': [],
+        'createdAt': Timestamp.now(),
+        'serverCreatedAt' : FieldValue.serverTimestamp(),
+      });
+
+      final primaryCaseId = docRef.id;
       final photoUrls = await _uploadAllMedia(primaryCaseId);
       if (photoUrls.isNotEmpty) {
-        for (final id in createdDocIds) {
-          await casesCollection.doc(id).update({'photoUrls': photoUrls});
-        }
+        await casesCollection.doc(primaryCaseId).update({'photoUrls': photoUrls});
       }
 
       if (mounted) {

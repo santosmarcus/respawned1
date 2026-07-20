@@ -64,11 +64,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     setState(() => _isLoading = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).acceptCase(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-            openForTransfer: openForTransfer,
-          );
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        openForTransfer: openForTransfer,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -116,7 +116,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
     switch (outcome.result) {
       case ClinicSheetResult.cancelled:
-        // Remain on Rescue Details. Nothing to undo — nothing was saved.
+      // Remain on Rescue Details. Nothing to undo — nothing was saved.
         break;
       case ClinicSheetResult.clinicSaved:
         await showSuccessDialog(context,
@@ -145,12 +145,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     setState(() => _isLoading = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).rejectCase(
-            caseId: c.id,
-            reason: result.reason,
-            otherText: result.otherText,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        reason: result.reason,
+        otherText: result.otherText,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -434,7 +434,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                           Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
                         },
                         initialCameraPosition:
-                            CameraPosition(target: LatLng(c.lat!, c.lng!), zoom: 15),
+                        CameraPosition(target: LatLng(c.lat!, c.lng!), zoom: 15),
                         markers: {
                           Marker(
                             markerId: const MarkerId('rescue_location'),
@@ -448,9 +448,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     ),
                   )
                 else
-                  // Fallback for reports with no saved coordinates —
-                  // avoids a broken/blank box instead of trying (and
-                  // failing) to render a map with nothing to center on.
+                // Fallback for reports with no saved coordinates —
+                // avoids a broken/blank box instead of trying (and
+                // failing) to render a map with nothing to center on.
                   Container(
                     height: 160,
                     decoration: BoxDecoration(
@@ -547,12 +547,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       ),
                       child: _isLoading
                           ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: AppColors.textPrimary))
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AppColors.textPrimary))
                           : Text('Accept',
-                              style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                          style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                     ),
                   ),
                 ],
@@ -623,11 +623,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   ),
                 )
               else if (hasActiveAssignment)
-                // A transporter offer already exists and hasn't been
-                // rejected — route through AdminTrackCasePage, which shows
-                // an inline "waiting for the transporter to respond" view
-                // for as long as it stays pending (never a second "Assign
-                // Transporter" while one is outstanding).
+              // A transporter offer already exists and hasn't been
+              // rejected — route through AdminTrackCasePage, which shows
+              // an inline "waiting for the transporter to respond" view
+              // for as long as it stays pending (never a second "Assign
+              // Transporter" while one is outstanding).
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -650,7 +650,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     onPressed: _isLoading
                         ? null
                         : () => Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw))),
+                        builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw))),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.yellowrspwn,
                       elevation: 0,
@@ -811,17 +811,61 @@ class _DetailSection extends StatelessWidget {
   }
 }
 
-/// "No. of Animals" + per-animal breakdown. Cases submitted together
-/// (multi-animal reports) share a `groupId`, one case doc per animal — this
-/// queries the sibling docs and shows each one's species/breed/sex/size/
-/// color. Cases without a `groupId` (including every report saved before
-/// this field existed) just show this case's own single animal.
+/// "No. of Animals" + per-animal breakdown.
+///
+/// Current submissions: every animal in a group report lives in this one
+/// case doc's `animals` array — one Case ID for the whole report, however
+/// many animals (or species) were logged together.
+///
+/// Legacy fallback: cases created before this fix stored one case doc PER
+/// animal, linked only by a shared `groupId`; those are still read the old
+/// way (querying sibling docs) so historic group reports keep displaying
+/// correctly. Cases with neither `animals` nor `groupId` just show this
+/// case's own single animal.
 class _AnimalGroupSection extends StatelessWidget {
   final RescueCase currentCase;
   const _AnimalGroupSection({required this.currentCase});
 
+  // Maps an `animals[]` entry (species/breed/sex/size/colorMarkings) onto
+  // the same key shape `_AnimalCard._animalFields()` already expects from a
+  // full case doc (animalType/breed/sex/size/colorMarkings).
+  Map<String, dynamic> _animalMap(Map raw) => {
+    'animalType': raw['species'],
+    'breed': raw['breed'],
+    'sex': raw['sex'],
+    'size': raw['size'],
+    'colorMarkings': raw['colorMarkings'],
+  };
+
   @override
   Widget build(BuildContext context) {
+    final animals = currentCase.raw['animals'] as List?;
+    if (animals != null && animals.isNotEmpty) {
+      final total = animals.length;
+      if (total <= 1) {
+        return _AnimalCard(
+          data: _animalMap(animals.first as Map),
+          index: 1,
+          total: 1,
+          highlight: false,
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DetailSection(label: 'No. of Animals', value: '$total'),
+          const SizedBox(height: 4),
+          for (var i = 0; i < animals.length; i++)
+            _AnimalCard(
+              data: _animalMap(animals[i] as Map),
+              index: i + 1,
+              total: total,
+              highlight: false,
+            ),
+        ],
+      );
+    }
+
     final groupId = currentCase.raw['groupId'] as String?;
     if (groupId == null || groupId.isEmpty) {
       return _AnimalCard(data: currentCase.raw, index: 1, total: 1, highlight: false);

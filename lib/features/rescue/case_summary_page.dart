@@ -4,14 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 
-/// The full case summary — status timeline, community reports, media, and
-/// details — for a case that has reached a final state ('completed' or
-/// 'closed'). Reached two ways:
-///  • Right after completion, via CaseCompletedPage's "Next" button
-///    (`fromCompletionFlow: true` — the 'x' takes the reporter all the way
-///    back Home, since there's nothing to "go back" to).
-///  • Later, from History in the reporter's profile (`fromCompletionFlow:
-///    false` — the 'x' just pops back to the History list).
 class CaseSummaryPage extends StatelessWidget {
   final String caseId;
   final Map<String, dynamic> caseData;
@@ -24,17 +16,11 @@ class CaseSummaryPage extends StatelessWidget {
     this.fromCompletionFlow = false,
   });
 
-  // Broad match so status variants like 'Rescue Ended' or 'rescue_ended'
-  // (not just the exact 'closed') are treated as the somber outcome.
   bool get _isClosed {
     final s = (caseData['status'] as String? ?? '').toLowerCase();
     return s == 'closed' || s.contains('ended');
   }
 
-  // Tapping 'x' both leaves the summary AND removes this case from the
-  // public Explore Reports feed — it's done, so it no longer needs to be
-  // shown there. This only happens on this explicit dismissal, never
-  // automatically when the case first reaches a final status.
   Future<void> _close(BuildContext context) async {
     try {
       await FirebaseFirestore.instance
@@ -42,7 +28,7 @@ class CaseSummaryPage extends StatelessWidget {
           .doc(caseId)
           .update({'hiddenFromExplore': true});
     } catch (_) {
-      // Non-fatal — worst case it briefly still shows in Explore Reports.
+
     }
 
     if (!context.mounted) return;
@@ -335,9 +321,25 @@ class CaseSummaryPage extends StatelessWidget {
             _DetailRow('Address', caseData['address']),
             _DetailRow(
                 'Vet Clinic Address', caseData['vetClinicAddress'] ?? '-'),
+            _DetailRow('Type of Rescue', caseData['rescueType']),
             _DetailRow('Description', caseData['condition']),
-            _DetailRow('Type of Animal', caseData['animalType']),
+            _AnimalGroupSection(caseId: caseId, data: caseData),
             _DetailRow('Urgency', caseData['urgency']),
+            _DetailRow('Containment Status', caseData['containmentStatus']),
+            if ((caseData['strayTemperament'] as String?)?.isNotEmpty ?? false)
+              _DetailRow('Approachability / Bite Risk',
+                  caseData['strayTemperament']),
+            _DetailRow('On-site', caseData['onSite']),
+            if ((caseData['accessInstructions'] as String?)?.isNotEmpty ??
+                false)
+              _DetailRow(
+                  'Access Instructions', caseData['accessInstructions']),
+            if ((caseData['bestTimeToContact'] as String?)?.isNotEmpty ??
+                false)
+              _DetailRow(
+                  'Best Time to Contact', caseData['bestTimeToContact']),
+            if ((caseData['scannedTagId'] as String?)?.isNotEmpty ?? false)
+              _DetailRow('Scanned Tag ID', caseData['scannedTagId']),
             _DetailRow('Coordination', caseData['coordinateWithShelter']),
             if (caseData['coordinateWithShelter'] == 'no') ...[
               _DetailRow('Witness Name', caseData['witnessName']),
@@ -348,6 +350,122 @@ class CaseSummaryPage extends StatelessWidget {
             const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AnimalGroupSection extends StatelessWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _AnimalGroupSection({required this.caseId, required this.data});
+
+  Map<String, dynamic> _animalMap(Map raw) => {
+    'animalType': raw['species'],
+    'breed': raw['breed'],
+    'sex': raw['sex'],
+    'size': raw['size'],
+    'colorMarkings': raw['colorMarkings'],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final animals = data['animals'] as List?;
+    if (animals != null && animals.isNotEmpty) {
+      final total = animals.length;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DetailRow('No. of Animals', '$total'),
+          for (var i = 0; i < animals.length; i++)
+            _AnimalDetailBlock(
+              data: _animalMap(animals[i] as Map),
+              index: i + 1,
+              total: total,
+            ),
+        ],
+      );
+    }
+
+    final groupId = data['groupId'] as String?;
+    if (groupId == null || groupId.isEmpty) {
+      return _AnimalDetailBlock(data: data, index: 1, total: 1);
+    }
+
+    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance
+          .collection('cases')
+          .where('groupId', isEqualTo: groupId)
+          .get(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return _AnimalDetailBlock(data: data, index: 1, total: 1);
+        }
+        final docs = snapshot.data!.docs;
+        final total = docs.length;
+        if (total <= 1) {
+          return _AnimalDetailBlock(data: data, index: 1, total: 1);
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _DetailRow('No. of Animals', '$total'),
+            for (var i = 0; i < docs.length; i++)
+              _AnimalDetailBlock(
+                data: docs[i].data(),
+                index: i + 1,
+                total: total,
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AnimalDetailBlock extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final int index;
+  final int total;
+  const _AnimalDetailBlock(
+      {required this.data, required this.index, required this.total});
+
+  List<Widget> _fields() => [
+    _DetailRow('Species', data['animalType']),
+    _DetailRow('Breed / Mixed', data['breed']),
+    _DetailRow('Sex', data['sex']),
+    _DetailRow('Size', data['size']),
+    _DetailRow('Color / Distinguishing Markings', data['colorMarkings']),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (total <= 1) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: _fields(),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Animal $index of $total',
+              style: GoogleFonts.zain(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          ..._fields(),
+        ],
       ),
     );
   }

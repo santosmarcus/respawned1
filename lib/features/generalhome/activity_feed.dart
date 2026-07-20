@@ -7,6 +7,22 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'activity_card.dart';
 import 'activity_item.dart';
 
+String _animalSummary(List animals) {
+  final counts = <String, int>{};
+  final order = <String>[];
+  for (final a in animals) {
+    final species = (a is Map ? a['species'] : null) as String?;
+    if (species == null || species.isEmpty) continue;
+    if (!counts.containsKey(species)) order.add(species);
+    counts[species] = (counts[species] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return '';
+  return order.map((s) {
+    final c = counts[s]!;
+    return '$c ${c == 1 ? s : '${s}s'}';
+  }).join(', ');
+}
+
 class ActivityFeed extends StatelessWidget {
   ActivityFeed({super.key});
 
@@ -74,13 +90,18 @@ class ActivityFeed extends StatelessWidget {
                   final ts = data['createdAt'] as Timestamp?;
                   final createdAt = ts is Timestamp ? ts.toDate() : null;
 
+                  final animals = data['animals'] as List?;
+                  final animalSummary = (animals != null && animals.isNotEmpty)
+                      ? _animalSummary(animals)
+                      : (data['animalType'] as String? ?? '');
+
                   items.add(ActivityItem(
                     id: doc.id,
                     type: ActivityType.rescue,
                     title: 'Rescue Report #${shortCaseId(doc.id)}',
                     subtitle: data['address'] as String? ?? '-',
                     status: latestStatus,
-                    animalType: data['animalType'] as String? ?? '',
+                    animalType: animalSummary,
                     urgency: data['urgency'] as String? ?? '',
                     createdAt: createdAt,
                     docId: doc.id,

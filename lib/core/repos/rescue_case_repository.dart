@@ -50,6 +50,17 @@ class RescueCaseRepository {
   /// filters (urgency/species/date/location/search) are applied on top by
   /// the caller — Firestore can't combine an array-membership status query
   /// with several other equality/range filters efficiently on this schema.
+  ///
+  /// Multi-animal group reports (e.g. a cat + a dog logged together in one
+  /// rescue_page.dart submission) are stored as one `cases` doc per animal,
+  /// linked by a shared `groupId` (the primary doc's own id) — see the doc
+  /// comment on `_AnimalGroupSection` in rescue_detail_page.dart. Only the
+  /// primary doc is surfaced in these pipeline queues (Review/Assign/
+  /// Ongoing/Treatment/Intake); the sibling animal docs are fetched by
+  /// RescueDetailPage's groupId query when the admin opens that card. This
+  /// mirrors the same filter already applied in activity_feed.dart,
+  /// public_rescue_feed.dart, and history_screen.dart, so a group report
+  /// reads as a single case everywhere in the app, not one per animal.
   Stream<List<RescueCase>> streamCasesByStatuses(List<RescueStatus> statuses) {
     final values = statuses.expand((s) => s.queryValues).toSet().toList();
     if (values.isEmpty) return Stream.value(const []);
@@ -59,37 +70,43 @@ class RescueCaseRepository {
         .where('status', whereIn: values)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map(RescueCase.fromFirestore).toList());
+        .map((snap) => snap.docs
+        .where((doc) {
+      final groupId = doc.data()['groupId'] as String?;
+      return groupId == null || groupId == doc.id;
+    })
+        .map(RescueCase.fromFirestore)
+        .toList());
   }
 
   Stream<RescueCase?> streamCase(String caseId) {
     return _caseDoc(caseId).snapshots().map(
           (doc) => doc.exists ? RescueCase.fromFirestore(doc) : null,
-        );
+    );
   }
 
   Stream<List<RescueReport>> streamReports(String caseId) {
     return _reportsOf(caseId).orderBy('submittedAt').snapshots().map(
           (snap) => snap.docs.map((d) => RescueReport.fromFirestore(d, caseId)).toList(),
-        );
+    );
   }
 
   Stream<List<Referral>> streamReferrals(String caseId) {
     return _referralsOf(caseId).orderBy('createdAt', descending: true).snapshots().map(
           (snap) => snap.docs.map((d) => Referral.fromFirestore(d, caseId)).toList(),
-        );
+    );
   }
 
   Stream<List<ActivityLogEntry>> streamActivityLogs(String caseId) {
     return _activityLogsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
           (snap) => snap.docs.map((d) => ActivityLogEntry.fromFirestore(d, caseId)).toList(),
-        );
+    );
   }
 
   Stream<List<CommunityReport>> streamCommunityReports(String caseId) {
     return _communityReportsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
           (snap) => snap.docs.map(CommunityReport.fromFirestore).toList(),
-        );
+    );
   }
 
   /// Every account with role == 'pet_transporter' — the exact string
@@ -101,7 +118,7 @@ class RescueCaseRepository {
   Stream<List<PetTransporter>> streamPetTransporters() {
     return _users.where('role', isEqualTo: 'pet_transporter').snapshots().map(
           (snap) => snap.docs.map(PetTransporter.fromFirestore).toList(),
-        );
+    );
   }
 
   /// The most recently offered rider assignment for a case, regardless of
@@ -153,10 +170,10 @@ class RescueCaseRepository {
   /// pulls a bounded window of same-species active cases and computes
   /// distance client-side rather than doing a true geo query.
   Future<List<RescueCase>> findPossibleDuplicates(
-    RescueCase source, {
-    double radiusKm = 1.0,
-    int limit = 20,
-  }) async {
+      RescueCase source, {
+        double radiusKm = 1.0,
+        int limit = 20,
+      }) async {
     if (source.animalType == null || source.lat == null || source.lng == null) {
       return const [];
     }
@@ -502,11 +519,15 @@ class RescueCaseRepository {
   /// Saves a clinic (picked via the map/Places search in
   /// select_clinic_sheet.dart) onto the case as flat `vetClinic*` fields —
   /// the same convention already read by treatment_detail_page.dart /
-  /// intake_detail_page.dart for `vetClinicName`. This is purely
-  /// informational for the admin/treatment side; it intentionally does NOT
-  /// touch the `dropoff*` fields the pet-transporter app's own live routing
-  /// reads (see transit_progress_page.dart) — those two "selected clinic"
-  /// concepts aren't reconciled yet (see repo notes / assessment doc).
+  /// intake_detail_page.dart for `vetClinicName`. Also mirrors the same
+  /// clinic onto the `dropoff*` fields the pet-transporter app's own live
+  /// routing reads (rescue_request.dart, service_screen.dart,
+  /// transit_progress_page.dart, track_case_page.dart) — these were two
+  /// separate "assigned clinic" schemas that were never reconciled, so the
+  /// transporter never saw the admin's actual clinic choice and fell back
+  /// to showing the pickup address instead. `_findAndRouteToNextClinic`'s
+  /// auto-search after a rejection still writes `dropoff*` directly for its
+  /// own reassignment, independent of this admin-initiated path.
   Future<void> assignClinic({
     required String caseId,
     required String clinicName,
@@ -526,6 +547,14 @@ class RescueCaseRepository {
       'vetClinicLng': clinicLng,
       'vetClinicPhone': clinicPhone,
       'vetClinicSelectedAt': Timestamp.now(),
+      // Mirrored so the pet-transporter app shows/routes to the actual
+      // admin-assigned clinic instead of falling back to the pickup
+      // address.
+      'dropoffAddress': clinicAddress ?? clinicName,
+      'dropoffPlaceId': clinicPlaceId,
+      'dropoffName': clinicName,
+      'dropoffLat': clinicLat,
+      'dropoffLng': clinicLng,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Assigned to clinic: $clinicName.', 'timestamp': Timestamp.now()}
       ]),

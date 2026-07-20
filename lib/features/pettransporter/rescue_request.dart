@@ -3,16 +3,25 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 
 class RescueRequest extends StatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
+  // Set only when this request came from a specific admin assignment offer
+  // (cases/{caseId}/transportAssignments/{assignmentId}, status 'pending') —
+  // in that case Start Now / Decline go through
+  // RescueCaseRepository.acceptAssignment/rejectAssignment instead of the
+  // legacy direct case-field write, which is reserved for the open pickup
+  // pool (a case nobody has been offered yet).
+  final String? assignmentId;
 
   const RescueRequest({
     super.key,
     required this.caseId,
     required this.data,
+    this.assignmentId,
   });
 
   @override
@@ -38,21 +47,40 @@ class _RescueRequestState extends State<RescueRequest> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
           .trim();
 
-      await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .update({
-        'status': 'accepted',
-        'assignedVolunteerId': uid,
-        'assignedVolunteerName':
-        riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Rider accepted the rescue request.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
+      final assignmentId = widget.assignmentId;
+      if (assignmentId != null) {
+        // A real admin-offered assignment — accept the specific offer so
+        // the admin's Assign Rider screen (which listens on this exact
+        // assignment doc) sees the acceptance, and the case's own
+        // status/assignedVolunteer* fields get updated the same way the
+        // legacy flow below always did.
+        final verification =
+        userData?['transporterVerification'] as Map<String, dynamic>?;
+        await RescueCaseRepository().acceptAssignment(
+          caseId: widget.caseId,
+          assignmentId: assignmentId,
+          riderId: uid,
+          riderName: riderName.isEmpty ? 'A pet transporter' : riderName,
+          riderVehicle: (verification?['vehicleType'] as String?) ?? '',
+          riderPlate: (verification?['licensePlate'] as String?) ?? '',
+        );
+      } else {
+        await FirebaseFirestore.instance
+            .collection('cases')
+            .doc(widget.caseId)
+            .update({
+          'status': 'accepted',
+          'assignedVolunteerId': uid,
+          'assignedVolunteerName':
+          riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
+          'statusHistory': FieldValue.arrayUnion([
+            {
+              'status': 'Rider accepted the rescue request.',
+              'timestamp': Timestamp.now(),
+            }
+          ]),
+        });
+      }
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -79,6 +107,21 @@ class _RescueRequestState extends State<RescueRequest> {
   Future<void> _decline(List<String> reasons) async {
     setState(() => _isDeclining = true);
     try {
+      final assignmentId = widget.assignmentId;
+      if (assignmentId != null) {
+        // Reject the specific offer — the admin's Assign Rider screen picks
+        // this up via its own listener and lets them choose another
+        // transporter. Deliberately doesn't touch the case's own status:
+        // it was never changed to offer this rider in the first place.
+        await RescueCaseRepository().rejectAssignment(
+          caseId: widget.caseId,
+          assignmentId: assignmentId,
+          reason: reasons.join('; '),
+        );
+        if (mounted) Navigator.pop(context);
+        return;
+      }
+
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final caseRef =
       FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
@@ -324,11 +367,19 @@ class _RescueRequestState extends State<RescueRequest> {
     final d = widget.data;
     final urgency = d['urgency'] ?? '';
     final address = d['address'] ?? '';
-    final dropoffAddress = d['dropoffAddress'] ?? address;
+    // vetClinicAddress is the admin's actual Select Clinic choice; dropoff*
+    // is normally mirrored from it (see RescueCaseRepository.assignClinic),
+    // but this fallback still shows the right clinic for any case assigned
+    // before that mirroring existed.
+    final dropoffAddress = d['dropoffAddress'] ?? d['vetClinicAddress'] ?? address;
     final condition = d['condition'] ?? '';
     final animalType = d['animalType'] ?? '';
     final photoUrls = List<String>.from(d['photoUrls'] ?? []);
-    final alreadyAccepted = d['status'] == 'accepted' || d['status'] == 'ongoing';
+    // A pending admin offer (widget.assignmentId != null) leaves the
+    // case's own raw status at 'accepted' while awaiting THIS rider's
+    // response — that must never read as "already accepted" here.
+    final alreadyAccepted = widget.assignmentId == null &&
+        (d['status'] == 'accepted' || d['status'] == 'ongoing');
 
     return Scaffold(
       backgroundColor: AppColors.background,

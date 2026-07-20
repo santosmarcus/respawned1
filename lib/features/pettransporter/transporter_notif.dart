@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/features/pettransporter/rescue_request.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
@@ -16,6 +17,10 @@ class _NotifItem {
   final String message;
   final DateTime timestamp;
   final String caseId;
+  // Set only for a pending admin assignment offer notification — tapping
+  // this one opens RescueRequest (Start Now / Decline) instead of
+  // TransitProgressPage, since nothing has been accepted yet.
+  final String? assignmentId;
 
   const _NotifItem({
     required this.refLabel,
@@ -23,9 +28,12 @@ class _NotifItem {
     required this.message,
     required this.timestamp,
     required this.caseId,
+    this.assignmentId,
   });
 
-  String get id => '${caseId}_${type}_${timestamp.millisecondsSinceEpoch}';
+  String get id => assignmentId != null
+      ? '${caseId}_offer_$assignmentId'
+      : '${caseId}_${type}_${timestamp.millisecondsSinceEpoch}';
 }
 
 class TransporterNotifications extends StatefulWidget {
@@ -41,9 +49,11 @@ class _TransporterNotificationsState
   final String? _uid = FirebaseAuth.instance.currentUser?.uid;
 
   StreamSubscription<QuerySnapshot>? _casesSub;
+  StreamSubscription<QuerySnapshot>? _offersSub;
   final Map<String, StreamSubscription<QuerySnapshot>> _messageSubs = {};
 
   List<_NotifItem> _statusItems = [];
+  List<_NotifItem> _offerItems = [];
   final Map<String, List<_NotifItem>> _messageItemsByCase = {};
 
   DateTime? _lastSeenAt;
@@ -85,6 +95,27 @@ class _TransporterNotificationsState
         .where('assignedVolunteerId', isEqualTo: uid)
         .snapshots()
         .listen(_onCasesUpdate);
+
+    // Admin assignments (assign_rider_page.dart) create a pending offer doc
+    // under cases/{caseId}/transportAssignments instead of touching the
+    // case's own assignedVolunteerId — so the listener above alone never
+    // sees a freshly-offered case. This collectionGroup query is what
+    // actually notifies this rider that the admin has something for them.
+    // Requires a Firestore composite collection-group index on
+    // transportAssignments (riderId, status) — the first live query prints
+    // the console's direct create-index link if it's still missing.
+    _offersSub = FirebaseFirestore.instance
+        .collectionGroup('transportAssignments')
+        .where('riderId', isEqualTo: uid)
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen(
+      _onOffersUpdate,
+      onError: (e) => debugPrint(
+          'TransporterNotifications: offers query failed (likely a '
+              'missing Firestore composite index on transportAssignments '
+              'riderId+status): $e'),
+    );
 
     FirebaseFirestore.instance.collection('users').doc(uid).set(
       {'lastTransporterNotificationsSeenAt': FieldValue.serverTimestamp()},
@@ -142,6 +173,29 @@ class _TransporterNotificationsState
     if (mounted) setState(() => _statusItems = items);
   }
 
+  void _onOffersUpdate(QuerySnapshot snap) {
+    final items = <_NotifItem>[];
+
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final caseId = data['caseId'] as String?;
+      if (caseId == null || caseId.isEmpty) continue;
+
+      final ts = data['offeredAt'];
+      items.add(_NotifItem(
+        refLabel: _labelFor(caseId),
+        type: 'New Assignment',
+        message: 'You have a new rescue transport assignment. Tap to '
+            'review and accept or decline.',
+        timestamp: ts is Timestamp ? ts.toDate() : DateTime.now(),
+        caseId: caseId,
+        assignmentId: doc.id,
+      ));
+    }
+
+    if (mounted) setState(() => _offerItems = items);
+  }
+
   void _onMessagesUpdate(String caseId, String label, QuerySnapshot snap) {
     final uid = _uid;
     final items = <_NotifItem>[];
@@ -171,6 +225,7 @@ class _TransporterNotificationsState
   List<_NotifItem> get _allItems {
     final all = <_NotifItem>[
       ..._statusItems,
+      ..._offerItems,
       for (final list in _messageItemsByCase.values) ...list,
     ];
     all.removeWhere((item) => _dismissedIds.contains(item.id));
@@ -217,10 +272,81 @@ class _TransporterNotificationsState
 
   void _openItem(_NotifItem item) {
     _dismiss(item);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => TransitProgressPage(caseId: item.caseId),
+
+    final assignmentId = item.assignmentId;
+    if (assignmentId != null) {
+      // Pending offer — nothing accepted yet, so this goes to the
+      // Start Now / Decline screen rather than the transit tracker.
+      FirebaseFirestore.instance
+          .collection('cases')
+          .doc(item.caseId)
+          .get()
+          .then((doc) {
+        if (!mounted) return;
+        final data = doc.data() as Map<String, dynamic>? ?? {};
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => RescueRequest(
+              caseId: item.caseId,
+              data: data,
+              assignmentId: assignmentId,
+            ),
+          ),
+        );
+      });
+      return;
+    }
+
+    // A status-update/message notification for a case that has since
+    // reached a final state shouldn't drop the rider back into the transit
+    // tracker for a trip that's already over — check first and show a
+    // simple heads-up instead.
+    FirebaseFirestore.instance
+        .collection('cases')
+        .doc(item.caseId)
+        .get()
+        .then((doc) {
+      if (!mounted) return;
+      final status = (doc.data()?['status'] as String? ?? '').toLowerCase();
+      final isCompleted = status == 'closed' ||
+          status.contains('completed') ||
+          status.contains('ended');
+
+      if (isCompleted) {
+        _showCaseCompletedDialog();
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TransitProgressPage(caseId: item.caseId),
+        ),
+      );
+    });
+  }
+
+  void _showCaseCompletedDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Case Completed',
+            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        content: Text(
+          'This case has been completed.',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK',
+                style: GoogleFonts.zain(
+                    fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          ),
+        ],
       ),
     );
   }
@@ -228,6 +354,7 @@ class _TransporterNotificationsState
   @override
   void dispose() {
     _casesSub?.cancel();
+    _offersSub?.cancel();
     for (final s in _messageSubs.values) {
       s.cancel();
     }

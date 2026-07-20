@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
+import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
@@ -415,6 +416,11 @@ class _StatsRow extends StatelessWidget {
       builder: (context, snapshot) {
         int completed = 0;
         int ongoing = 0;
+        // The specific case to jump to when "Ongoing" is tapped — the
+        // rider is only ever meant to have one active job at a time (see
+        // createAssignmentOffer's single-active-assignment guard), so the
+        // first match found is the one to show.
+        String? ongoingCaseId;
 
         if (snapshot.hasData) {
           for (final doc in snapshot.data!.docs) {
@@ -425,6 +431,7 @@ class _StatsRow extends StatelessWidget {
               completed++;
             } else if (_ongoingStatuses.contains(status)) {
               ongoing++;
+              ongoingCaseId ??= doc.id;
             }
           }
         }
@@ -438,7 +445,21 @@ class _StatsRow extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _StatCard(
-                  label: 'Ongoing', value: '$ongoing', icon: Icons.local_shipping_outlined),
+                label: 'Ongoing',
+                value: '$ongoing',
+                icon: Icons.local_shipping_outlined,
+                onTap: ongoingCaseId == null
+                    ? null
+                    : () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          TransitProgressPage(caseId: ongoingCaseId!),
+                    ),
+                  );
+                },
+              ),
             ),
           ],
         );
@@ -451,12 +472,16 @@ class _StatCard extends StatelessWidget {
   final String label;
   final String value;
   final IconData icon;
+  final VoidCallback? onTap;
   const _StatCard(
-      {required this.label, required this.value, required this.icon});
+      {required this.label,
+        required this.value,
+        required this.icon,
+        this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final card = Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -480,6 +505,14 @@ class _StatCard extends StatelessWidget {
                   fontSize: 12, color: AppColors.textSecondary)),
         ],
       ),
+    );
+
+    if (onTap == null) return card;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: card,
     );
   }
 }
