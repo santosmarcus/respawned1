@@ -95,6 +95,7 @@ class RescueCase {
   // ---- Intake -------------------------------------------------------
   final String? intakeDestinationName;
   final String? intakeDestinationAddress;
+  final String? intakeDestinationPlaceId;
   final double? intakeDestinationLat;
   final double? intakeDestinationLng;
   final DateTime? intakeConfirmedAt;
@@ -162,6 +163,7 @@ class RescueCase {
     this.latestTreatmentUpdateType,
     this.intakeDestinationName,
     this.intakeDestinationAddress,
+    this.intakeDestinationPlaceId,
     this.intakeDestinationLat,
     this.intakeDestinationLng,
     this.intakeConfirmedAt,
@@ -245,6 +247,7 @@ class RescueCase {
       latestTreatmentUpdateType: data['latestTreatmentUpdateType'] as String?,
       intakeDestinationName: data['intakeDestinationName'] as String?,
       intakeDestinationAddress: data['intakeDestinationAddress'] as String?,
+      intakeDestinationPlaceId: data['intakeDestinationPlaceId'] as String?,
       intakeDestinationLat: (data['intakeDestinationLat'] as num?)?.toDouble(),
       intakeDestinationLng: (data['intakeDestinationLng'] as num?)?.toDouble(),
       intakeConfirmedAt:

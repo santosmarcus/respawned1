@@ -771,6 +771,40 @@ class RescueCaseRepository {
     });
   }
 
+  /// Organization-initiated cancellation of a still-pending offer — the
+  /// "Back" path out of the pending-assignment modal, for a transporter
+  /// (typically a real one, with no accept/reject UI of their own yet)
+  /// whose response might never come. Never deletes the assignment doc —
+  /// full offer history (including this cancellation) is preserved, only
+  /// the status changes. Clears the case's `currentAssignmentId` pointer
+  /// only if it still points at *this* assignment (guards against a race
+  /// where a newer offer was already created by the time this resolves).
+  /// A no-op if the offer is no longer pending, guarding against
+  /// double-cancellation.
+  Future<void> cancelAssignment({
+    required String caseId,
+    required String assignmentId,
+    String? reason,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(assignmentRef);
+      if (!snap.exists || snap.data()?['status'] != 'pending') return;
+      final now = Timestamp.now();
+      tx.update(assignmentRef, {
+        'status': 'cancelled',
+        'respondedAt': now,
+        'cancelledAt': now,
+        if (reason != null && reason.isNotEmpty) 'cancellationReason': reason,
+      });
+      final caseSnap = await tx.get(caseRef);
+      if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
+        tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
+      }
+    });
+  }
+
   /// Closes out an accepted assignment once the animal has reached
   /// treatment — this is what frees a demo/real rider back to "Available"
   /// (streamActiveAssignmentsByRider only counts pending/accepted).
@@ -920,6 +954,7 @@ class RescueCaseRepository {
     required String caseId,
     required String destinationName,
     String? destinationAddress,
+    String? destinationPlaceId,
     double? destinationLat,
     double? destinationLng,
     String? transporterUid,
@@ -942,6 +977,7 @@ class RescueCaseRepository {
         'status': RescueStatus.intake.firestoreValue,
         'intakeDestinationName': destinationName,
         'intakeDestinationAddress': destinationAddress,
+        'intakeDestinationPlaceId': destinationPlaceId,
         'intakeDestinationLat': destinationLat,
         'intakeDestinationLng': destinationLng,
         'intakeConfirmedAt': now,

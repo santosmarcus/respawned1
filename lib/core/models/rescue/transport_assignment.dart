@@ -34,6 +34,8 @@ class TransportAssignment {
   final DateTime? rejectedAt;
   final String? rejectionReason;
   final DateTime? completedAt;
+  final DateTime? cancelledAt;
+  final String? cancellationReason;
   final bool isDemo;
 
   const TransportAssignment({
@@ -49,6 +51,8 @@ class TransportAssignment {
     this.rejectedAt,
     this.rejectionReason,
     this.completedAt,
+    this.cancelledAt,
+    this.cancellationReason,
     this.isDemo = false,
   });
 
@@ -75,6 +79,8 @@ class TransportAssignment {
       rejectedAt: ts('rejectedAt'),
       rejectionReason: data['rejectionReason'] as String?,
       completedAt: ts('completedAt'),
+      cancelledAt: ts('cancelledAt'),
+      cancellationReason: data['cancellationReason'] as String?,
       isDemo: data['isDemo'] as bool? ?? false,
     );
   }

@@ -8,6 +8,7 @@ import 'package:respawnd1/app_theme.dart';
 /// "Create Record" entry point and, with [prefillData]/[linkedCaseId]/
 /// [sourceAnimalIndex]/[stepCurrent]/[stepTotal] set, by
 /// AnimalRecordsFlowPage's multi-animal creation flow. Not a parallel form.
+// TODO: Update the Animal Record form layout and fields after the revised design references are provided.
 class CreateAnimalRecordPage extends StatefulWidget {
   final Map<String, dynamic>? prefillData; // from intake
   final String? linkedCaseId;

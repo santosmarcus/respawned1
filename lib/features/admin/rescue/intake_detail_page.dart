@@ -12,11 +12,9 @@ import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
+import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 
-// TODO(intake-locations): no UI writes organizations/{orgId}.shelterLocation
-// or shelterLat/Lng yet (see OrganizationDirectoryRepository.resolveShelterLocation),
-// so this is the last-resort default almost every case falls back to today.
-const _kFallbackShelterName = 'Dasmarinas, Cavite';
+typedef ShelterDestination = ({String name, String? address, String? placeId, double? lat, double? lng});
 
 class IntakeDetailPage extends ConsumerStatefulWidget {
   final String caseId;
@@ -34,8 +32,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   bool _isSkippingQuarantine = false;
   final _quarantineDaysController = TextEditingController(text: '7');
   bool _hasCheckedQuarantineAutoComplete = false;
+  bool _quarantineExpanded = false;
 
-  ({String name, double? lat, double? lng})? _resolvedDestination;
+  ShelterDestination? _resolvedDestination;
+  String? _currentOrganizationId;
 
   @override
   void initState() {
@@ -49,17 +49,44 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     super.dispose();
   }
 
+  /// Resolves the org's saved shelter location as the Intake destination —
+  /// no hardcoded fallback: if the organization hasn't configured a shelter
+  /// location yet (and has no legacy `location` field either), the
+  /// destination stays null and the UI prompts "Set Shelter Location"
+  /// instead of silently defaulting to a placeholder address.
   Future<void> _resolveDestination() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    ({String name, double? lat, double? lng})? resolved;
+    ShelterDestination? resolved;
+    String? orgId;
     if (uid != null) {
       final membership = await OrgMembershipService().getMembership(uid);
-      resolved =
-          await ref.read(organizationDirectoryRepositoryProvider).resolveShelterLocation(membership?.organizationId);
+      orgId = membership?.organizationId;
+      resolved = await ref.read(organizationDirectoryRepositoryProvider).resolveShelterLocation(orgId);
     }
     if (mounted) {
-      setState(() => _resolvedDestination = resolved ?? (name: _kFallbackShelterName, lat: null, lng: null));
+      setState(() {
+        _resolvedDestination = resolved;
+        _currentOrganizationId = orgId;
+      });
     }
+  }
+
+  Future<void> _openShelterPicker() async {
+    final orgId = _currentOrganizationId;
+    if (orgId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No organization is linked to this account yet.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => ShelterLocationPickerPage(organizationId: orgId)),
+    );
+    if (saved == true) _resolveDestination();
   }
 
   /// Fires at most once per page instance. See
@@ -82,7 +109,8 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   }) async {
     if (_isConfirmingIntake) return;
     final destination = _resolvedDestination;
-    if (destination == null) return;
+    if (destination == null || destination.lat == null || destination.lng == null) return;
+    if (transporterUid == null) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -95,7 +123,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _ConfirmRow('Intake Destination', destination.name),
-            _ConfirmRow('Transporter', transporterUid != null ? '$transporterName ($transporterType)' : 'None selected'),
+            _ConfirmRow('Transporter', '$transporterName ($transporterType)'),
             _ConfirmRow('Clinic Pickup Location', c.vetClinicName ?? 'Not on file'),
             _ConfirmRow('Case ID', '#${c.shortCaseId}'),
             _ConfirmRow('Species Summary', c.speciesSummary),
@@ -131,11 +159,13 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       await ref.read(rescueCaseRepositoryProvider).confirmIntake(
             caseId: widget.caseId,
             destinationName: destination.name,
+            destinationAddress: destination.address,
+            destinationPlaceId: destination.placeId,
             destinationLat: destination.lat,
             destinationLng: destination.lng,
             transporterUid: transporterUid,
-            transporterName: transporterUid != null ? transporterName : null,
-            transporterType: transporterUid != null ? transporterType : null,
+            transporterName: transporterName,
+            transporterType: transporterType,
             isDemoTransporter: transporterIsDemo,
           );
       if (mounted) setState(() => _isConfirmingIntake = false);
@@ -282,6 +312,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 defaultType: defaultType,
                 defaultIsDemo: defaultIsDemo,
                 isConfirming: _isConfirmingIntake,
+                onChangeShelter: _openShelterPicker,
                 onReassign: () => Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -303,6 +334,8 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
             else ...[
               _SectionHeader('Intake Destination'),
               _InfoItem('Destination', c.intakeDestinationName ?? '-'),
+              if ((c.intakeDestinationAddress ?? '').isNotEmpty)
+                _InfoItem('Address', c.intakeDestinationAddress!),
               const SizedBox(height: 16),
 
               _SectionHeader('Transporter'),
@@ -382,6 +415,8 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 isStarting: _isStartingQuarantine,
                 isEnding: _isEndingQuarantine,
                 isSkipping: _isSkippingQuarantine,
+                expanded: _quarantineExpanded,
+                onToggleExpand: () => setState(() => _quarantineExpanded = !_quarantineExpanded),
                 onStart: _startQuarantine,
                 onEnd: _endQuarantine,
                 onSkip: _skipQuarantine,
@@ -406,12 +441,13 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
 class _ConfirmIntakeSection extends StatelessWidget {
   final RescueCase rescueCase;
-  final ({String name, double? lat, double? lng})? destination;
+  final ShelterDestination? destination;
   final String? defaultUid;
   final String defaultName;
   final String defaultType;
   final bool defaultIsDemo;
   final bool isConfirming;
+  final VoidCallback onChangeShelter;
   final VoidCallback onReassign;
   final VoidCallback onConfirm;
 
@@ -423,17 +459,23 @@ class _ConfirmIntakeSection extends StatelessWidget {
     required this.defaultType,
     required this.defaultIsDemo,
     required this.isConfirming,
+    required this.onChangeShelter,
     required this.onReassign,
     required this.onConfirm,
   });
 
+  bool get _hasUsableDestination => destination != null && destination!.lat != null && destination!.lng != null;
+
   @override
   Widget build(BuildContext context) {
+    final canConfirm = _hasUsableDestination && defaultUid != null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionHeader('Confirm Intake'),
-        _InfoItem('Intake Destination', destination?.name ?? 'Resolving…'),
+        _DestinationCard(destination: destination, onChangeShelter: onChangeShelter),
+        const SizedBox(height: 16),
         _InfoItem('Selected Transporter', defaultUid != null ? '$defaultName ($defaultType)' : 'None selected'),
         _InfoItem('Clinic Pickup Location', rescueCase.vetClinicName ?? 'Not on file'),
         const SizedBox(height: 8),
@@ -447,10 +489,21 @@ class _ConfirmIntakeSection extends StatelessWidget {
           child: Text('Reassign Transporter', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
         ),
         const SizedBox(height: 20),
+        if (!canConfirm) ...[
+          Text(
+            !_hasUsableDestination
+                ? 'Set a shelter location before confirming intake.'
+                : 'Select a transporter before confirming intake.',
+            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 8),
+        ],
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: (isConfirming || destination == null) ? null : onConfirm,
+            onPressed: isConfirming
+                ? null
+                : (!_hasUsableDestination ? onChangeShelter : (canConfirm ? onConfirm : null)),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellowrspwn,
               disabledBackgroundColor: AppColors.slaterspwn,
@@ -461,7 +514,10 @@ class _ConfirmIntakeSection extends StatelessWidget {
             child: isConfirming
                 ? const SizedBox(
                     height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                : Text('Confirm Intake', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                : Text(
+                    !_hasUsableDestination ? 'Set Shelter Location' : 'Confirm Intake',
+                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                  ),
           ),
         ),
       ],
@@ -469,12 +525,78 @@ class _ConfirmIntakeSection extends StatelessWidget {
   }
 }
 
+/// "Intake Destination / <name> / [Change Location]" or, with nothing
+/// configured yet, "No shelter location configured. / [Set Shelter
+/// Location]" — deliberately card-sized, not a permanent map; the map only
+/// exists inside ShelterLocationPickerPage.
+class _DestinationCard extends StatelessWidget {
+  final ShelterDestination? destination;
+  final VoidCallback onChangeShelter;
+
+  const _DestinationCard({required this.destination, required this.onChangeShelter});
+
+  @override
+  Widget build(BuildContext context) {
+    final d = destination;
+    final hasCoords = d != null && d.lat != null && d.lng != null;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.home_work_outlined, color: hasCoords ? AppColors.textPrimary : AppColors.textSecondary, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Intake Destination',
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                const SizedBox(height: 2),
+                Text(
+                  d == null ? 'No shelter location configured.' : d.name,
+                  style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                ),
+                if (d != null && (d.address ?? '').isNotEmpty)
+                  Text(d.address!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                if (d != null && !hasCoords)
+                  Text('No coordinates on file — set an exact location.',
+                      style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: onChangeShelter,
+            child: Text(d == null ? 'Set Shelter Location' : 'Change Location',
+                style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Collapsed by default — shows only title + a one-line status summary +
+/// expand arrow, never the active quarantine's controls or dates in full.
+/// The summary line itself (computed from persisted quarantineStatus/
+/// quarantine*At fields, not local state) always stays visible even while
+/// collapsed, so an active quarantine is never silently hidden. Expand/
+/// collapse is purely a local UI toggle owned by the parent page — it does
+/// not read or write Firestore.
 class _QuarantineSection extends StatelessWidget {
   final RescueCase rescueCase;
   final TextEditingController daysController;
   final bool isStarting;
   final bool isEnding;
   final bool isSkipping;
+  final bool expanded;
+  final VoidCallback onToggleExpand;
   final VoidCallback onStart;
   final VoidCallback onEnd;
   final VoidCallback onSkip;
@@ -485,74 +607,108 @@ class _QuarantineSection extends StatelessWidget {
     required this.isStarting,
     required this.isEnding,
     required this.isSkipping,
+    required this.expanded,
+    required this.onToggleExpand,
     required this.onStart,
     required this.onEnd,
     required this.onSkip,
   });
 
+  ({String title, String subtitle}) _summary(RescueCase c) {
+    if (c.quarantineStatus == 'active' && c.isQuarantineActive) {
+      final end = c.quarantineScheduledEndAt;
+      return (title: 'Quarantine', subtitle: end != null ? 'Active · Ends ${_fmtDate(end)}' : 'Active');
+    }
+    if (c.hasQuarantineDecision) {
+      if (c.quarantineStatus == 'skipped') return (title: 'Quarantine', subtitle: 'Skipped');
+      final end = c.quarantineEndedAt;
+      return (title: 'Quarantine', subtitle: end != null ? 'Completed ${_fmtDate(end)}' : 'Completed');
+    }
+    return (title: 'Quarantine — Optional', subtitle: 'Not started');
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = rescueCase;
+    final summary = _summary(rescueCase);
 
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onToggleExpand,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(summary.title, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text(summary.subtitle, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+                Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textPrimary),
+              ],
+            ),
+          ),
+          if (expanded) ...[
+            const SizedBox(height: 12),
+            _buildExpandedContent(rescueCase),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpandedContent(RescueCase c) {
     if (c.quarantineStatus == 'active' && c.isQuarantineActive) {
       final remaining = c.quarantineScheduledEndAt?.difference(DateTime.now());
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.slaterspwn),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionHeader('Quarantine — Active', noPad: true),
-            const SizedBox(height: 8),
-            if (c.quarantineStartedAt != null) _InfoItem('Started', _fmtDate(c.quarantineStartedAt!)),
-            if (c.quarantineDurationDays != null) _InfoItem('Duration', '${c.quarantineDurationDays} days'),
-            if (c.quarantineScheduledEndAt != null) _InfoItem('Scheduled End', _fmtDate(c.quarantineScheduledEndAt!)),
-            if (remaining != null) _InfoItem('Remaining', '${remaining.inDays} day(s)'),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: isEnding ? null : onEnd,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFE05353),
-                  side: const BorderSide(color: Color(0xFFE05353)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
-                child: isEnding
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text('End Quarantine', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (c.quarantineStartedAt != null) _InfoItem('Started', _fmtDate(c.quarantineStartedAt!)),
+          if (c.quarantineDurationDays != null) _InfoItem('Duration', '${c.quarantineDurationDays} days'),
+          if (c.quarantineScheduledEndAt != null) _InfoItem('Scheduled End', _fmtDate(c.quarantineScheduledEndAt!)),
+          if (remaining != null) _InfoItem('Remaining', '${remaining.inDays} day(s)'),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: isEnding ? null : onEnd,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFE05353),
+                side: const BorderSide(color: Color(0xFFE05353)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               ),
+              child: isEnding
+                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text('End Quarantine', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
             ),
-          ],
-        ),
+          ),
+        ],
       );
     }
 
     if (c.hasQuarantineDecision) {
-      // Already decided (completed or explicitly skipped) — show a short
-      // summary instead of re-prompting.
       final label = c.quarantineStatus == 'skipped'
-          ? 'Quarantine skipped.'
+          ? 'Quarantine was skipped for this case.'
           : 'Quarantine completed'
               '${c.quarantineEndedAt != null ? ' on ${_fmtDate(c.quarantineEndedAt!)}' : ''}.';
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SectionHeader('Quarantine'),
-          Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-        ],
-      );
+      return Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
     }
 
     // Not yet decided — offer Start/Skip.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader('Quarantine — Optional'),
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -664,13 +820,12 @@ class _AnimalRecordsSection extends StatelessWidget {
 
 class _SectionHeader extends StatelessWidget {
   final String text;
-  final bool noPad;
-  const _SectionHeader(this.text, {this.noPad = false});
+  const _SectionHeader(this.text);
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: noPad ? 0 : 8),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Text(text, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
     );
   }
