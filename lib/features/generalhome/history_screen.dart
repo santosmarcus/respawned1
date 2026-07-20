@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 
@@ -204,7 +205,7 @@ class _RescueHistoryCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '#${caseId.substring(0, 7).toUpperCase()}',
+                    '#${shortCaseId(caseId)}',
                     style: GoogleFonts.tiltWarp(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,

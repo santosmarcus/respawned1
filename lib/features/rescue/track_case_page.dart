@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../app_theme.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 
 // Same Google Geocoding key used elsewhere in the rescue flow (rescue_page.dart)
@@ -237,7 +238,7 @@ class _TrackCasePageState extends State<TrackCasePage> {
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            '#${widget.caseId.substring(0, 7).toUpperCase()}',
+                            '#${shortCaseId(widget.caseId)}',
                             style: GoogleFonts.tiltWarp(
                                 fontSize: 18,
                                 color: AppColors.textPrimary),
