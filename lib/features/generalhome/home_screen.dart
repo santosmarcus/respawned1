@@ -60,13 +60,6 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
         onTap: (index) {
-          // NOTE: this must be push, not pushReplacement. HomeScreen isn't
-          // reached via Navigator.push — it's the widget AuthWrapper
-          // returns directly inside the app's single root route.
-          // pushReplacement here would replace that entire route, evicting
-          // AuthWrapper (and its authStateChanges listener) from the tree
-          // for the rest of the session — which is why re-logging in
-          // afterward had nothing left to route it anywhere.
           if (index == 1) {
             Navigator.push(
               context, MaterialPageRoute(builder: (_) => const NotificationsScreen()),

@@ -18,9 +18,14 @@ import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
+import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
+// Species + breed picklists shared by every "animal" card in this flow
+// (owner's own pet, and each found/stray animal entry).
 const String _dogSpecies = 'Dog';
 const String _catSpecies = 'Cat';
 const String _othersBreedLabel = 'Others / Not sure';
@@ -232,7 +237,18 @@ class _RescuePageState extends State<RescuePage> {
 
   // Google Maps
   GoogleMapController? _mapController;
-  LatLng _pinnedLocation = const LatLng(14.5995, 120.9842); // default: Manila
+  // This is only ever a camera-framing default, used for the very first
+  // frame before any real position resolves — it must never be shown to
+  // the person as an actual pinned marker (see _hasResolvedLocation below),
+  // since it happens to be a real, recognizable Manila address rather than
+  // a neutral placeholder.
+  LatLng _pinnedLocation = const LatLng(14.5995, 120.9842);
+  // True once _pinnedLocation reflects an actual resolved position (fresh
+  // GPS, or the device's own last-known real fix) rather than the
+  // hardcoded camera-framing default above. The map marker only renders
+  // once this is true, so the person is never shown a pin sitting at that
+  // default coordinate as if it were their actual rescue location.
+  bool _hasResolvedLocation = false;
   String _pinnedAddress = 'Fetching location…';
   bool _loadingLocation = true;
 
@@ -264,8 +280,58 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   //Geolocation
+  // Tries the device's own last known real position first — still "the
+  // user's location" even without a fresh live GPS fix, and always a
+  // better default than an arbitrary hardcoded city coordinate. Only falls
+  // through to that hardcoded coordinate if there's truly no cached
+  // position at all (e.g. a fresh install that's never gotten a location
+  // fix on this device).
+  Future<void> _fallbackToLastKnownOrDefault(String reasonMessage) async {
+    // If we already have a real resolved position pinned (e.g. from the
+    // cached-fix seed below), don't clobber it with an error message —
+    // just stop the loading spinner.
+    if (_hasResolvedLocation) {
+      if (mounted) setState(() => _loadingLocation = false);
+      return;
+    }
+
+    Position? lastKnown;
+    try {
+      lastKnown = await Geolocator.getLastKnownPosition();
+    } catch (_) {
+      lastKnown = null;
+    }
+
+    if (lastKnown != null) {
+      await _updatePin(LatLng(lastKnown.latitude, lastKnown.longitude));
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _loadingLocation = false;
+        _pinnedAddress = reasonMessage;
+      });
+    }
+  }
+
   Future<void> _fetchCurrentLocation() async {
     setState(() => _loadingLocation = true);
+
+    // Seed the pin with any cached last-known fix right away, so the map
+    // reflects the user's own location as early as possible instead of
+    // sitting on the hardcoded camera-framing default while we wait on
+    // permission checks and a fresh GPS fix below.
+    if (!_hasResolvedLocation) {
+      try {
+        final cached = await Geolocator.getLastKnownPosition();
+        if (cached != null && mounted) {
+          await _updatePin(LatLng(cached.latitude, cached.longitude));
+        }
+      } catch (_) {
+        // Ignore — we still attempt a fresh fix below regardless.
+      }
+    }
 
     try {
       // Check if location service is on
@@ -282,10 +348,8 @@ class _RescuePageState extends State<RescuePage> {
             ),
           );
         }
-        setState(() {
-          _loadingLocation = false;
-          _pinnedAddress = 'Location services disabled — tap map to pin manually.';
-        });
+        await _fallbackToLastKnownOrDefault(
+            'Location services disabled — tap map to pin manually.');
         return;
       }
 
@@ -307,40 +371,30 @@ class _RescuePageState extends State<RescuePage> {
             ),
           );
         }
-        setState(() {
-          _loadingLocation = false;
-          _pinnedAddress = 'Location permission denied — tap map to pin manually.';
-        });
+        await _fallbackToLastKnownOrDefault(
+            'Location permission denied — tap map to pin manually.');
         return;
       }
 
-      // Get position with a timeout fallback
+      // Get a fresh, accurate fix. On timeout, fall back to whatever cached
+      // position is available rather than ever substituting the hardcoded
+      // default coordinate as if it were a real resolved location.
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-      ).timeout(
+      ).then<Position?>((p) => p).timeout(
         const Duration(seconds: 15),
-        onTimeout: () => Geolocator.getLastKnownPosition().then(
-              (p) => p ?? Position(
-            latitude: 14.5995,
-            longitude: 120.9842,
-            timestamp: DateTime.now(),
-            accuracy: 0,
-            altitude: 0,
-            altitudeAccuracy: 0,
-            heading: 0,
-            headingAccuracy: 0,
-            speed: 0,
-            speedAccuracy: 0,
-          ),
-        ),
+        onTimeout: () => Geolocator.getLastKnownPosition(),
       );
 
-      await _updatePin(LatLng(pos.latitude, pos.longitude));
+      if (pos != null) {
+        await _updatePin(LatLng(pos.latitude, pos.longitude));
+      } else {
+        await _fallbackToLastKnownOrDefault(
+            'Could not get your location — tap map to pin manually.');
+      }
     } catch (e) {
-      setState(() {
-        _loadingLocation = false;
-        _pinnedAddress = 'Could not get location — tap map to pin manually.';
-      });
+      await _fallbackToLastKnownOrDefault(
+          'Could not get location — tap map to pin manually.');
     }
   }
 
@@ -375,6 +429,7 @@ class _RescuePageState extends State<RescuePage> {
   Future<void> _updatePin(LatLng pos) async {
     setState(() {
       _pinnedLocation = pos;
+      _hasResolvedLocation = true;
       _pinnedAddress = 'Resolving address…';
       _loadingLocation = true;
     });
@@ -623,13 +678,10 @@ class _RescuePageState extends State<RescuePage> {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined,
                   color: AppColors.textPrimary),
-              title: Text('Choose photos from gallery',
+              title: Text('Choose photo from gallery',
                   style: GoogleFonts.zain(
                       fontSize: 15, color: AppColors.textPrimary)),
-              subtitle: Text('Select up to ${_mediaFiles.length} at once',
-                  style: GoogleFonts.zain(
-                      fontSize: 12, color: AppColors.textSecondary)),
-              onTap: () => Navigator.pop(context, 'photo_gallery_multi'),
+              onTap: () => Navigator.pop(context, 'photo_gallery'),
             ),
             ListTile(
               leading: const Icon(Icons.videocam_outlined,
@@ -665,11 +717,6 @@ class _RescuePageState extends State<RescuePage> {
 
     if (action == null || action == 'remove') return;
 
-    if (action == 'photo_gallery_multi') {
-      await _pickMultipleImages(startIndex: index);
-      return;
-    }
-
     XFile? file;
     bool isVideo = false;
 
@@ -677,6 +724,10 @@ class _RescuePageState extends State<RescuePage> {
       case 'photo_camera':
         file = await _picker.pickImage(
             source: ImageSource.camera, imageQuality: 80, maxWidth: 1280);
+        break;
+      case 'photo_gallery':
+        file = await _picker.pickImage(
+            source: ImageSource.gallery, imageQuality: 80, maxWidth: 1280);
         break;
       case 'video_camera':
         file = await _picker.pickVideo(
@@ -694,39 +745,6 @@ class _RescuePageState extends State<RescuePage> {
 
     if (file != null && mounted) {
       setState(() => _mediaFiles[index] = _MediaItem(file: file!, isVideo: isVideo));
-    }
-  }
-
-  Future<void> _pickMultipleImages({required int startIndex}) async {
-    final picked = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1280);
-    if (picked.isEmpty || !mounted) return;
-
-    final emptySlots = [
-      if (_mediaFiles[startIndex] == null) startIndex,
-      for (int i = 0; i < _mediaFiles.length; i++)
-        if (i != startIndex && _mediaFiles[i] == null) i,
-    ];
-
-    final placeCount =
-    picked.length < emptySlots.length ? picked.length : emptySlots.length;
-
-    setState(() {
-      for (int i = 0; i < placeCount; i++) {
-        _mediaFiles[emptySlots[i]] = _MediaItem(file: picked[i], isVideo: false);
-      }
-    });
-
-    if (placeCount < picked.length && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            placeCount == 0
-                ? 'You already have ${_mediaFiles.length} photos/videos added — remove one first.'
-                : 'Only $placeCount of ${picked.length} photos were added (max ${_mediaFiles.length} total).',
-          ),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
     }
   }
 
@@ -843,7 +861,7 @@ class _RescuePageState extends State<RescuePage> {
     final result = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => const _QRScannerPage(),
+        builder: (_) => const QRScannerPage(),
       ),
     );
 
@@ -896,18 +914,97 @@ class _RescuePageState extends State<RescuePage> {
     }
   }
 
-  void _handleScanResult(String result) {
+  // Gives the page's own location fetch (already running since initState)
+  // a brief window to finish, rather than proceeding with no location at
+  // all just because the person scanned before the map settled. Bounded so
+  // a stuck/denied GPS fix never blocks the scan indefinitely.
+  Future<void> _awaitResolvedLocation({
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (!_hasResolvedLocation && DateTime.now().isBefore(deadline)) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+    }
+  }
+
+  Future<void> _handleScanResult(String result) async {
     setState(() => _scannedTagId = result);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _isLostPetType
-              ? 'Tag found — this animal already has a registered profile. Owner will be notified directly.'
-              : 'Tag scanned: $result',
+
+    final tagId = AppLinks.tagIdFromScan(result);
+    if (tagId == null) {
+      // Doesn't look like one of our tags (or a bare ID at all) — just note
+      // whatever was scanned on this report, same as before.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Tag scanned: $result'),
+          backgroundColor: Colors.green,
         ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Tag scanned — checking for a registered pet…'),
         backgroundColor: Colors.green,
       ),
     );
+
+    await _awaitResolvedLocation();
+    if (!mounted) return;
+
+    try {
+      final outcome = await resolveScannedTagId(
+        tagId,
+        location: _hasResolvedLocation
+            ? ScanLocation(
+          lat: _pinnedLocation.latitude,
+          lng: _pinnedLocation.longitude,
+          address: _pinnedAddress,
+        )
+            : null,
+      );
+
+      if (!mounted) return;
+
+      if (!outcome.tagExists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _isLostPetType
+                  ? 'Tag scanned, but no registered profile was found for it.'
+                  : 'Tag scanned: $result',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+        return;
+      }
+
+      // A confirmed tag with a resolved location — go straight to notifying
+      // the owner and chatting, instead of continuing this manual report.
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PetFoundChatScreen(
+            tagId: outcome.tagId!,
+            sessionId: outcome.sessionId!,
+            petName: outcome.petName!,
+            isOwner: false,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not check this tag: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
   }
 
 //build
@@ -992,13 +1089,16 @@ class _RescuePageState extends State<RescuePage> {
                       zoom: 15,
                     ),
                     onTap: _updatePin,
-                    markers: {
+                    markers: _hasResolvedLocation
+                        ? {
                       Marker(
                         markerId: const MarkerId('rescue_pin'),
                         position: _pinnedLocation,
-                        infoWindow: const InfoWindow(title: 'Rescue Location'),
+                        infoWindow:
+                        const InfoWindow(title: 'Rescue Location'),
                       ),
-                    },
+                    }
+                        : {},
                     myLocationEnabled: true,
                     myLocationButtonEnabled: false,
                     zoomControlsEnabled: false,
@@ -1151,14 +1251,6 @@ class _RescuePageState extends State<RescuePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildLabel('Include images and videos', required: true),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Tap any box, then "Choose photos from gallery" to '
-                        'select several at once — no need to tap each box. '
-                        'At least 2 are required, up to 4 total.',
-                    style: GoogleFonts.zain(
-                        fontSize: 11, color: AppColors.textSecondary),
-                  ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
@@ -1724,7 +1816,8 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
-
+  // Species dropdown ('Dog' / 'Cat') shared by the owner's pet and every
+  // found/stray animal card.
   Widget _speciesDropdown({
     required String? value,
     required ValueChanged<String?> onChanged,
@@ -1748,6 +1841,8 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
+  // Breed dropdown, filtered by whichever species is selected. Picking
+  // "Others / Not sure" reveals a small text field for a custom breed.
   Widget _breedDropdown({
     required String? species,
     required String? breedValue,
@@ -2356,6 +2451,10 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
+  // Shared by every rescue type (not just Lost Pet finder reports): renders
+  // the repeatable animal cards plus "Add another animal" so any report —
+  // illness, injury, abandonment, a litter turned in together, etc. — can
+  // cover more than one animal as a single grouped case.
   List<Widget> _buildAnimalEntryFields() {
     return [
       for (int i = 0; i < _foundAnimals.length; i++) _buildFoundAnimalCard(i),
@@ -2530,64 +2629,64 @@ class _RescuePageState extends State<RescuePage> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
       final casesCollection = FirebaseFirestore.instance.collection('cases');
+      String? groupId;
+      final createdDocIds = <String>[];
 
-      final animalsPayload = [
-        for (final animal in validAnimals)
-          {
-            'species': animal.speciesText,
-            'breed': animal.breedText,
-            'sex': animal.sex,
-            'size': animal.size,
-            'colorMarkings': animal.colorController.text.trim(),
-          }
-      ];
-      final firstAnimal = validAnimals.first;
+      for (final animal in validAnimals) {
+        final docRef = await casesCollection.add({
+          'reporterId': uid,
+          'reporterName': reporterName,
+          'reporterPhone': userData?['phone'] ?? '',
+          'groupId': groupId, // backfilled below once the first doc exists
+          'animalType': animal.speciesText,
+          'breed': animal.breedText,
+          'sex': animal.sex,
+          'size': animal.size,
+          'colorMarkings': animal.colorController.text.trim(),
+          'rescueType': _selectedRescueType,
+          'condition': condition,
+          'urgency': _selectedUrgency,
+          'containmentStatus': _containmentStatus,
+          'strayTemperament': _strayTemperament,
+          'onSite': _onSiteChoice,
+          'accessInstructions': _accessInstructionsController.text.trim(),
+          'bestTimeToContact': _bestTimeContactController.text.trim(),
+          'reportAnonymously':
+          _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
+          'address': _addressController.text.trim().isEmpty
+              ? _pinnedAddress
+              : _addressController.text.trim(),
+          'lat': _pinnedLocation.latitude,
+          'lng': _pinnedLocation.longitude,
+          'coordinateWithShelter': _coordinateChoice,
+          'witnessName': _witnessNameController.text.trim(),
+          'witnessPhone': _witnessNumberController.text.trim(),
+          'interestedToAdopt': _adoptionChoice,
+          'scannedTagId': _scannedTagId,
+          'status': 'pending',
+          'statusHistory': [
+            {
+              'status': 'Rescue case is being reviewed.',
+              'timestamp': Timestamp.now(),
+            }
+          ],
+          'photoUrls': [],
+          'createdAt': Timestamp.now(),
+          'serverCreatedAt' : FieldValue.serverTimestamp(),
+        });
+        groupId ??= docRef.id;
+        createdDocIds.add(docRef.id);
+      }
+      for (final id in createdDocIds) {
+        await casesCollection.doc(id).update({'groupId': groupId});
+      }
 
-      final docRef = await casesCollection.add({
-        'reporterId': uid,
-        'reporterName': reporterName,
-        'reporterPhone': userData?['phone'] ?? '',
-        'animals': animalsPayload,
-        'animalCount': animalsPayload.length,
-        'animalType': firstAnimal.speciesText,
-        'breed': firstAnimal.breedText,
-        'sex': firstAnimal.sex,
-        'size': firstAnimal.size,
-        'colorMarkings': firstAnimal.colorController.text.trim(),
-        'rescueType': _selectedRescueType,
-        'condition': condition,
-        'urgency': _selectedUrgency,
-        'containmentStatus': _containmentStatus,
-        'strayTemperament': _strayTemperament,
-        'onSite': _onSiteChoice,
-        'accessInstructions': _accessInstructionsController.text.trim(),
-        'bestTimeToContact': _bestTimeContactController.text.trim(),
-        'reportAnonymously':
-        _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
-        'address': _addressController.text.trim(),
-        'lat': _pinnedLocation.latitude,
-        'lng': _pinnedLocation.longitude,
-        'coordinateWithShelter': _coordinateChoice,
-        'witnessName': _witnessNameController.text.trim(),
-        'witnessPhone': _witnessNumberController.text.trim(),
-        'interestedToAdopt': _adoptionChoice,
-        'scannedTagId': _scannedTagId,
-        'status': 'pending',
-        'statusHistory': [
-          {
-            'status': 'Rescue case is being reviewed.',
-            'timestamp': Timestamp.now(),
-          }
-        ],
-        'photoUrls': [],
-        'createdAt': Timestamp.now(),
-        'serverCreatedAt' : FieldValue.serverTimestamp(),
-      });
-
-      final primaryCaseId = docRef.id;
+      final primaryCaseId = createdDocIds.first;
       final photoUrls = await _uploadAllMedia(primaryCaseId);
       if (photoUrls.isNotEmpty) {
-        await casesCollection.doc(primaryCaseId).update({'photoUrls': photoUrls});
+        for (final id in createdDocIds) {
+          await casesCollection.doc(id).update({'photoUrls': photoUrls});
+        }
       }
 
       if (mounted) {
@@ -2880,14 +2979,14 @@ class _RescuePageState extends State<RescuePage> {
   }
 }
 
-class _QRScannerPage extends StatefulWidget {
-  const _QRScannerPage();
+class QRScannerPage extends StatefulWidget {
+  const QRScannerPage({super.key});
 
   @override
-  State<_QRScannerPage> createState() => _QRScannerPageState();
+  State<QRScannerPage> createState() => _QRScannerPageState();
 }
 
-class _QRScannerPageState extends State<_QRScannerPage> {
+class _QRScannerPageState extends State<QRScannerPage> {
   final MobileScannerController _controller = MobileScannerController();
   bool _scanned = false;
 

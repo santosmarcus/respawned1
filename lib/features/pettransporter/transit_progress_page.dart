@@ -15,11 +15,20 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
+import 'package:respawnd1/core/constants/maps_config.dart';
 
 
-const String _placesApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
+// This file previously had its own separate hardcoded key literal
+// ('AIzaSyAzqeI6...') — the exact one maps_config.dart's own doc comment
+// identifies as the stale/invalid key behind a prior "This API project was
+// not found" bug. That fix was applied to MapsConfig but never propagated
+// here, so this file's Directions/clinic-search calls kept silently
+// failing on the broken key while everything else in the app used the
+// working one. Routed through MapsConfig now so there's a single source of
+// truth for both.
+String get _placesApiKey => MapsConfig.placesApiKey;
 
-const String _directionsApiKey = _placesApiKey;
+String get _directionsApiKey => MapsConfig.directionsApiKey;
 
 const double _arrivalThresholdMeters = 150;
 
@@ -51,17 +60,40 @@ Future<DirectionsRoute?> fetchDirectionsRoute(
       },
     );
     final res = await http.get(uri);
-    if (res.statusCode != 200) return null;
+    if (res.statusCode != 200) {
+      debugPrint(
+          'fetchDirectionsRoute: HTTP ${res.statusCode} — ${res.body}');
+      return null;
+    }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (body['status'] != 'OK') return null;
+    if (body['status'] != 'OK') {
+      // Common values here: REQUEST_DENIED (bad/restricted key, or
+      // Directions API not enabled for this key's project — check
+      // MapsConfig.maskedDirectionsKeyForLogging against the Google Cloud
+      // Console), ZERO_RESULTS (no driving route between these points),
+      // OVER_QUERY_LIMIT (billing/quota).
+      debugPrint(
+          'fetchDirectionsRoute: status=${body['status']} '
+              'error_message=${body['error_message']}');
+      return null;
+    }
     final routes = body['routes'] as List<dynamic>;
-    if (routes.isEmpty) return null;
+    if (routes.isEmpty) {
+      debugPrint('fetchDirectionsRoute: status OK but routes list empty.');
+      return null;
+    }
     final route = routes.first as Map<String, dynamic>;
     final legs = route['legs'] as List<dynamic>;
-    if (legs.isEmpty) return null;
+    if (legs.isEmpty) {
+      debugPrint('fetchDirectionsRoute: route has no legs.');
+      return null;
+    }
     final leg = legs.first as Map<String, dynamic>;
     final overview = route['overview_polyline']?['points'] as String?;
-    if (overview == null) return null;
+    if (overview == null) {
+      debugPrint('fetchDirectionsRoute: no overview_polyline in response.');
+      return null;
+    }
 
     return DirectionsRoute(
       points: decodePolyline(overview),
@@ -69,7 +101,8 @@ Future<DirectionsRoute?> fetchDirectionsRoute(
       distanceText: (leg['distance']?['text'] as String?) ?? '',
       durationText: (leg['duration']?['text'] as String?) ?? '',
     );
-  } catch (_) {
+  } catch (e) {
+    debugPrint('fetchDirectionsRoute: threw $e');
     return null;
   }
 }
@@ -134,17 +167,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   bool _isSearchingClinic = false;
   bool _autoSearchAttempted = false;
   bool _isVerifyingArrival = false;
-
-  // TESTING ONLY — remove later. A solo tester can't realistically be
-  // physically within _arrivalThresholdMeters of the pickup point, the
-  // clinic, AND the shelter in the same test run, so this lets
-  // _verifyArrivalViaDirections be bypassed via the toggle in the top-right
-  // corner of the map instead of the real GPS/Directions check. Defaults to
-  // ON for now so the whole accepted -> ongoing -> arrived -> treatment ->
-  // dropoff -> in_transit_shelter progression can be walked through
-  // immediately without an extra tap; flip the toggle off to test against
-  // real location again.
-  bool _testBypassGps = true;
 
   // Verification images
   final List<File?> _pickupImages = [null, null];
@@ -216,6 +238,39 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   Future<void> _startTrip() async {
     await _setStatus('ongoing', 'On the way to pick up location.');
     _beginLocationStreaming();
+  }
+
+  // Opens turn-by-turn driving navigation in the native Google Maps app —
+  // the same pattern Grab/Foodpanda driver apps use. This app's own map
+  // stays a simplified live-tracking overlay (trail + dashed route
+  // preview); actual voice-guided navigation is handed off to Google Maps
+  // itself rather than reimplemented in-app.
+  Future<void> _launchNavigation(LatLng destination, String label) async {
+    final uri = Uri(
+      scheme: 'https',
+      host: 'www.google.com',
+      path: '/maps/dir/',
+      queryParameters: {
+        'api': '1',
+        'destination': '${destination.latitude},${destination.longitude}',
+        'travelmode': 'driving',
+      },
+    );
+    try {
+      final launched =
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Google Maps.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Google Maps.')),
+        );
+      }
+    }
   }
 
   // Places a phone call to the given number, if available.
@@ -376,7 +431,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
   Future<bool> _verifyArrivalViaDirections(
       LatLng? destination, String destinationLabel) async {
-    if (_testBypassGps) return true; // TESTING ONLY — remove later.
     if (destination == null) return true;
 
     setState(() => _isVerifyingArrival = true);
@@ -734,99 +788,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     } finally {
       if (mounted) setState(() => _isSearchingClinic = false);
     }
-  }
-
-  // TESTING ONLY — remove later. Generic "Skip (Testing)" action, wired
-  // into every stage's panel below, so the whole accepted -> ongoing ->
-  // arrived -> treatment -> dropoff -> in_transit_shelter -> completed
-  // journey can be exercised without swiping through each real
-  // confirmation, uploading verification photos at every stop, or
-  // physically being at the pickup point / clinic / shelter.
-  Future<void> _testSkipStage(String currentStatus) async {
-    if (currentStatus == 'in_transit_shelter') {
-      await _testCompleteShelterDropoff();
-      return;
-    }
-
-    late final String nextStatus;
-    late final String label;
-    switch (currentStatus) {
-      case 'assigned':
-      case 'accepted':
-        nextStatus = 'ongoing';
-        label = '[TEST] Skipped — on the way to pick up location.';
-        break;
-      case 'ongoing':
-        nextStatus = 'arrived';
-        label = '[TEST] Skipped — arrived at pick up location.';
-        break;
-      case 'arrived':
-        nextStatus = 'treatment';
-        label = '[TEST] Skipped — animal rescued, on the way to treatment.';
-        break;
-      case 'treatment':
-        nextStatus = 'dropoff';
-        label = '[TEST] Skipped — arrived at clinic for treatment.';
-        break;
-      case 'dropoff':
-        nextStatus = 'in_transit_shelter';
-        label = '[TEST] Skipped — treatment accepted, on the way to shelter.';
-        break;
-      case 'searching_clinic':
-        nextStatus = 'in_transit_shelter';
-        label = '[TEST] Skipped clinic search — proceeding to shelter.';
-        break;
-      default:
-        return;
-    }
-
-    await FirebaseFirestore.instance
-        .collection('cases')
-        .doc(widget.caseId)
-        .update({
-      'status': nextStatus,
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': label, 'timestamp': Timestamp.now()}
-      ]),
-    });
-  }
-
-  // TESTING ONLY — remove later. Same end state _completeShelterDropoff
-  // reaches, minus the GPS check and the required shelter photo.
-  Future<void> _testCompleteShelterDropoff() async {
-    await FirebaseFirestore.instance
-        .collection('cases')
-        .doc(widget.caseId)
-        .update({
-      'status': 'completed',
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status':
-          '[TEST] Skipped — animal delivered to shelter. Rescue completed.',
-          'timestamp': Timestamp.now(),
-        }
-      ]),
-    });
-    _positionSub?.cancel();
-    if (mounted) await _showTransitCompletedBanner();
-  }
-
-  // TESTING ONLY — remove later. Small reusable "Skip (Testing)" button,
-  // styled to match the one already used on the searching-clinic panel.
-  Widget _testSkipButton(String currentStatus) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton(
-        onPressed: () => _testSkipStage(currentStatus),
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: Colors.orange),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-        ),
-        child: Text('Skip (Testing)',
-            style: GoogleFonts.tiltWarp(fontSize: 12, color: Colors.orange)),
-      ),
-    );
   }
 
   Future<void> _completeShelterDropoff() async {
@@ -1339,51 +1300,27 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                         left: 16,
                         child: _OnlineBadge(),
                       ),
-                      // TESTING ONLY — remove later. Toggles
-                      // _testBypassGps so arrival at pickup/clinic/shelter
-                      // can be confirmed without physically being there.
-                      Positioned(
-                        top: 48,
-                        right: 16,
-                        child: GestureDetector(
-                          onTap: () {
-                            setState(() => _testBypassGps = !_testBypassGps);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _testBypassGps
-                                      ? 'Test mode ON — arrival checks will '
-                                      'skip the real GPS/location check.'
-                                      : 'Test mode OFF — arrival checks use '
-                                      'your real location again.',
-                                ),
-                                backgroundColor: _testBypassGps
-                                    ? Colors.orange
-                                    : AppColors.greenrspwn,
-                              ),
-                            );
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: _testBypassGps ? Colors.orange : Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.black.withOpacity(0.08),
-                                    blurRadius: 4)
-                              ],
-                            ),
-                            child: Icon(
-                              Icons.science_outlined,
-                              size: 18,
-                              color: _testBypassGps
-                                  ? Colors.white
-                                  : AppColors.textPrimary,
-                            ),
+
+                      // Navigate button — opens turn-by-turn driving
+                      // directions in the native Google Maps app, the same
+                      // pattern Grab/Foodpanda driver apps use. Only shown
+                      // once there's an actual destination to navigate to.
+                      if (currentDestination != null)
+                        Positioned(
+                          bottom: 20,
+                          left: 16,
+                          child: FloatingActionButton.extended(
+                            heroTag: 'navigate_btn',
+                            backgroundColor: AppColors.textPrimary,
+                            onPressed: () => _launchNavigation(
+                                currentDestination!, currentDestinationLabel),
+                            icon: const Icon(Icons.navigation,
+                                color: Colors.white),
+                            label: Text('Navigate',
+                                style: GoogleFonts.tiltWarp(
+                                    fontSize: 14, color: Colors.white)),
                           ),
                         ),
-                      ),
 
                       Positioned(
                         bottom: 20,
@@ -1457,7 +1394,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         isActing: _isActing,
         data: data,
         showContacts: true,
-        testSkipStatus: status,
       );
     }
 
@@ -1481,7 +1417,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         onConfirm: _completeShelterDropoff,
         confirmLabel: 'Complete',
         isActing: _isActing,
-        testSkipStatus: status,
       );
     }
 
@@ -1599,8 +1534,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               label: 'Treatment Rejected',
               onSwiped: canDecide ? _rejectTreatment : null,
             ),
-            const SizedBox(height: 10),
-            _testSkipButton('dropoff'),
           ],
         ),
       ),
@@ -1665,39 +1598,20 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             ),
             if (!_isSearchingClinic) ...[
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _findAndRouteToNextClinic,
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: AppColors.textPrimary),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
-                      ),
-                      child: Text('Retry',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 14, color: AppColors.textPrimary)),
-                    ),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _findAndRouteToNextClinic,
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.textPrimary),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30)),
                   ),
-                  const SizedBox(width: 10),
-                  // Testing-only remove later
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => _testSkipStage('searching_clinic'),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.orange),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
-                      ),
-                      child: Text('Skip (Testing)',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 12, color: Colors.orange)),
-                    ),
-                  ),
-                ],
+                  child: Text('Retry',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                ),
               ),
             ],
             const SizedBox(height: 20),
@@ -1752,18 +1666,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             // Swipe button
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              child: Column(
-                children: [
-                  _buildSwipeButton(status),
-                  if (status == 'assigned' ||
-                      status == 'accepted' ||
-                      status == 'ongoing' ||
-                      status == 'treatment') ...[
-                    const SizedBox(height: 10),
-                    _testSkipButton(status),
-                  ],
-                ],
-              ),
+              child: _buildSwipeButton(status),
             ),
           ],
         ),
@@ -1843,7 +1746,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     VoidCallback? onEnd,
     Map<String, dynamic>? data,
     bool showContacts = false,
-    String? testSkipStatus,
   }) {
     return Container(
       decoration: const BoxDecoration(
@@ -1986,11 +1888,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                           fontSize: 14, color: AppColors.textPrimary)),
                 ),
               ),
-            ],
-
-            if (testSkipStatus != null) ...[
-              const SizedBox(height: 10),
-              _testSkipButton(testSkipStatus),
             ],
           ],
         ),
@@ -2513,7 +2410,10 @@ class _TrackingMapState extends State<_TrackingMap> {
   }
 
   void _maybeRefreshRoute(LatLng riderPosition) {
-    if (widget.destination == null) return;
+    if (widget.destination == null) {
+      debugPrint('_maybeRefreshRoute: no destination set yet, skipping.');
+      return;
+    }
 
     final destChanged = _routeFetchedFor == null ||
         _routeFetchedFor!.latitude != widget.destination!.latitude ||
@@ -2533,8 +2433,18 @@ class _TrackingMapState extends State<_TrackingMap> {
     _routeFetchedFor = widget.destination;
     _routeFetchedFrom = riderPosition;
 
+    debugPrint(
+        '_maybeRefreshRoute: fetching route from $riderPosition to '
+            '${widget.destination} (${widget.destinationLabel})');
+
     fetchDirectionsRoute(riderPosition, widget.destination!).then((route) {
-      if (mounted && route != null) {
+      if (route == null) {
+        debugPrint(
+            '_maybeRefreshRoute: fetchDirectionsRoute returned null — see '
+                'fetchDirectionsRoute logs above for the actual reason.');
+        return;
+      }
+      if (mounted) {
         setState(() => _route = route);
       }
     });
@@ -2583,6 +2493,9 @@ class _TrackingMapState extends State<_TrackingMap> {
           markers.add(Marker(
             markerId: const MarkerId('rider_current'),
             position: points.last,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueAzure),
+            zIndex: 2,
             infoWindow: const InfoWindow(title: 'You'),
           ));
         }
@@ -2606,33 +2519,82 @@ class _TrackingMapState extends State<_TrackingMap> {
           polylines.add(Polyline(
             polylineId: const PolylineId('route_trail'),
             points: points,
-            color: AppColors.textPrimary,
-            width: 4,
+            color: AppColors.textPrimary.withOpacity(0.35),
+            width: 3,
+            zIndex: 0,
           ));
         }
+
         if (_route != null && _route!.points.length >= 2) {
           polylines.add(Polyline(
             polylineId: const PolylineId('directions_route'),
             points: _route!.points,
-            color: Colors.blueAccent,
-            width: 4,
-            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+            color: const Color(0xFF4285F4),
+            width: 6,
+            zIndex: 1,
+            jointType: JointType.round,
+            startCap: Cap.roundCap,
+            endCap: Cap.roundCap,
           ));
         }
 
-        return GoogleMap(
-          onMapCreated: (ctrl) {
-            _controller = ctrl;
-            widget.onMapCreated(ctrl);
-          },
-          initialCameraPosition:
-          CameraPosition(target: initialCenter, zoom: 14),
-          myLocationEnabled: true,
-          myLocationButtonEnabled: false,
-          zoomControlsEnabled: false,
-          mapToolbarEnabled: false,
-          markers: markers,
-          polylines: polylines,
+        return Stack(
+          children: [
+            GoogleMap(
+              onMapCreated: (ctrl) {
+                _controller = ctrl;
+                widget.onMapCreated(ctrl);
+              },
+              initialCameraPosition:
+              CameraPosition(target: initialCenter, zoom: 14),
+              myLocationEnabled: true,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              markers: markers,
+              polylines: polylines,
+            ),
+
+            // Persistent ETA banner (Google Maps Directions duration) —
+            // shown for every en-route leg (pickup, clinic, shelter), not
+            // just as a tap-to-reveal marker info window.
+            if (_route != null && widget.destination != null)
+              Positioned(
+                bottom: 90,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.black.withOpacity(0.12),
+                            blurRadius: 6)
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.access_time,
+                            size: 15, color: AppColors.textPrimary),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${_route!.durationText} to ${widget.destinationLabel} • ${_route!.distanceText}',
+                          style: GoogleFonts.zain(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );

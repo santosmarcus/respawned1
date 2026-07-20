@@ -6,7 +6,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
-import 'package:respawnd1/features/collartag/collar_id_tag_intro.dart';
+import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
 import 'package:respawnd1/features/generalhome/history_screen.dart';
 
 class UserProfile extends StatefulWidget {
@@ -198,7 +198,7 @@ class _UserProfileState extends State<UserProfile> {
                     label: 'Create Pet Collar Tag',
                     onTap: (){
                       Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const CollarIdTagIntroScreen()),);
+                        MaterialPageRoute(builder: (_) => const CollarTagHomeScreen()),);
                     },
                   ),
                 ],
@@ -240,7 +240,7 @@ class _UserProfileState extends State<UserProfile> {
 
             Center(
               child: TextButton(
-                onPressed: _logout,
+                onPressed: _logout,//TODO:
                 child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: Colors.redAccent,
                 ),
                 ),

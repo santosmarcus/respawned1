@@ -16,10 +16,12 @@ class CaseSummaryPage extends StatelessWidget {
     this.fromCompletionFlow = false,
   });
 
+
   bool get _isClosed {
     final s = (caseData['status'] as String? ?? '').toLowerCase();
     return s == 'closed' || s.contains('ended');
   }
+
 
   Future<void> _close(BuildContext context) async {
     try {
@@ -28,7 +30,7 @@ class CaseSummaryPage extends StatelessWidget {
           .doc(caseId)
           .update({'hiddenFromExplore': true});
     } catch (_) {
-
+      // Non-fatal — worst case it briefly still shows in Explore Reports.
     }
 
     if (!context.mounted) return;
@@ -199,11 +201,52 @@ class CaseSummaryPage extends StatelessWidget {
     );
   }
 
+
+  Widget _mediaSection(String label, List<String> urls) {
+    if (urls.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: urls.map((url) {
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  url,
+                  width: 100,
+                  height: 100,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _MediaBox(),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final statusHistory =
     List<Map<String, dynamic>>.from(caseData['statusHistory'] ?? []);
     final photoUrls = List<String>.from(caseData['photoUrls'] ?? []);
+    final pickupVerificationUrls =
+    List<String>.from(caseData['pickupVerificationUrls'] ?? []);
+    final clinicVerificationUrls =
+    List<String>.from(caseData['clinicVerificationUrls'] ?? []);
+    final shelterVerificationUrls =
+    List<String>.from(caseData['shelterVerificationUrls'] ?? []);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -311,8 +354,12 @@ class CaseSummaryPage extends StatelessWidget {
 
             const SizedBox(height: 16),
 
-            // Case details — note: no reporter mobile number here, to
-            // match the same privacy rule applied in Track Case.
+            _mediaSection('Rescue / Pickup Verification', pickupVerificationUrls),
+            _mediaSection('Clinic / Treatment Verification', clinicVerificationUrls),
+            _mediaSection('Shelter Drop-off Verification', shelterVerificationUrls),
+
+            const SizedBox(height: 16),
+
             _DetailRow('Reporter Name', caseData['reporterName']),
             _DetailRow(
                 'Pet Transporter Name', caseData['transporterName'] ?? '-'),
