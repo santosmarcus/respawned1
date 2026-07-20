@@ -43,6 +43,11 @@ class ClinicSearchUnexpectedException extends ClinicSearchException {
 /// `_findAndRouteToNextClinic` (type=veterinary_care), kept in one place so
 /// map/Places logic doesn't get duplicated a third time.
 ///
+/// Also reused (via [searchPlaces], which — unlike [textSearch] — doesn't
+/// bias toward veterinary clinics) by the shelter-location picker, since
+/// it's the same underlying API/key/error-handling for any place search,
+/// not just clinics.
+///
 /// Uses Places API (New) — POST + JSON body + `X-Goog-Api-Key` /
 /// `X-Goog-FieldMask` headers — not the legacy `maps/api/place/*` Places
 /// Web Service GET endpoints. Both were enabled in Google Cloud per the
@@ -110,6 +115,30 @@ class ClinicSearchRepository {
           'circle': {
             'center': {'latitude': lat, 'longitude': lng},
             'radius': 20000,
+          },
+        },
+    });
+    return _search(uri, body);
+  }
+
+  /// General-purpose place/address search — no veterinary bias, for the
+  /// shelter-location picker (or anything else that just needs "find this
+  /// address/place"). Same endpoint, key, and error handling as
+  /// [textSearch]/[nearbySearch]; only the query body differs.
+  Future<List<ClinicSearchResult>> searchPlaces({
+    required String query,
+    double? lat,
+    double? lng,
+  }) async {
+    if (query.trim().isEmpty) return const [];
+    final uri = Uri.https(_baseUrl, '/v1/places:searchText');
+    final body = jsonEncode({
+      'textQuery': query,
+      if (lat != null && lng != null)
+        'locationBias': {
+          'circle': {
+            'center': {'latitude': lat, 'longitude': lng},
+            'radius': 50000,
           },
         },
     });

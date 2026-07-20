@@ -9,11 +9,13 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 
 // Raw case-doc status values written by the pet-transporter app's own
 // transit flow (see transit_progress_page.dart) once it has physically
@@ -31,11 +33,23 @@ const _kArrivedAtClinicStatuses = {'dropoff', 'in_transit_shelter'};
 // switches from the rescue case to the selected clinic.
 const _kPostPickupStatuses = {'treatment', 'dropoff', 'searching_clinic', 'in_transit_shelter'};
 
+/// Which leg of the case this screen is tracking. Added so the same
+/// Track Case screen (map, route, transporter card, timeline) serves both
+/// the original rescue pickup and the later clinic-to-shelter intake
+/// transport, instead of building a second tracking page — only the
+/// origin/destination resolution and which sections are visible change.
+enum TrackingMode { rescuePickup, intakeTransfer }
+
 class AdminTrackCasePage extends ConsumerStatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const AdminTrackCasePage(
-      {super.key, required this.caseId, required this.data});
+  final TrackingMode mode;
+  const AdminTrackCasePage({
+    super.key,
+    required this.caseId,
+    required this.data,
+    this.mode = TrackingMode.rescuePickup,
+  });
 
   @override
   ConsumerState<AdminTrackCasePage> createState() => _AdminTrackCasePageState();
@@ -46,6 +60,33 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   final _messageController = TextEditingController();
   GoogleMapController? _mapController;
   bool _hasFitCamera = false;
+
+  // Drives the collapsible transporter card (see _CollapsibleTransporterCard)
+  // — a purely local/visual toggle, never tied to re-fetching the
+  // assignment stream itself (that's still watched once, at the top of
+  // build()). Auto-collapses once the admin scrolls the tracking-detail
+  // content down past a small threshold, expands again near the top; a tap
+  // on the card itself can also toggle it directly (see onToggle below).
+  final ScrollController _scrollController = ScrollController();
+  bool _transporterCollapsed = false;
+  static const _collapseThreshold = 24.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+  }
+
+  void _handleScroll() {
+    final offset = _scrollController.offset;
+    if (offset > _collapseThreshold && !_transporterCollapsed) {
+      setState(() => _transporterCollapsed = true);
+    } else if (offset <= _collapseThreshold && _transporterCollapsed) {
+      setState(() => _transporterCollapsed = false);
+    }
+  }
+
+  void _toggleTransporterCard() => setState(() => _transporterCollapsed = !_transporterCollapsed);
 
   /// Guards against double-tapping "Proceed to Treatment" and drives the
   /// button's loading state while the write is in flight and being
@@ -77,6 +118,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   @override
   void dispose() {
     _messageController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -209,7 +251,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   /// Priority after pickup: saved selected-clinic coordinates ->
   /// legacy transporter-side dropoff coordinates -> visible warning
   /// (location null, caller shows markers-only / no route).
+  ///
+  /// In [TrackingMode.intakeTransfer], this is unrelated to the legacy
+  /// pickup/dropoff status vocabulary entirely — the destination is always
+  /// the intake shelter location saved by RescueCaseRepository.confirmIntake.
   ({LatLng? location, String label}) _destinationFrom(Map<String, dynamic> data) {
+    if (widget.mode == TrackingMode.intakeTransfer) {
+      final lat = (data['intakeDestinationLat'] as num?)?.toDouble();
+      final lng = (data['intakeDestinationLng'] as num?)?.toDouble();
+      final name = data['intakeDestinationName'] as String?;
+      if (lat == null || lng == null) {
+        return (location: null, label: 'No shelter destination available yet');
+      }
+      return (location: LatLng(lat, lng), label: (name != null && name.isNotEmpty) ? name : 'Organization Shelter');
+    }
+
     final rawStatus = data['status'] as String?;
     if (!_kPostPickupStatuses.contains(rawStatus)) {
       return (location: _caseLocationFrom(data), label: 'Rescue Case');
@@ -232,6 +288,41 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     }
 
     return (location: null, label: 'No clinic destination available yet');
+  }
+
+  /// The secondary "where they started from" marker — the original rescue
+  /// location pre-intake, or the pickup clinic during intake transport.
+  LatLng? _originMarkerLocationFrom(Map<String, dynamic> data) {
+    if (widget.mode == TrackingMode.intakeTransfer) {
+      final lat = (data['vetClinicLat'] as num?)?.toDouble();
+      final lng = (data['vetClinicLng'] as num?)?.toDouble();
+      if (lat == null || lng == null) return null;
+      return LatLng(lat, lng);
+    }
+    return _caseLocationFrom(data);
+  }
+
+  String get _originMarkerLabel =>
+      widget.mode == TrackingMode.intakeTransfer ? 'Clinic Pickup' : 'Original Rescue Location';
+
+  Future<void> _confirmAnimalReceived(TransportAssignment? assignment) async {
+    try {
+      await ref.read(rescueCaseRepositoryProvider).confirmAnimalReceived(
+            caseId: widget.caseId,
+            currentAssignmentId: assignment?.id,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Animal received — transport complete.'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not confirm arrival: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
   }
 
   /// Fits the camera around every point on the route polyline (not just the
@@ -271,11 +362,13 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       );
     }
 
-    final caseLocation = _caseLocationFrom(data);
+    final caseLocation = _originMarkerLocationFrom(data);
     final destination = _destinationFrom(data);
 
     if (caseLocation == null && destination.location == null) {
-      // "Markers only" / no-line tier: nothing to plot at all.
+      // "Markers only" / no-line tier: nothing to plot at all. The
+      // transporter card (when accepted) now lives below, in the
+      // scrollable body — see build()'s _CollapsibleTransporterCard.
       return Container(
         height: 180,
         color: AppColors.slaterspwn,
@@ -294,60 +387,60 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       // fields) — show a visible warning instead of silently routing back
       // to the rescue case, which the rider has already left.
       return SizedBox(
-        height: 180,
-        child: Stack(
-          children: [
-            GoogleMap(
-              gestureRecognizers: {
-                Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-              },
-              initialCameraPosition: CameraPosition(target: rider.location, zoom: 13),
-              markers: {
-                if (caseLocation != null)
-                  Marker(
-                    markerId: const MarkerId('rescue_case'),
-                    position: caseLocation,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-                    infoWindow: const InfoWindow(title: 'Original Rescue Location'),
-                  ),
-                Marker(
-                  markerId: const MarkerId('rider'),
-                  position: rider.location,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                  infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
-                ),
-              },
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              mapToolbarEnabled: false,
-            ),
-            Positioned(
-              left: 10,
-              right: 10,
-              bottom: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE05353),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(destination.label,
-                          style: GoogleFonts.zain(
-                              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+            height: 180,
+            child: Stack(
+              children: [
+                GoogleMap(
+                  gestureRecognizers: {
+                    Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                  },
+                  initialCameraPosition: CameraPosition(target: rider.location, zoom: 13),
+                  markers: {
+                    if (caseLocation != null)
+                      Marker(
+                        markerId: const MarkerId('rescue_case'),
+                        position: caseLocation,
+                        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+                        infoWindow: InfoWindow(title: _originMarkerLabel),
+                      ),
+                    Marker(
+                      markerId: const MarkerId('rider'),
+                      position: rider.location,
+                      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                      infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
                     ),
-                  ],
+                  },
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
                 ),
-              ),
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE05353),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(destination.label,
+                              style: GoogleFonts.zain(
+                                  fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      );
+          );
     }
 
     final destinationLocation = destination.location!;
@@ -360,11 +453,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         (caseLocation.latitude != destinationLocation.latitude ||
             caseLocation.longitude != destinationLocation.longitude);
 
-    return SizedBox(
-      height: 180,
-      child: FutureBuilder<RouteResult>(
-        future: _routeFor(rider.location, destinationLocation),
-        builder: (context, snapshot) {
+    return FutureBuilder<RouteResult>(
+      future: _routeFor(rider.location, destinationLocation),
+      builder: (context, snapshot) {
           final route = snapshot.data;
           final markers = {
             Marker(
@@ -378,7 +469,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 markerId: const MarkerId('rescue_case'),
                 position: caseLocation,
                 icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-                infoWindow: const InfoWindow(title: 'Original Rescue Location'),
+                infoWindow: InfoWindow(title: _originMarkerLabel),
               ),
             Marker(
               markerId: const MarkerId('rider'),
@@ -403,7 +494,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           // so it's harmless to also attempt it here on every rebuild.
           if (route != null) _fitTrackingCameraToRoute(route.polylinePoints);
 
-          return Stack(
+          return SizedBox(
+                height: 180,
+                child: Stack(
             children: [
               GoogleMap(
                 gestureRecognizers: {
@@ -478,10 +571,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   ),
                 ),
             ],
-          );
+                ),
+              );
         },
-      ),
-    );
+      );
   }
 
   @override
@@ -517,7 +610,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               icon: const Icon(Icons.arrow_back, color: AppColors.background),
               onPressed: () => Navigator.pop(context),
             ),
-            title: Text('Track Case',
+            title: Text(widget.mode == TrackingMode.intakeTransfer ? 'Intake Transport' : 'Track Case',
                 style: GoogleFonts.tiltWarp(
                     fontSize: 18, color: AppColors.background)),
             actions: [
@@ -528,11 +621,16 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               ),
             ],
           ),
+          // One coherent scrollable layout below the map — see
+          // _CollapsibleTransporterCard / _handleScroll for how the
+          // transporter card collapses as this scrolls, and
+          // _AdminTrackingTab for the collapsible Messages section further
+          // down. No nested independently-scrolling regions: the old
+          // per-tab ListView/SingleChildScrollView wrappers are gone, this
+          // single controller drives everything except the map itself.
           body: Column(
             children: [
               _buildTrackingMap(data, assignment),
-
-              // Bottom panel
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -540,65 +638,84 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     borderRadius:
                     BorderRadius.vertical(top: Radius.circular(20)),
                   ),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 12),
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 12),
 
-                      // Tab switcher
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: AppColors.slaterspwn,
-                          borderRadius: BorderRadius.circular(50),
-                        ),
-                        child: Row(
-                          children: [
-                            _AdminTabButton(
-                              label: 'Tracking Detail',
-                              selected: _tabIndex == 0,
-                              onTap: () => setState(() => _tabIndex = 0),
+                        if (assignment != null && assignment.status == TransportAssignmentStatus.accepted)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _CollapsibleTransporterCard(
+                              assignment: assignment,
+                              collapsed: _transporterCollapsed,
+                              onToggle: _toggleTransporterCard,
+                              onMessage: () => setState(() => _tabIndex = 0),
                             ),
-                            _AdminTabButton(
-                              label: 'Case Detail',
-                              selected: _tabIndex == 1,
-                              onTap: () => setState(() => _tabIndex = 1),
+                          ),
+
+                        // Tab switcher — intake transport is a restricted
+                        // view with only one tab (Case Detail carries
+                        // reporter-facing content that doesn't belong here;
+                        // see the class-level restriction note).
+                        if (widget.mode != TrackingMode.intakeTransfer)
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            decoration: BoxDecoration(
+                              color: AppColors.slaterspwn,
+                              borderRadius: BorderRadius.circular(50),
                             ),
-                          ],
-                        ),
-                      ),
+                            child: Row(
+                              children: [
+                                _AdminTabButton(
+                                  label: 'Tracking Detail',
+                                  selected: _tabIndex == 0,
+                                  onTap: () => setState(() => _tabIndex = 0),
+                                ),
+                                _AdminTabButton(
+                                  label: 'Case Detail',
+                                  selected: _tabIndex == 1,
+                                  onTap: () => setState(() => _tabIndex = 1),
+                                ),
+                              ],
+                            ),
+                          ),
 
-                      const SizedBox(height: 12),
+                        const SizedBox(height: 12),
 
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '#${shortCaseId(widget.caseId)}',
-                            style: GoogleFonts.tiltWarp(
-                                fontSize: 18, color: AppColors.textPrimary),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '#${shortCaseId(widget.caseId)}',
+                              style: GoogleFonts.tiltWarp(
+                                  fontSize: 18, color: AppColors.textPrimary),
+                            ),
                           ),
                         ),
-                      ),
 
-                      const SizedBox(height: 8),
+                        const SizedBox(height: 8),
 
-                      Expanded(
-                        child: _tabIndex == 0
+                        (widget.mode == TrackingMode.intakeTransfer || _tabIndex == 0)
                             ? _AdminTrackingTab(
                           statusHistory: statusHistory,
                           caseId: widget.caseId,
                           messageController: _messageController,
                           onSend: _sendMessage,
+                          isIntakeMode: widget.mode == TrackingMode.intakeTransfer,
                           transporterHasReachedClinic:
                               _kArrivedAtClinicStatuses.contains(data['status']),
                           isProceedingToTreatment: _isProceedingToTreatment,
                           onProceedToTreatment: () => _proceedToTreatment(data),
                           onFastForward: _fastForwardToClinic,
+                          hasReceivedIntake: data['intakeReceivedAt'] != null,
+                          onConfirmAnimalReceived: () => _confirmAnimalReceived(assignment),
                         )
                             : _AdminCaseDetailTab(data: data),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -643,7 +760,13 @@ class _AdminTabButton extends StatelessWidget {
   }
 }
 
-class _AdminTrackingTab extends StatelessWidget {
+/// Now a plain (non-independently-scrolling) column of content — this is
+/// rendered inside AdminTrackCasePage's own single SingleChildScrollView
+/// (see build()'s doc comment), not in its own ListView/Expanded, so the
+/// status timeline, community reports, and Messages all share one scroll
+/// gesture with the transporter card and map above them instead of
+/// competing nested scroll regions.
+class _AdminTrackingTab extends StatefulWidget {
   final List<Map<String, dynamic>> statusHistory;
   final String caseId;
   final TextEditingController messageController;
@@ -652,6 +775,9 @@ class _AdminTrackingTab extends StatelessWidget {
   final bool isProceedingToTreatment;
   final VoidCallback onProceedToTreatment;
   final VoidCallback onFastForward;
+  final bool isIntakeMode;
+  final bool hasReceivedIntake;
+  final VoidCallback onConfirmAnimalReceived;
 
   const _AdminTrackingTab({
     required this.statusHistory,
@@ -662,9 +788,24 @@ class _AdminTrackingTab extends StatelessWidget {
     required this.isProceedingToTreatment,
     required this.onProceedToTreatment,
     required this.onFastForward,
+    required this.isIntakeMode,
+    required this.hasReceivedIntake,
+    required this.onConfirmAnimalReceived,
   });
 
+  @override
+  State<_AdminTrackingTab> createState() => _AdminTrackingTabState();
+}
+
+class _AdminTrackingTabState extends State<_AdminTrackingTab> {
+  // Collapsed by default so the status timeline above is readable without
+  // the message composer taking most of the screen — independent of the
+  // transporter card's own collapse state, no scroll-position involved
+  // here, just a direct tap toggle.
+  bool _messagesExpanded = false;
+
   Widget _buildTimelineItem(int index) {
+    final statusHistory = widget.statusHistory;
     final item = statusHistory[index];
     final isLast = index == statusHistory.length - 1;
     final ts = item['timestamp'] as Timestamp?;
@@ -737,18 +878,24 @@ class _AdminTrackingTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final statusHistory = widget.statusHistory;
     return Column(
       children: [
-        // Status timeline + community reports, in one scrollable region —
-        // same subcollection/section widget the Rescue Details page uses,
-        // reused here rather than a second implementation.
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+        // Status timeline + community reports — same subcollection/section
+        // widget the Rescue Details page uses, reused here rather than a
+        // second implementation. Community reports (and, further down,
+        // original case media/reporter content) are reporter-facing and
+        // stay out of intake transport, which is restricted to the
+        // organization + assigned transporter. No longer its own ListView —
+        // this is now part of the page's single outer scroll (see the
+        // class doc comment).
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
             children: [
               for (var i = 0; i < statusHistory.length; i++) _buildTimelineItem(i),
               const SizedBox(height: 8),
-              CommunityReportsSection(caseId: caseId),
+              if (!widget.isIntakeMode) CommunityReportsSection(caseId: widget.caseId),
               const SizedBox(height: 8),
             ],
           ),
@@ -788,123 +935,174 @@ class _AdminTrackingTab extends StatelessWidget {
 
         const Divider(),
 
-        // Messages
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Messages',
-                style: GoogleFonts.zain(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
-          ),
-        ),
+        // Collapsible Messages — collapsed by default so the status
+        // timeline above is readable without the composer taking most of
+        // the screen. A single StreamBuilder always stays mounted here
+        // (never conditionally created/destroyed by the collapse toggle),
+        // so expanding/collapsing never disposes or duplicates the
+        // messages listener — see the class doc comment.
+        StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('cases')
+              .doc(widget.caseId)
+              .collection('messages')
+              .orderBy('timestamp')
+              .snapshots(),
+          builder: (context, snap) {
+            final docs = snap.data?.docs ?? const [];
+            final count = docs.length;
+            final summary = count == 0 ? 'No messages yet' : '$count message${count == 1 ? '' : 's'}';
 
-        SizedBox(
-          height: 80,
-          child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('cases')
-                .doc(caseId)
-                .collection('messages')
-                .orderBy('timestamp')
-                .snapshots(),
-            builder: (context, snap) {
-              if (!snap.hasData || snap.data!.docs.isEmpty) {
-                return Center(
-                  child: Text('No messages yet.',
-                      style: GoogleFonts.zain(
-                          fontSize: 12, color: AppColors.textSecondary)),
-                );
-              }
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: snap.data!.docs.length,
-                itemBuilder: (context, i) {
-                  final msg =
-                  snap.data!.docs[i].data() as Map<String, dynamic>;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+            return Column(
+              children: [
+                InkWell(
+                  onTap: () => setState(() => _messagesExpanded = !_messagesExpanded),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Messages',
+                            style: GoogleFonts.zain(
+                                fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        Row(
+                          children: [
+                            Text(summary,
+                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                            const SizedBox(width: 4),
+                            Icon(
+                              _messagesExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                              size: 18,
+                              color: AppColors.textSecondary,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_messagesExpanded) ...[
+                  SizedBox(
+                    height: 200,
+                    child: docs.isEmpty
+                        ? Center(
+                            child: Text('No messages yet.',
+                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: docs.length,
+                            itemBuilder: (context, i) {
+                              final msg = docs[i].data() as Map<String, dynamic>;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 12,
+                                      backgroundColor: AppColors.slaterspwn,
+                                      child: Text((msg['senderName'] ?? 'U')[0],
+                                          style: GoogleFonts.zain(fontSize: 10)),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '${msg['senderName']}: ${msg['text']}',
+                                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(12),
                     child: Row(
                       children: [
-                        CircleAvatar(
-                          radius: 12,
-                          backgroundColor: AppColors.slaterspwn,
-                          child: Text((msg['senderName'] ?? 'U')[0],
-                              style: GoogleFonts.zain(fontSize: 10)),
+                        Expanded(
+                          child: TextField(
+                            controller: widget.messageController,
+                            decoration: InputDecoration(
+                              hintText: 'Type a message',
+                              hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(50),
+                                borderSide: const BorderSide(color: AppColors.slaterspwn),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(50),
+                                borderSide: const BorderSide(color: AppColors.textPrimary),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '${msg['senderName']}: ${msg['text']}',
-                            style: GoogleFonts.zain(
-                                fontSize: 12, color: AppColors.textPrimary),
+                        GestureDetector(
+                          onTap: widget.onSend,
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: const BoxDecoration(
+                              color: AppColors.yellowrspwn,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.send, size: 18, color: AppColors.textPrimary),
                           ),
                         ),
                       ],
                     ),
-                  );
-                },
-              );
-            },
-          ),
+                  ),
+                ],
+              ],
+            );
+          },
         ),
 
-        // Message input
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: messageController,
-                  decoration: InputDecoration(
-                    hintText: 'Type a message',
-                    hintStyle: GoogleFonts.zain(
-                        fontSize: 13, color: AppColors.textSecondary),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(50),
-                      borderSide:
-                      const BorderSide(color: AppColors.slaterspwn),
+        // Intake transport's own confirmation action, replacing the
+        // rescue-pickup "Proceed to Treatment"/fast-forward controls
+        // entirely — arriving at the shelter doesn't move the case past
+        // Intake, it just unlocks quarantine/animal-record steps back on
+        // Intake Details (see RescueCaseRepository.confirmAnimalReceived).
+        if (widget.isIntakeMode)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: widget.hasReceivedIntake
+                ? Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.greenrspwn.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(30),
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(50),
-                      borderSide: const BorderSide(
-                          color: AppColors.textPrimary),
+                    child: Center(
+                      child: Text('Animal received at the shelter.',
+                          style: GoogleFonts.zain(
+                              fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     ),
-                    filled: true,
-                    fillColor: Colors.white,
+                  )
+                : ElevatedButton(
+                    onPressed: widget.onConfirmAnimalReceived,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      minimumSize: const Size(double.infinity, 48),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                    child: Text('Confirm Animal Received',
+                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                   ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: onSend,
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                    color: AppColors.yellowrspwn,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.send,
-                      size: 18, color: AppColors.textPrimary),
-                ),
-              ),
-            ],
-          ),
-        ),
-
+          )
         // Proceed to Treatment — only enabled once the transporter has
         // actually reached the clinic (status 'dropoff'/'in_transit_shelter').
         // Before that, show a fast-forward control for testing without GPS.
-        if (transporterHasReachedClinic)
+        else if (widget.transporterHasReachedClinic)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: ElevatedButton(
-              onPressed: isProceedingToTreatment ? null : onProceedToTreatment,
+              onPressed: widget.isProceedingToTreatment ? null : widget.onProceedToTreatment,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
                 disabledBackgroundColor: AppColors.slaterspwn,
@@ -913,7 +1111,7 @@ class _AdminTrackingTab extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(30)),
               ),
-              child: isProceedingToTreatment
+              child: widget.isProceedingToTreatment
                   ? const SizedBox(
                       height: 20,
                       width: 20,
@@ -934,7 +1132,7 @@ class _AdminTrackingTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: onFastForward,
+                  onPressed: widget.onFastForward,
                   icon: const Icon(Icons.fast_forward, size: 18),
                   label: Text('Fast-forward to Clinic (Test)',
                       style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
@@ -959,7 +1157,11 @@ class _AdminCaseDetailTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    // No longer its own SingleChildScrollView — this is now part of
+    // AdminTrackCasePage's single outer scroll (see _AdminTrackingTab's
+    // class doc comment for why nested independent scroll regions were
+    // removed).
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1017,6 +1219,138 @@ class _Row extends StatelessWidget {
 /// (the Assign Transporter modal already carries the admin through
 /// Pending before Track Case opens); it only surfaces if the case is
 /// reopened while an offer is still outstanding.
+/// Wraps the existing TransporterDetailsCard (expanded state, unchanged
+/// look) with a compact collapsed row for when the admin has scrolled the
+/// tracking content down — see AdminTrackCasePage._handleScroll for what
+/// drives [collapsed]. Both states watch the same
+/// transporterProfileProvider family key (uid/name/type/isDemo), so
+/// toggling between them never causes a second fetch — Riverpod keeps that
+/// provider's cached value alive as long as either widget is watching it,
+/// and one of them always is. [assignment] itself is passed down unchanged
+/// from the single currentAssignmentProvider watch at the top of
+/// AdminTrackCasePage.build() — collapsing/expanding is pure local visual
+/// state, never a new stream subscription.
+class _CollapsibleTransporterCard extends StatelessWidget {
+  final TransportAssignment assignment;
+  final bool collapsed;
+  final VoidCallback onToggle;
+  final VoidCallback? onMessage;
+
+  const _CollapsibleTransporterCard({
+    required this.assignment,
+    required this.collapsed,
+    required this.onToggle,
+    this.onMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeInOut,
+      alignment: Alignment.topCenter,
+      child: collapsed
+          ? _CompactTransporterRow(assignment: assignment, onTap: onToggle)
+          : Column(
+              children: [
+                TransporterDetailsCard(assignment: assignment, onMessage: onMessage),
+                GestureDetector(
+                  onTap: onToggle,
+                  behavior: HitTestBehavior.opaque,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: Icon(Icons.keyboard_arrow_up, size: 18, color: AppColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Collapsed-state row: `[avatar] Name · Vehicle    Status ▼`. Tapping
+/// anywhere expands the card again (see _CollapsibleTransporterCard).
+class _CompactTransporterRow extends ConsumerWidget {
+  final TransportAssignment assignment;
+  final VoidCallback onTap;
+  const _CompactTransporterRow({required this.assignment, required this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profileAsync = ref.watch(transporterProfileProvider((
+      uid: assignment.riderId,
+      fallbackName: assignment.riderName,
+      type: assignment.riderType,
+      isDemo: assignment.isDemo,
+    )));
+    final profile = profileAsync.asData?.value ??
+        TransporterProfile(
+          uid: assignment.riderId,
+          name: assignment.riderName,
+          type: assignment.riderType,
+          vehicle: 'Not provided',
+          plate: 'Not provided',
+          isDemo: assignment.isDemo,
+        );
+
+    final isCompleted = assignment.status == TransportAssignmentStatus.completed;
+    final chipLabel = isCompleted ? 'Completed' : 'Busy';
+    final chipColor = isCompleted ? AppColors.slaterspwn : AppColors.yellowrspwn;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: (profile.photoUrl != null && profile.photoUrl!.isNotEmpty)
+                  ? Image.network(profile.photoUrl!,
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                          width: 32, height: 32, color: AppColors.tearspwn,
+                          child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)))
+                  : Container(
+                      width: 32,
+                      height: 32,
+                      color: AppColors.tearspwn,
+                      child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${profile.name} · ${profile.vehicle}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: chipColor, borderRadius: BorderRadius.circular(20)),
+              child: Text(chipLabel,
+                  style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down, size: 18, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PendingAssignmentBanner extends StatelessWidget {
   final TransportAssignment assignment;
   final Map<String, dynamic> caseData;
