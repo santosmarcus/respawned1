@@ -712,6 +712,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                           onFastForward: _fastForwardToClinic,
                           hasReceivedIntake: data['intakeReceivedAt'] != null,
                           onConfirmAnimalReceived: () => _confirmAnimalReceived(assignment),
+                          hideCommunityContent: data['sourceType'] == 'animalRecordAdmission',
                         )
                             : _AdminCaseDetailTab(data: data),
                       ],
@@ -778,6 +779,13 @@ class _AdminTrackingTab extends StatefulWidget {
   final bool isIntakeMode;
   final bool hasReceivedIntake;
   final VoidCallback onConfirmAnimalReceived;
+  /// True for an animal-record medical admission (see
+  /// RescueCaseRepository.createAdmissionCase / data['sourceType']) —
+  /// suppresses CommunityReportsSection, which only makes sense for a
+  /// community-submitted rescue report. Reporter-facing messaging already
+  /// doesn't render anywhere on this admin screen regardless, so nothing
+  /// else needs hiding here.
+  final bool hideCommunityContent;
 
   const _AdminTrackingTab({
     required this.statusHistory,
@@ -787,6 +795,7 @@ class _AdminTrackingTab extends StatefulWidget {
     required this.transporterHasReachedClinic,
     required this.isProceedingToTreatment,
     required this.onProceedToTreatment,
+    this.hideCommunityContent = false,
     required this.onFastForward,
     required this.isIntakeMode,
     required this.hasReceivedIntake,
@@ -895,7 +904,7 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
             children: [
               for (var i = 0; i < statusHistory.length; i++) _buildTimelineItem(i),
               const SizedBox(height: 8),
-              if (!widget.isIntakeMode) CommunityReportsSection(caseId: widget.caseId),
+              if (!widget.isIntakeMode && !widget.hideCommunityContent) CommunityReportsSection(caseId: widget.caseId),
               const SizedBox(height: 8),
             ],
           ),

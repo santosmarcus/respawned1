@@ -67,13 +67,82 @@ class RescueCaseRepository {
   Stream<List<RescueCase>> streamCasesByStatuses(List<RescueStatus> statuses) {
     final values = statuses.expand((s) => s.queryValues).toSet().toList();
     if (values.isEmpty) return Stream.value(const []);
+    // Animal-record admissions (see createAdmissionCase) skip the Rescue
+    // Review stage by construction — they're never written with status
+    // pendingReview/awaitingAssignment's own review intent in mind, just
+    // its "needs a clinic/transporter" mechanics reused. Excluding them
+    // specifically from a query that's ONLY for those review-queue statuses
+    // keeps Rescue Reports focused on community-submitted reports, while
+    // any other status list (ongoing/treatment/intake/completed) still
+    // includes them — those views are meant to show every case in motion,
+    // regardless of source.
+    final isReviewQueueQuery = statuses.every((s) =>
+        s == RescueStatus.pendingReview || s == RescueStatus.accepted || s == RescueStatus.awaitingAssignment);
     // Firestore whereIn supports up to 30 values; our alias lists are well
     // under that even for the broadest status (ongoing).
     return _cases
         .where('status', whereIn: values)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map(RescueCase.fromFirestore).where(_isPrimaryGroupMember).toList());
+        .map((snap) => snap.docs
+            .map(RescueCase.fromFirestore)
+            .where(_isPrimaryGroupMember)
+            .where((c) => !isReviewQueueQuery || c.raw['sourceType'] != 'animalRecordAdmission')
+            .toList());
+  }
+
+  /// Creates a `cases` doc directly in the "needs a clinic + transporter"
+  /// state — the entry point for AdmitAnimalPage (Animal Record -> Medical
+  /// -> Admit Animal), for an animal already owned/managed by the
+  /// organization that later needs vet care. Deliberately skips every
+  /// rescue-report concept (Rescue Review, Accept/Reject, Possible
+  /// Duplicate, Community Reports) by starting at
+  /// RescueStatus.awaitingAssignment with no saved clinic yet, which is
+  /// exactly the state RescueDetailPage's own "Select Clinic" branch reads
+  /// — the caller opens showSelectClinicSheet directly instead of routing
+  /// through that page. See streamCasesByStatuses' isReviewQueueQuery guard
+  /// for how this stays out of the Rescue Reports review queue while still
+  /// appearing in Ongoing/Treatment/Intake once it's moving.
+  Future<String> createAdmissionCase({
+    required String sourceAnimalRecordId,
+    required String animalName,
+    required String species,
+    required String admissionReason,
+    String? admissionNotes,
+    required double lat,
+    required double lng,
+    String? shelterAddress,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final ref = _cases.doc();
+    final now = Timestamp.now();
+    await ref.set({
+      'status': RescueStatus.awaitingAssignment.firestoreValue,
+      'sourceType': 'animalRecordAdmission',
+      'sourceAnimalRecordId': sourceAnimalRecordId,
+      'admissionReason': admissionReason,
+      if (admissionNotes != null && admissionNotes.isNotEmpty) 'admissionNotes': admissionNotes,
+      'animalType': species,
+      'condition': admissionNotes ?? '',
+      'reporterName': actorName,
+      'lat': lat,
+      'lng': lng,
+      if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
+      'urgency': 'Medium',
+      'createdAt': FieldValue.serverTimestamp(),
+      'statusHistory': [
+        {'status': 'Medical admission opened for $animalName ($admissionReason).', 'timestamp': now},
+      ],
+    });
+    await addActivityLog(
+      caseId: ref.id,
+      action: 'animal_record_admission_created',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'reason': admissionReason},
+    );
+    return ref.id;
   }
 
   /// Backward compatibility for reports submitted before multi-animal

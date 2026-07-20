@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
@@ -7,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 
 enum _AdoptionProcess {
   intro,           // 1st step - Lets start
@@ -27,6 +30,16 @@ const List<String> _stepLabels = [
 ];
 
 
+// TODO(animal-catalog): widget.animal comes from this file's own hardcoded
+// _allAnimals catalog (adoption_page.dart), not a live read of the real
+// `animals` Firestore collection the admin Animal Records module manages —
+// a pre-existing disconnect, not something this round's admin Adoption
+// Application Review work introduced. Until the browsing catalog itself is
+// reconnected to Firestore, `personal.animalId` on a submitted application
+// generally will NOT match a real `animals/{id}` document, so admin-side
+// animal-record linking (View Applications from an Animal Record, per-
+// application animal photo lookups) only works for applications whose id
+// happens to coincide with a real doc id.
 class AdoptionProcess extends StatefulWidget {
   final Animal animal;
   final String? existingAdoptionId;
@@ -113,6 +126,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   bool _isSubmitting = false;
   bool _isLoadingExisting = false;
 
+  // True once the organization has reserved this animal for this
+  // applicant's approved application (AdoptionApplicationRepository.reserve,
+  // admin-side) — read straight off this same doc's own reservedAt field,
+  // no second lookup needed.
+  bool _isReservedForMe = false;
+
+  // Live updates so admin actions (interview scheduling, approval,
+  // reservation, release, rejection) show up here without the applicant
+  // needing to reopen this screen.
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _adoptionSub;
+
   // Adoption fee / payment
   static const double adoptionFeeAmount = 500;
   bool _feePaid = false;
@@ -180,6 +204,15 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     if (widget.existingAdoptionId != null) {
       _isLoadingExisting = true;
       _loadExistingAdoption();
+      _adoptionSub = FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(widget.existingAdoptionId)
+          .snapshots()
+          .listen((_) {
+        // Re-parses via the same _loadExistingAdoption path used on open —
+        // no separate live-parsing logic to keep in sync with it.
+        if (!_isLoadingExisting) _loadExistingAdoption();
+      });
     } else {
       _prefillFromAccount();
     }
@@ -187,6 +220,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   @override
   void dispose() {
+    _adoptionSub?.cancel();
     _nameCtrl.dispose();
     _ageCtrl.dispose();
     _emailCtrl.dispose();
@@ -299,18 +333,26 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     } catch (_) {}
   }
 
+  // Recognizes both the canonical statuses the admin Adoption Application
+  // Review module now writes (pending/interview/approved/adopted) and the
+  // legacy values this form used to write on its own before that module
+  // existed — so an application submitted before this change still resumes
+  // at the right step. See AdoptionStatus.fromFirestoreValue for the same
+  // mapping used admin-side.
   _AdoptionProcess _stepForStatus(String? status) {
     switch (status) {
+      case 'pending':
       case 'pending_appointment':
         return _AdoptionProcess.bookAppointment;
+      case 'interview':
       case 'under_review':
         return _AdoptionProcess.appReview;
+      case 'approved':
       case 'appointment_confirmed':
         return _AdoptionProcess.timeToMeet;
+      case 'adopted':
       case 'completed':
-        return _AdoptionProcess.adoptionDay;
       case 'return_requested':
-        return _AdoptionProcess.adoptionDay;
       case 'return_approved':
         return _AdoptionProcess.adoptionDay;
       case 'rejected':
@@ -427,6 +469,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _feePaid = payment['status'] == 'paid';
         _paymentMethod = payment['method'] as String?;
 
+        // Set by AdoptionApplicationRepository.reserve (admin-side) —
+        // cleared again by unreserve/release.
+        _isReservedForMe = data['reservedAt'] != null;
+
         _step = _stepForStatus(data['status'] as String?);
         _isLoadingExisting = false;
       });
@@ -466,7 +512,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final existing = await FirebaseFirestore.instance
           .collection('adoptions')
-          .where('personal.animalId', isEqualTo: widget.animal.id)
+          .where('personal.animalId', isEqualTo: '${widget.animal.id}')
           .get();
 
       final stillActiveOrDone = existing.docs.any((doc) {
@@ -506,7 +552,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       await docRef.set({
         'personal': {
           'adopterId': uid,
-          'animalId': widget.animal.id,
+          // Stored as a string (not the raw int) so it can match a real
+          // `animals/{id}` Firestore document id — see the TODO on
+          // AdoptionProcess for the current catalog/Firestore disconnect
+          // this doesn't fully resolve.
+          'animalId': '${widget.animal.id}',
           'animalName': widget.animal.name,
           'adopterName': _nameCtrl.text.trim(),
           'adopterEmail': _emailCtrl.text.trim(),
@@ -565,7 +615,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           'infoAccurate': _agreeAccurate,
           'approvalNotGuaranteed': _agreeNotGuaranteed,
         },
-        'status': 'pending_appointment',
+        'status': 'pending',
         'statusHistory': [
           {
             'status': 'Form submitted.',
@@ -604,7 +654,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         'appointmentType': _appointmentType,
         'appointmentDate': Timestamp.fromDate(_appointmentDate!),
         'appointmentTime': _appointmentTime,
-        'status': 'under_review',
+        'status': 'interview',
         'statusHistory': FieldValue.arrayUnion([{
           'status': 'Appointment booked.',
           'timestamp': Timestamp.now(),
@@ -618,41 +668,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to book appointment: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
-  }
-
-  Future<void> _updateStatus(String status,
-      String statusMessage,
-      _AdoptionProcess nextStep,) async {
-    if (_adoptionId == null) return;
-    setState(() => _isSubmitting = true);
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('adoptions')
-          .doc(_adoptionId)
-          .update({
-        'status': status,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': statusMessage,
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
-
-      setState(() => _step = nextStep);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -761,6 +776,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           .doc(_adoptionId)
           .update({
         'status': 'withdrawn',
+        'withdrawnAt': FieldValue.serverTimestamp(),
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Application withdrawn by adopter.',
@@ -768,6 +784,19 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           }
         ]),
       });
+
+      // If this application had reserved the animal, safely release that
+      // reservation so it becomes available again — never touches an
+      // already-completed release (see the repository method's own doc
+      // comment on why that's flagged for manual resolution instead).
+      await AdoptionApplicationRepository().clearReservationOnWithdrawal(
+        applicationId: _adoptionId!,
+        // TODO(animal-catalog): widget.animal.id is this screen's local
+        // mock-catalog int id, not necessarily a real `animals/{id}`
+        // Firestore document id — see the class doc comment for why. This
+        // call is a no-op (safely) if no matching animal doc exists.
+        animalId: '${widget.animal.id}',
+      );
 
       setState(() => _step = _AdoptionProcess.withdrawn);
     } catch (e) {
@@ -1566,37 +1595,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             label: 'Withdraw Application',
             onTap: _isSubmitting ? null : _withdrawApplication,
           ),
-
-          const SizedBox(height: 12),
-
-          // ---------- for testing only!!
-          Row(
-            children: [
-              Expanded(
-                child: _SecondaryButton(
-                  label: 'Approved →',
-                  onTap: _isSubmitting
-                      ? null
-                      : () =>
-                      _updateStatus('appointment_confirmed',
-                        'Application approved. Appointment confirmed.',
-                        _AdoptionProcess.timeToMeet,),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SecondaryButton(
-                  label: 'Rejected →',
-                  onTap: _isSubmitting
-                      ? null
-                      : () =>
-                      _updateStatus('rejected', 'Application was not approved.',
-                        _AdoptionProcess.appReject,),
-                ),
-              ),
-            ],
-          ),
-          // ---------- for testing only ^^^^
         ],
 
         const SizedBox(height: 24),
@@ -1696,6 +1694,28 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           ),
         ],
 
+        if (_isReservedForMe) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.lavenderrspwn.withOpacity(0.4),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.favorite, color: AppColors.textPrimary, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('${widget.animal.name} has been reserved for you!',
+                      style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                ),
+              ],
+            ),
+          ),
+        ],
+
         if (!_isReadOnly) ...[
           const SizedBox(height: 28),
           if (!_feePaid)
@@ -1704,13 +1724,22 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               onTap: _openReviewPayment,
             )
           else
-            _PrimaryButton(
-              label: _isSubmitting ? 'Updating...' : 'Adoption Day!',
-              onTap: _isSubmitting
-                  ? null
-                  : () =>
-                  _updateStatus('completed', 'Adoption Completed!',
-                    _AdoptionProcess.adoptionDay,),
+            // The organization completes the actual handoff (Release
+            // Animal, from the admin Adoption Application Review module) —
+            // this screen just reflects that live once it happens, rather
+            // than letting the applicant self-declare adoption complete.
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.slaterspwn.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Center(
+                child: Text('Waiting for the organization to release the animal to you.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              ),
             ),
         ],
 
