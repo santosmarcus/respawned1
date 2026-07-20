@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
@@ -41,7 +42,7 @@ void main() async {
   // working" because it silently logged the user right back out.
   // Removed so Firebase's normal persisted-session behavior applies.
 
-  runApp(const ResPAWndApp());
+  runApp(const ProviderScope(child: ResPAWndApp()));
 }
 
 class ResPAWndApp extends StatelessWidget {

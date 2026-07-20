@@ -124,6 +124,10 @@ flutter:
         - asset: assets/fonts/Zain-Regular.ttf
         - asset: assets/fonts/Zain-Bold.ttf
           weight: 700
+
+    - family: TiltWarp
+      fonts:
+        - asset: assets/fonts/TiltWarp-Regular.ttf
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a
   # "family" key with the font family name, and a "fonts" key with a

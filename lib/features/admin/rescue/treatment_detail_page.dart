@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'intake_detail_page.dart';
 
 class TreatmentDetailPage extends StatefulWidget {
@@ -184,7 +185,7 @@ class _TreatmentDetailPageState extends State<TreatmentDetailPage> {
                             style: GoogleFonts.tiltWarp(
                                 fontSize: 24, color: AppColors.textPrimary)),
                         Text(
-                            'CASE ID: ${widget.caseId.substring(0, 5).toUpperCase()}',
+                            'CASE ID: ${shortCaseId(widget.caseId)}',
                             style: GoogleFonts.zain(
                                 fontSize: 12, color: AppColors.textSecondary)),
                       ],

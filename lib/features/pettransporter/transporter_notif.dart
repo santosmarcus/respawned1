@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
@@ -93,7 +94,7 @@ class _TransporterNotificationsState
     if (mounted) setState(() => _ready = true);
   }
 
-  String _labelFor(String docId) => '#${docId.length >= 7 ? docId.substring(0, 7).toUpperCase() : docId.toUpperCase()}';
+  String _labelFor(String docId) => '#${shortCaseId(docId)}';
 
   String _classifyStatusType(String message) {
     final lower = message.toLowerCase();

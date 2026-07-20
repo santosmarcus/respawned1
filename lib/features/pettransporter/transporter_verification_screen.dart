@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/pettransporter/transporter_success_screen.dart';
 
 class _VehicleTypeOption {
@@ -172,8 +173,43 @@ class _TransporterVerificationScreenState
     }
   }
 
+  Future<void> _confirmSignOut() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: const Text('Sign Out?'),
+        content: const Text(
+            "You'll need to sign back in to finish identity verification later."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sign Out')),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await AuthService().signOut();
+      // AuthWrapper (main.dart) rebuilds off the auth-state stream and
+      // routes to LoginScreen on its own — nothing to navigate to here.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // AuthWrapper (main.dart) makes this screen the app's root/home
+    // whenever verification is incomplete, so on a fresh launch there is
+    // nothing behind it to pop to. The old unconditional
+    // Navigator.pop(context) was a no-op at best and, in profile/release
+    // builds where assertion failures don't render the red debug screen,
+    // could show as a blank/black frame instead. Only offer a real "back"
+    // when there's somewhere to go back to (e.g. reached via push right
+    // after onboarding in the same session); otherwise offer Sign Out as
+    // the actual way out of an incomplete verification.
+    final canGoBack = Navigator.canPop(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -181,9 +217,12 @@ class _TransporterVerificationScreenState
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.chevron_left,
-              color: AppColors.textPrimary, size: 28),
-          onPressed: _submitting ? null : () => Navigator.pop(context),
+          icon: Icon(canGoBack ? Icons.chevron_left : Icons.logout,
+              color: AppColors.textPrimary, size: canGoBack ? 28 : 22),
+          tooltip: canGoBack ? 'Back' : 'Sign Out',
+          onPressed: _submitting
+              ? null
+              : (canGoBack ? () => Navigator.pop(context) : _confirmSignOut),
         ),
         centerTitle: true,
         title: Text('Identity Verification',

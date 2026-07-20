@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'activity_card.dart';
 import 'activity_item.dart';
 
@@ -76,7 +77,7 @@ class ActivityFeed extends StatelessWidget {
                   items.add(ActivityItem(
                     id: doc.id,
                     type: ActivityType.rescue,
-                    title: 'Rescue Report #${doc.id.substring(0, 7).toUpperCase()}',
+                    title: 'Rescue Report #${shortCaseId(doc.id)}',
                     subtitle: data['address'] as String? ?? '-',
                     status: latestStatus,
                     animalType: data['animalType'] as String? ?? '',
@@ -144,8 +145,8 @@ class ActivityFeed extends StatelessWidget {
                     id: doc.id,
                     type: ActivityType.lostFoundPet,
                     title: kind == 'lost'
-                        ? 'Lost Pet Report #${doc.id.substring(0, 7).toUpperCase()}'
-                        : 'Found Pet Report #${doc.id.substring(0, 7).toUpperCase()}',
+                        ? 'Lost Pet Report #${shortCaseId(doc.id)}'
+                        : 'Found Pet Report #${shortCaseId(doc.id)}',
                     subtitle: data['address'] as String? ?? '-',
                     status: statusLabel,
                     animalType: data['species'] as String? ?? '',

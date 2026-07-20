@@ -1,44 +1,83 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/rescue_case_card.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/rescue_filter_sheet.dart';
 
-class RescueReportsPage extends StatefulWidget {
+class RescueReportsPage extends ConsumerStatefulWidget {
   const RescueReportsPage({super.key});
 
   @override
-  State<RescueReportsPage> createState() => _RescueReportsPageState();
+  ConsumerState<RescueReportsPage> createState() => _RescueReportsPageState();
 }
 
-class _RescueReportsPageState extends State<RescueReportsPage> {
-  String _currentFilter = 'Review';
+class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
+  final _searchController = TextEditingController();
 
-  final List<Map<String, dynamic>> _filters = [
-    {'label': 'Review', 'icon': Icons.rate_review_outlined, 'badge': 2},
-    {'label': 'Assign', 'icon': Icons.assignment_ind_outlined, 'badge': 0},
-    {'label': 'Ongoing', 'icon': Icons.local_shipping_outlined, 'badge': 0},
-    {'label': 'In Treatment', 'icon': Icons.medical_services_outlined, 'badge': 1},
-    {'label': 'Intake', 'icon': Icons.pets_outlined, 'badge': 0},
-  ];
+  static const _tabIcons = {
+    RescuePipelineTab.review: Icons.rate_review_outlined,
+    RescuePipelineTab.assign: Icons.assignment_ind_outlined,
+    RescuePipelineTab.ongoing: Icons.local_shipping_outlined,
+    RescuePipelineTab.treatment: Icons.medical_services_outlined,
+    RescuePipelineTab.intake: Icons.pets_outlined,
+  };
 
-  String _filterToStatus(String filter) {
-    switch (filter) {
-      case 'Review': return 'pending';
-      case 'Assign': return 'accepted';
-      case 'Ongoing': return 'assigned';
-      case 'In Treatment': return 'in_treatment';
-      case 'Intake': return 'intake';
-      default: return 'pending';
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _navigateToDetail(BuildContext context, RescueCase c) {
+    // The dedicated pipeline screens still take (caseId, Map<String,dynamic>
+    // data) — `c.raw` is the full original document, so this stays a
+    // drop-in for all of their existing logic.
+    switch (c.status) {
+      case RescueStatus.pendingReview:
+        Navigator.push(context, MaterialPageRoute(
+            builder: (_) => RescueDetailPage(caseId: c.id, data: c.raw)));
+        break;
+      case RescueStatus.accepted:
+      case RescueStatus.awaitingAssignment:
+        Navigator.push(context, MaterialPageRoute(
+            builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)));
+        break;
+      case RescueStatus.ongoing:
+        Navigator.push(context, MaterialPageRoute(
+            builder: (_) => AdminTrackCasePage(caseId: c.id, data: c.raw)));
+        break;
+      case RescueStatus.treatment:
+        Navigator.push(context, MaterialPageRoute(
+            builder: (_) => TreatmentDetailPage(caseId: c.id, data: c.raw)));
+        break;
+      case RescueStatus.intake:
+        Navigator.push(context, MaterialPageRoute(
+            builder: (_) => IntakeDetailPage(caseId: c.id, data: c.raw)));
+        break;
+      default:
+        // Rejected / referred / possibleDuplicate / merged / completed /
+        // cancelled all land on the read-oriented detail page, which shows
+        // referral/merge history instead of the accept/assign actions.
+        Navigator.push(context, MaterialPageRoute(
+            builder: (_) => RescueDetailPage(caseId: c.id, data: c.raw)));
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final selectedTab = ref.watch(rescuePipelineTabProvider);
+    final filters = ref.watch(rescueFilterProvider);
+    final casesAsync = ref.watch(filteredCasesProvider);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -48,12 +87,10 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
           onPressed: () {},
         ),
         title: Text('Rescue Reports',
-            style: GoogleFonts.tiltWarp(
-                fontSize: 18, color: AppColors.background)),
+            style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_outlined,
-                color: AppColors.background),
+            icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
             onPressed: () {},
           ),
         ],
@@ -63,12 +100,10 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
         children: [
           const SizedBox(height: 20),
 
-          // Rescue Process label
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text('Rescue Process',
-                style: GoogleFonts.tiltWarp(
-                    fontSize: 16, color: AppColors.textPrimary)),
+                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
           ),
 
           const SizedBox(height: 16),
@@ -79,14 +114,19 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _filters.length,
+              itemCount: RescuePipelineTab.values.length,
               separatorBuilder: (_, __) => const SizedBox(width: 16),
               itemBuilder: (context, index) {
-                final filter = _filters[index];
-                final isSelected = _currentFilter == filter['label'];
+                final tab = RescuePipelineTab.values[index];
+                final isSelected = selectedTab == tab && filters.statusOverride == null;
+                final badgeAsync = ref.watch(casesByStatusesProvider(tab.statuses));
+                final badgeCount = badgeAsync.asData?.value.length ?? 0;
+
                 return GestureDetector(
-                  onTap: () =>
-                      setState(() => _currentFilter = filter['label']),
+                  onTap: () {
+                    ref.read(rescuePipelineTabProvider.notifier).select(tab);
+                    ref.read(rescueFilterProvider.notifier).setStatusOverride(null);
+                  },
                   child: Column(
                     children: [
                       Stack(
@@ -96,20 +136,16 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              color: isSelected
-                                  ? AppColors.textPrimary
-                                  : AppColors.slaterspwn,
+                              color: isSelected ? AppColors.textPrimary : AppColors.slaterspwn,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
-                              filter['icon'] as IconData,
-                              color: isSelected
-                                  ? AppColors.background
-                                  : AppColors.textSecondary,
+                              _tabIcons[tab],
+                              color: isSelected ? AppColors.background : AppColors.textSecondary,
                               size: 22,
                             ),
                           ),
-                          if ((filter['badge'] as int) > 0)
+                          if (badgeCount > 0)
                             Positioned(
                               top: -6,
                               right: -6,
@@ -122,11 +158,9 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
                                 ),
                                 child: Center(
                                   child: Text(
-                                    '${filter['badge']}',
+                                    '$badgeCount',
                                     style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold),
+                                        fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
                                   ),
                                 ),
                               ),
@@ -135,15 +169,11 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        filter['label'] as String,
+                        tab.label,
                         style: GoogleFonts.zain(
                           fontSize: 11,
-                          color: isSelected
-                              ? AppColors.textPrimary
-                              : AppColors.textSecondary,
-                          fontWeight: isSelected
-                              ? FontWeight.w600
-                              : FontWeight.normal,
+                          color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                         ),
                       ),
                     ],
@@ -153,42 +183,121 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+
+          // Search + filter
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: AppColors.slaterspwn),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.search, size: 18, color: AppColors.textSecondary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            onChanged: (v) =>
+                                ref.read(rescueFilterProvider.notifier).setSearchText(v),
+                            decoration: InputDecoration(
+                              hintText: 'Search species, reporter, case ID…',
+                              hintStyle: GoogleFonts.zain(
+                                  fontSize: 13, color: AppColors.textSecondary),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: () => showRescueFilterSheet(
+                    context,
+                    current: filters,
+                    onApply: (next) {
+                      ref.read(rescueFilterProvider.notifier).replaceAll(next);
+                      _searchController.text = next.searchText;
+                    },
+                  ),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: filters.isEmpty ? Colors.white : AppColors.yellowrspwn,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.slaterspwn),
+                    ),
+                    child: const Icon(Icons.tune, size: 20, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          if (filters.statusOverride != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Chip(
+                  label: Text('Showing: ${filters.statusOverride!.label}',
+                      style: GoogleFonts.zain(fontSize: 12)),
+                  backgroundColor: AppColors.yellowrspwn,
+                  onDeleted: () =>
+                      ref.read(rescueFilterProvider.notifier).setStatusOverride(null),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 12),
 
           // Cases list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('cases')
-                  .where('status',
-                  isEqualTo: _filterToStatus(_currentFilter))
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            child: casesAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (err, _) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('Could not load reports: $err',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                ),
+              ),
+              data: (cases) {
+                if (cases.isEmpty) {
                   return Center(
-                    child: Text('No cases in this stage.',
-                        style: GoogleFonts.zain(
-                            fontSize: 14,
-                            color: AppColors.textSecondary)),
+                    child: Text(
+                      filters.isEmpty
+                          ? 'No cases in this stage.'
+                          : 'No cases match your filters.',
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                    ),
                   );
                 }
-
                 return ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: snapshot.data!.docs.length,
+                  itemCount: cases.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
-                    final doc = snapshot.data!.docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _CaseCard(
-                      caseId: doc.id,
-                      data: data,
-                      currentFilter: _currentFilter,
+                    final c = cases[index];
+                    return RescueCaseCard(
+                      rescueCase: c,
+                      showStatusChip: filters.statusOverride != null,
+                      highlightBorder: c.status == RescueStatus.pendingReview,
+                      onTap: () => _navigateToDetail(context, c),
                     );
                   },
                 );
@@ -200,210 +309,3 @@ class _RescueReportsPageState extends State<RescueReportsPage> {
     );
   }
 }
-
-class _CaseCard extends StatelessWidget {
-  final String caseId;
-  final Map<String, dynamic> data;
-  final String currentFilter;
-
-  const _CaseCard({
-    required this.caseId,
-    required this.data,
-    required this.currentFilter,
-  });
-
-  Color _urgencyColor(String? urgency) {
-    switch (urgency) {
-      case 'Critical': return Colors.red;
-      case 'Medium':   return AppColors.yellowrspwn;
-      case 'Low':      return Colors.green;
-      default:         return AppColors.slaterspwn;
-    }
-  }
-
-  String _previewText() {
-    switch (currentFilter) {
-      case 'Review':
-        return data['condition'] ?? '';
-      case 'Assign':
-        return 'Searching for Pet Transporter...';
-      case 'Ongoing':
-        final history = List<Map<String, dynamic>>.from(
-            data['statusHistory'] ?? []);
-        return history.isNotEmpty
-            ? history.last['status'] ?? ''
-            : 'In progress';
-      case 'In Treatment':
-        return 'The animal has reached the clinic. Animal is now in treatment.';
-      case 'Intake':
-        return 'Animal marked ready for Intake';
-      default:
-        return data['condition'] ?? '';
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ts = data['createdAt'] as Timestamp?;
-    final timeStr = ts != null
-        ? '${ts.toDate().hour.toString().padLeft(2,'0')}:${ts.toDate().minute.toString().padLeft(2,'0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-        : '';
-    final dateStr = ts != null
-        ? 'March ${ts.toDate().day}, ${ts.toDate().year}'
-        : '';
-
-    return GestureDetector(
-      onTap: () => _navigateToDetail(context),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: currentFilter == 'Review'
-              ? Border.all(color: AppColors.textPrimary.withValues(alpha: 0.3), width: 1.5)
-              : null,
-          boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Photo placeholder
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.tearspwn,
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-
-            const SizedBox(width: 12),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Animal type + urgency
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(data['animalType'] ?? 'Animal',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 15, color: AppColors.textPrimary)),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: _urgencyColor(data['urgency']),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(data['urgency'] ?? '',
-                            style: GoogleFonts.zain(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white)),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // Description preview
-                  Text(
-                    _previewText(),
-                    style: GoogleFonts.zain(
-                        fontSize: 12, color: AppColors.textSecondary),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  // Location + time
-                  Text(data['address'] ?? '',
-                      style: GoogleFonts.zain(
-                          fontSize: 11, color: AppColors.textSecondary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '$timeStr\n$dateStr',
-                        style: GoogleFonts.zain(
-                            fontSize: 10, color: AppColors.textSecondary),
-                      ),
-                      Text('',style: GoogleFonts.zain(fontSize: 10)),
-                    ],
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // Reporter + case ID
-                  Text('Reported by: ${data['reporterName'] ?? '-'}',
-                      style: GoogleFonts.zain(
-                          fontSize: 11, color: AppColors.textSecondary)),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                          'CASE ID: ${caseId.substring(0, 5).toUpperCase()}',
-                          style: GoogleFonts.zain(
-                              fontSize: 11, color: AppColors.textSecondary)),
-                      ElevatedButton(
-                        onPressed: () => _navigateToDetail(context),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.yellowrspwn,
-                          elevation: 0,
-                          minimumSize: const Size(90, 28),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20)),
-                        ),
-                        child: Text('View Details',
-                            style: GoogleFonts.zain(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _navigateToDetail(BuildContext context) {
-    switch (currentFilter) {
-      case 'Review':
-        Navigator.push(context, MaterialPageRoute(
-            builder: (_) => RescueDetailPage(caseId: caseId, data: data)));
-        break;
-      case 'Assign':
-        Navigator.push(context, MaterialPageRoute(
-            builder: (_) => AssignRiderPage(caseId: caseId, data: data)));
-        break;
-      case 'Ongoing':
-        Navigator.push(context, MaterialPageRoute(
-            builder: (_) => AdminTrackCasePage(caseId: caseId, data: data)));
-        break;
-      case 'In Treatment':
-        Navigator.push(context, MaterialPageRoute(
-            builder: (_) => TreatmentDetailPage(caseId: caseId, data: data)));
-        break;
-      case 'Intake':
-        Navigator.push(context, MaterialPageRoute(
-            builder: (_) => IntakeDetailPage(caseId: caseId, data: data)));
-        break;
-    }
-  }
-}
-
-
