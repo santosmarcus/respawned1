@@ -1,8 +1,21 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Lightweight view model for a single card in the public rescue feed
-/// (Explore Reports / Home preview). Built straight from a `cases` doc —
-/// this feed is public, so it is never filtered down to a single reporter.
+String _animalSummary(List animals) {
+  final counts = <String, int>{};
+  final order = <String>[];
+  for (final a in animals) {
+    final species = (a is Map ? a['species'] : null) as String?;
+    if (species == null || species.isEmpty) continue;
+    if (!counts.containsKey(species)) order.add(species);
+    counts[species] = (counts[species] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return '';
+  return order.map((s) {
+    final c = counts[s]!;
+    return '$c ${c == 1 ? s : '${s}s'}';
+  }).join(', ');
+}
+
 class PublicRescueItem {
   final String caseId;
   final List<String> photoUrls;
@@ -39,6 +52,11 @@ class PublicRescueItem {
     final reporterTag =
     reporterName.isNotEmpty ? 'Reported by $reporterName' : 'Reported by a community member';
 
+    final animals = data['animals'] as List?;
+    final animalSummary = (animals != null && animals.isNotEmpty)
+        ? _animalSummary(animals)
+        : (data['animalType'] as String? ?? '');
+
     return PublicRescueItem(
       caseId: doc.id,
       photoUrls: List<String>.from(data['photoUrls'] ?? []),
@@ -48,7 +66,7 @@ class PublicRescueItem {
       latestStatusLabel: latestStatus,
       reporterTag: reporterTag,
       createdAt: ts?.toDate(),
-      animalType: data['animalType'] as String? ?? '',
+      animalType: animalSummary,
       urgency: data['urgency'] as String? ?? '',
     );
   }

@@ -134,62 +134,14 @@ class _TrackCasePageState extends State<TrackCasePage> {
           ),
           body: Column(
             children: [
-              // Reporter: live transit-progress map as soon as the rider
-              // has accepted and started the trip — riderLastLat/Lng only
-              // get written once _startTrip() begins location streaming,
-              // so their presence is the real "accepted" signal (being
-              // merely assigned isn't enough yet). Before that — and for
-              // everyone who isn't the reporter — the gray area shows the
-              // submitted report photos instead.
-              if (isReporter && data?['riderLastLat'] != null)
-                SizedBox(
-                  height: 200,
-                  child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
-                )
-              else if (isReporter && data?['riderId'] != null)
-                Container(
-                  height: 200,
-                  color: AppColors.slaterspwn,
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.map_outlined,
-                            size: 40, color: AppColors.textSecondary),
-                        const SizedBox(height: 8),
-                        Text(
-                            'The transit map will appear once your transporter accepts and starts the pickup.',
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.zain(
-                                fontSize: 12, color: AppColors.textSecondary)),
-                      ],
-                    ),
-                  ),
-                )
-              else if (isReporter)
-                  Container(
-                    height: 200,
-                    color: AppColors.slaterspwn,
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.map_outlined,
-                              size: 40, color: AppColors.textSecondary),
-                          const SizedBox(height: 8),
-                          Text(
-                              'The transit map will appear once a transporter is assigned.',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.zain(
-                                  fontSize: 12, color: AppColors.textSecondary)),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  _CasePhotoHeader(
-                    photoUrls: List<String>.from(data?['photoUrls'] ?? []),
-                  ),
+              // The map is always the top element on this page — it shows
+              // the case's pickup pin plus, once a transporter has been
+              // assigned/starts moving, the drop-off pin, live transporter
+              // position, and the route traveled so far.
+              SizedBox(
+                height: 200,
+                child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
+              ),
 
               // Bottom panel
               Expanded(
@@ -318,11 +270,11 @@ class _TabButton extends StatelessWidget {
   }
 }
 
-// Reporter-only transit progress map: pickup marker, drop-off marker, the
-// transporter's live position, and the route actually traveled so far
-// (built from the periodic location pings the transporter's app writes to
-// cases/{caseId}/tracking). Gives the reporter a clear "pickup → now →
-// drop-off" picture of the rescue in progress.
+// Transit progress map shown to everyone viewing this case — pickup marker,
+// drop-off marker (once assigned), the transporter's live position, and the
+// route actually traveled so far (built from the periodic location pings
+// the transporter's app writes to cases/{caseId}/tracking). Before a
+// transporter is assigned this just shows the reported pickup location.
 class _TrackCaseMap extends StatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
@@ -346,7 +298,11 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
   @override
   Widget build(BuildContext context) {
     final pickup = _latLngFrom(widget.data, 'lat', 'lng');
-    final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng');
+    // Falls back to the admin's vetClinic coordinates for any case assigned
+    // a clinic before dropoff* was mirrored from it — see
+    // RescueCaseRepository.assignClinic.
+    final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng') ??
+        _latLngFrom(widget.data, 'vetClinicLat', 'vetClinicLng');
     final riderLastKnown =
     _latLngFrom(widget.data, 'riderLastLat', 'riderLastLng');
 
@@ -376,7 +332,7 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
         // case doc itself.
         final riderPos = trail.isNotEmpty ? trail.last : riderLastKnown;
 
-        final center = riderPos ?? pickup ?? dropoff ?? const LatLng(14.5995, 120.9842);
+        final center = riderPos ?? pickup ?? dropoff ?? const LatLng(14.5416, 121.0644);
 
         if (_controller != null && riderPos != null && !_centered) {
           _centered = true;
@@ -1208,9 +1164,23 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Address', data['address']),
+          _DetailRow('Type of Rescue', data['rescueType']),
           _DetailRow('Description', data['condition']),
-          _DetailRow('Type of Animal', data['animalType']),
+          _AnimalGroupSection(caseId: widget.caseId, data: data),
           _DetailRow('Urgency', data['urgency']),
+          _DetailRow('Containment Status', data['containmentStatus']),
+          if ((data['strayTemperament'] as String?)?.isNotEmpty ?? false)
+            _DetailRow(
+                'Approachability / Bite Risk', data['strayTemperament']),
+          _DetailRow('On-site', data['onSite']),
+          if ((data['accessInstructions'] as String?)?.isNotEmpty ?? false)
+            _DetailRow(
+                'Access Instructions', data['accessInstructions']),
+          if ((data['bestTimeToContact'] as String?)?.isNotEmpty ?? false)
+            _DetailRow(
+                'Best Time to Contact', data['bestTimeToContact']),
+          if ((data['scannedTagId'] as String?)?.isNotEmpty ?? false)
+            _DetailRow('Scanned Tag ID', data['scannedTagId']),
           _DetailRow('Coordination', data['coordinateWithShelter']),
           if (data['coordinateWithShelter'] == 'no') ...[
             _DetailRow('Witness Name', data['witnessName']),
@@ -1304,6 +1274,135 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   }
 }
 
+/// "No. of Animals" + per-animal breakdown (species/breed/sex/size/color),
+/// matching the same multi-animal display used in the admin app's
+/// RescueDetailPage. Current submissions store every animal in this case
+/// doc's `animals` array — one Case ID for the whole group report. Cases
+/// created before that change stored one case doc per animal linked by a
+/// shared `groupId`; those are still read the legacy way so old group
+/// reports keep displaying correctly. Cases with neither `animals` nor
+/// `groupId` just show this case's own single animal.
+class _AnimalGroupSection extends StatelessWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _AnimalGroupSection({required this.caseId, required this.data});
+
+  // Maps an `animals[]` entry (species/breed/sex/size/colorMarkings) onto
+  // the same key shape _AnimalDetailBlock expects from a full case doc
+  // (animalType/breed/sex/size/colorMarkings).
+  Map<String, dynamic> _animalMap(Map raw) => {
+    'animalType': raw['species'],
+    'breed': raw['breed'],
+    'sex': raw['sex'],
+    'size': raw['size'],
+    'colorMarkings': raw['colorMarkings'],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final animals = data['animals'] as List?;
+    if (animals != null && animals.isNotEmpty) {
+      final total = animals.length;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DetailRow('No. of Animals', '$total'),
+          for (var i = 0; i < animals.length; i++)
+            _AnimalDetailBlock(
+              data: _animalMap(animals[i] as Map),
+              index: i + 1,
+              total: total,
+            ),
+        ],
+      );
+    }
+
+    final groupId = data['groupId'] as String?;
+    if (groupId == null || groupId.isEmpty) {
+      return _AnimalDetailBlock(data: data, index: 1, total: 1);
+    }
+
+    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance
+          .collection('cases')
+          .where('groupId', isEqualTo: groupId)
+          .get(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          // Show this case's own animal immediately rather than blocking
+          // on the group query.
+          return _AnimalDetailBlock(data: data, index: 1, total: 1);
+        }
+        final docs = snapshot.data!.docs;
+        final total = docs.length;
+        if (total <= 1) {
+          return _AnimalDetailBlock(data: data, index: 1, total: 1);
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _DetailRow('No. of Animals', '$total'),
+            for (var i = 0; i < docs.length; i++)
+              _AnimalDetailBlock(
+                data: docs[i].data(),
+                index: i + 1,
+                total: total,
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AnimalDetailBlock extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final int index;
+  final int total;
+  const _AnimalDetailBlock(
+      {required this.data, required this.index, required this.total});
+
+  List<Widget> _fields() => [
+    _DetailRow('Species', data['animalType']),
+    _DetailRow('Breed / Mixed', data['breed']),
+    _DetailRow('Sex', data['sex']),
+    _DetailRow('Size', data['size']),
+    _DetailRow('Color / Distinguishing Markings', data['colorMarkings']),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (total <= 1) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: _fields(),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Animal $index of $total',
+              style: GoogleFonts.zain(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          ..._fields(),
+        ],
+      ),
+    );
+  }
+}
+
 class _DetailRow extends StatelessWidget {
   final String label;
   final String? value;
@@ -1324,90 +1423,6 @@ class _DetailRow extends StatelessWidget {
           Text(value ?? '-',
               style: GoogleFonts.zain(
                   fontSize: 13, color: AppColors.textSecondary)),
-        ],
-      ),
-    );
-  }
-}
-
-// Hero header shown to everyone who is NOT the reporter — since they have
-// no live rider to track, the gray area simply shows the submitted report
-// photo instead of a map.
-class _CasePhotoHeader extends StatefulWidget {
-  final List<String> photoUrls;
-  const _CasePhotoHeader({required this.photoUrls});
-
-  @override
-  State<_CasePhotoHeader> createState() => _CasePhotoHeaderState();
-}
-
-class _CasePhotoHeaderState extends State<_CasePhotoHeader> {
-  int _page = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final urls = widget.photoUrls;
-    return SizedBox(
-      height: 200,
-      width: double.infinity,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          urls.isEmpty
-              ? Container(
-            color: AppColors.slaterspwn,
-            child: const Center(
-              child: Icon(Icons.pets, size: 40, color: AppColors.textSecondary),
-            ),
-          )
-              : PageView.builder(
-            itemCount: urls.length,
-            onPageChanged: (i) => setState(() => _page = i),
-            itemBuilder: (context, i) {
-              return Image.network(
-                urls[i],
-                fit: BoxFit.cover,
-                width: double.infinity,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return Container(
-                    color: AppColors.slaterspwn,
-                    child: const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                  );
-                },
-                errorBuilder: (context, _, __) => Container(
-                  color: AppColors.slaterspwn,
-                  child: const Center(
-                    child: Icon(Icons.broken_image_outlined,
-                        size: 36, color: AppColors.textSecondary),
-                  ),
-                ),
-              );
-            },
-          ),
-          if (urls.length > 1)
-            Positioned(
-              bottom: 10,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(urls.length, (i) {
-                  return Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: i == _page
-                          ? AppColors.textPrimary
-                          : Colors.white.withOpacity(0.8),
-                    ),
-                  );
-                }),
-              ),
-            ),
         ],
       ),
     );
@@ -1533,8 +1548,8 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
               (p) =>
           p ??
               Position(
-                latitude: 14.5995,
-                longitude: 120.9842,
+                latitude: 14.5416,
+                longitude: 121.0644,
                 timestamp: DateTime.now(),
                 accuracy: 0,
                 altitude: 0,

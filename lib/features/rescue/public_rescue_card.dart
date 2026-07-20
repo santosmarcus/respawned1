@@ -104,6 +104,20 @@ class PublicRescueCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 4),
+                  if (item.animalType.isNotEmpty)
+                    Row(children: [
+                      const Icon(Icons.pets, size: 12, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          item.animalType,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ]),
+                  const SizedBox(height: 4),
                   Row(children: [
                     const Icon(Icons.info_outline, size: 12, color: AppColors.textSecondary),
                     const SizedBox(width: 6),

@@ -21,6 +21,50 @@ import 'package:firebase_storage/firebase_storage.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
+const String _dogSpecies = 'Dog';
+const String _catSpecies = 'Cat';
+const String _othersBreedLabel = 'Others / Not sure';
+
+const List<String> _dogBreeds = [
+  'Aspin (Mixed/Native)',
+  'Shih Tzu',
+  'Poodle',
+  'Pomeranian',
+  'Chihuahua',
+  'Labrador Retriever',
+  'Golden Retriever',
+  'German Shepherd',
+  'Beagle',
+  'Dachshund',
+  'Siberian Husky',
+  'Rottweiler',
+  'French Bulldog',
+  'Corgi',
+  'Shiba Inu',
+  'Japanese Spitz',
+  _othersBreedLabel,
+];
+
+const List<String> _catBreeds = [
+  'Puspin (Mixed/Native)',
+  'Persian',
+  'Siamese',
+  'British Shorthair',
+  'Maine Coon',
+  'Scottish Fold',
+  'Ragdoll',
+  'American Shorthair',
+  'Himalayan',
+  'Bengal',
+  _othersBreedLabel,
+];
+
+List<String> _breedOptionsFor(String? species) {
+  if (species == _dogSpecies) return _dogBreeds;
+  if (species == _catSpecies) return _catBreeds;
+  return const [_othersBreedLabel];
+}
+
 //Media
 class _MediaItem {
   final XFile file;
@@ -32,16 +76,22 @@ class _MediaItem {
 }
 
 class _FoundAnimalEntry {
-  final TextEditingController speciesController = TextEditingController();
-  final TextEditingController breedController = TextEditingController();
+  String? species; // 'Dog' | 'Cat'
+  String? breed; // one of _breedOptionsFor(species), or _othersBreedLabel
+  final TextEditingController breedOtherController = TextEditingController();
   final TextEditingController colorController = TextEditingController();
   String? sex;
   String? size;
 
   void dispose() {
-    speciesController.dispose();
-    breedController.dispose();
+    breedOtherController.dispose();
     colorController.dispose();
+  }
+
+  String get speciesText => species ?? '';
+  String get breedText {
+    if (breed == null) return '';
+    return breed == _othersBreedLabel ? breedOtherController.text.trim() : breed!;
   }
 }
 
@@ -78,7 +128,8 @@ class _RescuePageState extends State<RescuePage> {
 
   // Owner-side controllers
   final TextEditingController _petNameController = TextEditingController();
-  final TextEditingController _lostBreedController = TextEditingController();
+  String? _lostBreed;
+  final TextEditingController _lostBreedOtherController = TextEditingController();
   final TextEditingController _lostColorController = TextEditingController();
   DateTime? _lastSeenDate;
   TimeOfDay? _lastSeenTime;
@@ -87,6 +138,13 @@ class _RescuePageState extends State<RescuePage> {
   String? _lostSex;
   String? _temperament;
   bool _offerReward = false;
+
+  String get _lostBreedText {
+    if (_lostBreed == null) return '';
+    return _lostBreed == _othersBreedLabel
+        ? _lostBreedOtherController.text.trim()
+        : _lostBreed!;
+  }
 
   // Finder-side: one card per animal found (supports a multi-animal group case)
   final List<_FoundAnimalEntry> _foundAnimals = [_FoundAnimalEntry()];
@@ -194,7 +252,7 @@ class _RescuePageState extends State<RescuePage> {
     _accessInstructionsController.dispose();
     _bestTimeContactController.dispose();
     _petNameController.dispose();
-    _lostBreedController.dispose();
+    _lostBreedOtherController.dispose();
     _lostColorController.dispose();
     _rewardAmountController.dispose();
     _ownerContactController.dispose();
@@ -565,10 +623,13 @@ class _RescuePageState extends State<RescuePage> {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined,
                   color: AppColors.textPrimary),
-              title: Text('Choose photo from gallery',
+              title: Text('Choose photos from gallery',
                   style: GoogleFonts.zain(
                       fontSize: 15, color: AppColors.textPrimary)),
-              onTap: () => Navigator.pop(context, 'photo_gallery'),
+              subtitle: Text('Select up to ${_mediaFiles.length} at once',
+                  style: GoogleFonts.zain(
+                      fontSize: 12, color: AppColors.textSecondary)),
+              onTap: () => Navigator.pop(context, 'photo_gallery_multi'),
             ),
             ListTile(
               leading: const Icon(Icons.videocam_outlined,
@@ -604,6 +665,11 @@ class _RescuePageState extends State<RescuePage> {
 
     if (action == null || action == 'remove') return;
 
+    if (action == 'photo_gallery_multi') {
+      await _pickMultipleImages(startIndex: index);
+      return;
+    }
+
     XFile? file;
     bool isVideo = false;
 
@@ -611,10 +677,6 @@ class _RescuePageState extends State<RescuePage> {
       case 'photo_camera':
         file = await _picker.pickImage(
             source: ImageSource.camera, imageQuality: 80, maxWidth: 1280);
-        break;
-      case 'photo_gallery':
-        file = await _picker.pickImage(
-            source: ImageSource.gallery, imageQuality: 80, maxWidth: 1280);
         break;
       case 'video_camera':
         file = await _picker.pickVideo(
@@ -632,6 +694,39 @@ class _RescuePageState extends State<RescuePage> {
 
     if (file != null && mounted) {
       setState(() => _mediaFiles[index] = _MediaItem(file: file!, isVideo: isVideo));
+    }
+  }
+
+  Future<void> _pickMultipleImages({required int startIndex}) async {
+    final picked = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1280);
+    if (picked.isEmpty || !mounted) return;
+
+    final emptySlots = [
+      if (_mediaFiles[startIndex] == null) startIndex,
+      for (int i = 0; i < _mediaFiles.length; i++)
+        if (i != startIndex && _mediaFiles[i] == null) i,
+    ];
+
+    final placeCount =
+    picked.length < emptySlots.length ? picked.length : emptySlots.length;
+
+    setState(() {
+      for (int i = 0; i < placeCount; i++) {
+        _mediaFiles[emptySlots[i]] = _MediaItem(file: picked[i], isVideo: false);
+      }
+    });
+
+    if (placeCount < picked.length && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            placeCount == 0
+                ? 'You already have ${_mediaFiles.length} photos/videos added — remove one first.'
+                : 'Only $placeCount of ${picked.length} photos were added (max ${_mediaFiles.length} total).',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     }
   }
 
@@ -1056,6 +1151,14 @@ class _RescuePageState extends State<RescuePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildLabel('Include images and videos', required: true),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Tap any box, then "Choose photos from gallery" to '
+                        'select several at once — no need to tap each box. '
+                        'At least 2 are required, up to 4 total.',
+                    style: GoogleFonts.zain(
+                        fontSize: 11, color: AppColors.textSecondary),
+                  ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
@@ -1621,6 +1724,76 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
+
+  Widget _speciesDropdown({
+    required String? value,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isDense: true,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: 'Select species',
+        hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+        border: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary),
+        ),
+      ),
+      items: const [
+        DropdownMenuItem(value: _dogSpecies, child: Text('Dog')),
+        DropdownMenuItem(value: _catSpecies, child: Text('Cat')),
+      ],
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _breedDropdown({
+    required String? species,
+    required String? breedValue,
+    required ValueChanged<String?> onChanged,
+    required TextEditingController otherController,
+  }) {
+    final options = _breedOptionsFor(species);
+    final validValue =
+    (breedValue != null && options.contains(breedValue)) ? breedValue : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          value: validValue,
+          isDense: true,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: species == null ? 'Select species first' : 'Select breed',
+            hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+            border: const UnderlineInputBorder(
+              borderSide: BorderSide(color: AppColors.textPrimary),
+            ),
+          ),
+          items: species == null
+              ? const []
+              : options
+              .map((b) => DropdownMenuItem(
+            value: b,
+            child: Text(
+              b,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+            ),
+          ))
+              .toList(),
+          onChanged: species == null ? null : onChanged,
+        ),
+        if (validValue == _othersBreedLabel) ...[
+          const SizedBox(height: 8),
+          _lostPetTextField(otherController, 'Enter breed'),
+        ],
+      ],
+    );
+  }
+
   Widget _buildMediaBox(int index) {
     final item = _mediaFiles[index];
     final progress = _uploadProgress[index];
@@ -1955,13 +2128,17 @@ class _RescuePageState extends State<RescuePage> {
       _lostPetTextField(_petNameController, 'Enter pet name'),
       const SizedBox(height: 20),
       _buildLabel('Species', required: true),
-      const SizedBox(height: 8),
-      _buildCheckboxOption2('Dog', _selectedAnimalType,
-              (val) => setState(() => _selectedAnimalType = val)),
-      _buildCheckboxOption2('Cat', _selectedAnimalType,
-              (val) => setState(() => _selectedAnimalType = val)),
+      const SizedBox(height: 6),
+      _speciesDropdown(
+        value: _selectedAnimalType,
+        onChanged: (v) => setState(() {
+          _selectedAnimalType = v;
+          _lostBreed = null;
+        }),
+      ),
       const SizedBox(height: 20),
       Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Column(
@@ -1969,7 +2146,12 @@ class _RescuePageState extends State<RescuePage> {
               children: [
                 _buildLabel('Breed', required: false),
                 const SizedBox(height: 6),
-                _lostPetTextField(_lostBreedController, 'Mixed / unknown'),
+                _breedDropdown(
+                  species: _selectedAnimalType,
+                  breedValue: _lostBreed,
+                  onChanged: (v) => setState(() => _lostBreed = v),
+                  otherController: _lostBreedOtherController,
+                ),
               ],
             ),
           ),
@@ -2174,10 +2356,6 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
-  // Shared by every rescue type (not just Lost Pet finder reports): renders
-  // the repeatable animal cards plus "Add another animal" so any report —
-  // illness, injury, abandonment, a litter turned in together, etc. — can
-  // cover more than one animal as a single grouped case.
   List<Widget> _buildAnimalEntryFields() {
     return [
       for (int i = 0; i < _foundAnimals.length; i++) _buildFoundAnimalCard(i),
@@ -2231,13 +2409,25 @@ class _RescuePageState extends State<RescuePage> {
           ),
           const SizedBox(height: 8),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _lostPetTextField(entry.speciesController, 'Species'),
+                child: _speciesDropdown(
+                  value: entry.species,
+                  onChanged: (v) => setState(() {
+                    entry.species = v;
+                    entry.breed = null;
+                  }),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _lostPetTextField(entry.breedController, 'Breed / mixed'),
+                child: _breedDropdown(
+                  species: entry.species,
+                  breedValue: entry.breed,
+                  onChanged: (v) => setState(() => entry.breed = v),
+                  otherController: entry.breedOtherController,
+                ),
               ),
             ],
           ),
@@ -2299,7 +2489,7 @@ class _RescuePageState extends State<RescuePage> {
     final condition = _conditionController.text.trim();
     final filledCount = _mediaFiles.where((f) => f != null).length;
     final validAnimals =
-    _foundAnimals.where((a) => a.speciesController.text.trim().isNotEmpty).toList();
+    _foundAnimals.where((a) => a.speciesText.isNotEmpty).toList();
 
     if (condition.isEmpty ||
         _selectedRescueType == null ||
@@ -2341,38 +2531,29 @@ class _RescuePageState extends State<RescuePage> {
 
       final casesCollection = FirebaseFirestore.instance.collection('cases');
 
-      // ROOT CAUSE (fixed here) of "multiple animals in one report create
-      // multiple cases": this used to loop over validAnimals and `.add()`
-      // a separate case doc per animal (linked only by a shared groupId),
-      // so a 3-dog report became 3 case documents — and, since Rescue
-      // Reports never collapsed groupId siblings back together, 3 separate
-      // cards. One report is one rescue case: every animal now goes into
-      // a single doc's `animals` array instead. `animalType`/`breed`/
-      // `sex`/`size`/`colorMarkings` are still set from the first animal
-      // as a flat, backward-compatible fallback for older screens that
-      // only ever read those single fields (TrackCasePage's "Type of
-      // Animal" row, referral prefill, etc.) — RescueCase.speciesSummary
-      // is what actually reads the full `animals` list.
+      final animalsPayload = [
+        for (final animal in validAnimals)
+          {
+            'species': animal.speciesText,
+            'breed': animal.breedText,
+            'sex': animal.sex,
+            'size': animal.size,
+            'colorMarkings': animal.colorController.text.trim(),
+          }
+      ];
       final firstAnimal = validAnimals.first;
+
       final docRef = await casesCollection.add({
         'reporterId': uid,
         'reporterName': reporterName,
         'reporterPhone': userData?['phone'] ?? '',
-        'animalType': firstAnimal.speciesController.text.trim(),
-        'breed': firstAnimal.breedController.text.trim(),
+        'animals': animalsPayload,
+        'animalCount': animalsPayload.length,
+        'animalType': firstAnimal.speciesText,
+        'breed': firstAnimal.breedText,
         'sex': firstAnimal.sex,
         'size': firstAnimal.size,
         'colorMarkings': firstAnimal.colorController.text.trim(),
-        'animals': [
-          for (final animal in validAnimals)
-            {
-              'species': animal.speciesController.text.trim(),
-              'breed': animal.breedController.text.trim(),
-              'sex': animal.sex,
-              'size': animal.size,
-              'colorMarkings': animal.colorController.text.trim(),
-            },
-        ],
         'rescueType': _selectedRescueType,
         'condition': condition,
         'urgency': _selectedUrgency,
@@ -2406,7 +2587,7 @@ class _RescuePageState extends State<RescuePage> {
       final primaryCaseId = docRef.id;
       final photoUrls = await _uploadAllMedia(primaryCaseId);
       if (photoUrls.isNotEmpty) {
-        await docRef.update({'photoUrls': photoUrls});
+        await casesCollection.doc(primaryCaseId).update({'photoUrls': photoUrls});
       }
 
       if (mounted) {
@@ -2469,7 +2650,7 @@ class _RescuePageState extends State<RescuePage> {
       }
     } else {
       final hasEmptySpecies = _foundAnimals
-          .any((a) => a.speciesController.text.trim().isEmpty);
+          .any((a) => a.speciesText.isEmpty);
       if (hasEmptySpecies ||
           _conditionController.text.trim().isEmpty ||
           _animalStatus == null ||
@@ -2511,7 +2692,7 @@ class _RescuePageState extends State<RescuePage> {
           'contactNumber': _ownerContactController.text.trim(),
           'petName': _petNameController.text.trim(),
           'species': _selectedAnimalType,
-          'breed': _lostBreedController.text.trim(),
+          'breed': _lostBreedText,
           'sex': _lostSex,
           'colorMarkings': _lostColorController.text.trim(),
           'temperament': _temperament,
@@ -2542,7 +2723,7 @@ class _RescuePageState extends State<RescuePage> {
             'reporterId': uid,
             'reporterName': reporterName,
             'reporterPhone': _finderContactController.text.trim(),
-            'animalType': _foundAnimals.first.speciesController.text.trim(),
+            'animalType': _foundAnimals.first.speciesText,
             'rescueType': 'Lost Pet',
             'condition': _conditionController.text.trim(),
             'urgency': _selectedUrgency,
@@ -2573,8 +2754,8 @@ class _RescuePageState extends State<RescuePage> {
             'reporterId': uid,
             'reporterName': reporterName,
             'contactNumber': _finderContactController.text.trim(),
-            'species': a.speciesController.text.trim(),
-            'breed': a.breedController.text.trim(),
+            'species': a.speciesText,
+            'breed': a.breedText,
             'sex': a.sex,
             'size': a.size,
             'colorMarkings': a.colorController.text.trim(),
@@ -2613,7 +2794,7 @@ class _RescuePageState extends State<RescuePage> {
       final oppositeType = _isOwner == true ? 'found' : 'lost';
       final firstSpecies = _isOwner == true
           ? _selectedAnimalType
-          : _foundAnimals.first.speciesController.text.trim();
+          : _foundAnimals.first.speciesText;
       final candidates = await alertsCollection
           .where('type', isEqualTo: oppositeType)
           .where('status', isEqualTo: 'open')

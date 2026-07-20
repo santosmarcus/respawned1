@@ -135,6 +135,17 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   bool _autoSearchAttempted = false;
   bool _isVerifyingArrival = false;
 
+  // TESTING ONLY — remove later. A solo tester can't realistically be
+  // physically within _arrivalThresholdMeters of the pickup point, the
+  // clinic, AND the shelter in the same test run, so this lets
+  // _verifyArrivalViaDirections be bypassed via the toggle in the top-right
+  // corner of the map instead of the real GPS/Directions check. Defaults to
+  // ON for now so the whole accepted -> ongoing -> arrived -> treatment ->
+  // dropoff -> in_transit_shelter progression can be walked through
+  // immediately without an extra tap; flip the toggle off to test against
+  // real location again.
+  bool _testBypassGps = true;
+
   // Verification images
   final List<File?> _pickupImages = [null, null];
   final List<File?> _clinicImages = [null, null]; // arrived-at-clinic verification
@@ -246,6 +257,17 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     return null;
   }
 
+  // The clinic destination: dropoffLat/dropoffLng (normally mirrored from
+  // the admin's Select Clinic choice — see
+  // RescueCaseRepository.assignClinic — or set directly by this file's own
+  // _findAndRouteToNextClinic auto-search), falling back to vetClinicLat/
+  // vetClinicLng for any case assigned a clinic before that mirroring
+  // existed.
+  LatLng? _clinicLatLngFrom(Map<String, dynamic> data) {
+    return _latLngFrom(data, 'dropoffLat', 'dropoffLng') ??
+        _latLngFrom(data, 'vetClinicLat', 'vetClinicLng');
+  }
+
 
   // Clinic profile logging
   static const Set<String> _clinicRelevantReasons = {
@@ -341,6 +363,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
   Future<bool> _verifyArrivalViaDirections(
       LatLng? destination, String destinationLabel) async {
+    if (_testBypassGps) return true; // TESTING ONLY — remove later.
     if (destination == null) return true;
 
     setState(() => _isVerifyingArrival = true);
@@ -412,7 +435,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         .doc(widget.caseId)
         .get();
     final data = doc.data() as Map<String, dynamic>? ?? {};
-    final destination = _latLngFrom(data, 'dropoffLat', 'dropoffLng');
+    final destination = _clinicLatLngFrom(data);
 
     final arrived =
     await _verifyArrivalViaDirections(destination, 'the clinic');
@@ -673,6 +696,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         'dropoffName': newName,
         if (loc != null) 'dropoffLat': loc['lat'],
         if (loc != null) 'dropoffLng': loc['lng'],
+        // Deliberately NOT written to vetClinic* here — those fields mean
+        // specifically "the admin's Select Clinic choice" (see
+        // admin_track_case_page.dart's _destinationFrom priority: vetClinic*
+        // first, dropoff* only as the "legacy destination" fallback). This
+        // is an automatic re-search after a rejection, not an admin
+        // decision, so it must stay under dropoff* only — writing it to
+        // vetClinic* would falsely relabel an algorithm's pick as "Selected
+        // Clinic" and hide from the admin that they didn't choose it.
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Finding nearby clinics… routed to $newAddress',
@@ -693,20 +724,96 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     }
   }
 
-  // TESTING ONLY — remove later.
-  Future<void> _testSkipToNextStep() async {
+  // TESTING ONLY — remove later. Generic "Skip (Testing)" action, wired
+  // into every stage's panel below, so the whole accepted -> ongoing ->
+  // arrived -> treatment -> dropoff -> in_transit_shelter -> completed
+  // journey can be exercised without swiping through each real
+  // confirmation, uploading verification photos at every stop, or
+  // physically being at the pickup point / clinic / shelter.
+  Future<void> _testSkipStage(String currentStatus) async {
+    if (currentStatus == 'in_transit_shelter') {
+      await _testCompleteShelterDropoff();
+      return;
+    }
+
+    late final String nextStatus;
+    late final String label;
+    switch (currentStatus) {
+      case 'accepted':
+        nextStatus = 'ongoing';
+        label = '[TEST] Skipped — on the way to pick up location.';
+        break;
+      case 'ongoing':
+        nextStatus = 'arrived';
+        label = '[TEST] Skipped — arrived at pick up location.';
+        break;
+      case 'arrived':
+        nextStatus = 'treatment';
+        label = '[TEST] Skipped — animal rescued, on the way to treatment.';
+        break;
+      case 'treatment':
+        nextStatus = 'dropoff';
+        label = '[TEST] Skipped — arrived at clinic for treatment.';
+        break;
+      case 'dropoff':
+        nextStatus = 'in_transit_shelter';
+        label = '[TEST] Skipped — treatment accepted, on the way to shelter.';
+        break;
+      case 'searching_clinic':
+        nextStatus = 'in_transit_shelter';
+        label = '[TEST] Skipped clinic search — proceeding to shelter.';
+        break;
+      default:
+        return;
+    }
+
     await FirebaseFirestore.instance
         .collection('cases')
         .doc(widget.caseId)
         .update({
-      'status': 'in_transit_shelter',
+      'status': nextStatus,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': label, 'timestamp': Timestamp.now()}
+      ]),
+    });
+  }
+
+  // TESTING ONLY — remove later. Same end state _completeShelterDropoff
+  // reaches, minus the GPS check and the required shelter photo.
+  Future<void> _testCompleteShelterDropoff() async {
+    await FirebaseFirestore.instance
+        .collection('cases')
+        .doc(widget.caseId)
+        .update({
+      'status': 'completed',
       'statusHistory': FieldValue.arrayUnion([
         {
-          'status': '[TEST] Skipped clinic search — proceeding to shelter.',
-          'timestamp': Timestamp.now()
+          'status':
+          '[TEST] Skipped — animal delivered to shelter. Rescue completed.',
+          'timestamp': Timestamp.now(),
         }
       ]),
     });
+    _positionSub?.cancel();
+    if (mounted) await _showTransitCompletedBanner();
+  }
+
+  // TESTING ONLY — remove later. Small reusable "Skip (Testing)" button,
+  // styled to match the one already used on the searching-clinic panel.
+  Widget _testSkipButton(String currentStatus) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: () => _testSkipStage(currentStatus),
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: Colors.orange),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+        ),
+        child: Text('Skip (Testing)',
+            style: GoogleFonts.tiltWarp(fontSize: 12, color: Colors.orange)),
+      ),
+    );
   }
 
   Future<void> _completeShelterDropoff() async {
@@ -1186,7 +1293,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           currentDestination = _latLngFrom(data, 'lat', 'lng');
           currentDestinationLabel = 'Pick up location';
         } else if (status == 'treatment' || status == 'dropoff') {
-          currentDestination = _latLngFrom(data, 'dropoffLat', 'dropoffLng');
+          currentDestination = _clinicLatLngFrom(data);
           currentDestinationLabel = 'Clinic';
         } else if (status == 'in_transit_shelter') {
           currentDestination = _latLngFrom(data, 'shelterLat', 'shelterLng');
@@ -1219,23 +1326,49 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                         left: 16,
                         child: _OnlineBadge(),
                       ),
-                      // Settings / filter icon top right
+                      // TESTING ONLY — remove later. Toggles
+                      // _testBypassGps so arrival at pickup/clinic/shelter
+                      // can be confirmed without physically being there.
                       Positioned(
                         top: 48,
                         right: 16,
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                            boxShadow: [
-                              BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
-                                  blurRadius: 4)
-                            ],
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() => _testBypassGps = !_testBypassGps);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  _testBypassGps
+                                      ? 'Test mode ON — arrival checks will '
+                                      'skip the real GPS/location check.'
+                                      : 'Test mode OFF — arrival checks use '
+                                      'your real location again.',
+                                ),
+                                backgroundColor: _testBypassGps
+                                    ? Colors.orange
+                                    : AppColors.greenrspwn,
+                              ),
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _testBypassGps ? Colors.orange : Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                    color: Colors.black.withOpacity(0.08),
+                                    blurRadius: 4)
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.science_outlined,
+                              size: 18,
+                              color: _testBypassGps
+                                  ? Colors.white
+                                  : AppColors.textPrimary,
+                            ),
                           ),
-                          child: const Icon(Icons.tune,
-                              size: 18, color: AppColors.textPrimary),
                         ),
                       ),
 
@@ -1311,6 +1444,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         isActing: _isActing,
         data: data,
         showContacts: true,
+        testSkipStatus: status,
       );
     }
 
@@ -1334,6 +1468,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         onConfirm: _completeShelterDropoff,
         confirmLabel: 'Complete',
         isActing: _isActing,
+        testSkipStatus: status,
       );
     }
 
@@ -1451,6 +1586,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               label: 'Treatment Rejected',
               onSwiped: canDecide ? _rejectTreatment : null,
             ),
+            const SizedBox(height: 10),
+            _testSkipButton('dropoff'),
           ],
         ),
       ),
@@ -1535,7 +1672,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                   // Testing-only remove later
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _testSkipToNextStep,
+                      onPressed: () => _testSkipStage('searching_clinic'),
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Colors.orange),
                         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1600,7 +1737,17 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             // Swipe button
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              child: _buildSwipeButton(status),
+              child: Column(
+                children: [
+                  _buildSwipeButton(status),
+                  if (status == 'accepted' ||
+                      status == 'ongoing' ||
+                      status == 'treatment') ...[
+                    const SizedBox(height: 10),
+                    _testSkipButton(status),
+                  ],
+                ],
+              ),
             ),
           ],
         ),
@@ -1679,6 +1826,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     VoidCallback? onEnd,
     Map<String, dynamic>? data,
     bool showContacts = false,
+    String? testSkipStatus,
   }) {
     return Container(
       decoration: const BoxDecoration(
@@ -1821,6 +1969,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                           fontSize: 14, color: AppColors.textPrimary)),
                 ),
               ),
+            ],
+
+            if (testSkipStatus != null) ...[
+              const SizedBox(height: 10),
+              _testSkipButton(testSkipStatus),
             ],
           ],
         ),
