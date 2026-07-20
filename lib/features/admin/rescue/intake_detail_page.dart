@@ -1,138 +1,248 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/features/admin/animals/animal_records_flow_page.dart';
+import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
+import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 
-class IntakeDetailPage extends StatefulWidget {
+// TODO(intake-locations): no UI writes organizations/{orgId}.shelterLocation
+// or shelterLat/Lng yet (see OrganizationDirectoryRepository.resolveShelterLocation),
+// so this is the last-resort default almost every case falls back to today.
+const _kFallbackShelterName = 'Dasmarinas, Cavite';
+
+class IntakeDetailPage extends ConsumerStatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const IntakeDetailPage(
-      {super.key, required this.caseId, required this.data});
+  const IntakeDetailPage({super.key, required this.caseId, required this.data});
 
   @override
-  State<IntakeDetailPage> createState() => _IntakeDetailPageState();
+  ConsumerState<IntakeDetailPage> createState() => _IntakeDetailPageState();
 }
 
-class _IntakeDetailPageState extends State<IntakeDetailPage> {
-  bool _showAllLogs = false;
-  bool _isLoading = false;
+class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
+  bool _isConfirmingIntake = false;
+  bool _isStartingQuarantine = false;
+  bool _isEndingQuarantine = false;
+  bool _isSkippingQuarantine = false;
+  final _quarantineDaysController = TextEditingController(text: '7');
+  bool _hasCheckedQuarantineAutoComplete = false;
 
-  // Intake form
-  final _intakeStaffController = TextEditingController();
-  final _otherNotesController = TextEditingController();
-  String? _selectedShelter;
-  DateTime? _intakeDate;
+  ({String name, double? lat, double? lng})? _resolvedDestination;
 
-  final List<String> _shelterLocations = [
-    'Dasmarinas, Cavite',
-    'Pasay, Metro Manila',
-    'Makati, Metro Manila',
-    'Taguig, Metro Manila',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _resolveDestination();
+  }
 
   @override
   void dispose() {
-    _intakeStaffController.dispose();
-    _otherNotesController.dispose();
+    _quarantineDaysController.dispose();
     super.dispose();
   }
 
-  Future<void> _createAnimalRecord() async {
-    if (_selectedShelter == null || _intakeDate == null ||
-        _intakeStaffController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in all intake details.'),
-          backgroundColor: Colors.redAccent,
+  Future<void> _resolveDestination() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    ({String name, double? lat, double? lng})? resolved;
+    if (uid != null) {
+      final membership = await OrgMembershipService().getMembership(uid);
+      resolved =
+          await ref.read(organizationDirectoryRepositoryProvider).resolveShelterLocation(membership?.organizationId);
+    }
+    if (mounted) {
+      setState(() => _resolvedDestination = resolved ?? (name: _kFallbackShelterName, lat: null, lng: null));
+    }
+  }
+
+  /// Fires at most once per page instance. See
+  /// RescueCaseRepository.checkAndCompleteQuarantineIfDue's own doc comment
+  /// for why this is a read-time derived completion, not a live timer.
+  Future<void> _checkQuarantineAutoComplete(RescueCase c) async {
+    if (_hasCheckedQuarantineAutoComplete) return;
+    _hasCheckedQuarantineAutoComplete = true;
+    if (c.quarantineStatus == 'active' && !c.isQuarantineActive) {
+      await ref.read(rescueCaseRepositoryProvider).checkAndCompleteQuarantineIfDue(c);
+    }
+  }
+
+  Future<void> _confirmIntake({
+    required RescueCase c,
+    required String? transporterUid,
+    required String transporterName,
+    required String transporterType,
+    required bool transporterIsDemo,
+  }) async {
+    if (_isConfirmingIntake) return;
+    final destination = _resolvedDestination;
+    if (destination == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Confirm Intake', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ConfirmRow('Intake Destination', destination.name),
+            _ConfirmRow('Transporter', transporterUid != null ? '$transporterName ($transporterType)' : 'None selected'),
+            _ConfirmRow('Clinic Pickup Location', c.vetClinicName ?? 'Not on file'),
+            _ConfirmRow('Case ID', '#${c.shortCaseId}'),
+            _ConfirmRow('Species Summary', c.speciesSummary),
+            _ConfirmRow(
+                'Discharge Date',
+                c.dischargedAt != null
+                    ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'
+                    : 'Not on file'),
+          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.yellowrspwn,
+              foregroundColor: AppColors.textPrimary,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isConfirmingIntake = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).confirmIntake(
+            caseId: widget.caseId,
+            destinationName: destination.name,
+            destinationLat: destination.lat,
+            destinationLng: destination.lng,
+            transporterUid: transporterUid,
+            transporterName: transporterUid != null ? transporterName : null,
+            transporterType: transporterUid != null ? transporterType : null,
+            isDemoTransporter: transporterIsDemo,
+          );
+      if (mounted) setState(() => _isConfirmingIntake = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isConfirmingIntake = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not confirm intake: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  Future<void> _startQuarantine() async {
+    final days = int.tryParse(_quarantineDaysController.text.trim());
+    if (days == null || days <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a quarantine duration in days.'), backgroundColor: Colors.redAccent),
       );
       return;
     }
-
-    setState(() => _isLoading = true);
-
+    setState(() => _isStartingQuarantine = true);
     try {
-      final d = widget.data;
-
-      // Create animal record
-      final animalRef = await FirebaseFirestore.instance
-          .collection('animals')
-          .add({
-        'species': d['animalType'] ?? '',
-        'name': '',
-        'breed': '',
-        'sex': '',
-        'age': 0,
-        'status': 'intake',
-        'adoptionStatus': 'not_ready',
-        'shelterLocation': _selectedShelter,
-        'intakeDate': Timestamp.fromDate(_intakeDate!),
-        'intakeStaffName': _intakeStaffController.text.trim(),
-        'intakeNotes': _otherNotesController.text.trim(),
-        'vetClinicName': d['vetClinicName'] ?? '',
-        'treatmentLog': d['treatmentLog'] ?? [],
-        'linkedCaseId': widget.caseId,
-        'reporterName': d['reporterName'] ?? '',
-        'reporterPhone': d['reporterPhone'] ?? '',
-        'transporterName': d['assignedVolunteerName'] ?? '',
-        'condition': d['currentCondition'] ?? '',
-        'photoUrls': d['photoUrls'] ?? [],
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // Update case
-      await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .update({
-        'status': 'intake',
-        'linkedAnimalId': animalRef.id,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Animal has been admitted to the shelter.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Animal record created successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context);
-        Navigator.pop(context);
-      }
+      await ref.read(rescueCaseRepositoryProvider).startQuarantine(caseId: widget.caseId, durationDays: days);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          SnackBar(content: Text('Could not start quarantine: $e'), backgroundColor: Colors.redAccent),
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _isStartingQuarantine = false);
+    }
+  }
+
+  Future<void> _endQuarantine() async {
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'End Quarantine?',
+      message: 'This marks quarantine complete right now, ahead of its scheduled end.',
+      confirmLabel: 'End Quarantine',
+    );
+    if (!confirmed) return;
+    setState(() => _isEndingQuarantine = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).endQuarantine(caseId: widget.caseId, reason: 'Manually ended early.');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not end quarantine: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isEndingQuarantine = false);
+    }
+  }
+
+  Future<void> _skipQuarantine() async {
+    setState(() => _isSkippingQuarantine = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).skipQuarantine(caseId: widget.caseId);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not skip quarantine: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSkippingQuarantine = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final d = widget.data;
-    final urgency = d['urgency'] ?? '';
-    final treatmentLog = List<Map<String, dynamic>>.from(
-        d['treatmentLog'] ?? []).reversed.toList();
+    final liveCase = ref.watch(caseDetailProvider(widget.caseId)).asData?.value;
+    final c = liveCase ?? RescueCase.fromMap(widget.caseId, widget.data);
 
-    // Get latest treatment log for discharge info
-    final latestLog = treatmentLog.isNotEmpty ? treatmentLog.first : null;
-    final dateAdmitted = d['dateAdmitted'] as Timestamp?;
-    final dateDischargedStr = latestLog != null
-        ? _formatTs(latestLog['timestamp'] as Timestamp?)
-        : 'mm/dd/yyyy';
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuarantineAutoComplete(c));
+
+    final latestAssignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
+
+    // Default transporter priority: most recent accepted/completed
+    // transport assignment -> the case's own flat assignedVolunteer*
+    // fields (set the same way by acceptAssignment/confirmIntake) -> none.
+    // Opening this page never writes any of this — purely a read.
+    String? defaultUid;
+    String defaultName = 'Unassigned';
+    String defaultType = 'Pet Transporter';
+    bool defaultIsDemo = false;
+    if (latestAssignment != null &&
+        (latestAssignment.status == TransportAssignmentStatus.accepted ||
+            latestAssignment.status == TransportAssignmentStatus.completed)) {
+      defaultUid = latestAssignment.riderId;
+      defaultName = latestAssignment.riderName;
+      defaultType = latestAssignment.riderType;
+      defaultIsDemo = latestAssignment.isDemo;
+    } else if (c.assignedVolunteerId != null) {
+      defaultUid = c.assignedVolunteerId;
+      defaultName = c.assignedVolunteerName ?? 'Unnamed Transporter';
+    }
+
+    final completedIndexes = ref.watch(completedAnimalRecordIndexesProvider(widget.caseId)).asData?.value ?? <int>{};
+    final totalAnimals = c.animalCount;
+
+    final dischargeDateStr = c.dischargedAt != null
+        ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'
+        : '-';
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -142,293 +252,149 @@ class _IntakeDetailPageState extends State<IntakeDetailPage> {
           icon: const Icon(Icons.arrow_back, color: AppColors.background),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Intake Details',
-            style: GoogleFonts.tiltWarp(
-                fontSize: 18, color: AppColors.background)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined,
-                color: AppColors.background),
-            onPressed: () {},
-          ),
-        ],
+        title: Text('Intake Details', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(d['animalType'] ?? 'Animal',
-                        style: GoogleFonts.tiltWarp(
-                            fontSize: 24, color: AppColors.textPrimary)),
-                    Text(
-                        'CASE ID: ${shortCaseId(widget.caseId)}',
-                        style: GoogleFonts.zain(
-                            fontSize: 12, color: AppColors.textSecondary)),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: urgency == 'Critical'
-                        ? Colors.red
-                        : AppColors.yellowrspwn,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(urgency,
-                      style: GoogleFonts.zain(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                ),
-              ],
-            ),
+            // Header — same hierarchy as Treatment Details / Rescue Reports.
+            Text('#${c.shortCaseId}', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.textPrimary)),
+            const SizedBox(height: 2),
+            Text(c.speciesSummary,
+                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            if ((c.vetClinicName ?? '').isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(c.vetClinicName!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+            ],
+            const SizedBox(height: 2),
+            Text('Discharged $dischargeDateStr', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
 
-            // Case info pulled from treatment/case data
-            Row(
-              children: [
-                Expanded(
-                    child: _InfoItem('Vet Clinic Name',
-                        d['vetClinicName'] ?? '-')),
-                Expanded(
-                    child: _InfoItem('Date Discharged', dateDischargedStr)),
-              ],
-            ),
-            Row(
-              children: [
-                Expanded(
-                    child: _InfoItem('Condition at Discharge',
-                        latestLog?['condition'] ?? d['currentCondition'] ?? '-')),
-                Expanded(
-                    child: _InfoItem(
-                        'Transported by', d['assignedVolunteerName'] ?? '-')),
-              ],
-            ),
-            _InfoItem('Reported by', d['reporterName'] ?? '-'),
-
-            const SizedBox(height: 16),
-
-            // Treatment Logs
-            Text('Treatment Logs',
-                style: GoogleFonts.tiltWarp(
-                    fontSize: 15, color: AppColors.textPrimary)),
-
-            const SizedBox(height: 8),
-
-            if (treatmentLog.isEmpty)
-              Text('No treatment logs.',
-                  style: GoogleFonts.zain(
-                      fontSize: 13, color: AppColors.textSecondary))
-            else ...[
-              ...(_showAllLogs
-                  ? treatmentLog
-                  : treatmentLog.take(2).toList())
-                  .map((log) => _TreatmentLogCard(log: log)),
-              if (treatmentLog.length > 2)
-                Center(
-                  child: GestureDetector(
-                    onTap: () =>
-                        setState(() => _showAllLogs = !_showAllLogs),
-                    child: Icon(
-                      _showAllLogs
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      color: AppColors.textPrimary,
+            if (c.intakeConfirmedAt == null)
+              _ConfirmIntakeSection(
+                rescueCase: c,
+                destination: _resolvedDestination,
+                defaultUid: defaultUid,
+                defaultName: defaultName,
+                defaultType: defaultType,
+                defaultIsDemo: defaultIsDemo,
+                isConfirming: _isConfirmingIntake,
+                onReassign: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AssignRiderPage(
+                      caseId: widget.caseId,
+                      data: c.raw,
+                      postAcceptTrackingMode: TrackingMode.intakeTransfer,
                     ),
                   ),
                 ),
+                onConfirm: () => _confirmIntake(
+                  c: c,
+                  transporterUid: defaultUid,
+                  transporterName: defaultName,
+                  transporterType: defaultType,
+                  transporterIsDemo: defaultIsDemo,
+                ),
+              )
+            else ...[
+              _SectionHeader('Intake Destination'),
+              _InfoItem('Destination', c.intakeDestinationName ?? '-'),
+              const SizedBox(height: 16),
+
+              _SectionHeader('Transporter'),
+              if (latestAssignment != null && latestAssignment.status == TransportAssignmentStatus.accepted)
+                TransporterDetailsCard(assignment: latestAssignment)
+              else if (latestAssignment != null && latestAssignment.status == TransportAssignmentStatus.completed)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('${latestAssignment.riderName} — transport complete.',
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Text('No transporter on this leg yet.',
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AssignRiderPage(
+                      caseId: widget.caseId,
+                      data: c.raw,
+                      postAcceptTrackingMode: TrackingMode.intakeTransfer,
+                    ),
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textPrimary,
+                  side: const BorderSide(color: AppColors.textPrimary),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+                child: Text('Reassign Transporter', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+
+              const SizedBox(height: 16),
+              _SectionHeader('Clinic-to-Shelter Transport'),
+              if (c.intakeReceivedAt != null)
+                Text('Animal received at the shelter.',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.greenrspwn))
+              else
+                Text('Transport in progress.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AdminTrackCasePage(
+                      caseId: widget.caseId,
+                      data: c.raw,
+                      mode: TrackingMode.intakeTransfer,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.map_outlined, size: 18),
+                label: Text('View Transport Tracking', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textPrimary,
+                  side: const BorderSide(color: AppColors.textPrimary),
+                  minimumSize: const Size(double.infinity, 44),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+              _QuarantineSection(
+                rescueCase: c,
+                daysController: _quarantineDaysController,
+                isStarting: _isStartingQuarantine,
+                isEnding: _isEndingQuarantine,
+                isSkipping: _isSkippingQuarantine,
+                onStart: _startQuarantine,
+                onEnd: _endQuarantine,
+                onSkip: _skipQuarantine,
+              ),
+
+              const SizedBox(height: 20),
+              _AnimalRecordsSection(
+                caseId: widget.caseId,
+                data: c.raw,
+                totalAnimals: totalAnimals,
+                completedCount: completedIndexes.length,
+              ),
             ],
-
-            const SizedBox(height: 24),
-
-            // Intake Notes section
-            Text('Intake Notes',
-                style: GoogleFonts.tiltWarp(
-                    fontSize: 15, color: AppColors.textPrimary)),
-
-            const SizedBox(height: 12),
-
-            // Shelter location + date
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Shelter Location',
-                          style: GoogleFonts.zain(
-                              fontSize: 12, color: AppColors.textSecondary)),
-                      DropdownButtonFormField<String>(
-                        value: _selectedShelter,
-                        hint: Text('Select',
-                            style: GoogleFonts.zain(
-                                fontSize: 14,
-                                color: AppColors.textSecondary)),
-                        style: GoogleFonts.zain(
-                            fontSize: 14, color: AppColors.textPrimary),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          contentPadding: EdgeInsets.only(bottom: 4),
-                          enabledBorder: UnderlineInputBorder(
-                            borderSide:
-                            BorderSide(color: AppColors.textPrimary),
-                          ),
-                          focusedBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(
-                                color: AppColors.textPrimary, width: 1.5),
-                          ),
-                        ),
-                        items: _shelterLocations
-                            .map((s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(s,
-                                style: GoogleFonts.zain(fontSize: 14))))
-                            .toList(),
-                        onChanged: (val) =>
-                            setState(() => _selectedShelter = val),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Date of Intake',
-                          style: GoogleFonts.zain(
-                              fontSize: 12, color: AppColors.textSecondary)),
-                      GestureDetector(
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime.now(),
-                          );
-                          if (picked != null)
-                            setState(() => _intakeDate = picked);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          decoration: const BoxDecoration(
-                            border: Border(
-                                bottom: BorderSide(
-                                    color: AppColors.textPrimary)),
-                          ),
-                          child: Row(
-                            mainAxisAlignment:
-                            MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                _intakeDate == null
-                                    ? 'mm/dd/yyyy'
-                                    : '${_intakeDate!.month}/${_intakeDate!.day}/${_intakeDate!.year}',
-                                style: GoogleFonts.zain(
-                                    fontSize: 14,
-                                    color: _intakeDate == null
-                                        ? AppColors.textSecondary
-                                        : AppColors.textPrimary),
-                              ),
-                              const Icon(Icons.calendar_today_outlined,
-                                  size: 16, color: AppColors.textPrimary),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // Intake staff name
-            Text('Intake Staff Name',
-                style: GoogleFonts.zain(
-                    fontSize: 12, color: AppColors.textSecondary)),
-            TextField(
-              controller: _intakeStaffController,
-              decoration: InputDecoration(
-                hintText: 'Enter staff name',
-                hintStyle: GoogleFonts.zain(
-                    color: AppColors.textSecondary, fontSize: 14),
-                isDense: true,
-                contentPadding: const EdgeInsets.only(bottom: 8),
-                enabledBorder: const UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppColors.textPrimary),
-                ),
-                focusedBorder: const UnderlineInputBorder(
-                  borderSide:
-                  BorderSide(color: AppColors.textPrimary, width: 1.5),
-                ),
-              ),
-              style: GoogleFonts.zain(
-                  fontSize: 14, color: AppColors.textPrimary),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Other notes
-            Text('Other Notes',
-                style: GoogleFonts.zain(
-                    fontSize: 12, color: AppColors.textSecondary)),
-            TextField(
-              controller: _otherNotesController,
-              decoration: InputDecoration(
-                hintText: 'Enter notes',
-                hintStyle: GoogleFonts.zain(
-                    color: AppColors.textSecondary, fontSize: 14),
-                isDense: true,
-                contentPadding: const EdgeInsets.only(bottom: 8),
-                enabledBorder: const UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppColors.textPrimary),
-                ),
-                focusedBorder: const UnderlineInputBorder(
-                  borderSide:
-                  BorderSide(color: AppColors.textPrimary, width: 1.5),
-                ),
-              ),
-              style: GoogleFonts.zain(
-                  fontSize: 14, color: AppColors.textPrimary),
-            ),
-
-            const SizedBox(height: 32),
-
-            // Create Animal Record button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _createAnimalRecord,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                    height: 22, width: 22,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: AppColors.textPrimary))
-                    : Text('Create Animal Record',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 16, color: AppColors.textPrimary)),
-              ),
-            ),
 
             const SizedBox(height: 32),
           ],
@@ -436,79 +402,276 @@ class _IntakeDetailPageState extends State<IntakeDetailPage> {
       ),
     );
   }
-
-  String _formatTs(Timestamp? ts) {
-    if (ts == null) return '-';
-    final d = ts.toDate();
-    return '${d.month}/${d.day}/${d.year}';
-  }
 }
 
-class _TreatmentLogCard extends StatelessWidget {
-  final Map<String, dynamic> log;
-  const _TreatmentLogCard({required this.log});
+class _ConfirmIntakeSection extends StatelessWidget {
+  final RescueCase rescueCase;
+  final ({String name, double? lat, double? lng})? destination;
+  final String? defaultUid;
+  final String defaultName;
+  final String defaultType;
+  final bool defaultIsDemo;
+  final bool isConfirming;
+  final VoidCallback onReassign;
+  final VoidCallback onConfirm;
+
+  const _ConfirmIntakeSection({
+    required this.rescueCase,
+    required this.destination,
+    required this.defaultUid,
+    required this.defaultName,
+    required this.defaultType,
+    required this.defaultIsDemo,
+    required this.isConfirming,
+    required this.onReassign,
+    required this.onConfirm,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final ts = log['timestamp'] as Timestamp?;
-    final timeStr = ts != null
-        ? '${ts.toDate().hour.toString().padLeft(2, '0')}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-        : '';
-    final dateStr = ts != null
-        ? 'March ${ts.toDate().day}, ${ts.toDate().year}'
-        : '';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Confirm Intake'),
+        _InfoItem('Intake Destination', destination?.name ?? 'Resolving…'),
+        _InfoItem('Selected Transporter', defaultUid != null ? '$defaultName ($defaultType)' : 'None selected'),
+        _InfoItem('Clinic Pickup Location', rescueCase.vetClinicName ?? 'Not on file'),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: onReassign,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.textPrimary,
+            side: const BorderSide(color: AppColors.textPrimary),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+          child: Text('Reassign Transporter', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: (isConfirming || destination == null) ? null : onConfirm,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.yellowrspwn,
+              disabledBackgroundColor: AppColors.slaterspwn,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: isConfirming
+                ? const SizedBox(
+                    height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                : Text('Confirm Intake', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.tearspwn.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
+class _QuarantineSection extends StatelessWidget {
+  final RescueCase rescueCase;
+  final TextEditingController daysController;
+  final bool isStarting;
+  final bool isEnding;
+  final bool isSkipping;
+  final VoidCallback onStart;
+  final VoidCallback onEnd;
+  final VoidCallback onSkip;
+
+  const _QuarantineSection({
+    required this.rescueCase,
+    required this.daysController,
+    required this.isStarting,
+    required this.isEnding,
+    required this.isSkipping,
+    required this.onStart,
+    required this.onEnd,
+    required this.onSkip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = rescueCase;
+
+    if (c.quarantineStatus == 'active' && c.isQuarantineActive) {
+      final remaining = c.quarantineScheduledEndAt?.difference(DateTime.now());
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.slaterspwn),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionHeader('Quarantine — Active', noPad: true),
+            const SizedBox(height: 8),
+            if (c.quarantineStartedAt != null) _InfoItem('Started', _fmtDate(c.quarantineStartedAt!)),
+            if (c.quarantineDurationDays != null) _InfoItem('Duration', '${c.quarantineDurationDays} days'),
+            if (c.quarantineScheduledEndAt != null) _InfoItem('Scheduled End', _fmtDate(c.quarantineScheduledEndAt!)),
+            if (remaining != null) _InfoItem('Remaining', '${remaining.inDays} day(s)'),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: isEnding ? null : onEnd,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFE05353),
+                  side: const BorderSide(color: Color(0xFFE05353)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                ),
+                child: isEnding
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text('End Quarantine', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (c.hasQuarantineDecision) {
+      // Already decided (completed or explicitly skipped) — show a short
+      // summary instead of re-prompting.
+      final label = c.quarantineStatus == 'skipped'
+          ? 'Quarantine skipped.'
+          : 'Quarantine completed'
+              '${c.quarantineEndedAt != null ? ' on ${_fmtDate(c.quarantineEndedAt!)}' : ''}.';
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.tearspwn,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(log['type'] ?? '',
-                    style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary)),
-                Text(log['notes'] ?? '',
-                    style: GoogleFonts.zain(
-                        fontSize: 12, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(log['condition'] ?? '',
-                  style: GoogleFonts.zain(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary)),
-              Text(timeStr,
-                  style: GoogleFonts.zain(
-                      fontSize: 10, color: AppColors.textSecondary)),
-              Text(dateStr,
-                  style: GoogleFonts.zain(
-                      fontSize: 10, color: AppColors.textSecondary)),
-            ],
-          ),
+          _SectionHeader('Quarantine'),
+          Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
         ],
-      ),
+      );
+    }
+
+    // Not yet decided — offer Start/Skip.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Quarantine — Optional'),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            SizedBox(
+              width: 80,
+              child: TextField(
+                controller: daysController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Days',
+                  labelStyle: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.only(bottom: 6),
+                  enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+                  focusedBorder:
+                      const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+                ),
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton(
+                onPressed: isStarting ? null : onStart,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.yellowrspwn,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                ),
+                child: isStarting
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text('Start Quarantine', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: isSkipping ? null : onSkip,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textSecondary,
+                  side: const BorderSide(color: AppColors.slaterspwn),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                ),
+                child: isSkipping
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text('Skip', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  String _fmtDate(DateTime d) => '${_monthName(d.month)} ${d.day}, ${d.year}';
+}
+
+class _AnimalRecordsSection extends StatelessWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  final int totalAnimals;
+  final int completedCount;
+
+  const _AnimalRecordsSection({
+    required this.caseId,
+    required this.data,
+    required this.totalAnimals,
+    required this.completedCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final allDone = completedCount >= totalAnimals;
+    final label = allDone
+        ? '$completedCount of $totalAnimals records created'
+        : '$completedCount of $totalAnimals records created';
+    final buttonLabel = allDone ? 'View Animal Records' : (completedCount == 0 ? 'Create Animal Records' : 'Continue Animal Records');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Animal Records'),
+        Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => AnimalRecordsFlowPage(caseId: caseId, caseData: data)),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.yellowrspwn,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: Text(buttonLabel, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String text;
+  final bool noPad;
+  const _SectionHeader(this.text, {this.noPad = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: noPad ? 0 : 8),
+      child: Text(text, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
     );
   }
 }
@@ -521,20 +684,39 @@ class _InfoItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: GoogleFonts.zain(
-                  fontSize: 12, color: AppColors.textSecondary)),
-          Text(value,
-              style: GoogleFonts.zain(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
+          Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          Text(value, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
         ],
       ),
     );
   }
 }
+
+class _ConfirmRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _ConfirmRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+          Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+}
+
+String _monthName(int month) => const [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ][month - 1];

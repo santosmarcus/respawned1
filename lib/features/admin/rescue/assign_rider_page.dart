@@ -117,8 +117,20 @@ class _RiderVm {
 class AssignRiderPage extends ConsumerStatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const AssignRiderPage(
-      {super.key, required this.caseId, required this.data});
+  /// Which Track Case mode to open once a transporter accepts. Defaults to
+  /// the original rescue-pickup tracking (every existing call site keeps
+  /// working unchanged); Intake Details' "Reassign Transporter" passes
+  /// [TrackingMode.intakeTransfer] instead, so accepting a replacement
+  /// transporter mid-intake lands on the clinic-to-shelter tracking view
+  /// rather than the rescue-pickup one. Purely additive — this is still
+  /// the one Assign Transporter interface, not a separate intake picker.
+  final TrackingMode postAcceptTrackingMode;
+  const AssignRiderPage({
+    super.key,
+    required this.caseId,
+    required this.data,
+    this.postAcceptTrackingMode = TrackingMode.rescuePickup,
+  });
 
   @override
   ConsumerState<AssignRiderPage> createState() => _AssignRiderPageState();
@@ -300,9 +312,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     switch (outcome) {
       case _DialogOutcome.accepted:
         // Assignment is confirmed accepted (persisted, not just local
-        // state) — Track Case now shows the live tracking map directly.
+        // state) — Track Case now shows the live tracking map directly, in
+        // whichever mode this page was opened for (rescue pickup, or
+        // intake transport when this was a reassignment from Intake
+        // Details).
         Navigator.pushReplacement(context, MaterialPageRoute(
-            builder: (_) => AdminTrackCasePage(caseId: widget.caseId, data: _currentCaseData())));
+            builder: (_) => AdminTrackCasePage(
+                caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode)));
         break;
       case _DialogOutcome.declined:
         // Stay here; clear the selection so the admin can pick someone

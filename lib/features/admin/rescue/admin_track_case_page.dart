@@ -14,6 +14,7 @@ import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 
 // Raw case-doc status values written by the pet-transporter app's own
 // transit flow (see transit_progress_page.dart) once it has physically
@@ -31,11 +32,23 @@ const _kArrivedAtClinicStatuses = {'dropoff', 'in_transit_shelter'};
 // switches from the rescue case to the selected clinic.
 const _kPostPickupStatuses = {'treatment', 'dropoff', 'searching_clinic', 'in_transit_shelter'};
 
+/// Which leg of the case this screen is tracking. Added so the same
+/// Track Case screen (map, route, transporter card, timeline) serves both
+/// the original rescue pickup and the later clinic-to-shelter intake
+/// transport, instead of building a second tracking page — only the
+/// origin/destination resolution and which sections are visible change.
+enum TrackingMode { rescuePickup, intakeTransfer }
+
 class AdminTrackCasePage extends ConsumerStatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const AdminTrackCasePage(
-      {super.key, required this.caseId, required this.data});
+  final TrackingMode mode;
+  const AdminTrackCasePage({
+    super.key,
+    required this.caseId,
+    required this.data,
+    this.mode = TrackingMode.rescuePickup,
+  });
 
   @override
   ConsumerState<AdminTrackCasePage> createState() => _AdminTrackCasePageState();
@@ -209,7 +222,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   /// Priority after pickup: saved selected-clinic coordinates ->
   /// legacy transporter-side dropoff coordinates -> visible warning
   /// (location null, caller shows markers-only / no route).
+  ///
+  /// In [TrackingMode.intakeTransfer], this is unrelated to the legacy
+  /// pickup/dropoff status vocabulary entirely — the destination is always
+  /// the intake shelter location saved by RescueCaseRepository.confirmIntake.
   ({LatLng? location, String label}) _destinationFrom(Map<String, dynamic> data) {
+    if (widget.mode == TrackingMode.intakeTransfer) {
+      final lat = (data['intakeDestinationLat'] as num?)?.toDouble();
+      final lng = (data['intakeDestinationLng'] as num?)?.toDouble();
+      final name = data['intakeDestinationName'] as String?;
+      if (lat == null || lng == null) {
+        return (location: null, label: 'No shelter destination available yet');
+      }
+      return (location: LatLng(lat, lng), label: (name != null && name.isNotEmpty) ? name : 'Organization Shelter');
+    }
+
     final rawStatus = data['status'] as String?;
     if (!_kPostPickupStatuses.contains(rawStatus)) {
       return (location: _caseLocationFrom(data), label: 'Rescue Case');
@@ -232,6 +259,41 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     }
 
     return (location: null, label: 'No clinic destination available yet');
+  }
+
+  /// The secondary "where they started from" marker — the original rescue
+  /// location pre-intake, or the pickup clinic during intake transport.
+  LatLng? _originMarkerLocationFrom(Map<String, dynamic> data) {
+    if (widget.mode == TrackingMode.intakeTransfer) {
+      final lat = (data['vetClinicLat'] as num?)?.toDouble();
+      final lng = (data['vetClinicLng'] as num?)?.toDouble();
+      if (lat == null || lng == null) return null;
+      return LatLng(lat, lng);
+    }
+    return _caseLocationFrom(data);
+  }
+
+  String get _originMarkerLabel =>
+      widget.mode == TrackingMode.intakeTransfer ? 'Clinic Pickup' : 'Original Rescue Location';
+
+  Future<void> _confirmAnimalReceived(TransportAssignment? assignment) async {
+    try {
+      await ref.read(rescueCaseRepositoryProvider).confirmAnimalReceived(
+            caseId: widget.caseId,
+            currentAssignmentId: assignment?.id,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Animal received — transport complete.'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not confirm arrival: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
   }
 
   /// Fits the camera around every point on the route polyline (not just the
@@ -271,18 +333,27 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       );
     }
 
-    final caseLocation = _caseLocationFrom(data);
+    final caseLocation = _originMarkerLocationFrom(data);
     final destination = _destinationFrom(data);
+    final showTransporterCard = assignment != null && assignment.status == TransportAssignmentStatus.accepted;
 
     if (caseLocation == null && destination.location == null) {
       // "Markers only" / no-line tier: nothing to plot at all.
-      return Container(
-        height: 180,
-        color: AppColors.slaterspwn,
-        child: Center(
-          child: Text('No coordinates saved for this case.',
-              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-        ),
+      return Column(
+        children: [
+          Container(
+            height: 180,
+            color: AppColors.slaterspwn,
+            child: Center(
+              child: Text('No coordinates saved for this case.',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+            ),
+          ),
+          if (showTransporterCard) ...[
+            const SizedBox(height: 10),
+            TransporterDetailsCard(assignment: assignment, onMessage: () => setState(() => _tabIndex = 0)),
+          ],
+        ],
       );
     }
 
@@ -293,60 +364,68 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       // admin's selected clinic nor the transporter's own legacy dropoff
       // fields) — show a visible warning instead of silently routing back
       // to the rescue case, which the rider has already left.
-      return SizedBox(
-        height: 180,
-        child: Stack(
-          children: [
-            GoogleMap(
-              gestureRecognizers: {
-                Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-              },
-              initialCameraPosition: CameraPosition(target: rider.location, zoom: 13),
-              markers: {
-                if (caseLocation != null)
-                  Marker(
-                    markerId: const MarkerId('rescue_case'),
-                    position: caseLocation,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-                    infoWindow: const InfoWindow(title: 'Original Rescue Location'),
-                  ),
-                Marker(
-                  markerId: const MarkerId('rider'),
-                  position: rider.location,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                  infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
-                ),
-              },
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              mapToolbarEnabled: false,
-            ),
-            Positioned(
-              left: 10,
-              right: 10,
-              bottom: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE05353),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(destination.label,
-                          style: GoogleFonts.zain(
-                              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+      return Column(
+        children: [
+          SizedBox(
+            height: 180,
+            child: Stack(
+              children: [
+                GoogleMap(
+                  gestureRecognizers: {
+                    Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                  },
+                  initialCameraPosition: CameraPosition(target: rider.location, zoom: 13),
+                  markers: {
+                    if (caseLocation != null)
+                      Marker(
+                        markerId: const MarkerId('rescue_case'),
+                        position: caseLocation,
+                        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+                        infoWindow: InfoWindow(title: _originMarkerLabel),
+                      ),
+                    Marker(
+                      markerId: const MarkerId('rider'),
+                      position: rider.location,
+                      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                      infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
                     ),
-                  ],
+                  },
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
                 ),
-              ),
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE05353),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(destination.label,
+                              style: GoogleFonts.zain(
+                                  fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
+          ),
+          if (showTransporterCard) ...[
+            const SizedBox(height: 10),
+            TransporterDetailsCard(assignment: assignment, onMessage: () => setState(() => _tabIndex = 0)),
           ],
-        ),
+        ],
       );
     }
 
@@ -360,11 +439,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         (caseLocation.latitude != destinationLocation.latitude ||
             caseLocation.longitude != destinationLocation.longitude);
 
-    return SizedBox(
-      height: 180,
-      child: FutureBuilder<RouteResult>(
-        future: _routeFor(rider.location, destinationLocation),
-        builder: (context, snapshot) {
+    return FutureBuilder<RouteResult>(
+      future: _routeFor(rider.location, destinationLocation),
+      builder: (context, snapshot) {
           final route = snapshot.data;
           final markers = {
             Marker(
@@ -378,7 +455,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 markerId: const MarkerId('rescue_case'),
                 position: caseLocation,
                 icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-                infoWindow: const InfoWindow(title: 'Original Rescue Location'),
+                infoWindow: InfoWindow(title: _originMarkerLabel),
               ),
             Marker(
               markerId: const MarkerId('rider'),
@@ -403,7 +480,11 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           // so it's harmless to also attempt it here on every rebuild.
           if (route != null) _fitTrackingCameraToRoute(route.polylinePoints);
 
-          return Stack(
+          return Column(
+            children: [
+              SizedBox(
+                height: 180,
+                child: Stack(
             children: [
               GoogleMap(
                 gestureRecognizers: {
@@ -478,10 +559,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   ),
                 ),
             ],
+                ),
+              ),
+              if (showTransporterCard) ...[
+                const SizedBox(height: 10),
+                TransporterDetailsCard(
+                  assignment: assignment,
+                  distanceKm: distanceKm,
+                  etaDuration: route?.duration,
+                  onMessage: () => setState(() => _tabIndex = 0),
+                ),
+              ],
+            ],
           );
         },
-      ),
-    );
+      );
   }
 
   @override
@@ -517,7 +609,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               icon: const Icon(Icons.arrow_back, color: AppColors.background),
               onPressed: () => Navigator.pop(context),
             ),
-            title: Text('Track Case',
+            title: Text(widget.mode == TrackingMode.intakeTransfer ? 'Intake Transport' : 'Track Case',
                 style: GoogleFonts.tiltWarp(
                     fontSize: 18, color: AppColors.background)),
             actions: [
@@ -544,28 +636,32 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     children: [
                       const SizedBox(height: 12),
 
-                      // Tab switcher
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: AppColors.slaterspwn,
-                          borderRadius: BorderRadius.circular(50),
+                      // Tab switcher — intake transport is a restricted
+                      // view with only one tab (Case Detail carries
+                      // reporter-facing content that doesn't belong here;
+                      // see the class-level restriction note).
+                      if (widget.mode != TrackingMode.intakeTransfer)
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: AppColors.slaterspwn,
+                            borderRadius: BorderRadius.circular(50),
+                          ),
+                          child: Row(
+                            children: [
+                              _AdminTabButton(
+                                label: 'Tracking Detail',
+                                selected: _tabIndex == 0,
+                                onTap: () => setState(() => _tabIndex = 0),
+                              ),
+                              _AdminTabButton(
+                                label: 'Case Detail',
+                                selected: _tabIndex == 1,
+                                onTap: () => setState(() => _tabIndex = 1),
+                              ),
+                            ],
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            _AdminTabButton(
-                              label: 'Tracking Detail',
-                              selected: _tabIndex == 0,
-                              onTap: () => setState(() => _tabIndex = 0),
-                            ),
-                            _AdminTabButton(
-                              label: 'Case Detail',
-                              selected: _tabIndex == 1,
-                              onTap: () => setState(() => _tabIndex = 1),
-                            ),
-                          ],
-                        ),
-                      ),
 
                       const SizedBox(height: 12),
 
@@ -584,17 +680,20 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                       const SizedBox(height: 8),
 
                       Expanded(
-                        child: _tabIndex == 0
+                        child: (widget.mode == TrackingMode.intakeTransfer || _tabIndex == 0)
                             ? _AdminTrackingTab(
                           statusHistory: statusHistory,
                           caseId: widget.caseId,
                           messageController: _messageController,
                           onSend: _sendMessage,
+                          isIntakeMode: widget.mode == TrackingMode.intakeTransfer,
                           transporterHasReachedClinic:
                               _kArrivedAtClinicStatuses.contains(data['status']),
                           isProceedingToTreatment: _isProceedingToTreatment,
                           onProceedToTreatment: () => _proceedToTreatment(data),
                           onFastForward: _fastForwardToClinic,
+                          hasReceivedIntake: data['intakeReceivedAt'] != null,
+                          onConfirmAnimalReceived: () => _confirmAnimalReceived(assignment),
                         )
                             : _AdminCaseDetailTab(data: data),
                       ),
@@ -652,6 +751,9 @@ class _AdminTrackingTab extends StatelessWidget {
   final bool isProceedingToTreatment;
   final VoidCallback onProceedToTreatment;
   final VoidCallback onFastForward;
+  final bool isIntakeMode;
+  final bool hasReceivedIntake;
+  final VoidCallback onConfirmAnimalReceived;
 
   const _AdminTrackingTab({
     required this.statusHistory,
@@ -662,6 +764,9 @@ class _AdminTrackingTab extends StatelessWidget {
     required this.isProceedingToTreatment,
     required this.onProceedToTreatment,
     required this.onFastForward,
+    required this.isIntakeMode,
+    required this.hasReceivedIntake,
+    required this.onConfirmAnimalReceived,
   });
 
   Widget _buildTimelineItem(int index) {
@@ -741,14 +846,17 @@ class _AdminTrackingTab extends StatelessWidget {
       children: [
         // Status timeline + community reports, in one scrollable region —
         // same subcollection/section widget the Rescue Details page uses,
-        // reused here rather than a second implementation.
+        // reused here rather than a second implementation. Community
+        // reports (and, further down, original case media/reporter
+        // content) are reporter-facing and stay out of intake transport,
+        // which is restricted to the organization + assigned transporter.
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             children: [
               for (var i = 0; i < statusHistory.length; i++) _buildTimelineItem(i),
               const SizedBox(height: 8),
-              CommunityReportsSection(caseId: caseId),
+              if (!isIntakeMode) CommunityReportsSection(caseId: caseId),
               const SizedBox(height: 8),
             ],
           ),
@@ -897,10 +1005,43 @@ class _AdminTrackingTab extends StatelessWidget {
           ),
         ),
 
+        // Intake transport's own confirmation action, replacing the
+        // rescue-pickup "Proceed to Treatment"/fast-forward controls
+        // entirely — arriving at the shelter doesn't move the case past
+        // Intake, it just unlocks quarantine/animal-record steps back on
+        // Intake Details (see RescueCaseRepository.confirmAnimalReceived).
+        if (isIntakeMode)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: hasReceivedIntake
+                ? Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.greenrspwn.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: Center(
+                      child: Text('Animal received at the shelter.',
+                          style: GoogleFonts.zain(
+                              fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    ),
+                  )
+                : ElevatedButton(
+                    onPressed: onConfirmAnimalReceived,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      minimumSize: const Size(double.infinity, 48),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                    child: Text('Confirm Animal Received',
+                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  ),
+          )
         // Proceed to Treatment — only enabled once the transporter has
         // actually reached the clinic (status 'dropoff'/'in_transit_shelter').
         // Before that, show a fast-forward control for testing without GPS.
-        if (transporterHasReachedClinic)
+        else if (transporterHasReachedClinic)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: ElevatedButton(

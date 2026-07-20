@@ -4,14 +4,30 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 
+/// The existing animal-record form — reused as-is by both a standalone
+/// "Create Record" entry point and, with [prefillData]/[linkedCaseId]/
+/// [sourceAnimalIndex]/[stepCurrent]/[stepTotal] set, by
+/// AnimalRecordsFlowPage's multi-animal creation flow. Not a parallel form.
 class CreateAnimalRecordPage extends StatefulWidget {
   final Map<String, dynamic>? prefillData; // from intake
   final String? linkedCaseId;
+  /// This animal's position in the source case's `animals[]` array (0 for
+  /// legacy single-animal cases) — the duplicate-prevention key alongside
+  /// [linkedCaseId]. Null when opened outside the multi-animal flow.
+  final int? sourceAnimalIndex;
+  /// 1-based step number / total steps, for the "Animal X of N" header and
+  /// the Save and Continue vs Finish button label. Both null outside the
+  /// multi-animal flow (plain "Create Record" label, no step header).
+  final int? stepCurrent;
+  final int? stepTotal;
 
   const CreateAnimalRecordPage({
     super.key,
     this.prefillData,
     this.linkedCaseId,
+    this.sourceAnimalIndex,
+    this.stepCurrent,
+    this.stepTotal,
   });
 
   @override
@@ -58,8 +74,12 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     'Protective': false,
   };
 
-  // Rescue Background
+  // Rescue Background — 'Rescued' is auto-checked (not manually required)
+  // whenever this record comes from the rescue workflow (linkedCaseId set);
+  // the other options stay available but never pre-selected, since they
+  // only apply in situations this workflow doesn't itself represent.
   final Map<String, bool> _rescueBackground = {
+    'Rescued': false,
     'Rescued from street': false,
     'Abandoned': false,
     'Rescued from abuse': false,
@@ -67,10 +87,32 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     'Transferred from Shelter': false,
   };
 
+  // Breed dropdown items are a fixed, species-dependent list — if the
+  // report's breed text isn't one of them, it's inserted dynamically so
+  // the dropdown always has a matching item (never silently dropped, never
+  // an invalid-value crash).
+  final List<String> _dogBreeds = ['Aspin', 'Labrador', 'Shih Tzu', 'Poodle', 'Other'];
+  final List<String> _catBreeds = ['Puspin', 'Persian', 'Siamese', 'Other'];
+
   bool get _isDog => _selectedSpecies == 'Dog';
 
   String get _vaccine2Label => _isDog ? '5-in-1' : '3-in-1';
   String get _vaccine3Label => _isDog ? 'Bordetella' : 'FeLV';
+
+  String get _saveButtonLabel {
+    if (widget.stepCurrent == null || widget.stepTotal == null) return 'Create Record';
+    return widget.stepCurrent! >= widget.stepTotal! ? 'Finish' : 'Save and Continue';
+  }
+
+  // TODO(qr-nfc): generating a real per-animal QR/NFC tag, associating it
+  // with this record, and printing/displaying it are not implemented.
+  // Also TODO: NFC support, if it ends up sharing the same identifier as
+  // the QR code rather than being independent.
+  void _showTagNotAvailable() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('QR assignment is not available yet.')),
+    );
+  }
 
   @override
   void initState() {
@@ -78,11 +120,55 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     _prefill();
   }
 
+  /// Prefills whatever the source rescue report/case already captured.
+  /// Species/breed/sex/size/color/description/image come straight from the
+  /// report — never invented. Fields the report never asked about (name,
+  /// age, coat length, vaccination/sterilization status, temperament,
+  /// etc.) are deliberately left blank/Unknown here, matching whatever
+  /// default the field already has.
   void _prefill() {
     final d = widget.prefillData;
     if (d == null) return;
-    _selectedSpecies = d['species'];
-    _descriptionController.text = d['description'] ?? '';
+
+    _selectedSpecies = d['species'] as String?;
+
+    final breed = (d['breed'] as String?)?.trim();
+    if (breed != null && breed.isNotEmpty) {
+      final list = _isDog ? _dogBreeds : _catBreeds;
+      if (!list.contains(breed)) list.insert(0, breed);
+      _selectedBreed = breed;
+    }
+
+    final sex = (d['sex'] as String?)?.trim();
+    if (sex != null) {
+      final match = ['Male', 'Female', 'Unknown']
+          .cast<String?>()
+          .firstWhere((s) => s!.toLowerCase() == sex.toLowerCase(), orElse: () => null);
+      if (match != null) _selectedSex = match;
+    }
+
+    final size = (d['size'] as String?)?.trim();
+    if (size != null) {
+      final match = ['Small', 'Medium', 'Large']
+          .cast<String?>()
+          .firstWhere((s) => s!.toLowerCase() == size.toLowerCase(), orElse: () => null);
+      if (match != null) _selectedSize = match;
+    }
+
+    // Report "condition"/color-markings text folded into the description
+    // so nothing captured at report time is lost, even though this form
+    // has no dedicated color field.
+    final descriptionParts = <String>[
+      if ((d['description'] as String?)?.isNotEmpty ?? false) d['description'] as String,
+      if ((d['colorMarkings'] as String?)?.isNotEmpty ?? false) 'Color/markings: ${d['colorMarkings']}',
+    ];
+    _descriptionController.text = descriptionParts.join('\n');
+
+    // This record came from the rescue workflow — "Rescued" is implied,
+    // not something the org has to remember to tick.
+    if (widget.linkedCaseId != null) {
+      _rescueBackground['Rescued'] = true;
+    }
   }
 
   @override
@@ -106,6 +192,26 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     setState(() => _isLoading = true);
 
     try {
+      // Duplicate-prevention: re-check against live Firestore state right
+      // before writing, not just the flow page's snapshot from when it was
+      // opened — guards the "user taps Confirm repeatedly" / two flow
+      // instances open at once edge cases.
+      if (widget.linkedCaseId != null && widget.sourceAnimalIndex != null) {
+        final existing = await FirebaseFirestore.instance
+            .collection('animals')
+            .where('linkedCaseId', isEqualTo: widget.linkedCaseId)
+            .where('sourceAnimalIndex', isEqualTo: widget.sourceAnimalIndex)
+            .limit(1)
+            .get();
+        if (existing.docs.isNotEmpty) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            Navigator.pop(context); // already created — just return to the flow
+          }
+          return;
+        }
+      }
+
       final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
       final selectedChars = _characteristics.entries
@@ -149,17 +255,21 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'adoptionStatus': _isAdoptable ? 'adoptable' : 'not_ready',
         'status': 'intake',
         'linkedCaseId': widget.linkedCaseId ?? '',
-        'rescuedBy': 'Loved by the Gapz',
+        if (widget.sourceAnimalIndex != null) 'sourceAnimalIndex': widget.sourceAnimalIndex,
+        'rescuedBy': widget.prefillData?['rescuedBy'] ?? 'Loved by the Gapz',
         'intakeStaffId': uid,
-        'photoUrls': [],
+        'photoUrls': (widget.prefillData?['photoUrl'] as String?) != null
+            ? [widget.prefillData!['photoUrl']]
+            : [],
         'treatmentLog': [],
         'createdAt': FieldValue.serverTimestamp(),
-        // prefilled from intake if available
+        // prefilled from intake/the source rescue report if available
         if (widget.prefillData != null) ...{
           'vetClinicName': widget.prefillData!['vetClinicName'] ?? '',
           'intakeNotes': widget.prefillData!['intakeNotes'] ?? '',
           'reporterName': widget.prefillData!['reporterName'] ?? '',
           'transporterName': widget.prefillData!['transporterName'] ?? '',
+          if (widget.prefillData!['rescueDate'] is Timestamp) 'rescueDate': widget.prefillData!['rescueDate'],
         }
       });
 
@@ -213,10 +323,20 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Center(
-              child: Text('Create New Record',
+              child: Text(
+                  widget.stepCurrent != null && widget.stepTotal != null
+                      ? 'Create Animal Record'
+                      : 'Create New Record',
                   style: GoogleFonts.tiltWarp(
                       fontSize: 20, color: AppColors.textPrimary)),
             ),
+            if (widget.stepCurrent != null && widget.stepTotal != null) ...[
+              const SizedBox(height: 4),
+              Center(
+                child: Text('Animal ${widget.stepCurrent} of ${widget.stepTotal}',
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              ),
+            ],
 
             const SizedBox(height: 20),
 
@@ -292,9 +412,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                       _DropdownField(
                         value: _selectedBreed,
                         hint: 'Select',
-                        items: _selectedSpecies == 'Dog'
-                            ? ['Aspin', 'Labrador', 'Shih Tzu', 'Poodle', 'Other']
-                            : ['Puspin', 'Persian', 'Siamese', 'Other'],
+                        items: _selectedSpecies == 'Dog' ? _dogBreeds : _catBreeds,
                         onChanged: (v) =>
                             setState(() => _selectedBreed = v),
                       ),
@@ -486,7 +604,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             // Rescued by (autofill)
             _FieldLabel('Rescued by'),
-            Text('Autofill',
+            Text((widget.prefillData?['rescuedBy'] as String?) ?? 'Loved by the Gapz',
                 style: GoogleFonts.zain(
                     fontSize: 14, color: AppColors.textSecondary)),
 
@@ -548,20 +666,32 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             const SizedBox(height: 20),
 
-            // QR + NFC buttons
+            // Any tag already scanned during the original rescue report —
+            // shown for reference only. It is NOT a generated animal-record
+            // QR/NFC tag and the two are never conflated.
+            if ((widget.prefillData?['scannedTagId'] as String?)?.isNotEmpty ?? false) ...[
+              _FieldLabel('Scanned Tag (from rescue report)'),
+              Text(widget.prefillData!['scannedTagId'] as String,
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+              const SizedBox(height: 16),
+            ],
+
+            // QR + NFC — not functional yet. Disabled rather than a silent
+            // no-op, so tapping it is honest about the current state
+            // instead of doing nothing. See the class doc comment's TODO.
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {},
+                    onPressed: _showTagNotAvailable,
                     icon: const Icon(Icons.qr_code,
-                        size: 18, color: AppColors.textPrimary),
+                        size: 18, color: AppColors.textSecondary),
                     label: Text('Add QR code',
                         style: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textPrimary)),
+                            fontSize: 13, color: AppColors.textSecondary)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(
-                          color: AppColors.textPrimary),
+                          color: AppColors.slaterspwn),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30)),
                       padding:
@@ -572,15 +702,15 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {},
+                    onPressed: _showTagNotAvailable,
                     icon: const Icon(Icons.nfc,
-                        size: 18, color: AppColors.textPrimary),
+                        size: 18, color: AppColors.textSecondary),
                     label: Text('Add NFC tag',
                         style: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textPrimary)),
+                            fontSize: 13, color: AppColors.textSecondary)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(
-                          color: AppColors.textPrimary),
+                          color: AppColors.slaterspwn),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30)),
                       padding:
@@ -593,7 +723,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             const SizedBox(height: 32),
 
-            // Create Record button
+            // Create Record button — "Save and Continue" / "Finish" inside
+            // the multi-animal flow, plain "Create Record" otherwise.
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -611,7 +742,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     child: CircularProgressIndicator(
                         strokeWidth: 2.5,
                         color: AppColors.textPrimary))
-                    : Text('Create Record',
+                    : Text(_saveButtonLabel,
                     style: GoogleFonts.tiltWarp(
                         fontSize: 16,
                         color: AppColors.textPrimary)),

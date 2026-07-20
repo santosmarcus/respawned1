@@ -2340,62 +2340,73 @@ class _RescuePageState extends State<RescuePage> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
       final casesCollection = FirebaseFirestore.instance.collection('cases');
-      String? groupId;
-      final createdDocIds = <String>[];
 
-      for (final animal in validAnimals) {
-        final docRef = await casesCollection.add({
-          'reporterId': uid,
-          'reporterName': reporterName,
-          'reporterPhone': userData?['phone'] ?? '',
-          'groupId': groupId, // backfilled below once the first doc exists
-          'animalType': animal.speciesController.text.trim(),
-          'breed': animal.breedController.text.trim(),
-          'sex': animal.sex,
-          'size': animal.size,
-          'colorMarkings': animal.colorController.text.trim(),
-          'rescueType': _selectedRescueType,
-          'condition': condition,
-          'urgency': _selectedUrgency,
-          'containmentStatus': _containmentStatus,
-          'strayTemperament': _strayTemperament,
-          'onSite': _onSiteChoice,
-          'accessInstructions': _accessInstructionsController.text.trim(),
-          'bestTimeToContact': _bestTimeContactController.text.trim(),
-          'reportAnonymously':
-          _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
-          'address': _addressController.text.trim(),
-          'lat': _pinnedLocation.latitude,
-          'lng': _pinnedLocation.longitude,
-          'coordinateWithShelter': _coordinateChoice,
-          'witnessName': _witnessNameController.text.trim(),
-          'witnessPhone': _witnessNumberController.text.trim(),
-          'interestedToAdopt': _adoptionChoice,
-          'scannedTagId': _scannedTagId,
-          'status': 'pending',
-          'statusHistory': [
+      // ROOT CAUSE (fixed here) of "multiple animals in one report create
+      // multiple cases": this used to loop over validAnimals and `.add()`
+      // a separate case doc per animal (linked only by a shared groupId),
+      // so a 3-dog report became 3 case documents — and, since Rescue
+      // Reports never collapsed groupId siblings back together, 3 separate
+      // cards. One report is one rescue case: every animal now goes into
+      // a single doc's `animals` array instead. `animalType`/`breed`/
+      // `sex`/`size`/`colorMarkings` are still set from the first animal
+      // as a flat, backward-compatible fallback for older screens that
+      // only ever read those single fields (TrackCasePage's "Type of
+      // Animal" row, referral prefill, etc.) — RescueCase.speciesSummary
+      // is what actually reads the full `animals` list.
+      final firstAnimal = validAnimals.first;
+      final docRef = await casesCollection.add({
+        'reporterId': uid,
+        'reporterName': reporterName,
+        'reporterPhone': userData?['phone'] ?? '',
+        'animalType': firstAnimal.speciesController.text.trim(),
+        'breed': firstAnimal.breedController.text.trim(),
+        'sex': firstAnimal.sex,
+        'size': firstAnimal.size,
+        'colorMarkings': firstAnimal.colorController.text.trim(),
+        'animals': [
+          for (final animal in validAnimals)
             {
-              'status': 'Rescue case is being reviewed.',
-              'timestamp': Timestamp.now(),
-            }
-          ],
-          'photoUrls': [],
-          'createdAt': Timestamp.now(),
-          'serverCreatedAt' : FieldValue.serverTimestamp(),
-        });
-        groupId ??= docRef.id;
-        createdDocIds.add(docRef.id);
-      }
-      for (final id in createdDocIds) {
-        await casesCollection.doc(id).update({'groupId': groupId});
-      }
+              'species': animal.speciesController.text.trim(),
+              'breed': animal.breedController.text.trim(),
+              'sex': animal.sex,
+              'size': animal.size,
+              'colorMarkings': animal.colorController.text.trim(),
+            },
+        ],
+        'rescueType': _selectedRescueType,
+        'condition': condition,
+        'urgency': _selectedUrgency,
+        'containmentStatus': _containmentStatus,
+        'strayTemperament': _strayTemperament,
+        'onSite': _onSiteChoice,
+        'accessInstructions': _accessInstructionsController.text.trim(),
+        'bestTimeToContact': _bestTimeContactController.text.trim(),
+        'reportAnonymously':
+        _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
+        'address': _addressController.text.trim(),
+        'lat': _pinnedLocation.latitude,
+        'lng': _pinnedLocation.longitude,
+        'coordinateWithShelter': _coordinateChoice,
+        'witnessName': _witnessNameController.text.trim(),
+        'witnessPhone': _witnessNumberController.text.trim(),
+        'interestedToAdopt': _adoptionChoice,
+        'scannedTagId': _scannedTagId,
+        'status': 'pending',
+        'statusHistory': [
+          {
+            'status': 'Rescue case is being reviewed.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'photoUrls': [],
+        'createdAt': Timestamp.now(),
+        'serverCreatedAt' : FieldValue.serverTimestamp(),
+      });
 
-      final primaryCaseId = createdDocIds.first;
+      final primaryCaseId = docRef.id;
       final photoUrls = await _uploadAllMedia(primaryCaseId);
       if (photoUrls.isNotEmpty) {
-        for (final id in createdDocIds) {
-          await casesCollection.doc(id).update({'photoUrls': photoUrls});
-        }
+        await docRef.update({'photoUrls': photoUrls});
       }
 
       if (mounted) {

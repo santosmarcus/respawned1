@@ -6,8 +6,11 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 
-/// Rescue list card: photo, species, urgency, short location, reporter,
-/// time submitted, case ID, status, and a "View Details" action.
+/// Rescue list card: photo, case ID (header) + species summary + urgency,
+/// short location, reporter, time submitted, status, and a "View Details"
+/// action. Always exactly one card per case document — a multi-animal
+/// report's animals only ever affect the species-summary line below the
+/// header, never the number of cards shown.
 ///
 /// [showStatusChip] is on by default for anything outside the five main
 /// pipeline tabs (where the tab itself already communicates the status) —
@@ -63,6 +66,10 @@ class RescueCaseCard extends StatelessWidget {
         : '';
     final dateStr = ts != null ? '${ts.month}/${ts.day}/${ts.year}' : '';
     final thumbnail = c.photoUrls.isNotEmpty ? c.photoUrls.first : null;
+    // Treatment-stage cards show clinic + days in treatment instead of the
+    // generic status preview/address/timestamp lines — same shared card,
+    // just a stage-aware body, per the Treatment card hierarchy.
+    final isTreatmentStage = c.status == RescueStatus.treatment;
 
     return GestureDetector(
       onTap: onTap,
@@ -112,7 +119,7 @@ class RescueCaseCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          c.animalType ?? 'Animal',
+                          '#${c.shortCaseId}',
                           style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -121,25 +128,52 @@ class RescueCaseCard extends StatelessWidget {
                       UrgencyChip(urgency: c.urgency),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
+                  // Species summary — e.g. "Dog ×2, Cat" for a multi-animal
+                  // report — plus a count when there's more than one
+                  // animal. This, not the case ID above, is where a
+                  // multi-animal report's animals actually show up; the
+                  // card itself is always exactly one per case document.
                   Text(
-                    _previewText(c),
-                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    c.address ?? '',
-                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                    c.animalCount > 1 ? '${c.speciesSummary} · ${c.animalCount} animals' : c.speciesSummary,
+                    style: GoogleFonts.zain(
+                        fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (ts != null)
+                  const SizedBox(height: 4),
+                  if (isTreatmentStage) ...[
+                    if ((c.vetClinicName ?? '').isNotEmpty)
+                      Text(
+                        c.vetClinicName!,
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     Text(
-                      '$timeStr  $dateStr',
-                      style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+                      '${c.daysInTreatment} day${c.daysInTreatment == 1 ? '' : 's'} in treatment',
+                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                     ),
+                  ] else ...[
+                    Text(
+                      _previewText(c),
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      c.address ?? '',
+                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (ts != null)
+                      Text(
+                        '$timeStr  $dateStr',
+                        style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+                      ),
+                  ],
                   const SizedBox(height: 4),
                   Text(
                     'Reported by: ${c.reporterName ?? '-'}',
@@ -149,19 +183,11 @@ class RescueCaseCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      // Case ID already headlines the card above — this
+                      // row is just the status chip now (when shown), not
+                      // a second copy of the ID.
                       Expanded(
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              'CASE ID: ${c.shortCaseId}',
-                              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-                            ),
-                            if (showStatusChip) RescueStatusChip(status: c.status),
-                          ],
-                        ),
+                        child: showStatusChip ? RescueStatusChip(status: c.status) : const SizedBox.shrink(),
                       ),
                       ElevatedButton(
                         onPressed: onTap,

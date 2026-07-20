@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
+import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
@@ -12,6 +13,8 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_report.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
+import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 
 /// Firestore access for the admin rescue module. Reads/writes the existing
 /// `cases` collection (shared with the reporter and pet-transporter apps —
@@ -43,6 +46,16 @@ class RescueCaseRepository {
   CollectionReference<Map<String, dynamic>> _transportAssignmentsOf(String caseId) =>
       _caseDoc(caseId).collection('transportAssignments');
   CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
+  CollectionReference<Map<String, dynamic>> _treatmentLogsOf(String caseId) =>
+      _caseDoc(caseId).collection('treatmentLogs');
+  CollectionReference<Map<String, dynamic>> _expensesOf(String caseId) =>
+      _caseDoc(caseId).collection('expenses');
+  // Top-level collection — see create_animal_record_page.dart /
+  // animal_record_detail_page.dart, both already established. Reused as-is
+  // (linkedCaseId is the existing case-reference field); only
+  // sourceAnimalIndex is genuinely new, for multi-animal duplicate
+  // prevention.
+  CollectionReference<Map<String, dynamic>> get _animals => _db.collection('animals');
 
   // ---- Reads ----------------------------------------------------------
 
@@ -59,12 +72,72 @@ class RescueCaseRepository {
         .where('status', whereIn: values)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map(RescueCase.fromFirestore).toList());
+        .map((snap) => snap.docs.map(RescueCase.fromFirestore).where(_isPrimaryGroupMember).toList());
+  }
+
+  /// Backward compatibility for reports submitted before multi-animal
+  /// reports were consolidated into a single doc with an `animals` array:
+  /// older multi-animal reports wrote one case doc per animal, linked by a
+  /// shared `groupId` (see rescue_page.dart's prior submission logic).
+  /// Without this filter, Rescue Reports would still show one card per
+  /// sibling doc for any of that older data. Keeps only the "primary" doc
+  /// of a group (the one whose own id equals the shared groupId) — mirrors
+  /// the same collapsing already done in public_rescue_feed.dart and
+  /// activity_feed.dart. New submissions never set `groupId`, so they pass
+  /// through untouched.
+  bool _isPrimaryGroupMember(RescueCase c) {
+    final groupId = c.raw['groupId'] as String?;
+    return groupId == null || groupId.isEmpty || groupId == c.id;
   }
 
   Stream<RescueCase?> streamCase(String caseId) {
     return _caseDoc(caseId).snapshots().map(
           (doc) => doc.exists ? RescueCase.fromFirestore(doc) : null,
+        );
+  }
+
+  /// Chronological (oldest first) treatment history for a case — merges the
+  /// new append-only `treatmentLogs` subcollection with any entries still
+  /// sitting only in the legacy `treatmentLog` array field on the case doc
+  /// itself (written by the old treatment_detail_page.dart before this
+  /// subcollection existed). Legacy entries are read-only here — every new
+  /// write goes to the subcollection exclusively, so the array field never
+  /// grows again; it just isn't discarded for cases that already have it.
+  Stream<List<TreatmentLogEntry>> streamTreatmentLogs(String caseId) {
+    return _treatmentLogsOf(caseId).orderBy('timestamp').snapshots().asyncMap((snap) async {
+      final subcollectionLogs = snap.docs.map((d) => TreatmentLogEntry.fromFirestore(d, caseId)).toList();
+      if (subcollectionLogs.isNotEmpty) return subcollectionLogs;
+
+      // Only fall back to the legacy array if the subcollection is
+      // genuinely empty — once a case has any real log entries, those are
+      // the source of truth and legacy data (if any) has already been
+      // migrated forward by the first new write's own read, avoiding a
+      // second Firestore read on every snapshot for cases with real data.
+      final caseSnap = await _caseDoc(caseId).get();
+      final legacy = List<Map<String, dynamic>>.from(caseSnap.data()?['treatmentLog'] ?? const []);
+      return [
+        for (var i = 0; i < legacy.length; i++) TreatmentLogEntry.fromLegacyMap(legacy[i], caseId, i),
+      ];
+    });
+  }
+
+  Stream<List<Expense>> streamExpenses(String caseId) {
+    return _expensesOf(caseId).orderBy('incurredAt', descending: true).snapshots().map(
+          (snap) => snap.docs.map((d) => Expense.fromFirestore(d, caseId)).toList(),
+        );
+  }
+
+  /// Which animal-array indexes already have a created record for this
+  /// case — drives both the "N of M records created" progress and
+  /// duplicate-prevention in the multi-animal creation flow (checked
+  /// client-side against this single query rather than a second
+  /// composite-indexed query per animal).
+  Stream<Set<int>> streamCompletedAnimalRecordIndexes(String caseId) {
+    return _animals.where('linkedCaseId', isEqualTo: caseId).snapshots().map(
+          (snap) => snap.docs
+              .map((d) => (d.data()['sourceAnimalIndex'] as num?)?.toInt())
+              .whereType<int>()
+              .toSet(),
         );
   }
 
@@ -102,6 +175,52 @@ class RescueCaseRepository {
     return _users.where('role', isEqualTo: 'pet_transporter').snapshots().map(
           (snap) => snap.docs.map(PetTransporter.fromFirestore).toList(),
         );
+  }
+
+  /// Resolves display-ready transporter details (vehicle/plate/photo/phone)
+  /// for the Intake Details default-transporter display and the shared
+  /// TransporterDetailsCard on Track Case — an accepted transportAssignment
+  /// only carries riderId/riderName/riderType, never vehicle/plate, so
+  /// those come from `users/{uid}` for real transporters, or the same
+  /// fixed values assign_rider_page.dart uses for the two demo
+  /// transporters. Never throws — an unresolvable/missing profile falls
+  /// back to safe placeholder text rather than surfacing an error.
+  Future<TransporterProfile> resolveTransporterProfile({
+    required String uid,
+    required String fallbackName,
+    required String type,
+    required bool isDemo,
+  }) async {
+    if (isDemo) {
+      final vehicle = uid == 'demo-rider-a'
+          ? 'Yamaha NMAX'
+          : (uid == 'demo-rider-b' ? 'Honda Click' : 'Not provided');
+      final plate =
+          uid == 'demo-rider-a' ? 'DEMO-001' : (uid == 'demo-rider-b' ? 'DEMO-002' : 'Not provided');
+      return TransporterProfile(
+          uid: uid, name: fallbackName, type: type, vehicle: vehicle, plate: plate, isDemo: true);
+    }
+    try {
+      final doc = await _users.doc(uid).get();
+      if (!doc.exists) {
+        return TransporterProfile(
+            uid: uid, name: fallbackName, type: type, vehicle: 'Not provided', plate: 'Not provided', isDemo: false);
+      }
+      final pt = PetTransporter.fromFirestore(doc);
+      return TransporterProfile(
+        uid: uid,
+        name: pt.name.isNotEmpty && pt.name != 'Unnamed Transporter' ? pt.name : fallbackName,
+        type: type,
+        photoUrl: pt.photoUrl,
+        phone: pt.phone,
+        vehicle: pt.vehicleType ?? 'Not provided',
+        plate: pt.licensePlate ?? 'Not provided',
+        isDemo: false,
+      );
+    } catch (_) {
+      return TransporterProfile(
+          uid: uid, name: fallbackName, type: type, vehicle: 'Not provided', plate: 'Not provided', isDemo: false);
+    }
   }
 
   /// The most recently offered rider assignment for a case, regardless of
@@ -663,6 +782,300 @@ class RescueCaseRepository {
       'status': 'completed',
       'completedAt': Timestamp.now(),
     });
+  }
+
+  // ---- Treatment ----------------------------------------------------
+
+  /// Appends one treatment log entry (never edits/overwrites a prior one)
+  /// and updates the case-level "latest state" fields that drive the
+  /// Treatment Details header and the Rescue Reports card: currentCondition,
+  /// latestTreatmentUpdateType, treatmentUpdatedAt, statusHistory. A
+  /// Discharge entry additionally sets readyForDischarge/dischargedAt; a
+  /// Death Report entry sets deceasedAt/causeOfDeath (and the legacy
+  /// animalStatus:'Deceased' flag some older screens still read).
+  Future<void> addTreatmentLog({
+    required String caseId,
+    required TreatmentLogEntry entry,
+  }) async {
+    await _treatmentLogsOf(caseId).add(entry.toFirestore());
+
+    final now = Timestamp.now();
+    final isDischarge = entry.type == TreatmentUpdateType.discharge.label;
+    final isDeath = entry.type == TreatmentUpdateType.deathReport.label;
+
+    await _caseDoc(caseId).update({
+      if (entry.condition != null) 'currentCondition': entry.condition,
+      'latestTreatmentUpdateType': entry.type,
+      'treatmentUpdatedAt': now,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': '${entry.type}: ${entry.notes}', 'timestamp': now},
+      ]),
+      if (isDischarge) 'readyForDischarge': true,
+      if (isDischarge) 'dischargedAt': now,
+      if (isDeath) 'deceasedAt': now,
+      if (isDeath) 'animalStatus': 'Deceased',
+      if (isDeath && entry.causeOfDeath != null) 'causeOfDeath': entry.causeOfDeath,
+    });
+  }
+
+  Future<void> transferAnimal({
+    required String caseId,
+    required String targetOrganizationId,
+    required String targetOrganizationName,
+    String? notes,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.completed.firestoreValue,
+      'targetOrganizationId': targetOrganizationId,
+      'targetOrganizationName': targetOrganizationName,
+      'transferNotes': notes,
+      'transferRequestedAt': Timestamp.now(),
+      // TODO(transfer): this is a simplified, one-way record — there is no
+      // receiving-organization acceptance workflow yet. 'pending' here just
+      // means "handed off, not yet acknowledged by the receiving org."
+      'transferStatus': 'pending',
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Animal transferred to $targetOrganizationName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'transferred_animal',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'targetOrganizationId': targetOrganizationId, 'targetOrganizationName': targetOrganizationName},
+    );
+  }
+
+  /// Temporary handoff record only — this is NOT a completed adoption. See
+  /// the TODO on the release UI: formal adoption approval/forms are a
+  /// separate, not-yet-built feature.
+  Future<void> releaseToReporter({
+    required String caseId,
+    required String reporterId,
+    required String reporterName,
+    String? notes,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.completed.firestoreValue,
+      'releasedToReporterId': reporterId,
+      'releasedToReporterName': reporterName,
+      'releasedAt': Timestamp.now(),
+      'releaseNotes': notes,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Release confirmed — handed off to $reporterName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'released_to_reporter',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'reporterId': reporterId, 'reporterName': reporterName},
+    );
+  }
+
+  Future<void> closeDeceasedCase({required String caseId}) async {
+    // Deliberately the literal 'closed' string, NOT
+    // RescueStatus.completed.firestoreValue ('completed') — several
+    // reporter-facing screens (case_summary_page.dart, case_completed_page.dart,
+    // history_screen.dart, activity_feed.dart, public_rescue_feed.dart,
+    // track_case_page.dart) specifically check `status == 'closed'` (or a
+    // string containing 'ended') to render the somber/deceased outcome
+    // rather than the ordinary completed-case tone; 'completed' alone
+    // doesn't trigger that. Both values already map to RescueStatus.completed
+    // via its _legacyAliases, so nothing about admin-side reads changes.
+    await _caseDoc(caseId).update({
+      'status': 'closed',
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Case closed. Animal deceased.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+  }
+
+  // ---- Intake -----------------------------------------------------------
+
+  /// Moves a case into the Intake stage: saves the destination, moves
+  /// `status` to 'intake' (its own alias list, disjoint from 'ongoing' —
+  /// no collision like the earlier treatment-status bug), and — if a
+  /// transporter is carried forward (same one or a reassignment) — records
+  /// a new transportAssignment doc for this leg, written directly as
+  /// 'accepted' rather than 'pending'. That's deliberate: this transporter
+  /// was already trusted/accepted for an earlier leg of the same case, so
+  /// re-running the full offer/pending/accept dance here would just be
+  /// friction; that full dance still happens for genuine reassignment via
+  /// the existing Assign Transporter screen. Writing this doc (not just
+  /// updating the case's flat assignedVolunteer* fields) is what correctly
+  /// keeps the transporter showing Busy elsewhere for the duration of this
+  /// leg, since activeAssignmentsByRiderProvider only looks at the most
+  /// recent assignment doc.
+  ///
+  /// Guarded against double-confirmation: a no-op if `intakeConfirmedAt` is
+  /// already set.
+  Future<void> confirmIntake({
+    required String caseId,
+    required String destinationName,
+    String? destinationAddress,
+    double? destinationLat,
+    double? destinationLng,
+    String? transporterUid,
+    String? transporterName,
+    String? transporterType,
+    String? transporterVehicle,
+    String? transporterPlate,
+    bool isDemoTransporter = false,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final assignmentRef = _transportAssignmentsOf(caseId).doc();
+
+    await _db.runTransaction((tx) async {
+      final caseSnap = await tx.get(caseRef);
+      if (!caseSnap.exists) throw StateError('Case not found.');
+      if (caseSnap.data()?['intakeConfirmedAt'] != null) return; // already confirmed
+
+      final now = Timestamp.now();
+      tx.update(caseRef, {
+        'status': RescueStatus.intake.firestoreValue,
+        'intakeDestinationName': destinationName,
+        'intakeDestinationAddress': destinationAddress,
+        'intakeDestinationLat': destinationLat,
+        'intakeDestinationLng': destinationLng,
+        'intakeConfirmedAt': now,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Intake confirmed — transport to $destinationName arranged.', 'timestamp': now}
+        ]),
+        if (transporterUid != null) 'currentAssignmentId': assignmentRef.id,
+        if (transporterUid != null) 'assignedVolunteerId': transporterUid,
+        if (transporterUid != null) 'assignedVolunteerName': transporterName,
+        if (transporterUid != null) 'assignedVehicle': transporterVehicle,
+        if (transporterUid != null) 'assignedPlate': transporterPlate,
+      });
+
+      if (transporterUid != null) {
+        tx.set(assignmentRef, {
+          'caseId': caseId,
+          'riderId': transporterUid,
+          'riderName': transporterName ?? 'Unknown Transporter',
+          'riderType': transporterType ?? 'Pet Transporter',
+          'status': 'accepted',
+          'offeredAt': now,
+          'respondedAt': now,
+          'acceptedAt': now,
+          'rejectedAt': null,
+          'rejectionReason': null,
+          'completedAt': null,
+          'isDemo': isDemoTransporter,
+          'vehicle': transporterVehicle,
+          'plate': transporterPlate,
+        });
+      }
+    });
+  }
+
+  /// Organization's "Confirm Animal Received" action once the transporter
+  /// has physically arrived — completes the intake-leg transport
+  /// assignment (freeing the transporter back to Available) and stamps
+  /// the arrival time. Never touches the case's own RescueStatus: arriving
+  /// at the shelter doesn't complete the whole rescue case, it just means
+  /// transport is done and quarantine/animal-record steps can begin.
+  Future<void> confirmAnimalReceived({
+    required String caseId,
+    String? currentAssignmentId,
+  }) async {
+    await _caseDoc(caseId).update({
+      'intakeReceivedAt': Timestamp.now(),
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Animal received at the shelter.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    if (currentAssignmentId != null) {
+      await completeAssignment(caseId: caseId, assignmentId: currentAssignmentId);
+    }
+  }
+
+  // ---- Quarantine (optional) ---------------------------------------------
+
+  Future<void> startQuarantine({
+    required String caseId,
+    required int durationDays,
+  }) async {
+    final now = DateTime.now();
+    await _caseDoc(caseId).update({
+      'quarantineStatus': 'active',
+      'quarantineStartedAt': FieldValue.serverTimestamp(),
+      'quarantineDurationDays': durationDays,
+      // The scheduled END is a future instant, which FieldValue.serverTimestamp()
+      // can't express (it only stamps "now") — computed from the device
+      // clock here. The START above still uses the server clock.
+      'quarantineScheduledEndAt': Timestamp.fromDate(now.add(Duration(days: durationDays))),
+      'quarantineEndedAt': null,
+      'quarantineEndReason': null,
+    });
+  }
+
+  Future<void> endQuarantine({
+    required String caseId,
+    String? reason,
+  }) async {
+    await _caseDoc(caseId).update({
+      'quarantineStatus': 'completed',
+      'quarantineEndedAt': FieldValue.serverTimestamp(),
+      if (reason != null && reason.isNotEmpty) 'quarantineEndReason': reason,
+    });
+  }
+
+  /// Explicitly records that the organization chose not to quarantine —
+  /// distinct from simply never having started one, so Intake Details
+  /// stops re-prompting "Start Quarantine / Skip" once a decision has been
+  /// made either way. Animal-record creation was never gated on this
+  /// either way.
+  Future<void> skipQuarantine({required String caseId}) async {
+    await _caseDoc(caseId).update({'quarantineStatus': 'skipped'});
+  }
+
+  /// Client-derived automatic completion, persisted the next time the case
+  /// is read/opened — RescueCase.isQuarantineActive applies the same
+  /// past-the-deadline logic purely client-side (no write) so the UI never
+  /// shows an overdue quarantine as still active even before this runs.
+  /// TODO(quarantine): this only fires when an admin actually opens the
+  /// case; replace with a scheduled Cloud Function for true server-side
+  /// automatic completion that doesn't depend on the case being reopened.
+  Future<void> checkAndCompleteQuarantineIfDue(RescueCase c) async {
+    if (c.quarantineStatus != 'active') return;
+    final scheduledEnd = c.quarantineScheduledEndAt;
+    if (scheduledEnd == null || DateTime.now().isBefore(scheduledEnd)) return;
+    await _caseDoc(c.id).update({
+      'quarantineStatus': 'completed',
+      'quarantineEndedAt': Timestamp.fromDate(scheduledEnd),
+      'quarantineEndReason': 'Automatic — scheduled duration elapsed.',
+    });
+  }
+
+  // ---- Cost tracking --------------------------------------------------
+
+  Future<void> addExpense({required String caseId, required Expense expense}) async {
+    if (expense.amount <= 0) {
+      throw ArgumentError('Expense amount must be greater than zero.');
+    }
+    await _expensesOf(caseId).add({
+      ...expense.toFirestore(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> updateExpense({required String caseId, required Expense expense}) async {
+    if (expense.amount <= 0) {
+      throw ArgumentError('Expense amount must be greater than zero.');
+    }
+    await _expensesOf(caseId).doc(expense.id).update(expense.toFirestore());
+  }
+
+  Future<void> deleteExpense({required String caseId, required String expenseId}) async {
+    await _expensesOf(caseId).doc(expenseId).delete();
   }
 
   Future<void> addActivityLog({

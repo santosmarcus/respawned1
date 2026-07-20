@@ -3,12 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
+import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_report.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
+import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 import 'package:respawnd1/core/repos/clinic_search_repository.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
@@ -101,6 +104,40 @@ final activeAssignmentsByRiderProvider =
 /// Real accounts with role == 'pet_transporter'.
 final petTransportersProvider = StreamProvider<List<PetTransporter>>((ref) {
   return ref.watch(rescueCaseRepositoryProvider).streamPetTransporters();
+});
+
+/// Chronological treatment history for a case (subcollection, with legacy
+/// array-field fallback — see streamTreatmentLogs's own doc comment).
+final treatmentLogsProvider = StreamProvider.family<List<TreatmentLogEntry>, String>((ref, caseId) {
+  return ref.watch(rescueCaseRepositoryProvider).streamTreatmentLogs(caseId);
+});
+
+/// A case's expense ledger — Cost Tracking's totals are always computed
+/// from this list, never stored/edited as a standalone number.
+final expensesProvider = StreamProvider.family<List<Expense>, String>((ref, caseId) {
+  return ref.watch(rescueCaseRepositoryProvider).streamExpenses(caseId);
+});
+
+/// Which animal-array indexes already have a created animal record —
+/// drives the Intake Details "N of M records created" progress and the
+/// multi-animal creation flow's duplicate prevention.
+final completedAnimalRecordIndexesProvider = StreamProvider.family<Set<int>, String>((ref, caseId) {
+  return ref.watch(rescueCaseRepositoryProvider).streamCompletedAnimalRecordIndexes(caseId);
+});
+
+/// Display-ready transporter details (vehicle/plate/photo/phone) for a
+/// given accepted assignment — used by Intake Details' default-transporter
+/// display and the shared TransporterDetailsCard on Track Case.
+typedef TransporterProfileQuery = ({String uid, String fallbackName, String type, bool isDemo});
+
+final transporterProfileProvider =
+    FutureProvider.family<TransporterProfile, TransporterProfileQuery>((ref, query) {
+  return ref.read(rescueCaseRepositoryProvider).resolveTransporterProfile(
+        uid: query.uid,
+        fallbackName: query.fallbackName,
+        type: query.type,
+        isDemo: query.isDemo,
+      );
 });
 
 // ---- List filter state --------------------------------------------------
@@ -203,10 +240,13 @@ class RescueFilters {
   /// already handled server-side by the query the list screen issues).
   bool matches(RescueCase c) {
     if (urgency != null && UrgencyLevel.fromFirestoreValue(c.urgency) != urgency) return false;
-    if (species != null &&
-        species!.isNotEmpty &&
-        (c.animalType == null || c.animalType!.toLowerCase() != species!.toLowerCase())) {
-      return false;
+    if (species != null && species!.isNotEmpty) {
+      // Matches if ANY of the case's animals are that species — not just
+      // the first/legacy one — so a "Dog ×2, Cat" case is found by both a
+      // Dog filter and a Cat filter, without needing separate cards.
+      final wanted = species!.toLowerCase();
+      final matchesAnySpecies = c.allSpecies.any((s) => s.toLowerCase() == wanted);
+      if (!matchesAnySpecies) return false;
     }
     if (fromDate != null && (c.createdAt == null || c.createdAt!.isBefore(fromDate!))) {
       return false;
@@ -221,11 +261,11 @@ class RescueFilters {
     if (searchText.trim().isNotEmpty) {
       final q = searchText.trim().toLowerCase();
       final haystack = [
-        c.animalType,
         c.condition,
         c.address,
         c.reporterName,
         c.id,
+        ...c.allSpecies, // every animal's species, not just the legacy first one
       ].whereType<String>().join(' ').toLowerCase();
       if (!haystack.contains(q)) return false;
     }
