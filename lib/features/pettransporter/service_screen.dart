@@ -23,10 +23,9 @@ class ServiceScreen extends StatefulWidget{
 
 class _ServiceScreenState extends State<ServiceScreen> {
   bool _isOnline = false;
-  bool _seedingTestData = false;
 
   GoogleMapController? _mapController;
-  double _serviceRangeKm = 100;
+  //double _serviceRangeKm = 100;
   bool _loadingLocation = false;
   LatLng? _currentLocation;
 
@@ -49,31 +48,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
           automaticallyImplyLeading: false,
 
           actions: [
-            // TEMPORARY TEST AID — creates a couple of self-contained fake
-            // cases + pending transportAssignments offers for THIS signed-in
-            // rider, so the "see and accept reports assigned by admin" flow
-            // (service_screen.dart / rescue_request.dart /
-            // transporter_notif.dart) can be verified end-to-end without a
-            // real admin walking through Assign Rider, and without a second
-            // transporter account. Mirrors the existing demo-transporter
-            // convention in assign_rider_page.dart (isDemo: true, clearly
-            // labeled). Remove this button once real multi-case testing via
-            // the actual admin flow is set up.
-            IconButton(
-              icon: _seedingTestData
-                  ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-                  : const Icon(Icons.science_outlined, color: AppColors.textPrimary),
-              tooltip: 'Add test assignments (dev only)',
-              onPressed: _seedingTestData ? null : _seedTestAssignments,
-            ),
-            IconButton(
+            /*IconButton(
               icon: const Icon(Icons.tune, color: AppColors.textPrimary),
               onPressed: _openFilter,
-            ),
+            ),*/
           ],
         ),
 
@@ -120,8 +98,6 @@ class _ServiceScreenState extends State<ServiceScreen> {
   }
 
   Widget _buildOfflineView() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-
     return Column(
       children: [
         Expanded(
@@ -195,52 +171,42 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
         const SizedBox(height: 16),
 
-        // Admin-assigned offers (and any job this rider already accepted)
-        // still need to reach them even while offline — going offline only
-        // opts out of the ambient nearby pool, not of a job the admin
-        // specifically sent them. Falls back to the old static placeholder
-        // if there's no signed-in rider to query for.
-        if (uid == null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Service Request',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 16, color: AppColors.textPrimary)),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  decoration: BoxDecoration(color: AppColors.background,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(
-                        color: AppColors.slaterspwn,
-                        blurRadius: 1,
-                        offset: Offset(0, 3),)
-                      ]
-                  ),
-                  child: Column(
-                    children: [
-                      Text('There are no requests for now.',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 16, color: AppColors.slaterspwn)),
-                      Text('Go Online.', style: GoogleFonts.tiltWarp(
-                          fontSize: 16, color: AppColors.slaterspwn)),
-                    ],
-                  ),
-                )
-
-              ],),)
-        else
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 260),
-            child: _ServiceRequestList(
-              currentRiderUid: uid,
-              includeOpenPool: false,
-            ),
+        // Pet transporters must not see any rescue cases — admin-assigned
+        // or otherwise — while offline. No live query here at all; going
+        // online is the only way to see anything in Service Request.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Service Request',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 16, color: AppColors.textPrimary)),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                decoration: BoxDecoration(color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [BoxShadow(
+                      color: AppColors.slaterspwn,
+                      blurRadius: 1,
+                      offset: Offset(0, 3),)
+                    ]
+                ),
+                child: Column(
+                  children: [
+                    Text('There are no requests for now.',
+                        style: GoogleFonts.tiltWarp(
+                            fontSize: 16, color: AppColors.slaterspwn)),
+                    Text('Go Online.', style: GoogleFonts.tiltWarp(
+                        fontSize: 16, color: AppColors.slaterspwn)),
+                  ],
+                ),
+              )
+            ],
           ),
+        ),
       ],
     );
   }
@@ -280,7 +246,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
                   const InfoWindow(title: 'Your Location'),
                 ),
               },
-              circles: _currentLocation == null
+              /*circles: _currentLocation == null
                   ? {}
                   : {
                 Circle(
@@ -293,6 +259,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
                   strokeWidth: 1,
                 ),
               },
+               */
             ),
           ),
         ),
@@ -335,7 +302,11 @@ class _ServiceScreenState extends State<ServiceScreen> {
             constraints: const BoxConstraints(maxHeight: 320),
             child: uid == null
                 ? const SizedBox()
-                : _ServiceRequestList(currentRiderUid: uid, includeOpenPool: true),
+                : _ServiceRequestList(
+              currentRiderUid: uid,
+              includeOpenPool: true,
+              currentLocation: _currentLocation,
+            ),
           ),
         ),
 
@@ -385,7 +356,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
   }
-  void _openFilter(){
+ /* void _openFilter(){
     showModalBottomSheet(context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -393,133 +364,22 @@ class _ServiceScreenState extends State<ServiceScreen> {
         initialRange: _serviceRangeKm,
         onApply: (km) => setState(() => _serviceRangeKm = km),
       ),);
-  }
-
-  // TEMPORARY TEST AID — see the comment on the AppBar action above. Seeds
-  // a couple of fully self-contained fake cases, each already at the
-  // 'accepted' (awaiting-assignment) status a real admin-assigned case
-  // would be at, plus a pending transportAssignments offer addressed to
-  // THIS rider — exactly what createAssignmentOffer() would have produced.
-  // Lets the "multiple reports assigned at once" scenario be checked (job
-  // board + Notifications, accept/decline via RescueRequest) without
-  // waiting on a real admin to assign real cases one at a time.
-  Future<void> _seedTestAssignments() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      _showError('Sign in first to add test assignments.');
-      return;
-    }
-
-    setState(() => _seedingTestData = true);
-    try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
-      final userData = userDoc.data();
-      final riderName =
-      '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
-
-      const testCases = [
-        {
-          'address': '123 Test Street, Marikina City (TEST DATA)',
-          'condition': 'Found limping near a test intersection.',
-          'urgency': 'Critical',
-          'animalType': 'Dog',
-        },
-        {
-          'address': '456 Sample Avenue, Marikina City (TEST DATA)',
-          'condition': 'Stray reported sheltering under a test parked car.',
-          'urgency': 'Medium',
-          'animalType': 'Cat',
-        },
-      ];
-
-      final casesCollection = FirebaseFirestore.instance.collection('cases');
-      for (final t in testCases) {
-        final caseRef = await casesCollection.add({
-          'reporterId': 'test-reporter',
-          'reporterName': 'Test Reporter',
-          'reporterPhone': '',
-          'animalType': t['animalType'],
-          'condition': t['condition'],
-          'urgency': t['urgency'],
-          'address': t['address'],
-          'lat': 14.6507,
-          'lng': 121.1029,
-          'status': 'accepted', // awaiting-assignment, same as a real case
-          'statusHistory': [
-            {
-              'status': '[TEST] Case ready for transporter assignment.',
-              'timestamp': Timestamp.now(),
-            }
-          ],
-          'photoUrls': [],
-          'createdAt': Timestamp.now(),
-          'serverCreatedAt': FieldValue.serverTimestamp(),
-          'isTestData': true,
-        });
-
-        final assignmentRef = await caseRef.collection('transportAssignments').add({
-          'caseId': caseRef.id,
-          'riderId': uid,
-          'riderName': riderName.isEmpty ? 'Test Transporter' : riderName,
-          'riderType': 'Pet Transporter',
-          'status': 'pending',
-          'offeredAt': Timestamp.now(),
-          'respondedAt': null,
-          'acceptedAt': null,
-          'rejectedAt': null,
-          'rejectionReason': null,
-          'completedAt': null,
-          'isDemo': true,
-        });
-        await caseRef.update({'currentAssignmentId': assignmentRef.id});
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Added ${testCases.length} test assignments — check Home and Notifications.'),
-            backgroundColor: AppColors.greenrspwn,
-          ),
-        );
-      }
-    } catch (e) {
-      _showError('Failed to add test assignments: $e');
-    } finally {
-      if (mounted) setState(() => _seedingTestData = false);
-    }
-  }
+  }*/
 
 }
 
 class _ServiceRequestList extends StatelessWidget {
   final String currentRiderUid;
-  // The ambient "open, unassigned, nearby" pool only makes sense while the
-  // rider has opted in to being visible/available (Online). An admin
-  // assignment offer — or a job this rider is already actively on — is
-  // NOT ambient nearby work and must still surface even while Offline, so
-  // those buckets below are never gated by this flag.
   final bool includeOpenPool;
+  final LatLng? currentLocation;
   const _ServiceRequestList({
     required this.currentRiderUid,
     this.includeOpenPool = true,
+    this.currentLocation,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Admin assignments (assign_rider_page.dart) create a *pending* offer
-    // doc under cases/{caseId}/transportAssignments instead of touching the
-    // case's own status/assignedVolunteerId fields directly — those only
-    // change once this rider actually accepts (see
-    // RescueCaseRepository.createAssignmentOffer/acceptAssignment). So a
-    // case freshly offered to this rider stays invisible to every bucket
-    // below unless we also know about it from this collectionGroup stream.
-    // Requires a Firestore composite collection-group index on
-    // transportAssignments (riderId, status) — the first live query prints
-    // the console's direct create-index link if it's still missing.
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collectionGroup('transportAssignments')
@@ -528,22 +388,11 @@ class _ServiceRequestList extends StatelessWidget {
           .snapshots(),
       builder: (context, offersSnapshot) {
         if (offersSnapshot.hasError) {
-          // Almost always a missing Firestore composite index the first
-          // time this query ever runs (collection-group queries need one
-          // created explicitly — Firestore does not auto-create it). Check
-          // the debug console for a "The query requires an index" error
-          // with a direct link to create it, or add it manually in the
-          // Firebase Console: Firestore -> Indexes -> Composite ->
-          // Collection group "transportAssignments", fields riderId (Asc),
-          // status (Asc). Falls back to the rest of the list rather than
-          // hard-failing the whole screen.
           debugPrint(
               'ServiceRequestList: transportAssignments offers query failed: '
                   '${offersSnapshot.error}');
         }
 
-        // caseId -> assignmentId, for every offer currently awaiting this
-        // rider's response.
         final offeredCaseIds = <String, String>{
           for (final doc in offersSnapshot.data?.docs ?? <QueryDocumentSnapshot>[])
             (doc.data() as Map<String, dynamic>)['caseId'] as String? ?? '':
@@ -578,18 +427,15 @@ class _ServiceRequestList extends StatelessWidget {
               final assignedId = d['assignedVolunteerId'];
               final declinedBy =
               List<String>.from(d['declinedBy'] ?? const <String>[]);
-
               final isMineActive = assignedId == currentRiderUid &&
-                  (status == 'accepted' || status == 'ongoing');
-              final isMineAssigned =
-                  assignedId == currentRiderUid && status == 'assigned';
+                  (status == 'assigned' || status == 'accepted' || status == 'ongoing');
               final isOpenNearby = includeOpenPool &&
                   status == 'pending' &&
                   (assignedId == null || assignedId == '') &&
                   !declinedBy.contains(currentRiderUid);
               final isOfferedToMe = offeredCaseIds.containsKey(doc.id);
 
-              return isMineActive || isMineAssigned || isOpenNearby || isOfferedToMe;
+              return isMineActive || isOpenNearby || isOfferedToMe;
             }).toList();
 
             if (visible.isEmpty) {
@@ -627,7 +473,8 @@ class _ServiceRequestList extends StatelessWidget {
                         final assignmentId = offeredCaseIds[doc.id];
                         final isMine = data['assignedVolunteerId'] == currentRiderUid;
                         final isActiveTrip = isMine &&
-                            (data['status'] == 'accepted' ||
+                            (data['status'] == 'assigned' ||
+                                data['status'] == 'accepted' ||
                                 data['status'] == 'ongoing') &&
                             assignmentId == null;
 
@@ -635,6 +482,7 @@ class _ServiceRequestList extends StatelessWidget {
                           caseId: doc.id,
                           data: data,
                           isOfferedToMe: assignmentId != null,
+                          currentLocation: currentLocation,
                           onTap: () {
                             if (isActiveTrip) {
                               Navigator.push(
@@ -702,23 +550,43 @@ class _RequestCard extends StatelessWidget {
   final Map<String, dynamic> data;
   final VoidCallback onTap;
   final bool isOfferedToMe;
+  // The rider's current position, used to compute the real distance to
+  // this case's pickup location instead of a hardcoded placeholder.
+  final LatLng? currentLocation;
 
   const _RequestCard({
     required this.caseId,
     required this.data,
     required this.onTap,
     this.isOfferedToMe = false,
+    this.currentLocation,
   });
+
+  String? _distanceLabel() {
+    final loc = currentLocation;
+    final pickupLat = (data['lat'] as num?)?.toDouble();
+    final pickupLng = (data['lng'] as num?)?.toDouble();
+    if (loc == null || pickupLat == null || pickupLng == null) return null;
+
+    final meters = Geolocator.distanceBetween(
+        loc.latitude, loc.longitude, pickupLat, pickupLng);
+    final km = meters / 1000;
+    final kmText = km < 10 ? km.toStringAsFixed(1) : km.round().toString();
+    return '~$kmText Km';
+  }
 
   @override
   Widget build(BuildContext context) {
     final urgency = data['urgency'] ?? '';
     final isCritical = urgency == 'Critical';
     final address = data['address'] ?? '';
-    // Fallback to the admin's actual Select Clinic choice for any case
-    // assigned before dropoff* was mirrored from it — see
-    // RescueCaseRepository.assignClinic.
-    final dropoffAddress = data['dropoffAddress'] ?? data['vetClinicAddress'] ?? address;
+    final rawDropoffAddress =
+    (data['dropoffAddress'] as String?)?.trim().isNotEmpty == true
+        ? data['dropoffAddress'] as String
+        : (data['vetClinicAddress'] as String?)?.trim();
+    final dropoffAddress = (rawDropoffAddress == null || rawDropoffAddress.isEmpty)
+        ? 'Clinic not yet assigned'
+        : rawDropoffAddress;
     final condition = data['condition'] ?? '';
     final status = data['status'] ?? 'pending';
 
@@ -735,12 +603,9 @@ class _RequestCard extends StatelessWidget {
         badgeColor = Colors.lightGreen;
     }
 
+    if (status == 'assigned') badgeLabel = 'Accepted';
     if (status == 'accepted') badgeLabel = 'Accepted';
     if (status == 'ongoing') badgeLabel = 'Ongoing';
-    // A pending admin offer leaves the case's own status at 'accepted' —
-    // that badge would otherwise wrongly read as already-accepted-by-
-    // someone-else, so this takes priority for a request specifically
-    // awaiting THIS rider's response.
     if (isOfferedToMe) {
       badgeLabel = 'New Assignment';
       badgeColor = AppColors.greenrspwn;
@@ -768,7 +633,9 @@ class _RequestCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      '(~4 Km) Rescue Now',
+                      _distanceLabel() == null
+                          ? 'Rescue Now'
+                          : '(${_distanceLabel()}) Rescue Now',
                       style: GoogleFonts.tiltWarp(
                         fontSize: 15,
                         color: AppColors.textPrimary,
