@@ -125,6 +125,124 @@ List<LatLng> decodePolyline(String encoded) {
   return points;
 }
 
+Future<String?> _showDeclineAssignmentDialog() async {
+  final reasons = [
+    'Outside my service area / too far to respond in time',
+    'Already committed to another active case',
+    "Vehicle/carrier not suited to this animal",
+    "Safety concern I'm not equipped to handle",
+    'Personal unavailability (emergency, off-duty)',
+    'Other',
+  ];
+  final selected = <String>{};
+  String? other;
+
+  return showDialog<String>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setDlg) => Dialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  Center(
+                    child: Text('Decline Assignment',
+                        style: GoogleFonts.tiltWarp(
+                            fontSize: 18, color: AppColors.textPrimary)),
+                  ),
+                  Positioned(
+                    right: 0,
+                    child: GestureDetector(
+                      onTap: () => Navigator.pop(ctx),
+                      child: const Icon(Icons.close,
+                          size: 20, color: AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ...reasons.map((r) => CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: selected.contains(r),
+                activeColor: AppColors.textPrimary,
+                side: const BorderSide(color: AppColors.textPrimary),
+                title: Text(r,
+                    style: GoogleFonts.zain(
+                        fontSize: 14, color: AppColors.textPrimary)),
+                onChanged: (v) => setDlg(() {
+                  if (v == true) {
+                    selected.add(r);
+                  } else {
+                    selected.remove(r);
+                  }
+                }),
+              )),
+              if (selected.contains('Other')) ...[
+                const SizedBox(height: 8),
+                TextField(
+                  onChanged: (v) => other = v,
+                  style: GoogleFonts.zain(
+                      fontSize: 14, color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    hintText: 'Describe reason…',
+                    hintStyle: GoogleFonts.zain(
+                        fontSize: 13, color: AppColors.textSecondary),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: AppColors.slaterspwn),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: AppColors.textPrimary),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: selected.isEmpty
+                      ? null
+                      : () {
+                    final reasonStr = [
+                      ...selected.where((r) => r != 'Other'),
+                      if (selected.contains('Other') &&
+                          other != null &&
+                          other!.isNotEmpty)
+                        other!,
+                    ].join(', ');
+                    Navigator.pop(ctx, reasonStr);
+                  },
+                  child: Text('Confirm',
+                      style: GoogleFonts.zain(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: selected.isEmpty
+                              ? AppColors.textSecondary
+                              : Colors.redAccent)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 // Status
 // accepted         - rider accepted, not yet started
 // ongoing          - otw to pickup
@@ -196,6 +314,50 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       _mapController
           ?.animateCamera(CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
     });
+  }
+
+  Future<void> _declineAssignment() async {
+    final reason = await _showDeclineAssignmentDialog();
+    if (reason == null) return; // dismissed via X / back
+
+    setState(() => _isActing = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .update({
+        'status': 'pending',
+        'riderId': null,
+        'assignedVolunteerId': null,
+        'riderLastLat': null,
+        'riderLastLng': null,
+        'declinedBy': FieldValue.arrayUnion([uid]),
+        'declineLog': FieldValue.arrayUnion([
+          {
+            'riderId': uid,
+            'reason': reason,
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Transporter declined the assignment — awaiting reassignment.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+      _positionSub?.cancel();
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
   }
 
   // Status transitions
@@ -869,7 +1031,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     }
   }
 
-  Future<void> _showEndReasonDialog() async {
+  Future<void> _showCloseTransitDialog() async {
     final reasons = [
       'Animal/Reporter not found on arrival',
       'Animal already rescued by someone else',
@@ -886,8 +1048,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlg) => Dialog(
           backgroundColor: AppColors.background,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -898,7 +1059,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                   alignment: Alignment.center,
                   children: [
                     Center(
-                      child: Text('End Reason',
+                      child: Text('Close Transit',
                           style: GoogleFonts.tiltWarp(
                               fontSize: 18, color: AppColors.textPrimary)),
                     ),
@@ -945,13 +1106,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                           horizontal: 12, vertical: 10),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide:
-                        const BorderSide(color: AppColors.slaterspwn),
+                        borderSide: const BorderSide(color: AppColors.slaterspwn),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide:
-                        const BorderSide(color: AppColors.textPrimary),
+                        borderSide: const BorderSide(color: AppColors.textPrimary),
                       ),
                     ),
                   ),
@@ -971,8 +1130,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                             other!.isNotEmpty)
                           other!,
                       ].join(', ');
-                      await _setStatus(
-                          'ended', 'Rescue ended: $reasonStr');
+                      await _setStatus('ended', 'Transit closed: $reasonStr');
                       _positionSub?.cancel();
                       if (mounted) Navigator.pop(context);
                     },
@@ -1366,7 +1524,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         images: _pickupImages,
         onImageTap: (i) => _pickImage(_pickupImages, i),
         onConfirm: _submitPickupVerification,
-        onEnd: _showEndReasonDialog,
+        onEnd: _showCloseTransitDialog,
         confirmLabel: 'Animal Rescued',
         isActing: _isActing,
         data: data,
@@ -1613,6 +1771,32 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           children: [
             const SizedBox(height: 16),
 
+            // Swipe button
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: _buildSwipeButton(status),
+            ),
+
+            if (status == 'assigned' || status == 'accepted') ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: _isActing ? null : _declineAssignment,
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.redAccent),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                    child: Text('Decline Assignment',
+                        style: GoogleFonts.tiltWarp(fontSize: 14, color: Colors.redAccent)),
+                  ),
+                ),
+              ),
+            ],
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Align(
@@ -1648,7 +1832,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           ],
         ),
       ),
+
     );
+
   }
 
   // Builds the tappable Reporter/Witness and Organization contact rows.
@@ -1860,7 +2046,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30)),
                   ),
-                  child: Text('End',
+                  child: Text('Close Transit',
                       style: GoogleFonts.tiltWarp(
                           fontSize: 14, color: AppColors.textPrimary)),
                 ),

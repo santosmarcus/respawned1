@@ -171,9 +171,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
         const SizedBox(height: 16),
 
-        // Pet transporters must not see any rescue cases — admin-assigned
-        // or otherwise — while offline. No live query here at all; going
-        // online is the only way to see anything in Service Request.
+
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
@@ -304,8 +302,8 @@ class _ServiceScreenState extends State<ServiceScreen> {
                 ? const SizedBox()
                 : _ServiceRequestList(
               currentRiderUid: uid,
-              includeOpenPool: true,
               currentLocation: _currentLocation,
+              serviceRangeKm: _serviceRangeKm,
             ),
           ),
         ),
@@ -370,11 +368,12 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
 class _ServiceRequestList extends StatelessWidget {
   final String currentRiderUid;
-  final bool includeOpenPool;
   final LatLng? currentLocation;
+  final double serviceRangeKm;
+
   const _ServiceRequestList({
     required this.currentRiderUid,
-    this.includeOpenPool = true,
+    required this.serviceRangeKm,
     this.currentLocation,
   });
 
@@ -425,17 +424,30 @@ class _ServiceRequestList extends StatelessWidget {
               final d = doc.data() as Map<String, dynamic>;
               final status = d['status'];
               final assignedId = d['assignedVolunteerId'];
-              final declinedBy =
-              List<String>.from(d['declinedBy'] ?? const <String>[]);
+
               final isMineActive = assignedId == currentRiderUid &&
-                  (status == 'assigned' || status == 'accepted' || status == 'ongoing');
-              final isOpenNearby = includeOpenPool &&
-                  status == 'pending' &&
-                  (assignedId == null || assignedId == '') &&
-                  !declinedBy.contains(currentRiderUid);
+                  (status == 'assigned' ||
+                      status == 'accepted' ||
+                      status == 'ongoing');
               final isOfferedToMe = offeredCaseIds.containsKey(doc.id);
 
-              return isMineActive || isOpenNearby || isOfferedToMe;
+              if (!isMineActive && !isOfferedToMe) return false;
+
+              final pickupLat = (d['lat'] as num?)?.toDouble();
+              final pickupLng = (d['lng'] as num?)?.toDouble();
+              if (currentLocation != null &&
+                  pickupLat != null &&
+                  pickupLng != null) {
+                final meters = Geolocator.distanceBetween(
+                  currentLocation!.latitude,
+                  currentLocation!.longitude,
+                  pickupLat,
+                  pickupLng,
+                );
+                if (meters / 1000 > serviceRangeKm) return false;
+              }
+
+              return true;
             }).toList();
 
             if (visible.isEmpty) {
@@ -550,8 +562,6 @@ class _RequestCard extends StatelessWidget {
   final Map<String, dynamic> data;
   final VoidCallback onTap;
   final bool isOfferedToMe;
-  // The rider's current position, used to compute the real distance to
-  // this case's pickup location instead of a hardcoded placeholder.
   final LatLng? currentLocation;
 
   const _RequestCard({
