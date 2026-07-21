@@ -29,37 +29,37 @@ const String _catSpecies = 'Cat';
 const String _othersBreedLabel = 'Others / Not sure';
 
 const List<String> _dogBreeds = [
+  _othersBreedLabel,
   'Aspin (Mixed/Native)',
-  'Shih Tzu',
-  'Poodle',
-  'Pomeranian',
-  'Chihuahua',
-  'Labrador Retriever',
-  'Golden Retriever',
-  'German Shepherd',
   'Beagle',
+  'Chihuahua',
+  'Corgi',
   'Dachshund',
+  'French Bulldog',
+  'German Shepherd',
+  'Golden Retriever',
+  'Japanese Spitz',
+  'Labrador Retriever',
+  'Pomeranian',
+  'Poodle',
+  'Shiba Inu',
+  'Shih Tzu',
   'Siberian Husky',
   'Rottweiler',
-  'French Bulldog',
-  'Corgi',
-  'Shiba Inu',
-  'Japanese Spitz',
-  _othersBreedLabel,
 ];
 
 const List<String> _catBreeds = [
-  'Puspin (Mixed/Native)',
-  'Persian',
-  'Siamese',
-  'British Shorthair',
-  'Maine Coon',
-  'Scottish Fold',
-  'Ragdoll',
-  'American Shorthair',
-  'Himalayan',
-  'Bengal',
   _othersBreedLabel,
+  'American Shorthair',
+  'Bengal',
+  'British Shorthair',
+  'Himalayan',
+  'Maine Coon',
+  'Persian',
+  'Puspin (Mixed/Native)',
+  'Ragdoll',
+  'Scottish Fold',
+  'Siamese',
 ];
 
 List<String> _breedOptionsFor(String? species) {
@@ -161,28 +161,6 @@ class _RescuePageState extends State<RescuePage> {
   // so reporters are no longer asked to separately self-assess urgency.
   static const List<Map<String, String>> _rescueTypeOptions = [
     {
-      'label': 'Illness',
-      'description':
-      'Appears weak, vomiting, coughing, skin disease; suspected illness',
-      'urgency': 'Medium',
-    },
-    {
-      'label': 'Injury',
-      'description': 'Visible wounds, fractures, bleeding',
-      'urgency': 'Critical',
-    },
-    {
-      'label': 'Abandonment',
-      'description': 'Animal left without care',
-      'urgency': 'Medium',
-    },
-    {
-      'label': 'Neglect or Abuse',
-      'description':
-      'Suspected animal cruelty, starvation, chaining, hoarding',
-      'urgency': 'Critical',
-    },
-    {
       'label': 'Pet Surrender',
       'description': 'Voluntary ownership surrender',
       'urgency': 'Low',
@@ -192,6 +170,30 @@ class _RescuePageState extends State<RescuePage> {
       'description': 'Owner reporting a missing pet for reunification',
       'urgency': 'Low',
     },
+    {
+      'label': 'Illness',
+      'description':
+      'Appears weak, vomiting, coughing, skin disease; suspected illness',
+      'urgency': 'Medium',
+    },
+    {
+      'label': 'Abandonment',
+      'description': 'Animal left without care',
+      'urgency': 'Medium',
+    },
+    {
+      'label': 'Injury',
+      'description': 'Visible wounds, fractures, bleeding',
+      'urgency': 'Critical',
+    },
+
+    {
+      'label': 'Neglect or Abuse',
+      'description':
+      'Suspected animal cruelty, starvation, chaining, hoarding',
+      'urgency': 'Critical',
+    },
+
     {
       'label': 'Trapped/Disaster',
       'description':
@@ -1265,9 +1267,8 @@ class _RescuePageState extends State<RescuePage> {
                   _buildLabel('Include images and videos', required: true),
                   const SizedBox(height: 4),
                   Text(
-                    'Tap any box, then "Choose photos from gallery" to '
-                        'select several at once — no need to tap each box. '
-                        'At least 2 are required, up to 4 total.',
+                    'Provide actual images or videos of the animal. '
+                        'At least 2 are required.',
                     style: GoogleFonts.zain(
                         fontSize: 11, color: AppColors.textSecondary),
                   ),
@@ -1519,14 +1520,6 @@ class _RescuePageState extends State<RescuePage> {
 
                     const SizedBox(height: 20),
 
-                    // Best time to contact
-                    _buildLabel('Best time to reach you', required: false),
-                    const SizedBox(height: 6),
-                    _lostPetTextField(_bestTimeContactController,
-                        'e.g. Anytime after 3PM'),
-
-                    const SizedBox(height: 20),
-
                     // Coordinate with shelter
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1652,6 +1645,17 @@ class _RescuePageState extends State<RescuePage> {
                         ),
                         style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
                       ),
+                    ],
+                    const SizedBox(height: 20,),
+
+                    if(_coordinateChoice == 'yes') ...[
+                      // Best time to contact
+                      _buildLabel('Best time to reach you', required: false),
+                      const SizedBox(height: 6),
+                      _lostPetTextField(_bestTimeContactController,
+                          'e.g. Anytime after 3PM'),
+
+                      const SizedBox(height: 20),
                     ],
 
                     // Willing to adopt
@@ -2471,10 +2475,6 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
-  // Shared by every rescue type (not just Lost Pet finder reports): renders
-  // the repeatable animal cards plus "Add another animal" so any report —
-  // illness, injury, abandonment, a litter turned in together, etc. — can
-  // cover more than one animal as a single grouped case.
   List<Widget> _buildAnimalEntryFields() {
     return [
       for (int i = 0; i < _foundAnimals.length; i++) _buildFoundAnimalCard(i),

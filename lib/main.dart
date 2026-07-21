@@ -14,6 +14,7 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
 import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
+import 'package:respawnd1/features/generalhome/push_token_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 void main() async {
@@ -126,6 +127,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
             if (role.isEmpty) {
               return const EnterDetailsScreen();
             }
+
+            // Fire-and-forget: registers/refreshes this device's FCM token
+            // now that we know the user is fully signed in with a role.
+            PushTokenService.register();
 
             // Existing user with role — route based on role
             switch (role) {

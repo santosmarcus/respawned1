@@ -18,14 +18,6 @@ import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
 import 'package:respawnd1/core/constants/maps_config.dart';
 
 
-// This file previously had its own separate hardcoded key literal
-// ('AIzaSyAzqeI6...') — the exact one maps_config.dart's own doc comment
-// identifies as the stale/invalid key behind a prior "This API project was
-// not found" bug. That fix was applied to MapsConfig but never propagated
-// here, so this file's Directions/clinic-search calls kept silently
-// failing on the broken key while everything else in the app used the
-// working one. Routed through MapsConfig now so there's a single source of
-// truth for both.
 String get _placesApiKey => MapsConfig.placesApiKey;
 
 String get _directionsApiKey => MapsConfig.directionsApiKey;
@@ -67,11 +59,6 @@ Future<DirectionsRoute?> fetchDirectionsRoute(
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (body['status'] != 'OK') {
-      // Common values here: REQUEST_DENIED (bad/restricted key, or
-      // Directions API not enabled for this key's project — check
-      // MapsConfig.maskedDirectionsKeyForLogging against the Google Cloud
-      // Console), ZERO_RESULTS (no driving route between these points),
-      // OVER_QUERY_LIMIT (billing/quota).
       debugPrint(
           'fetchDirectionsRoute: status=${body['status']} '
               'error_message=${body['error_message']}');
@@ -240,11 +227,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     _beginLocationStreaming();
   }
 
-  // Opens turn-by-turn driving navigation in the native Google Maps app —
-  // the same pattern Grab/Foodpanda driver apps use. This app's own map
-  // stays a simplified live-tracking overlay (trail + dashed route
-  // preview); actual voice-guided navigation is handed off to Google Maps
-  // itself rather than reimplemented in-app.
   Future<void> _launchNavigation(LatLng destination, String label) async {
     final uri = Uri(
       scheme: 'https',
@@ -312,22 +294,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     return null;
   }
 
-  // The clinic destination: dropoffLat/dropoffLng (normally mirrored from
-  // the admin's Select Clinic choice — see
-  // RescueCaseRepository.assignClinic — or set directly by this file's own
-  // _findAndRouteToNextClinic auto-search), falling back to vetClinicLat/
-  // vetClinicLng for any case assigned a clinic before that mirroring
-  // existed.
   LatLng? _clinicLatLngFrom(Map<String, dynamic> data) {
     return _latLngFrom(data, 'dropoffLat', 'dropoffLng') ??
         _latLngFrom(data, 'vetClinicLat', 'vetClinicLng');
   }
 
-  // Same idea for the clinic's display address: dropoffAddress falling
-  // back to vetClinicAddress. Deliberately never falls back further to the
-  // pickup address (data['address']) — showing the pickup location as if
-  // it were the assigned clinic would misrepresent "no clinic assigned
-  // yet" as an actual destination.
   String _clinicAddressFrom(Map<String, dynamic> data) {
     final dropoff = (data['dropoffAddress'] as String?)?.trim();
     if (dropoff != null && dropoff.isNotEmpty) return dropoff;
@@ -441,13 +412,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       final route = await fetchDirectionsRoute(origin, destination);
 
       if (route == null) {
-        // The Directions call couldn't be verified — see
-        // fetchDirectionsRoute's debugPrint output for the actual reason
-        // (commonly a key/API-enablement issue, not necessarily a network
-        // problem). Rather than permanently blocking arrival confirmation
-        // whenever that happens, fall back to straight-line distance —
-        // same idea as DirectionsRepository falling back to a straight-line
-        // polyline when the road route can't be fetched.
         final straightLineMeters = Geolocator.distanceBetween(
           origin.latitude,
           origin.longitude,
@@ -781,14 +745,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         'dropoffName': newName,
         if (loc != null) 'dropoffLat': loc['lat'],
         if (loc != null) 'dropoffLng': loc['lng'],
-        // Deliberately NOT written to vetClinic* here — those fields mean
-        // specifically "the admin's Select Clinic choice" (see
-        // admin_track_case_page.dart's _destinationFrom priority: vetClinic*
-        // first, dropoff* only as the "legacy destination" fallback). This
-        // is an automatic re-search after a rejection, not an admin
-        // decision, so it must stay under dropoff* only — writing it to
-        // vetClinic* would falsely relabel an algorithm's pick as "Selected
-        // Clinic" and hide from the admin that they didn't choose it.
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Finding nearby clinics… routed to $newAddress',
@@ -915,8 +871,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
   Future<void> _showEndReasonDialog() async {
     final reasons = [
-      'Animal/Reporter not Found',
-      'Invalid / fake report',
+      'Animal/Reporter not found on arrival',
+      'Animal already rescued by someone else',
+      'Location inaccessible (private property, no entry granted)',
       'Animal Deceased',
       'Other',
     ];
@@ -1040,6 +997,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     final reasons = [
       'Clinic at full capacity',
       'Insufficient Medication/Treatment Supplies',
+      'Require specialist care/equipment this clinic does not have',
       'Animal Deceased',
       'No Veterinarian/Specialist Available',
       'Other',

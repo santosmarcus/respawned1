@@ -113,6 +113,18 @@ class ActivityCard extends StatelessWidget{
     );
   }
 
+  Widget _thumbFallback() {
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: _accentColor.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(_icon, color: AppColors.textPrimary, size: 24),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return  GestureDetector(
@@ -171,83 +183,107 @@ class ActivityCard extends StatelessWidget{
 
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: Column(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(children: [
-                    const Icon(Icons.access_time,
-                        size: 14, color: AppColors.textSecondary),
-                    const SizedBox(width: 6),
-                    Text(_dateLabel,
-                        style: GoogleFonts.zain(
-                            fontSize: 12,
-                            color: AppColors.textSecondary)),
-                  ]),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: item.photoUrl != null
+                        ? Image.network(
+                      item.photoUrl!,
+                      width: 56,
+                      height: 56,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return _thumbFallback();
+                      },
+                      errorBuilder: (_, __, ___) => _thumbFallback(),
+                    )
+                        : _thumbFallback(),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          const Icon(Icons.access_time,
+                              size: 14, color: AppColors.textSecondary),
+                          const SizedBox(width: 6),
+                          Text(_dateLabel,
+                              style: GoogleFonts.zain(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary)),
+                        ]),
 
-                  const SizedBox(height: 6),
+                        const SizedBox(height: 6),
 
-                  // Address and Animal type row (rescue + lost/found pet)
-                  if ((item.type == ActivityType.rescue ||
-                      item.type == ActivityType.lostFoundPet) &&
-                      item.animalType.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      const Icon(Icons.location_on_outlined,
-                          size: 14, color: AppColors.textSecondary),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          item.subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.zain(
-                              fontSize: 12,
-                              color: AppColors.textPrimary),
+                        // Address and Animal type row (rescue + lost/found pet)
+                        if ((item.type == ActivityType.rescue ||
+                            item.type == ActivityType.lostFoundPet) &&
+                            item.animalType.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Row(children: [
+                            const Icon(Icons.location_on_outlined,
+                                size: 14, color: AppColors.textSecondary),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                item.subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.zain(
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary),
+                              ),
+                            ),
+                          ]),
+                          Row(children: [
+                            const Icon(Icons.pets,
+                                size: 14, color: AppColors.textSecondary),
+                            const SizedBox(width: 6),
+                            Text(item.animalType,
+                                style: GoogleFonts.zain(
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary)),
+                          ]),
+                        ],
+
+                        const SizedBox(height: 8),
+
+                        // Status row
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.status,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.zain(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                            if (item.type == ActivityType.rescue ||
+                                item.type == ActivityType.adoption ||
+                                item.type == ActivityType.lostFoundPet)
+                              Text(
+                                'View details →',
+                                style: GoogleFonts.zain(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                          ],
                         ),
-                      ),
-                    ]),
-                    Row(children: [
-                      const Icon(Icons.pets,
-                          size: 14, color: AppColors.textSecondary),
-                      const SizedBox(width: 6),
-                      Text(item.animalType,
-                          style: GoogleFonts.zain(
-                              fontSize: 12,
-                              color: AppColors.textPrimary)),
-                    ]),
-                  ],
-
-                  const SizedBox(height: 8),
-
-                  // Status row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.status,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.zain(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
-                      if (item.type == ActivityType.rescue ||
-                          item.type == ActivityType.adoption ||
-                          item.type == ActivityType.lostFoundPet)
-                        Text(
-                          'View details →',
-                          style: GoogleFonts.zain(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),

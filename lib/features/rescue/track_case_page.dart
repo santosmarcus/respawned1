@@ -13,10 +13,10 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../app_theme.dart';
-import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 
-
+// Same Google Geocoding key used elsewhere in the rescue flow (rescue_page.dart)
+// for turning a lat/lng into a human-readable address.
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
 
@@ -189,7 +189,7 @@ class _TrackCasePageState extends State<TrackCasePage> {
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            '#${shortCaseId(widget.caseId)}',
+                            '#${widget.caseId.substring(0, 7).toUpperCase()}',
                             style: GoogleFonts.tiltWarp(
                                 fontSize: 18,
                                 color: AppColors.textPrimary),
@@ -297,11 +297,7 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
   @override
   Widget build(BuildContext context) {
     final pickup = _latLngFrom(widget.data, 'lat', 'lng');
-    // Falls back to the admin's vetClinic coordinates for any case assigned
-    // a clinic before dropoff* was mirrored from it — see
-    // RescueCaseRepository.assignClinic.
-    final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng') ??
-        _latLngFrom(widget.data, 'vetClinicLat', 'vetClinicLng');
+    final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng');
     final riderLastKnown =
     _latLngFrom(widget.data, 'riderLastLat', 'riderLastLng');
 
@@ -401,7 +397,7 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
 }
 
 // Tracking detail tab
-class _TrackingTab extends StatelessWidget {
+class _TrackingTab extends StatefulWidget {
   final List<Map<String, dynamic>> statusHistory;
   final String caseId;
   final TextEditingController messageController;
@@ -419,6 +415,14 @@ class _TrackingTab extends StatelessWidget {
     required this.data,
     required this.isReporter,
   });
+
+  @override
+  State<_TrackingTab> createState() => _TrackingTabState();
+}
+
+class _TrackingTabState extends State<_TrackingTab> {
+  bool _trackingExpanded = true;
+  bool _messagesExpanded = true;
 
   String _formatTime(DateTime d) {
     final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
@@ -547,8 +551,8 @@ class _TrackingTab extends StatelessWidget {
     );
   }
   Widget _buildTimelineItem(int index) {
-    final item = statusHistory[index];
-    final isLast = index == statusHistory.length - 1;
+    final item = widget.statusHistory[index];
+    final isLast = index == widget.statusHistory.length - 1;
     final ts = item['timestamp'];
     final date = ts is Timestamp ? ts.toDate() : null;
     final timeStr = date != null ? _formatTime(date) : '';
@@ -571,7 +575,7 @@ class _TrackingTab extends StatelessWidget {
                   ? const Icon(Icons.check, size: 12, color: Colors.white)
                   : null,
             ),
-            if (index < statusHistory.length - 1)
+            if (index < widget.statusHistory.length - 1)
               Container(width: 2, height: 40, color: AppColors.textPrimary),
           ],
         ),
@@ -608,6 +612,36 @@ class _TrackingTab extends StatelessWidget {
     );
   }
 
+  // Shared header style for the two collapsible sections below — a title
+  // plus a chevron that flips the section's visibility.
+  Widget _collapsibleHeader({
+    required String title,
+    required bool expanded,
+    required VoidCallback onToggle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GestureDetector(
+        onTap: onToggle,
+        behavior: HitTestBehavior.opaque,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title,
+                style: GoogleFonts.zain(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              color: AppColors.textPrimary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -615,41 +649,50 @@ class _TrackingTab extends StatelessWidget {
         Expanded(
           child: ListView(
             children: [
-              if (statusHistory.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 24),
-                  child: Center(
-                    child: Text('No status updates yet.',
-                        style: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textSecondary)),
-                  ),
-                )
-              else
-                for (int i = 0; i < statusHistory.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: _buildTimelineItem(i),
-                  ),
+              _collapsibleHeader(
+                title: 'Tracking Progress',
+                expanded: _trackingExpanded,
+                onToggle: () => setState(() => _trackingExpanded = !_trackingExpanded),
+              ),
+              const SizedBox(height: 8),
 
-              const SizedBox(height: 12),
-              _buildMediaSection(
-                context,
-                'Pickup Verification',
-                List<String>.from(data['pickupVerificationUrls'] ?? []),
-              ),
-              const SizedBox(height: 12),
-              _buildMediaSection(
-                context,
-                'Dropoff Verification',
-                List<String>.from(data['dropoffVerificationUrls'] ?? []),
-              ),
+              if (_trackingExpanded) ...[
+                if (widget.statusHistory.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 24),
+                    child: Center(
+                      child: Text('No status updates yet.',
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: AppColors.textSecondary)),
+                    ),
+                  )
+                else
+                  for (int i = 0; i < widget.statusHistory.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildTimelineItem(i),
+                    ),
+
+                const SizedBox(height: 12),
+                _buildMediaSection(
+                  context,
+                  'Pickup Verification',
+                  List<String>.from(widget.data['pickupVerificationUrls'] ?? []),
+                ),
+                const SizedBox(height: 12),
+                _buildMediaSection(
+                  context,
+                  'Dropoff Verification',
+                  List<String>.from(widget.data['dropoffVerificationUrls'] ?? []),
+                ),
+              ],
               const SizedBox(height: 16),
 
               // Community Reports — visible to the reporter (for
               // situational awareness) and to every other user (who can
               // submit sighting reports to help verify/update the case).
-              _CommunityReportSection(caseId: caseId),
+              _CommunityReportSection(caseId: widget.caseId),
               const SizedBox(height: 8),
               const Divider(color: AppColors.slaterspwn),
             ],
@@ -657,141 +700,138 @@ class _TrackingTab extends StatelessWidget {
         ),
 
         // Messages to the Organization — reporter-only private channel.
-        if (isReporter) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Messages to the Organization',
-                  style: GoogleFonts.zain(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary)),
-            ),
+        if (widget.isReporter) ...[
+          _collapsibleHeader(
+            title: 'Messages to the Organization',
+            expanded: _messagesExpanded,
+            onToggle: () => setState(() => _messagesExpanded = !_messagesExpanded),
           ),
 
-          // Message list
-          SizedBox(
-            height: 100,
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('cases')
-                  .doc(caseId)
-                  .collection('messages')
-                  .orderBy('timestamp')
-                  .snapshots(),
-              builder: (context, snap) {
-                if (!snap.hasData || snap.data!.docs.isEmpty) {
-                  return const SizedBox();
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: snap.data!.docs.length,
-                  itemBuilder: (context, i) {
-                    final msg = snap.data!.docs[i].data()
-                    as Map<String, dynamic>;
-                    final ts = msg['timestamp'] as Timestamp?;
-                    final timeStr = ts != null
-                        ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-                        : '';
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CircleAvatar(
-                            radius: 14,
-                            backgroundColor: AppColors.slaterspwn,
-                            child: Text(
-                              (msg['senderName'] ?? 'U')[0],
-                              style: GoogleFonts.zain(
-                                  fontSize: 12,
-                                  color: AppColors.textPrimary),
+          if (_messagesExpanded) ...[
+            // Message list
+            SizedBox(
+              height: 100,
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('cases')
+                    .doc(widget.caseId)
+                    .collection('messages')
+                    .orderBy('timestamp')
+                    .snapshots(),
+                builder: (context, snap) {
+                  if (!snap.hasData || snap.data!.docs.isEmpty) {
+                    return const SizedBox();
+                  }
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: snap.data!.docs.length,
+                    itemBuilder: (context, i) {
+                      final msg = snap.data!.docs[i].data()
+                      as Map<String, dynamic>;
+                      final ts = msg['timestamp'] as Timestamp?;
+                      final timeStr = ts != null
+                          ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
+                          : '';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CircleAvatar(
+                              radius: 14,
+                              backgroundColor: AppColors.slaterspwn,
+                              child: Text(
+                                (msg['senderName'] ?? 'U')[0],
+                                style: GoogleFonts.zain(
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(msg['senderName'] ?? '',
-                                        style: GoogleFonts.zain(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.textPrimary)),
-                                    Text(timeStr,
-                                        style: GoogleFonts.zain(
-                                            fontSize: 10,
-                                            color: AppColors.textSecondary)),
-                                  ],
-                                ),
-                                Text(msg['text'] ?? '',
-                                    style: GoogleFonts.zain(
-                                        fontSize: 12,
-                                        color: AppColors.textSecondary)),
-                              ],
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(msg['senderName'] ?? '',
+                                          style: GoogleFonts.zain(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppColors.textPrimary)),
+                                      Text(timeStr,
+                                          style: GoogleFonts.zain(
+                                              fontSize: 10,
+                                              color: AppColors.textSecondary)),
+                                    ],
+                                  ),
+                                  Text(msg['text'] ?? '',
+                                      style: GoogleFonts.zain(
+                                          fontSize: 12,
+                                          color: AppColors.textSecondary)),
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                );
-              },
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-          ),
 
-          // Message input
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: messageController,
-                    focusNode: messageFocusNode,
-                    decoration: InputDecoration(
-                      hintText: 'Type a message',
-                      hintStyle: GoogleFonts.zain(
-                          fontSize: 13, color: AppColors.textSecondary),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(50),
-                        borderSide:
-                        const BorderSide(color: AppColors.slaterspwn),
+            // Message input
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: widget.messageController,
+                      focusNode: widget.messageFocusNode,
+                      decoration: InputDecoration(
+                        hintText: 'Type a message',
+                        hintStyle: GoogleFonts.zain(
+                            fontSize: 13, color: AppColors.textSecondary),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(50),
+                          borderSide:
+                          const BorderSide(color: AppColors.slaterspwn),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(50),
+                          borderSide: const BorderSide(
+                              color: AppColors.textPrimary),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(50),
-                        borderSide: const BorderSide(
-                            color: AppColors.textPrimary),
-                      ),
-                      filled: true,
-                      fillColor: Colors.white,
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: onSend,
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: const BoxDecoration(
-                      color: AppColors.yellowrspwn,
-                      shape: BoxShape.circle,
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: widget.onSend,
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: const BoxDecoration(
+                        color: AppColors.yellowrspwn,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.send,
+                          size: 18, color: AppColors.textPrimary),
                     ),
-                    child: const Icon(Icons.send,
-                        size: 18, color: AppColors.textPrimary),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+          ] else
+            const SizedBox(height: 12),
         ],
       ],
     );
@@ -1163,23 +1203,9 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Address', data['address']),
-          _DetailRow('Type of Rescue', data['rescueType']),
           _DetailRow('Description', data['condition']),
-          _AnimalGroupSection(caseId: widget.caseId, data: data),
+          _DetailRow('Type of Animal', data['animalType']),
           _DetailRow('Urgency', data['urgency']),
-          _DetailRow('Containment Status', data['containmentStatus']),
-          if ((data['strayTemperament'] as String?)?.isNotEmpty ?? false)
-            _DetailRow(
-                'Approachability / Bite Risk', data['strayTemperament']),
-          _DetailRow('On-site', data['onSite']),
-          if ((data['accessInstructions'] as String?)?.isNotEmpty ?? false)
-            _DetailRow(
-                'Access Instructions', data['accessInstructions']),
-          if ((data['bestTimeToContact'] as String?)?.isNotEmpty ?? false)
-            _DetailRow(
-                'Best Time to Contact', data['bestTimeToContact']),
-          if ((data['scannedTagId'] as String?)?.isNotEmpty ?? false)
-            _DetailRow('Scanned Tag ID', data['scannedTagId']),
           _DetailRow('Coordination', data['coordinateWithShelter']),
           if (data['coordinateWithShelter'] == 'no') ...[
             _DetailRow('Witness Name', data['witnessName']),
@@ -1273,124 +1299,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   }
 }
 
-class _AnimalGroupSection extends StatelessWidget {
-  final String caseId;
-  final Map<String, dynamic> data;
-  const _AnimalGroupSection({required this.caseId, required this.data});
-
-  Map<String, dynamic> _animalMap(Map raw) => {
-    'animalType': raw['species'],
-    'breed': raw['breed'],
-    'sex': raw['sex'],
-    'size': raw['size'],
-    'colorMarkings': raw['colorMarkings'],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final animals = data['animals'] as List?;
-    if (animals != null && animals.isNotEmpty) {
-      final total = animals.length;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _DetailRow('No. of Animals', '$total'),
-          for (var i = 0; i < animals.length; i++)
-            _AnimalDetailBlock(
-              data: _animalMap(animals[i] as Map),
-              index: i + 1,
-              total: total,
-            ),
-        ],
-      );
-    }
-
-    final groupId = data['groupId'] as String?;
-    if (groupId == null || groupId.isEmpty) {
-      return _AnimalDetailBlock(data: data, index: 1, total: 1);
-    }
-
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('cases')
-          .where('groupId', isEqualTo: groupId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          // Show this case's own animal immediately rather than blocking
-          // on the group query.
-          return _AnimalDetailBlock(data: data, index: 1, total: 1);
-        }
-        final docs = snapshot.data!.docs;
-        final total = docs.length;
-        if (total <= 1) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1);
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DetailRow('No. of Animals', '$total'),
-            for (var i = 0; i < docs.length; i++)
-              _AnimalDetailBlock(
-                data: docs[i].data(),
-                index: i + 1,
-                total: total,
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _AnimalDetailBlock extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final int index;
-  final int total;
-  const _AnimalDetailBlock(
-      {required this.data, required this.index, required this.total});
-
-  List<Widget> _fields() => [
-    _DetailRow('Species', data['animalType']),
-    _DetailRow('Breed / Mixed', data['breed']),
-    _DetailRow('Sex', data['sex']),
-    _DetailRow('Size', data['size']),
-    _DetailRow('Color / Distinguishing Markings', data['colorMarkings']),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    if (total <= 1) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: _fields(),
-      );
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.slaterspwn),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Animal $index of $total',
-              style: GoogleFonts.zain(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          ..._fields(),
-        ],
-      ),
-    );
-  }
-}
-
 class _DetailRow extends StatelessWidget {
   final String label;
   final String? value;
@@ -1439,10 +1347,19 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
   final _locationController = TextEditingController();
   final _picker = ImagePicker();
 
+  // Safe, sanctioned support actions a general user can offer without
+  // physically handling the animal — physical handling stays reserved for
+  // verified volunteers/transporters.
+  bool _isWatching = false;
+  bool _canProvideCare = false;
+  bool _someoneElseWatching = false;
+  final _watcherContactController = TextEditingController();
+
   @override
   void dispose() {
     _commentController.dispose();
     _locationController.dispose();
+    _watcherContactController.dispose();
     super.dispose();
   }
 
@@ -1627,6 +1544,32 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
         'newAddress':
         _selectedType == 'moved' ? _locationController.text.trim() : null,
         'photoUrl': photoUrl,
+        'isWatching': _isWatching,
+        'canProvideCare': _canProvideCare,
+        'someoneElseWatching': _someoneElseWatching,
+        'watcherContact':
+        _someoneElseWatching ? _watcherContactController.text.trim() : null,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // Mirror this into the case's audit trail (same collection staff
+      // actions are logged to) so a community report is part of the
+      // case's official, timestamped record — not just an informal comment.
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .collection('activityLogs')
+          .add({
+        'action': 'community_report_submitted',
+        'actorUid': uid,
+        'actorName': name.isEmpty ? 'A community member' : name,
+        'actorRole': null,
+        'details': {
+          'type': _selectedType,
+          'isWatching': _isWatching,
+          'canProvideCare': _canProvideCare,
+          'someoneElseWatching': _someoneElseWatching,
+        },
         'timestamp': FieldValue.serverTimestamp(),
       });
 
@@ -1635,9 +1578,13 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
           _selectedType = null;
           _pickedImage = null;
           _expanded = false;
+          _isWatching = false;
+          _canProvideCare = false;
+          _someoneElseWatching = false;
         });
         _commentController.clear();
         _locationController.clear();
+        _watcherContactController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Thanks! Your report has been submitted.'),
@@ -1692,6 +1639,27 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _safeActionSwitch(String label, bool value, ValueChanged<bool> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.zain(fontSize: 12.5, color: AppColors.textPrimary),
+            ),
+          ),
+          Switch(
+            value: value,
+            activeColor: AppColors.textPrimary,
+            onChanged: onChanged,
+          ),
+        ],
       ),
     );
   }
@@ -1753,6 +1721,59 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
             ),
 
             const SizedBox(height: 14),
+
+            // Safe, sanctioned ways a general user can help right now —
+            // monitoring/support only, never physical handling of the
+            // animal (that stays reserved for verified volunteers).
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'How can you help right now?',
+                style: GoogleFonts.zain(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(height: 4),
+            _safeActionSwitch(
+              "I'm currently keeping watch",
+              _isWatching,
+                  (v) => setState(() => _isWatching = v),
+            ),
+            _safeActionSwitch(
+              'I can safely provide food/water',
+              _canProvideCare,
+                  (v) => setState(() => _canProvideCare = v),
+            ),
+            _safeActionSwitch(
+              'Someone nearby is watching it',
+              _someoneElseWatching,
+                  (v) => setState(() => _someoneElseWatching = v),
+            ),
+            if (_someoneElseWatching) ...[
+              const SizedBox(height: 6),
+              TextField(
+                controller: _watcherContactController,
+                keyboardType: TextInputType.phone,
+                style: GoogleFonts.zain(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: "Watcher's contact number (optional)",
+                  hintStyle: GoogleFonts.zain(
+                      fontSize: 12, color: AppColors.textSecondary),
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: AppColors.slaterspwn),
+                  ),
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 10),
             if (_selectedType == 'moved') ...[
               Align(
                 alignment: Alignment.centerLeft,
@@ -1891,6 +1912,31 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
     return '${months[d.month]} ${d.day}, ${d.year}';
   }
 
+  Widget _safeActionBadge(String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.greenrspwn.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.greenrspwn),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _reportTile(Map<String, dynamic> r) {
     final ts = r['timestamp'] as Timestamp?;
     final date = ts?.toDate();
@@ -1970,6 +2016,24 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                     child: Text(comment,
                         style: GoogleFonts.zain(
                             fontSize: 14, color: AppColors.textSecondary)),
+                  ),
+                if (r['isWatching'] == true ||
+                    r['canProvideCare'] == true ||
+                    r['someoneElseWatching'] == true)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        if (r['isWatching'] == true)
+                          _safeActionBadge('Keeping watch', Icons.visibility_outlined),
+                        if (r['canProvideCare'] == true)
+                          _safeActionBadge('Providing food/water', Icons.water_drop_outlined),
+                        if (r['someoneElseWatching'] == true)
+                          _safeActionBadge('Someone watching', Icons.groups_outlined),
+                      ],
+                    ),
                   ),
               ],
             ),

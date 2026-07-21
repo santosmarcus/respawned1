@@ -25,7 +25,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
   bool _isOnline = false;
 
   GoogleMapController? _mapController;
-  //double _serviceRangeKm = 100;
+  double _serviceRangeKm = 100;
   bool _loadingLocation = false;
   LatLng? _currentLocation;
 
@@ -48,10 +48,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
           automaticallyImplyLeading: false,
 
           actions: [
-            /*IconButton(
+            IconButton(
               icon: const Icon(Icons.tune, color: AppColors.textPrimary),
               onPressed: _openFilter,
-            ),*/
+            ),
           ],
         ),
 
@@ -356,7 +356,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
   }
- /* void _openFilter(){
+  void _openFilter(){
     showModalBottomSheet(context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -364,7 +364,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
         initialRange: _serviceRangeKm,
         onApply: (km) => setState(() => _serviceRangeKm = km),
       ),);
-  }*/
+  }
 
 }
 

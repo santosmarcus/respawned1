@@ -24,7 +24,9 @@ String _animalSummary(List animals) {
 }
 
 class ActivityFeed extends StatelessWidget {
-  ActivityFeed({super.key});
+  final bool standalone;
+
+  ActivityFeed({super.key, this.standalone = false});
 
   final String? uid = FirebaseAuth.instance.currentUser?.uid;
 
@@ -95,6 +97,8 @@ class ActivityFeed extends StatelessWidget {
                       ? _animalSummary(animals)
                       : (data['animalType'] as String? ?? '');
 
+                  final photoList = (data['photoUrls'] as List?)?.cast<String>() ?? [];
+
                   items.add(ActivityItem(
                     id: doc.id,
                     type: ActivityType.rescue,
@@ -105,6 +109,7 @@ class ActivityFeed extends StatelessWidget {
                     urgency: data['urgency'] as String? ?? '',
                     createdAt: createdAt,
                     docId: doc.id,
+                    photoUrl: photoList.isNotEmpty ? photoList.first : null,
                   ));
                 }
 
@@ -161,6 +166,7 @@ class ActivityFeed extends StatelessWidget {
                         : 'Checking against open lost pet alerts',
                   };
                   final ts = data['createdAt'] as Timestamp?;
+                  final photoList = (data['photoUrls'] as List?)?.cast<String>() ?? [];
 
                   items.add(ActivityItem(
                     id: doc.id,
@@ -175,6 +181,7 @@ class ActivityFeed extends StatelessWidget {
                     createdAt: ts?.toDate(),
                     docId: doc.id,
                     alertKind: kind,
+                    photoUrl: photoList.isNotEmpty ? photoList.first : null,
                   ));
                 }
 
@@ -187,14 +194,19 @@ class ActivityFeed extends StatelessWidget {
                       'No activity yet.');
                 }
 
-                return ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, i) => ActivityCard(item: items[i]),
-                );
+                if (standalone) {
+                  return ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) => ActivityCard(item: items[i]),
+                  );
+                }
+
+                final visible =
+                items.length > 3 ? items.sublist(0, 3) : items;
+
+                return _ActivityCarousel(items: visible);
               },
             );
           },
@@ -226,6 +238,68 @@ class ActivityFeed extends StatelessWidget {
               fontSize: 14, color: AppColors.slaterspwn),
         ),
       ),
+    );
+  }
+}
+
+// Swipeable carousel, matching the style previously used for the Explore
+// Reports preview on Home: one card per swipe with the next one peeking at
+// the edge, and a dot per item below.
+class _ActivityCarousel extends StatefulWidget {
+  final List<ActivityItem> items;
+  const _ActivityCarousel({required this.items});
+
+  @override
+  State<_ActivityCarousel> createState() => _ActivityCarouselState();
+}
+
+class _ActivityCarouselState extends State<_ActivityCarousel> {
+  late final PageController _controller =
+  PageController(viewportFraction: 0.88);
+  int _page = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 190,
+          child: PageView.builder(
+            controller: _controller,
+            onPageChanged: (i) => setState(() => _page = i),
+            itemCount: widget.items.length,
+            itemBuilder: (context, i) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: ActivityCard(item: widget.items[i]),
+            ),
+          ),
+        ),
+        if (widget.items.length > 1) ...[
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(widget.items.length, (i) {
+              final active = i == _page;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: active ? 16 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: active ? AppColors.textPrimary : AppColors.slaterspwn,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              );
+            }),
+          ),
+        ],
+      ],
     );
   }
 }

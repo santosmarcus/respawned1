@@ -6,8 +6,9 @@ import 'package:respawnd1/features/donation/donation_page.dart';
 import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
 import 'package:respawnd1/features/organization/organization_list_page.dart';
 import 'package:respawnd1/features/generalhome/activity_feed.dart';
-import 'package:respawnd1/features/rescue/public_rescue_feed.dart';
+import 'package:respawnd1/features/generalhome/all_activity_page.dart';
 import 'package:respawnd1/features/rescue/all_explore_page.dart';
+import 'explore_reports_map.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
@@ -77,6 +78,15 @@ class HomeScreen extends StatelessWidget {
           children: [
             const SizedBox(height: 16),
 
+            ExploreReportsMap(
+              onSeeAll: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AllExploreReportsPage()),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
             // Quick action cards
             SizedBox(
               height: 140,
@@ -145,29 +155,12 @@ class HomeScreen extends StatelessWidget {
             // Active Cases section
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Activity',
-                style: GoogleFonts.tiltWarp(fontSize: 16,
-                  fontWeight: FontWeight.normal,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            ActivityFeed(),
-
-            const SizedBox(height: 28),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Explore Reports',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
+                    'Activity',
+                    style: GoogleFonts.tiltWarp(fontSize: 16,
                       fontWeight: FontWeight.normal,
                       color: AppColors.textPrimary,
                     ),
@@ -176,7 +169,7 @@ class HomeScreen extends StatelessWidget {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const AllExploreReportsPage(),
+                        builder: (_) => const AllActivityPage(),
                       ),
                     ),
                     child: Text(
@@ -194,7 +187,7 @@ class HomeScreen extends StatelessWidget {
 
             const SizedBox(height: 20),
 
-            const PublicRescueFeed(previewCount: 3),
+            ActivityFeed(),
 
             const SizedBox(height: 28),
             Padding(

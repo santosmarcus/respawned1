@@ -11,6 +11,7 @@ class ActivityItem{
   final DateTime? createdAt;
   final String docId;
   final String alertKind;
+  final String? photoUrl;
 
   const ActivityItem({
     required this.id,
@@ -23,6 +24,7 @@ class ActivityItem{
     required this.createdAt,
     required this.docId,
     this.alertKind = '',
+    this.photoUrl,
   });
 
 }
