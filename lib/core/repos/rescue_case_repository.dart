@@ -1292,6 +1292,49 @@ class RescueCaseRepository {
     });
   }
 
+  // ---- Intake completion -------------------------------------------------
+
+  /// Intake completion = animal received at the shelter AND every expected
+  /// animal record has been created — quarantine is optional and never
+  /// blocks this (its own status lives on independent fields and is never
+  /// read here). Reuses [RescueStatus.completed] as the "left the active
+  /// pipeline, still visible in case history" terminal state — the exact
+  /// same status a deceased-case close already reaches (see
+  /// RescueStatus.completed's queryValues including the legacy 'closed'
+  /// alias) — rather than inventing a second, parallel status field. Cheap,
+  /// client-triggered reconciliation (mirrors
+  /// [checkAndCompleteQuarantineIfDue]'s own pattern/TODO) called from
+  /// IntakeDetailPage's live rebuild and from AnimalRecordsFlowPage the
+  /// instant the last record is created — a transaction re-checks the same
+  /// guard against the freshest doc, so calling this redundantly from both
+  /// places (or twice in a race) is always harmless.
+  Future<void> checkAndCompleteIntakeIfDue(
+    RescueCase c, {
+    required int totalAnimalsExpected,
+    required int completedCount,
+  }) async {
+    if (c.intakeReceivedAt == null) return;
+    if (completedCount < totalAnimalsExpected) return;
+    if (c.status == RescueStatus.completed) return;
+
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(_caseDoc(c.id));
+      if (!snap.exists) return;
+      final data = snap.data()!;
+      if (RescueStatus.fromFirestoreValue(data['status'] as String?) == RescueStatus.completed) return;
+      if (data['intakeReceivedAt'] == null) return;
+
+      final now = Timestamp.now();
+      tx.update(_caseDoc(c.id), {
+        'status': RescueStatus.completed.firestoreValue,
+        'intakeCompletedAt': now,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Intake completed — all animal records created.', 'timestamp': now}
+        ]),
+      });
+    });
+  }
+
   // ---- Cost tracking --------------------------------------------------
 
   Future<void> addExpense({required String caseId, required Expense expense}) async {

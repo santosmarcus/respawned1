@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/medical_episode.dart';
@@ -39,8 +40,45 @@ class AnimalRecordRepository {
   /// OrganizationDirectoryRepository.search already uses), since Firestore
   /// can't combine free-text search across this many fields with the full
   /// range of sort options in one query. Fine at shelter-record scale.
+  ///
+  /// Parses each document individually inside its own try/catch —
+  /// AnimalRecord.fromFirestore already has its own internal fallback for a
+  /// field-level parse failure, but this is the outer safety net for
+  /// anything that still slips through (a genuinely corrupt document, a
+  /// future field this model doesn't know about yet, ...): one bad
+  /// document is logged and skipped, it never takes the whole list down
+  /// with a single throw the way a bare `.map()` would.
   Stream<List<AnimalRecord>> streamAllAnimalRecords() {
-    return _animals.snapshots().map((snap) => snap.docs.map(AnimalRecord.fromFirestore).toList());
+    return _animals.snapshots().map((snap) {
+      final records = <AnimalRecord>[];
+      for (final doc in snap.docs) {
+        try {
+          records.add(AnimalRecord.fromFirestore(doc));
+        } catch (e) {
+          debugPrint('[AnimalRecordRepository] Skipping unparseable animal record ${doc.id}: $e');
+        }
+      }
+      return records;
+    });
+  }
+
+  /// Every record created from one source rescue/intake case, ordered by
+  /// [AnimalRecord.sourceAnimalIndex] — powers "View Animal Record(s)" from
+  /// Intake Details (see AnimalRecordsFlowPage). Same per-doc isolation as
+  /// [streamAllAnimalRecords].
+  Stream<List<AnimalRecord>> streamRecordsForCase(String caseId) {
+    return _animals.where('linkedCaseId', isEqualTo: caseId).snapshots().map((snap) {
+      final records = <AnimalRecord>[];
+      for (final doc in snap.docs) {
+        try {
+          records.add(AnimalRecord.fromFirestore(doc));
+        } catch (e) {
+          debugPrint('[AnimalRecordRepository] Skipping unparseable animal record ${doc.id}: $e');
+        }
+      }
+      records.sort((a, b) => (a.sourceAnimalIndex ?? 0).compareTo(b.sourceAnimalIndex ?? 0));
+      return records;
+    });
   }
 
   Stream<List<MedicalEpisode>> streamMedicalEpisodes(String animalId) {

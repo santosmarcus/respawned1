@@ -34,6 +34,15 @@ class CreateAnimalRecordPage extends StatefulWidget {
   final String? existingAnimalId;
   final Map<String, dynamic>? existingData;
 
+  /// True (default) when this page owns its own Navigator route — Save
+  /// pops it on success, same as it always has. AnimalRecordsFlowPage sets
+  /// this to false: it embeds this widget directly in its own build() (not
+  /// via Navigator.push), and drives which animal is shown via its own
+  /// reactive rebuild off completedAnimalRecordIndexesProvider — a pop from
+  /// in here would close the whole flow after Animal 1 instead of letting
+  /// it advance to Animal 2/3 in place.
+  final bool popOnSuccess;
+
   const CreateAnimalRecordPage({
     super.key,
     this.prefillData,
@@ -43,6 +52,7 @@ class CreateAnimalRecordPage extends StatefulWidget {
     this.stepTotal,
     this.existingAnimalId,
     this.existingData,
+    this.popOnSuccess = true,
   });
 
   bool get isEditing => existingAnimalId != null;
@@ -468,7 +478,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context);
+        // See widget.popOnSuccess's doc comment — AnimalRecordsFlowPage
+        // stays on screen and reactively advances to the next animal
+        // itself instead of this page popping the whole flow.
+        if (widget.popOnSuccess) Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {

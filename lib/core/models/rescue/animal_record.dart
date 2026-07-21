@@ -1,4 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+
+import 'package:respawnd1/core/utils/firestore_parsing.dart';
 
 /// Structured health fields (spec section 6) — every value defaults to
 /// "unknown"/absent rather than a guessed default; nothing here is ever
@@ -32,15 +35,15 @@ class AnimalHealthDetails {
   factory AnimalHealthDetails.fromMap(Map<String, dynamic> data) {
     final checkup = data['lastVetCheckup'];
     return AnimalHealthDetails(
-      sterilized: data['spayedNeutered'] as bool?,
-      dewormed: data['dewormed'] as bool?,
-      allergies: data['allergies'] as String?,
-      chronicConditions: data['chronicConditions'] as String?,
-      currentMedications: data['currentMedications'] as String?,
+      sterilized: data['spayedNeutered'] == null ? null : parseBool(data['spayedNeutered']),
+      dewormed: data['dewormed'] == null ? null : parseBool(data['dewormed']),
+      allergies: parseOptionalString(data['allergies']),
+      chronicConditions: parseOptionalString(data['chronicConditions']),
+      currentMedications: parseOptionalString(data['currentMedications']),
       lastVetCheckup: checkup is Timestamp ? checkup.toDate() : null,
-      weightKg: (data['weightKg'] as num?)?.toDouble(),
-      bodyCondition: data['bodyCondition'] as String?,
-      microchipStatus: data['microchipStatus'] as String?,
+      weightKg: parseOptionalDouble(data['weightKg']),
+      bodyCondition: parseOptionalString(data['bodyCondition']),
+      microchipStatus: parseOptionalString(data['microchipStatus']),
     );
   }
 
@@ -61,6 +64,13 @@ class AnimalHealthDetails {
 /// create_animal_record_page.dart's write map) except [currentCaseId]
 /// (points at the active/most-recent medical-episode case) and [archived],
 /// both additive.
+///
+/// Every field is parsed through the centralized helpers in
+/// core/utils/firestore_parsing.dart rather than a bare `as String?`/
+/// `as bool?` cast — real documents predating the current write path have
+/// been observed storing e.g. `age` as an int64 instead of a string, and a
+/// bare cast throws on that instead of coercing it. See [fromFirestore] for
+/// the last-resort per-document safety net on top of that.
 class AnimalRecord {
   final String id;
   final String name;
@@ -108,6 +118,11 @@ class AnimalRecord {
   final String? previousAdoptionId;
   final AnimalHealthDetails health;
   final Map<String, dynamic> raw;
+  /// Set only by [fromFirestore]'s fallback path when this document's
+  /// shape couldn't be fully parsed even through the safe helpers below —
+  /// lets the UI show a "could not display this record" placeholder for
+  /// just this row instead of guessing at unset fields silently.
+  final bool isMalformed;
 
   const AnimalRecord({
     required this.id,
@@ -149,6 +164,7 @@ class AnimalRecord {
     this.previousAdoptionId,
     required this.health,
     required this.raw,
+    this.isMalformed = false,
   });
 
   bool get hasSourceCase => linkedCaseId.isNotEmpty;
@@ -158,55 +174,112 @@ class AnimalRecord {
   bool get isDeceased => adoptionStatus == 'deceased' || status == 'deceased';
   bool get isReturned => currentStatus == 'returned';
 
+  /// Never throws — a document whose shape defeats even the safe per-field
+  /// helpers below falls back to a minimal, clearly-flagged record (see
+  /// [isMalformed]) instead of taking the whole list down with it. Callers
+  /// that read every document in a snapshot (e.g.
+  /// AnimalRecordRepository.streamAllAnimalRecords) should still wrap this
+  /// in their own try/catch as a second layer, but this factory itself is
+  /// the primary safety net.
   factory AnimalRecord.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
-    return AnimalRecord.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
+    final data = doc.data() ?? const <String, dynamic>{};
+    try {
+      return AnimalRecord.fromMap(doc.id, data);
+    } catch (e, st) {
+      debugPrint('[AnimalRecord] doc ${doc.id} failed to parse ($e) — falling back to a minimal record.\n$st');
+      return AnimalRecord(
+        id: doc.id,
+        name: parseRequiredString(data['name']),
+        age: parseRequiredString(data['age']),
+        species: parseRequiredString(data['species']),
+        breed: '',
+        sex: '',
+        size: '',
+        coatLength: '',
+        description: '',
+        vaccinated: false,
+        spayedNeutered: false,
+        dewormed: false,
+        keyCharacteristics: const [],
+        rescueBackground: const [],
+        tags: const [],
+        adoptionStatus: 'not_ready',
+        status: 'intake',
+        linkedCaseId: parseRequiredString(data['linkedCaseId']),
+        sourceAnimalIndex: null,
+        rescuedBy: '',
+        photoUrls: const [],
+        createdAt: null,
+        updatedAt: null,
+        currentCaseId: null,
+        archived: false,
+        deceasedAt: null,
+        deceasedCause: null,
+        health: const AnimalHealthDetails(),
+        raw: data,
+        isMalformed: true,
+      );
+    }
   }
 
   /// Same parsing as [fromFirestore], for callers that only have the raw
   /// map and id (e.g. a page's fallback before its live stream has loaded,
-  /// mirroring RescueCase.fromMap's own fallback role).
+  /// mirroring RescueCase.fromMap's own fallback role). Every field goes
+  /// through the safe helpers in core/utils/firestore_parsing.dart, so a
+  /// legacy document storing e.g. `age` as a number or `tags` as a single
+  /// string (instead of a list) coerces cleanly instead of throwing.
   factory AnimalRecord.fromMap(String id, Map<String, dynamic> data) {
-    final createdAt = data['createdAt'];
-    final updatedAt = data['updatedAt'];
-    final deceasedAt = data['deceasedAt'];
+    final createdAtRaw = data['createdAt'];
+    final updatedAtRaw = data['updatedAt'];
+    final deceasedAtRaw = data['deceasedAt'];
+    final reservedAtRaw = data['reservedAt'];
+    final adoptedAtRaw = data['adoptedAt'];
+    final returnedAtRaw = data['returnedAt'];
+    // 'intakeDate' is the field name a now-removed older intake form used —
+    // 'createdAt' is the standardized field every current writer sets;
+    // fall back only when createdAt itself is missing.
+    final intakeDateRaw = data['intakeDate'];
+
     return AnimalRecord(
       id: id,
-      name: data['name'] as String? ?? '',
-      age: data['age'] as String? ?? '',
-      species: data['species'] as String? ?? '',
-      breed: data['breed'] as String? ?? '',
-      sex: data['sex'] as String? ?? '',
-      size: data['size'] as String? ?? '',
-      coatLength: data['coatLength'] as String? ?? '',
-      description: data['description'] as String? ?? '',
-      vaccinated: data['vaccinated'] as bool? ?? false,
-      spayedNeutered: data['spayedNeutered'] as bool? ?? false,
-      dewormed: data['dewormed'] as bool? ?? false,
-      keyCharacteristics: List<String>.from(data['keyCharacteristics'] ?? const []),
-      rescueBackground: List<String>.from(data['rescueBackground'] ?? const []),
-      tags: List<String>.from(data['tags'] ?? const []),
-      adoptionStatus: data['adoptionStatus'] as String? ?? 'not_ready',
-      status: data['status'] as String? ?? 'intake',
-      linkedCaseId: data['linkedCaseId'] as String? ?? '',
-      sourceAnimalIndex: (data['sourceAnimalIndex'] as num?)?.toInt(),
-      rescuedBy: data['rescuedBy'] as String? ?? '',
-      photoUrls: List<String>.from(data['photoUrls'] ?? const []),
-      createdAt: createdAt is Timestamp ? createdAt.toDate() : null,
-      updatedAt: updatedAt is Timestamp ? updatedAt.toDate() : null,
-      currentCaseId: data['currentCaseId'] as String?,
-      archived: data['archived'] as bool? ?? false,
-      deceasedAt: deceasedAt is Timestamp ? deceasedAt.toDate() : null,
-      deceasedCause: data['deceasedCause'] as String?,
-      reservedForUserId: data['reservedForUserId'] as String?,
-      reservedApplicationId: data['reservedApplicationId'] as String?,
-      reservedAt: data['reservedAt'] is Timestamp ? (data['reservedAt'] as Timestamp).toDate() : null,
-      adoptedByUserId: data['adoptedByUserId'] as String?,
-      adoptedApplicationId: data['adoptedApplicationId'] as String?,
-      adoptedAt: data['adoptedAt'] is Timestamp ? (data['adoptedAt'] as Timestamp).toDate() : null,
-      currentStatus: data['currentStatus'] as String?,
-      latestReturnRequestId: data['latestReturnRequestId'] as String?,
-      returnedAt: data['returnedAt'] is Timestamp ? (data['returnedAt'] as Timestamp).toDate() : null,
-      previousAdoptionId: data['previousAdoptionId'] as String?,
+      name: parseRequiredString(data['name']),
+      age: parseRequiredString(data['age']),
+      species: parseRequiredString(data['species']),
+      breed: parseRequiredString(data['breed']),
+      sex: parseRequiredString(data['sex']),
+      size: parseRequiredString(data['size']),
+      coatLength: parseRequiredString(data['coatLength']),
+      description: parseRequiredString(data['description']),
+      vaccinated: parseBool(data['vaccinated']),
+      spayedNeutered: parseBool(data['spayedNeutered']),
+      dewormed: parseBool(data['dewormed']),
+      keyCharacteristics: parseStringList(data['keyCharacteristics']),
+      rescueBackground: parseStringList(data['rescueBackground']),
+      tags: parseStringList(data['tags']),
+      adoptionStatus: parseRequiredString(data['adoptionStatus'], fallback: 'not_ready'),
+      status: parseRequiredString(data['status'], fallback: 'intake'),
+      linkedCaseId: parseRequiredString(data['linkedCaseId']),
+      sourceAnimalIndex: parseOptionalInt(data['sourceAnimalIndex']),
+      rescuedBy: parseRequiredString(data['rescuedBy']),
+      photoUrls: parseStringList(data['photoUrls']),
+      createdAt: createdAtRaw is Timestamp
+          ? createdAtRaw.toDate()
+          : (intakeDateRaw is Timestamp ? intakeDateRaw.toDate() : null),
+      updatedAt: updatedAtRaw is Timestamp ? updatedAtRaw.toDate() : null,
+      currentCaseId: parseOptionalString(data['currentCaseId']),
+      archived: parseBool(data['archived']),
+      deceasedAt: deceasedAtRaw is Timestamp ? deceasedAtRaw.toDate() : null,
+      deceasedCause: parseOptionalString(data['deceasedCause']),
+      reservedForUserId: parseOptionalString(data['reservedForUserId']),
+      reservedApplicationId: parseOptionalString(data['reservedApplicationId']),
+      reservedAt: reservedAtRaw is Timestamp ? reservedAtRaw.toDate() : null,
+      adoptedByUserId: parseOptionalString(data['adoptedByUserId']),
+      adoptedApplicationId: parseOptionalString(data['adoptedApplicationId']),
+      adoptedAt: adoptedAtRaw is Timestamp ? adoptedAtRaw.toDate() : null,
+      currentStatus: parseOptionalString(data['currentStatus']),
+      latestReturnRequestId: parseOptionalString(data['latestReturnRequestId']),
+      returnedAt: returnedAtRaw is Timestamp ? returnedAtRaw.toDate() : null,
+      previousAdoptionId: parseOptionalString(data['previousAdoptionId']),
       health: AnimalHealthDetails.fromMap(data),
       raw: data,
     );

@@ -110,6 +110,22 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
   }
 
+  /// Reactively completes Intake the moment "animal received" and "every
+  /// expected animal record created" are both true — deliberately NOT
+  /// guarded to fire only once per page instance (unlike quarantine's
+  /// check above): completedCount changes live while this page stays
+  /// mounted underneath a pushed AnimalRecordsFlowPage route, and
+  /// RescueCaseRepository.checkAndCompleteIntakeIfDue is cheap/idempotent
+  /// (its own guards make every call a no-op once already complete, or
+  /// before intake is received / before every record exists).
+  Future<void> _checkIntakeAutoComplete(RescueCase c, {required int completedCount, required int totalAnimals}) async {
+    await ref.read(rescueCaseRepositoryProvider).checkAndCompleteIntakeIfDue(
+          c,
+          totalAnimalsExpected: totalAnimals,
+          completedCount: completedCount,
+        );
+  }
+
   Future<void> _confirmIntake({
     required RescueCase c,
     required String? transporterUid,
@@ -316,6 +332,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
     final completedIndexes = ref.watch(completedAnimalRecordIndexesProvider(widget.caseId)).asData?.value ?? <int>{};
     final totalAnimals = c.animalCount;
+
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _checkIntakeAutoComplete(c, completedCount: completedIndexes.length, totalAnimals: totalAnimals),
+    );
 
     final dischargeDateStr = c.dischargedAt != null
         ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'

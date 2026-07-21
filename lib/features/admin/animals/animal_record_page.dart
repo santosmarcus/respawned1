@@ -482,6 +482,34 @@ class _AnimalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // AnimalRecord.fromFirestore already falls back to a minimal record
+    // (rather than throwing) when a document's shape defeats even the safe
+    // per-field parsing helpers — isMalformed flags that here so this one
+    // row renders as an explicit placeholder instead of silently showing
+    // blank/wrong fields.
+    if (animal.isMalformed) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.slaterspwn),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline, color: AppColors.slaterspwn),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Could not display this record (${animal.id}) — its data may be from an older format.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     // Cheap, doc-level-only attention signals — no extra subcollection
     // watches on the list page (see animal_record_repository.dart's
     // streamAllAnimalRecords doc comment on why this stays client-side and

@@ -15,6 +15,10 @@ final allAnimalRecordsProvider = StreamProvider<List<AnimalRecord>>((ref) {
   return ref.watch(animalRecordRepositoryProvider).streamAllAnimalRecords();
 });
 
+final recordsForCaseProvider = StreamProvider.family<List<AnimalRecord>, String>((ref, caseId) {
+  return ref.watch(animalRecordRepositoryProvider).streamRecordsForCase(caseId);
+});
+
 final medicalEpisodesProvider = StreamProvider.family<List<MedicalEpisode>, String>((ref, animalId) {
   return ref.watch(animalRecordRepositoryProvider).streamMedicalEpisodes(animalId);
 });
