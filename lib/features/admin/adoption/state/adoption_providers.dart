@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 
 final adoptionApplicationRepositoryProvider =
@@ -28,4 +29,8 @@ final adoptionsForApplicantProvider = StreamProvider.family<List<AdoptionApplica
 
 final adoptionNotesProvider = StreamProvider.family<List<Map<String, dynamic>>, String>((ref, applicationId) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamNotes(applicationId);
+});
+
+final followUpsForAdoptionProvider = StreamProvider.family<List<FollowUpRecord>, String>((ref, applicationId) {
+  return ref.watch(adoptionApplicationRepositoryProvider).streamFollowUps(applicationId);
 });

@@ -98,6 +98,14 @@ class AnimalRecord {
   final String? adoptedByUserId;
   final String? adoptedApplicationId;
   final DateTime? adoptedAt;
+  // Return-from-adoption — written by AnimalRecordRepository.
+  // returnFromAdoption. adoptedByUserId/adoptedApplicationId/adoptedAt above
+  // are never cleared by a return: they stay as the historical record of
+  // the completed adoption, while these fields describe current state.
+  final String? currentStatus;
+  final String? latestReturnRequestId;
+  final DateTime? returnedAt;
+  final String? previousAdoptionId;
   final AnimalHealthDetails health;
   final Map<String, dynamic> raw;
 
@@ -135,6 +143,10 @@ class AnimalRecord {
     this.adoptedByUserId,
     this.adoptedApplicationId,
     this.adoptedAt,
+    this.currentStatus,
+    this.latestReturnRequestId,
+    this.returnedAt,
+    this.previousAdoptionId,
     required this.health,
     required this.raw,
   });
@@ -144,6 +156,7 @@ class AnimalRecord {
   bool get isReserved => adoptionStatus == 'reserved';
   bool get isAdopted => adoptionStatus == 'adopted';
   bool get isDeceased => adoptionStatus == 'deceased' || status == 'deceased';
+  bool get isReturned => currentStatus == 'returned';
 
   factory AnimalRecord.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     return AnimalRecord.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
@@ -190,6 +203,10 @@ class AnimalRecord {
       adoptedByUserId: data['adoptedByUserId'] as String?,
       adoptedApplicationId: data['adoptedApplicationId'] as String?,
       adoptedAt: data['adoptedAt'] is Timestamp ? (data['adoptedAt'] as Timestamp).toDate() : null,
+      currentStatus: data['currentStatus'] as String?,
+      latestReturnRequestId: data['latestReturnRequestId'] as String?,
+      returnedAt: data['returnedAt'] is Timestamp ? (data['returnedAt'] as Timestamp).toDate() : null,
+      previousAdoptionId: data['previousAdoptionId'] as String?,
       health: AnimalHealthDetails.fromMap(data),
       raw: data,
     );

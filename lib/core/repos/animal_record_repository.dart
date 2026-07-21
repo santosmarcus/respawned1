@@ -225,6 +225,34 @@ class AnimalRecordRepository {
     await _addManagementLog(animalId: animalId, action: 'Marked adopted');
   }
 
+  /// The "un-adopt" transition — called once an approved return has actually
+  /// been retrieved (see AdoptionApplicationRepository.confirmAnimalRetrieved
+  /// / the Return Details "Proceed to Intake" action). Never clears
+  /// adoptedByUserId/adoptedApplicationId/adoptedAt: those stay as the
+  /// historical record of the completed adoption (see AnimalRecord's own
+  /// doc comment). adoptionStatus goes to 'not_ready' rather than back to
+  /// 'adoptable' so the animal isn't publicly re-listed without an
+  /// organization health/behavior review first (spec §22).
+  Future<void> returnFromAdoption({
+    required String animalId,
+    required String returnRequestId,
+    required String previousAdoptionId,
+  }) async {
+    await _animalDoc(animalId).update({
+      'adoptionStatus': 'not_ready',
+      'status': 'intake',
+      'currentStatus': 'returned',
+      'latestReturnRequestId': returnRequestId,
+      'previousAdoptionId': previousAdoptionId,
+      'returnedAt': FieldValue.serverTimestamp(),
+      'reservedForUserId': FieldValue.delete(),
+      'reservedApplicationId': FieldValue.delete(),
+      'reservedAt': FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _addManagementLog(animalId: animalId, action: 'Returned by adopter — entered Intake for review');
+  }
+
   Future<void> transferAnimal({
     required String animalId,
     required String targetType, // 'organization' | 'volunteer'

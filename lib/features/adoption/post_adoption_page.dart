@@ -9,62 +9,11 @@ import '../../../app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
 import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
+import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
+import 'package:respawnd1/core/models/adoption/return_request.dart';
+import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 
-
-// Check-in interval schedule
-// 1st month  - every week      (4 check-ins)
-// 2nd month  - every 2 weeks   (2 check-ins)
-// Months 3-6 - every month     (4 check-ins)
-
-class Checkpoint {
-  final String id;
-  final String label;
-  final DateTime dueDate;
-  const Checkpoint(this.id, this.label, this.dueDate);
-
-  // Each check-in stays open for a 3-day window starting on its due date,
-  // instead of a single-day deadline.
-  static const int windowDays = 3;
-
-  DateTime get windowEnd => dueDate.add(const Duration(days: windowDays));
-
-  bool isOpen(DateTime now) => !dueDate.isAfter(now);
-
-  bool isWithinWindow(DateTime now) =>
-      isOpen(now) && !now.isAfter(windowEnd);
-
-  bool isOverdue(DateTime now) => isOpen(now) && now.isAfter(windowEnd);
-}
-
-DateTime _addMonths(DateTime d, int months) {
-  final totalMonths = d.month - 1 + months;
-  final year = d.year + totalMonths ~/ 12;
-  final month = totalMonths % 12 + 1;
-  final lastDayOfMonth = DateTime(year, month + 1, 0).day;
-  final day = d.day > lastDayOfMonth ? lastDayOfMonth : d.day;
-  return DateTime(year, month, day);
-}
-
-List<Checkpoint> buildCheckinSchedule(DateTime adoptionDate) {
-  final month1 = _addMonths(adoptionDate, 1);
-  return [
-    Checkpoint('wk1', 'Week 1 Check-in',
-        adoptionDate.add(const Duration(days: 7))),
-    Checkpoint('wk2', 'Week 2 Check-in',
-        adoptionDate.add(const Duration(days: 14))),
-    Checkpoint('wk3', 'Week 3 Check-in',
-        adoptionDate.add(const Duration(days: 21))),
-    Checkpoint('m1', 'Month 1 Check-in', month1),
-    Checkpoint(
-        'm2a', 'Month 2 Check-in', month1.add(const Duration(days: 14))),
-    Checkpoint(
-        'm2b', 'Month 2 Check-in', month1.add(const Duration(days: 28))),
-    Checkpoint('m3', 'Month 3 Check-in', _addMonths(adoptionDate, 3)),
-    Checkpoint('m4', 'Month 4 Check-in', _addMonths(adoptionDate, 4)),
-    Checkpoint('m5', 'Month 5 Check-in', _addMonths(adoptionDate, 5)),
-    Checkpoint('m6', 'Month 6 Check-in', _addMonths(adoptionDate, 6)),
-  ];
-}
 
 String _formatDate(DateTime d) {
   const months = [
@@ -91,266 +40,12 @@ DateTime? extractAdoptionCompletedDate(Map<String, dynamic> data) {
   return null;
 }
 
-class _PickupSchedule {
-  final DateTime date;
-  final String time;
-  const _PickupSchedule(this.date, this.time);
-}
-
-const List<String> _pickupTimeSlots = [
-  '9:00 AM',
-  '10:00 AM',
-  '11:00 AM',
-  '1:00 PM',
-  '2:00 PM',
-  '3:00 PM',
-  '4:00 PM',
-];
-
-Future<_PickupSchedule?> _pickPickupDateTime(
-    BuildContext context, {
-      DateTime? initialDate,
-      String? initialTime,
-    }) {
-  return showModalBottomSheet<_PickupSchedule>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: AppColors.background,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
-    builder: (_) => _PickupSchedulerSheet(
-      initialDate: initialDate,
-      initialTime: initialTime,
-    ),
-  );
-}
-
-class _PickupSchedulerSheet extends StatefulWidget {
-  final DateTime? initialDate;
-  final String? initialTime;
-
-  const _PickupSchedulerSheet({this.initialDate, this.initialTime});
-
-  @override
-  State<_PickupSchedulerSheet> createState() => _PickupSchedulerSheetState();
-}
-
-class _PickupSchedulerSheetState extends State<_PickupSchedulerSheet> {
-  DateTime? _date;
-  String? _time;
-
-  @override
-  void initState() {
-    super.initState();
-    _date = widget.initialDate;
-    _time = widget.initialTime;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.slaterspwn,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
-            Text(
-              'Select Pick-up Date & Time',
-              style: GoogleFonts.tiltWarp(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // calendar
-            Container(
-              decoration: BoxDecoration(
-                color: AppColors.yellowrspwn.withOpacity(0.25),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.greenrspwn, width: 1.2),
-              ),
-              child: CalendarDatePicker(
-                initialDate:
-                _date ?? DateTime.now().add(const Duration(days: 2)),
-                firstDate: DateTime.now(),
-                lastDate: DateTime.now().add(const Duration(days: 90)),
-                onDateChanged: (picked) {
-                  setState(() {
-                    _date = picked;
-                    _time = null;
-                  });
-                },
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            Text(
-              'Available times',
-              style: GoogleFonts.tiltWarp(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            if (_date == null)
-              Text(
-                'Select a date above to see available times.',
-                style: GoogleFonts.zain(
-                    fontSize: 13, color: AppColors.textPrimary),
-              )
-            else
-              SizedBox(
-                height: 40,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _pickupTimeSlots.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (context, i) {
-                    final slot = _pickupTimeSlots[i];
-                    final selected = _time == slot;
-                    return GestureDetector(
-                      onTap: () => setState(() => _time = slot),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? AppColors.greenrspwn
-                              : AppColors.background,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: selected
-                                ? AppColors.greenrspwn
-                                : AppColors.slaterspwn,
-                            width: 1.2,
-                          ),
-                        ),
-                        child: Text(
-                          slot,
-                          style: GoogleFonts.zain(
-                            fontSize: 13,
-                            fontWeight: selected
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-
-            // summary
-            if (_date != null && _time != null) ...[
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.yellowrspwn.withOpacity(0.35),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.event_available,
-                        color: AppColors.greenrspwn, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Pick Up Visit  ·  ${_formatDate(_date!)}  ·  $_time',
-                        style: GoogleFonts.zain(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 20),
-            _PrimaryBtn(
-              label: 'Confirm',
-              onTap: (_date == null || _time == null)
-                  ? null
-                  : () => Navigator.pop(
-                  context, _PickupSchedule(_date!, _time!)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 
 // Post-Adoption Monitoring page
 class PostAdoptionMonitoringPage extends StatelessWidget {
   final String adoptionId;
 
   const PostAdoptionMonitoringPage({super.key, required this.adoptionId});
-
-  // ---------- for testing only!!
-  Future<void> _approveReturn(BuildContext context, String adoptionId) async {
-    final scheduled = await _pickPickupDateTime(context);
-    if (scheduled == null || !context.mounted) return;
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('adoptions')
-          .doc(adoptionId)
-          .update({
-        'status': 'return_approved',
-        'returnPickup': {
-          'date': Timestamp.fromDate(scheduled.date),
-          'time': scheduled.time,
-          'scheduledAt': Timestamp.now(),
-          'confirmedByAdopter': false,
-        },
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Return request approved.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to approve return: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -385,30 +80,30 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
             final orgName = personal['organizationName'] as String?;
             final adopterName = personal['adopterName'] as String? ?? '';
             final adoptedDate = extractAdoptionCompletedDate(data);
-            final isReturnRequested = data['status'] == 'return_requested';
-            final isReturnApproved = data['status'] == 'return_approved';
+            final returnRequest = ReturnRequest.fromMap(data['returnRequest'] as Map<String, dynamic>?);
+            final isReturnRequested = returnRequest != null && returnRequest.status == ReturnRequestStatus.pendingReview;
+            final isReturnApproved = returnRequest != null &&
+                (returnRequest.status.isApprovedAwaitingSchedule ||
+                    returnRequest.status == ReturnRequestStatus.retrievalScheduled ||
+                    returnRequest.status == ReturnRequestStatus.retrieved);
+            final noFollowUpsPlanned = data['noFollowUpsPlanned'] as bool? ?? false;
 
             return StreamBuilder<QuerySnapshot>(
-              stream: adoptionRef.collection('checkins').snapshots(),
-              builder: (context, checkinSnap) {
-                final submittedIds = <String>{
-                  for (final d in checkinSnap.data?.docs ?? []) d.id
-                };
-
-                final schedule = adoptedDate != null
-                    ? buildCheckinSchedule(adoptedDate)
-                    : <Checkpoint>[];
+              stream: adoptionRef.collection('followUps').orderBy('sequenceNumber').snapshots(),
+              builder: (context, followUpSnap) {
+                final schedule = (followUpSnap.data?.docs ?? [])
+                    .map((d) => FollowUpRecord.fromFirestore(d as DocumentSnapshot<Map<String, dynamic>>))
+                    .toList();
 
                 final now = DateTime.now();
-                Checkpoint? currentDue;
-                for (final c in schedule) {
-                  if (!submittedIds.contains(c.id) && c.isOpen(now)) {
-                    currentDue = c;
+                FollowUpRecord? currentDue;
+                for (final f in schedule) {
+                  if (!f.isTerminal && f.submittedAt == null && !f.scheduledDate.isAfter(now)) {
+                    currentDue = f;
                     break;
                   }
                 }
-                final allDone = schedule.isNotEmpty &&
-                    schedule.every((c) => submittedIds.contains(c.id));
+                final allDone = schedule.isNotEmpty && schedule.every((f) => f.isTerminal);
 
                 return SingleChildScrollView(
                   child: Column(
@@ -523,18 +218,6 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                               const SizedBox(height: 10),
                             ],
 
-                            // ---------- for testing only!! (simulates the
-                            // organization approving a submitted return) ----
-                            if (isReturnRequested) ...[
-                              _SecondaryBtn(
-                                label: 'Approve Return (test)',
-                                onTap: () =>
-                                    _approveReturn(context, adoptionId),
-                              ),
-                              const SizedBox(height: 6),
-                            ],
-                            // ---------- for testing only ^^^^
-
                             const SizedBox(height: 8),
 
                             Text(
@@ -579,7 +262,14 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                             ),
                             const SizedBox(height: 10),
 
-                            if (schedule.isEmpty)
+                            if (noFollowUpsPlanned)
+                              Text(
+                                'No post-adoption follow-ups were scheduled for this adoption.',
+                                style: GoogleFonts.zain(
+                                    fontSize: 13,
+                                    color: AppColors.textSecondary),
+                              )
+                            else if (schedule.isEmpty)
                               Text(
                                 'Your monitoring schedule will appear here once your adoption is finalized.',
                                 style: GoogleFonts.zain(
@@ -587,10 +277,10 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                     color: AppColors.textSecondary),
                               ),
 
-                            ...schedule.map((c) {
-                              final done = submittedIds.contains(c.id);
-                              final isCurrent = currentDue?.id == c.id;
-                              final overdue = !done && c.isOverdue(now);
+                            ...schedule.map((f) {
+                              final done = f.isTerminal;
+                              final isCurrent = currentDue?.id == f.id;
+                              final overdue = f.displayStatus(now) == 'Overdue';
                               return Padding(
                                 padding: const EdgeInsets.symmetric(
                                     vertical: 4),
@@ -618,7 +308,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                         CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            '${c.label} - ${_formatDate(c.dueDate)}',
+                                            'Follow-up ${f.sequenceNumber} - ${_formatDate(f.scheduledDate)}',
                                             style: GoogleFonts.zain(
                                               fontSize: 13,
                                               color: AppColors.textPrimary,
@@ -629,9 +319,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                           ),
                                           if (isCurrent && !done)
                                             Text(
-                                              overdue
-                                                  ? 'Overdue since ${_formatDate(c.windowEnd)}'
-                                                  : 'Available until ${_formatDate(c.windowEnd)}',
+                                              f.displayStatus(now),
                                               style: GoogleFonts.zain(
                                                 fontSize: 11,
                                                 color: overdue
@@ -665,7 +353,9 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                         PostAdoptionCheckinForm(
                                           adoptionId: adoptionId,
                                           animalName: animalName,
-                                          checkpoint: currentDue!,
+                                          followUpId: currentDue!.id,
+                                          sequenceNumber: currentDue.sequenceNumber,
+                                          dueDate: currentDue.scheduledDate,
                                         ),
                                   ),
                                 );
@@ -674,13 +364,13 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                             if (currentDue != null) ...[
                               const SizedBox(height: 6),
                               Text(
-                                currentDue.isOverdue(now)
+                                currentDue.displayStatus(now) == 'Overdue'
                                     ? 'This check-in is overdue — please submit as soon as possible.'
-                                    : 'Available until ${_formatDate(currentDue.windowEnd)} (${Checkpoint.windowDays}-day window).',
+                                    : 'Due ${_formatDate(currentDue.scheduledDate)}.',
                                 textAlign: TextAlign.center,
                                 style: GoogleFonts.zain(
                                   fontSize: 11,
-                                  color: currentDue.isOverdue(now)
+                                  color: currentDue.displayStatus(now) == 'Overdue'
                                       ? Colors.redAccent
                                       : AppColors.textSecondary,
                                 ),
@@ -1215,13 +905,17 @@ class _BackHeader extends StatelessWidget {
 class PostAdoptionCheckinForm extends StatefulWidget {
   final String adoptionId;
   final String animalName;
-  final Checkpoint checkpoint;
+  final String followUpId;
+  final int sequenceNumber;
+  final DateTime dueDate;
 
   const PostAdoptionCheckinForm({
     super.key,
     required this.adoptionId,
     required this.animalName,
-    required this.checkpoint,
+    required this.followUpId,
+    required this.sequenceNumber,
+    required this.dueDate,
   });
 
   @override
@@ -1314,7 +1008,7 @@ class _PostAdoptionCheckinFormState extends State<PostAdoptionCheckinForm> {
       final urls = <String>[];
       for (var i = 0; i < _images.length; i++) {
         final ref = FirebaseStorage.instance.ref(
-            'adoptions/${widget.adoptionId}/checkins/${widget.checkpoint.id}/img_$i.jpg');
+            'adoptions/${widget.adoptionId}/checkins/${widget.followUpId}/img_$i.jpg');
         await ref.putFile(_images[i]);
         urls.add(await ref.getDownloadURL());
       }
@@ -1322,13 +1016,15 @@ class _PostAdoptionCheckinFormState extends State<PostAdoptionCheckinForm> {
       final adoptionRef = FirebaseFirestore.instance
           .collection('adoptions')
           .doc(widget.adoptionId);
+      final label = 'Follow-up ${widget.sequenceNumber}';
+      final submittedAt = Timestamp.now();
 
       await adoptionRef
           .collection('checkins')
-          .doc(widget.checkpoint.id)
+          .doc(widget.followUpId)
           .set({
-        'label': widget.checkpoint.label,
-        'dueDate': Timestamp.fromDate(widget.checkpoint.dueDate),
+        'label': label,
+        'dueDate': Timestamp.fromDate(widget.dueDate),
         'howIsPetDoing': _howIsPet,
         'healthConcerns': _healthConcerns.toList(),
         'healthConcernsOther': _otherHealthCtrl.text.trim(),
@@ -1336,13 +1032,22 @@ class _PostAdoptionCheckinFormState extends State<PostAdoptionCheckinForm> {
         'images': urls,
         'notes': _notesCtrl.text.trim(),
         'submittedBy': FirebaseAuth.instance.currentUser?.uid,
-        'submittedAt': FieldValue.serverTimestamp(),
+        'submittedAt': submittedAt,
+      });
+
+      // Admin-facing scheduling/status record — see
+      // core/models/adoption/follow_up_record.dart. Doc id matches the
+      // checkins doc above 1:1; never overwrites the earlier `scheduled`/
+      // `reminderSent` status history, just advances it to `submitted`.
+      await adoptionRef.collection('followUps').doc(widget.followUpId).update({
+        'status': 'submitted',
+        'submittedAt': submittedAt,
       });
 
       await adoptionRef.update({
         'statusHistory': FieldValue.arrayUnion([
           {
-            'status': '${widget.checkpoint.label} submitted.',
+            'status': '$label submitted.',
             'timestamp': Timestamp.now(),
           }
         ]),
@@ -1391,7 +1096,7 @@ class _PostAdoptionCheckinFormState extends State<PostAdoptionCheckinForm> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${widget.checkpoint.label} - ${_formatDate(widget.checkpoint.dueDate)}',
+                      'Follow-up ${widget.sequenceNumber} - ${_formatDate(widget.dueDate)}',
                       style: GoogleFonts.tiltWarp(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -1629,29 +1334,19 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
         urls.add(await ref.getDownloadURL());
       }
 
-      final adoptionRef = FirebaseFirestore.instance
-          .collection('adoptions')
-          .doc(widget.adoptionId);
-
-      await adoptionRef.update({
-        'returnRequest': {
-          'reason': _reason,
-          'reasonOther':
-          _reason == 'Other' ? _otherReasonCtrl.text.trim() : null,
-          'urgency': _urgency,
-          'explanation': _explanationCtrl.text.trim(),
-          'images': urls,
-          'requestedBy': FirebaseAuth.instance.currentUser?.uid,
-          'requestedAt': Timestamp.now(),
-        },
-        'status': 'return_requested',
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Return requested.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
+      // Routed through AdoptionApplicationRepository.requestReturn so this
+      // lands in returnRequest.status (spec's own state machine) instead of
+      // overloading the top-level AdoptionStatus field — the application
+      // stays "adopted" throughout the whole return process.
+      await AdoptionApplicationRepository().requestReturn(
+        applicationId: widget.adoptionId,
+        reason: _reason!,
+        reasonOther: _reason == 'Other' ? _otherReasonCtrl.text.trim() : null,
+        urgency: _urgency!,
+        explanation: _explanationCtrl.text.trim(),
+        images: urls,
+        actorUid: FirebaseAuth.instance.currentUser?.uid ?? '',
+      );
 
       if (mounted) {
         Navigator.pop(context);
@@ -1845,46 +1540,15 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
     );
   }
 
-  Future<void> _requestOtherDate(DateTime? currentDate, String? currentTime) async {
-    final scheduled = await _pickPickupDateTime(
-      context,
-      initialDate: currentDate,
-      initialTime: currentTime,
-    );
-    if (scheduled == null || !mounted) return;
-
-    setState(() => _isSaving = true);
-    try {
-      await _adoptionRef.update({
-        'returnPickup': {
-          'date': Timestamp.fromDate(scheduled.date),
-          'time': scheduled.time,
-          'scheduledAt': Timestamp.now(),
-          'confirmedByAdopter': false,
-        },
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status':
-            'Adopter requested a new pick-up date: ${_formatDate(scheduled.date)} ${scheduled.time}.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
-      if (mounted) {
-        _showSnack('Your requested date has been sent to the organization.');
-      }
-    } catch (e) {
-      _showSnack('Failed to request a new date: $e', error: true);
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
+  // Rescheduling the retrieval is now an admin-only action (Return Details'
+  // own "Reschedule" button, spec §18) — the adopter's role here is to view
+  // and acknowledge the admin-set schedule, not propose a different one.
   Future<void> _accept() async {
     setState(() => _isSaving = true);
     try {
       await _adoptionRef.update({
-        'returnPickup.confirmedByAdopter': true,
+        'returnRequest.confirmedByAdopter': true,
+        'returnRequest.confirmedByAdopterAt': FieldValue.serverTimestamp(),
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Adopter confirmed the pick-up schedule.',
@@ -1919,12 +1583,10 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
               return const Center(child: Text('Return record not found.'));
             }
 
-            final pickup = (data['returnPickup'] as Map?) ?? {};
-            final pickupTs = pickup['date'];
-            final pickupDate =
-            pickupTs is Timestamp ? pickupTs.toDate() : null;
-            final pickupTime = pickup['time'] as String? ?? '';
-            final isConfirmed = pickup['confirmedByAdopter'] == true;
+            final returnRequest = ReturnRequest.fromMap(data['returnRequest'] as Map<String, dynamic>?);
+            final pickupDate = returnRequest?.retrievalDateTime;
+            final pickupAddress = returnRequest?.retrievalAddress;
+            final isConfirmed = returnRequest?.confirmedByAdopter == true;
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2009,7 +1671,8 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'Pick Up Visit  ·  ${_formatDate(pickupDate)}  ·  $pickupTime',
+                                  'Pick Up Visit  ·  ${_formatDate(pickupDate)} ${pickupDate.hour.toString().padLeft(2, '0')}:${pickupDate.minute.toString().padLeft(2, '0')}'
+                                  '${pickupAddress != null && pickupAddress.isNotEmpty ? '  ·  $pickupAddress' : ''}',
                                   style: GoogleFonts.zain(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -2026,23 +1689,6 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        GestureDetector(
-                          onTap: _isSaving
-                              ? null
-                              : () =>
-                              _requestOtherDate(pickupDate, pickupTime),
-                          child: Text(
-                            'Request Other Date',
-                            style: GoogleFonts.zain(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary,
-                              decoration: TextDecoration.underline,
-                              decorationColor: AppColors.textPrimary,
                             ),
                           ),
                         ),
@@ -2071,7 +1717,7 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
                   )
                       : _PrimaryBtn(
                     label: _isSaving ? 'Please wait...' : 'Accept',
-                    onTap: _isSaving ? null : _accept,
+                    onTap: (_isSaving || pickupDate == null) ? null : _accept,
                   ),
                 ),
               ],
@@ -2111,10 +1757,12 @@ class PostAdoption extends StatelessWidget {
 
         final matching = (snap.data?.docs ?? []).where((d) {
           final data = d.data() as Map<String, dynamic>;
-          final status = data['status'];
-          return status == 'completed' ||
-              status == 'return_requested' ||
-              status == 'return_approved';
+          // AdoptionStatus.adopted.queryValues also covers the legacy
+          // 'completed'/'return_requested'/'return_approved' strings older
+          // adoptions may still carry — the application stays "adopted"
+          // through the whole post-adoption/return lifecycle now (see
+          // ReturnRequest.status for the actual return sub-state).
+          return AdoptionStatus.adopted.queryValues.contains(data['status'] as String?);
         }).toList();
 
         // Keep only the most recent adoption record per animal, so the same
@@ -2487,37 +2135,6 @@ class _PrimaryBtn extends StatelessWidget {
           style: GoogleFonts.tiltWarp(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: AppColors.textPrimary,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SecondaryBtn extends StatelessWidget {
-  final String label;
-  final VoidCallback? onTap;
-  const _SecondaryBtn({required this.label, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 46,
-      child: OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: AppColors.greenrspwn, width: 1.5),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-        child: Text(
-          label,
-          style: GoogleFonts.zain(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
             color: AppColors.textPrimary,
           ),
         ),

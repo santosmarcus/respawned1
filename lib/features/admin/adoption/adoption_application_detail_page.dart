@@ -10,10 +10,11 @@ import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/adoption_rejection_sheet.dart';
+import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
+import 'package:respawnd1/features/admin/adoption/release_details_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
-import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 
 String _fmtDate(DateTime? d) => d == null ? kNotProvided : '${d.month}/${d.day}/${d.year}';
 String _fmtDateTime(DateTime? d) =>
@@ -147,40 +148,12 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).unreserve(applicationId: app.id, animalId: app.animalId));
   }
 
-  Future<void> _release(AdoptionApplication app) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Release ${app.animalName}?', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Animal: ${app.animalName}', style: GoogleFonts.zain(fontSize: 13)),
-            Text('Adopter: ${app.adopterName}', style: GoogleFonts.zain(fontSize: 13)),
-            Text('Application: #${app.id.substring(0, app.id.length > 6 ? 6 : app.id.length)}', style: GoogleFonts.zain(fontSize: 13)),
-            Text('Reservation: ${app.reservedAt != null ? 'Reserved' : 'Not reserved'}', style: GoogleFonts.zain(fontSize: 13)),
-            Text('Adoption fee: ${app.feeStatus.label}', style: GoogleFonts.zain(fontSize: 13)),
-            Text('Release date: ${_fmtDate(DateTime.now())}', style: GoogleFonts.zain(fontSize: 13)),
-            const SizedBox(height: 8),
-            Text('This finalizes the adoption — the animal is removed from public adoptable listings.',
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
-            child: const Text('Confirm Release'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).release(applicationId: app.id, animalId: app.animalId, actorName: _actorName));
+  // The admin now sets the release date and follow-up schedule on the
+  // dedicated Release Details screen (spec §1/§2) instead of a bare confirm
+  // dialog — that screen calls AdoptionApplicationRepository.
+  // releaseWithFollowUps itself once "Mark as Released" is confirmed.
+  void _release(AdoptionApplication app) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ReleaseDetailsPage(applicationId: app.id)));
   }
 
   @override
@@ -811,7 +784,7 @@ class _ActionsSection extends ConsumerWidget {
         return SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PostAdoptionMonitoringPage(adoptionId: app.id))),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PostAdoptionDetailsPage(applicationId: app.id))),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellowrspwn,
               foregroundColor: AppColors.textPrimary,

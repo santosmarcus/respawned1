@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/adoption/return_request.dart';
+
 /// Admin-facing pipeline phase. The user-side form (adoption_process.dart)
 /// already wrote a looser set of raw `status` strings before this module
 /// existed — [fromFirestoreValue] maps both the new canonical values this
@@ -146,6 +148,12 @@ class AdoptionApplication {
   final DateTime? adoptedAt;
   final String? releasedBy;
   final String? releaseNotes;
+  final DateTime? scheduledReleaseDate;
+  final DateTime? releasedAt;
+  final bool noFollowUpsPlanned;
+  final String postAdoptionStatus; // 'inProgress' | 'completed'
+  final DateTime? postAdoptionCompletedAt;
+  final String? postAdoptionCompletedBy;
 
   // Withdrawal
   final DateTime? withdrawnAt;
@@ -191,6 +199,12 @@ class AdoptionApplication {
     this.adoptedAt,
     this.releasedBy,
     this.releaseNotes,
+    this.scheduledReleaseDate,
+    this.releasedAt,
+    this.noFollowUpsPlanned = false,
+    this.postAdoptionStatus = 'inProgress',
+    this.postAdoptionCompletedAt,
+    this.postAdoptionCompletedBy,
     this.withdrawnAt,
     this.withdrawalReason,
     this.paymentStatus,
@@ -209,6 +223,8 @@ class AdoptionApplication {
       };
 
   bool get isOpen => status != AdoptionStatus.rejected && status != AdoptionStatus.withdrawn && status != AdoptionStatus.adopted;
+
+  ReturnRequest? get returnRequest => ReturnRequest.fromMap(raw['returnRequest'] as Map<String, dynamic>?);
 
   factory AdoptionApplication.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -254,6 +270,12 @@ class AdoptionApplication {
       adoptedAt: ts(data['adoptedAt']),
       releasedBy: data['releasedBy'] as String?,
       releaseNotes: data['releaseNotes'] as String?,
+      scheduledReleaseDate: ts(data['scheduledReleaseDate']),
+      releasedAt: ts(data['releasedAt']),
+      noFollowUpsPlanned: data['noFollowUpsPlanned'] as bool? ?? false,
+      postAdoptionStatus: data['postAdoptionStatus'] as String? ?? 'inProgress',
+      postAdoptionCompletedAt: ts(data['postAdoptionCompletedAt']),
+      postAdoptionCompletedBy: data['postAdoptionCompletedBy'] as String?,
       withdrawnAt: ts(data['withdrawnAt']),
       withdrawalReason: data['withdrawalReason'] as String?,
       paymentStatus: payment['status'] as String?,

@@ -145,6 +145,66 @@ class RescueCaseRepository {
     return ref.id;
   }
 
+  /// Opens a case directly at [RescueStatus.intake] for an animal that's
+  /// being returned by its adopter — same "the animal record already
+  /// exists, this isn't a fresh public report" reasoning as
+  /// [createAdmissionCase], so it skips Rescue Review/Accept/Assign the same
+  /// way. IntakeDetailPage reads `sourceType == 'adoptionReturn'` to show
+  /// the "Intake Source: Adoption Return" banner. Called from
+  /// AdoptionApplicationRepository.confirmAnimalRetrieved's "Proceed to
+  /// Intake" step — never creates a new `animals/{id}` doc, only this
+  /// `cases` doc pointing back at the existing one.
+  Future<String> createReturnIntakeCase({
+    required String sourceAnimalRecordId,
+    required String animalName,
+    required String species,
+    required String returnRequestId,
+    required String previousAdoptionId,
+    required String adopterName,
+    required String returnReason,
+    String? returnExplanation,
+    List<String> returnPhotos = const [],
+    required DateTime retrievedAt,
+    required double lat,
+    required double lng,
+    String? shelterAddress,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final ref = _cases.doc();
+    final now = Timestamp.now();
+    await ref.set({
+      'status': RescueStatus.intake.firestoreValue,
+      'sourceType': 'adoptionReturn',
+      'sourceAnimalRecordId': sourceAnimalRecordId,
+      'returnRequestId': returnRequestId,
+      'previousAdoptionId': previousAdoptionId,
+      'animalType': species,
+      'reporterName': adopterName,
+      'condition': returnExplanation ?? returnReason,
+      'admissionReason': returnReason,
+      if (returnExplanation != null && returnExplanation.isNotEmpty) 'admissionNotes': returnExplanation,
+      'photoUrls': returnPhotos,
+      'retrievedAt': Timestamp.fromDate(retrievedAt),
+      'lat': lat,
+      'lng': lng,
+      if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
+      'urgency': 'Medium',
+      'createdAt': FieldValue.serverTimestamp(),
+      'statusHistory': [
+        {'status': 'Adoption return intake opened for $animalName.', 'timestamp': now},
+      ],
+    });
+    await addActivityLog(
+      caseId: ref.id,
+      action: 'adoption_return_intake_created',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'returnRequestId': returnRequestId},
+    );
+    return ref.id;
+  }
+
   /// Backward compatibility for reports submitted before multi-animal
   /// reports were consolidated into a single doc with an `animals` array:
   /// older multi-animal reports wrote one case doc per animal, linked by a
