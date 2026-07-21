@@ -13,18 +13,82 @@ import 'collar_tag_form_screen.dart';
 class CollarTagHomeScreen extends StatelessWidget {
   const CollarTagHomeScreen({super.key});
 
+  // Self-heals a specific data gap: a tag that only ever got written to the
+  // root `collarTags` collection (e.g. created before this per-user
+  // mirroring existed, or from a partial write that failed halfway) never
+  // shows up here or in CollarTagsListScreen, since both only ever read
+  // from `users/{uid}/collarTags`. Before deciding whether the user "has
+  // tags", mirror anything owned by them that's missing from their own
+  // subcollection.
+  //
+  // This can fail for reasons unrelated to whether tags actually exist —
+  // most notably a Firestore rules issue, since `where('ownerId', ...)` is
+  // a *query* against the root collection, not the single-doc `get()`
+  // reads the scan flow relies on, and may need its own rule to allow
+  // listing. If it fails, that's logged and this falls back to the
+  // original plain subcollection check rather than silently reporting "no
+  // tags" and swallowing the real error.
+  static Future<bool> _hasTagsAfterReconciling(String uid) async {
+    final userSubcollection = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('collarTags');
+
+    QuerySnapshot<Map<String, dynamic>> ownedRoot;
+    try {
+      ownedRoot = await FirebaseFirestore.instance
+          .collection('collarTags')
+          .where('ownerId', isEqualTo: uid)
+          .get();
+    } catch (e) {
+      debugPrint(
+          'CollarTagHomeScreen: root ownerId query failed ($e) — falling '
+              'back to the plain subcollection check.');
+      final fallback = await userSubcollection.limit(1).get();
+      return fallback.docs.isNotEmpty;
+    }
+
+    debugPrint(
+        'CollarTagHomeScreen: found ${ownedRoot.docs.length} tag(s) owned '
+            'by $uid in the root collarTags collection: '
+            '${ownedRoot.docs.map((d) => d.id).toList()}');
+
+    if (ownedRoot.docs.isEmpty) return false;
+
+    final mirrored = await userSubcollection.get();
+    final mirroredIds = mirrored.docs.map((d) => d.id).toSet();
+
+    final missing =
+    ownedRoot.docs.where((d) => !mirroredIds.contains(d.id)).toList();
+    debugPrint(
+        'CollarTagHomeScreen: ${missing.length} of those are missing from '
+            'users/$uid/collarTags and will be backfilled: '
+            '${missing.map((d) => d.id).toList()}');
+
+    // Each write is handled independently — one document failing to write
+    // (e.g. a security-rule or schema mismatch specific to that doc)
+    // should never block the others from being backfilled.
+    for (final doc in missing) {
+      try {
+        await userSubcollection
+            .doc(doc.id)
+            .set(doc.data(), SetOptions(merge: true));
+        debugPrint('CollarTagHomeScreen: backfilled ${doc.id} successfully.');
+      } catch (e) {
+        debugPrint('CollarTagHomeScreen: FAILED to backfill ${doc.id}: $e');
+      }
+    }
+
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const CollarIdTagIntroScreen();
 
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('collarTags')
-          .limit(1)
-          .get(),
+    return FutureBuilder<bool>(
+      future: _hasTagsAfterReconciling(uid),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -35,7 +99,7 @@ class CollarTagHomeScreen extends StatelessWidget {
           );
         }
 
-        final hasTags = snapshot.data?.docs.isNotEmpty ?? false;
+        final hasTags = snapshot.data ?? false;
         return hasTags
             ? const CollarTagsListScreen()
             : const CollarIdTagIntroScreen();
@@ -86,8 +150,9 @@ class _CollarTagsListScreenState extends State<CollarTagsListScreen> {
         for (final d in snap.docs) {
           try {
             tags.add(CollarTagData.fromFirestore(d.data(), d.id));
-          } catch (_) {
-            // skip malformed doc
+          } catch (e) {
+            debugPrint(
+                'CollarTagsListScreen: skipping ${d.id} — failed to parse: $e');
           }
         }
         tags.sort((a, b) {

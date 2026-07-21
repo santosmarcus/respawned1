@@ -13,10 +13,7 @@ import 'pet_found_chat.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
-// Result of checking a scanned code against the collarTags collection.
-// Shared by every scan entry point in the app (the Home "Scan a Tag"
-// button and the scan already built into the Report a Stray flow) so they
-// all resolve — and react to — a scanned tag the exact same way.
+
 class TagScanOutcome {
   final bool tagExists;
   final String? tagId;
@@ -36,8 +33,6 @@ class TagScanOutcome {
   }) : tagExists = true;
 }
 
-// A lightweight best-effort location fix — used to tag a new rescue
-// session with where the tag was actually scanned.
 class ScanLocation {
   final double lat;
   final double lng;
@@ -45,12 +40,7 @@ class ScanLocation {
   const ScanLocation({required this.lat, required this.lng, this.address});
 }
 
-/// Core resolver used by every scan entry point: looks up [tagId] against
-/// the collarTags collection and, if it's a real registered tag, either
-/// joins its already-open rescue session or creates a new one (attaching
-/// [location] when available). This is the piece that actually notifies
-/// the owner — the pieces that only *display* a session already existed
-/// before this was wired up.
+
 Future<TagScanOutcome> resolveScannedTagId(
     String tagId, {
       ScanLocation? location,
@@ -64,12 +54,18 @@ Future<TagScanOutcome> resolveScannedTagId(
   final petName = tagData['name'] as String? ?? '';
   final existingSessionId = tagData['activeRescueSessionId'] as String?;
 
-  // If this tag was already scanned and that session is still open, join
-  // it instead of starting a duplicate — avoids spamming the owner with
-  // repeat notifications for what's really the same event.
-  final sessionId = (existingSessionId != null && existingSessionId.isNotEmpty)
-      ? existingSessionId
-      : await _createRescueSession(tagId, location: location);
+  String? sessionId;
+  if (existingSessionId != null && existingSessionId.isNotEmpty) {
+    final existingSnap = await FirebaseFirestore.instance
+        .collection('rescueSessions')
+        .doc(existingSessionId)
+        .get();
+    final existingStatus = existingSnap.data()?['status'] as String?;
+    if (existingSnap.exists && existingStatus == 'active') {
+      sessionId = existingSessionId;
+    }
+  }
+  sessionId ??= await _createRescueSession(tagId, location: location);
 
   return TagScanOutcome.found(
     tagId: tagId,
@@ -78,9 +74,6 @@ Future<TagScanOutcome> resolveScannedTagId(
   );
 }
 
-/// Best-effort current location, used to tag a scan with where it happened.
-/// Failures resolve to null rather than throwing — a session is still
-/// useful without a location attached.
 Future<ScanLocation?> fetchBestEffortScanLocation() async {
   try {
     final pos = await Geolocator.getCurrentPosition(
@@ -97,10 +90,6 @@ Future<ScanLocation?> fetchBestEffortScanLocation() async {
   }
 }
 
-/// Entry point for a "Scan a Tag" button anywhere in the app. Opens the
-/// shared QR scanner, resolves the scanned code to a registered collar tag,
-/// and routes the finder into the right next screen once both the tag is
-/// confirmed and a location has been resolved for it.
 Future<void> startTagScan(BuildContext context) async {
   final rawResult = await Navigator.push<String>(
     context,
@@ -114,9 +103,6 @@ Future<void> startTagScan(BuildContext context) async {
     return;
   }
 
-  // Looking up the tag, resolving a location, and (if needed) spinning up
-  // a new rescue session all involve network round trips — show a small
-  // blocking spinner instead of leaving the screen looking frozen.
   bool spinnerShowing = true;
   showDialog(
     context: context,
@@ -161,10 +147,6 @@ Future<void> startTagScan(BuildContext context) async {
   }
 }
 
-// Creates the rescueSessions doc and points the tag at it. This is the
-// piece that was missing entirely before — it's what makes the owner's
-// "Pet Found!" banner (and, via a Cloud Function watching for new
-// sessions, the push notification) show up at all.
 Future<String> _createRescueSession(
     String tagId, {
       ScanLocation? location,

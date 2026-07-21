@@ -16,8 +16,7 @@ import '../../../app_theme.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 
-// Same Google Geocoding key used elsewhere in the rescue flow (rescue_page.dart)
-// for turning a lat/lng into a human-readable address.
+
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
 
@@ -1274,22 +1273,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   }
 }
 
-/// "No. of Animals" + per-animal breakdown (species/breed/sex/size/color),
-/// matching the same multi-animal display used in the admin app's
-/// RescueDetailPage. Current submissions store every animal in this case
-/// doc's `animals` array — one Case ID for the whole group report. Cases
-/// created before that change stored one case doc per animal linked by a
-/// shared `groupId`; those are still read the legacy way so old group
-/// reports keep displaying correctly. Cases with neither `animals` nor
-/// `groupId` just show this case's own single animal.
 class _AnimalGroupSection extends StatelessWidget {
   final String caseId;
   final Map<String, dynamic> data;
   const _AnimalGroupSection({required this.caseId, required this.data});
 
-  // Maps an `animals[]` entry (species/breed/sex/size/colorMarkings) onto
-  // the same key shape _AnimalDetailBlock expects from a full case doc
-  // (animalType/breed/sex/size/colorMarkings).
   Map<String, dynamic> _animalMap(Map raw) => {
     'animalType': raw['species'],
     'breed': raw['breed'],

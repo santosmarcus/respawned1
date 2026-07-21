@@ -18,7 +18,6 @@ import 'package:respawnd1/core/constants/app.links.dart';
 import 'pet_found_chat.dart';
 
 //  Pet Identification Card Screen
-
 class CollarIdTagCardScreen extends StatefulWidget {
   final CollarTagData tagData;
   final bool isNewlyCreated;
@@ -562,6 +561,8 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
             .doc(_tag.activeRescueSessionId)
             .set({'status': 'resolved'}, SetOptions(merge: true));
         update['activeRescueSessionId'] = FieldValue.delete();
+      } else if (goingLost && _tag.activeRescueSessionId != null) {
+        update['activeRescueSessionId'] = FieldValue.delete();
       }
 
       await FirebaseFirestore.instance
@@ -578,7 +579,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       if (mounted) {
         setState(() {
           _tag.status = goingLost ? 'lost' : 'active';
-          if (!goingLost) _tag.activeRescueSessionId = null;
+          _tag.activeRescueSessionId = null;
         });
         _showSnack(goingLost
             ? 'Marked as lost. Your contact info is now visible to anyone who scans the tag.'

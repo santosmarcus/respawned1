@@ -269,19 +269,6 @@ class _SectionLabel extends StatelessWidget{
   }
 }
 
-/*class _SubSectionLabel extends StatelessWidget{
-  final String label;
-  const _SubSectionLabel({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 2),
-      child: TextButton(onPressed: onPressed, child: child),
-    )
-  }
-}*/
-
 class _ProfileTile extends StatelessWidget {
   final IconData? icon;
   final String label;

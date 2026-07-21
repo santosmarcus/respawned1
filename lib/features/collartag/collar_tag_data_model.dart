@@ -99,6 +99,20 @@ class CollarTagData {
 
   // Firestore deserialisation
 
+  // Defensive on purpose: a bad cast here throws inside
+  // CollarTagData.fromFirestore, which CollarTagsListScreen's _listen()
+  // silently swallows per-doc ("skip malformed doc") — so a single
+  // wrongly-typed createdAt doesn't just lose that field, it makes the
+  // *entire tag* vanish from the list with no visible error. Handles a
+  // genuine Timestamp (the normal case), a String (in case an older/other
+  // write path ever stored it differently), or anything else/missing.
+  static DateTime? _parseCreatedAt(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+
   factory CollarTagData.fromFirestore(
       Map<String, dynamic> data,
       String id,
@@ -124,10 +138,7 @@ class CollarTagData {
         status: data['status'] as String? ?? 'active',
         activeRescueSessionId: data['activeRescueSessionId'] as String?,
         qrCodeUrl: data['qrCodeUrl'] as String?,
-        // createdAt stored as Timestamp — convert to DateTime
-        createdAt: data['createdAt'] != null
-            ? (data['createdAt'] as Timestamp).toDate()
-            : null,
+        createdAt: _parseCreatedAt(data['createdAt']),
         ownerId: data['ownerId'] as String?,
         qrEnabled: data['qrEnabled'] as bool? ?? false,
         // nfcWritten: data['nfcWritten'] as bool? ?? false,

@@ -441,11 +441,30 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       final route = await fetchDirectionsRoute(origin, destination);
 
       if (route == null) {
+        // The Directions call couldn't be verified — see
+        // fetchDirectionsRoute's debugPrint output for the actual reason
+        // (commonly a key/API-enablement issue, not necessarily a network
+        // problem). Rather than permanently blocking arrival confirmation
+        // whenever that happens, fall back to straight-line distance —
+        // same idea as DirectionsRepository falling back to a straight-line
+        // polyline when the road route can't be fetched.
+        final straightLineMeters = Geolocator.distanceBetween(
+          origin.latitude,
+          origin.longitude,
+          destination.latitude,
+          destination.longitude,
+        );
+
+        if (straightLineMeters <= _arrivalThresholdMeters) {
+          return true;
+        }
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                  'Could not verify your route to $destinationLabel. Check your connection and try again.'),
+                  "Couldn't verify your route to $destinationLabel via Google Maps, and you're still "
+                      '~${straightLineMeters.round()}m away by straight-line distance — keep heading there before confirming arrival.'),
               backgroundColor: Colors.redAccent,
             ),
           );

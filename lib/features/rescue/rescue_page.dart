@@ -24,8 +24,6 @@ import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
-// Species + breed picklists shared by every "animal" card in this flow
-// (owner's own pet, and each found/stray animal entry).
 const String _dogSpecies = 'Dog';
 const String _catSpecies = 'Cat';
 const String _othersBreedLabel = 'Others / Not sure';
@@ -279,17 +277,7 @@ class _RescuePageState extends State<RescuePage> {
     super.dispose();
   }
 
-  //Geolocation
-  // Tries the device's own last known real position first — still "the
-  // user's location" even without a fresh live GPS fix, and always a
-  // better default than an arbitrary hardcoded city coordinate. Only falls
-  // through to that hardcoded coordinate if there's truly no cached
-  // position at all (e.g. a fresh install that's never gotten a location
-  // fix on this device).
   Future<void> _fallbackToLastKnownOrDefault(String reasonMessage) async {
-    // If we already have a real resolved position pinned (e.g. from the
-    // cached-fix seed below), don't clobber it with an error message —
-    // just stop the loading spinner.
     if (_hasResolvedLocation) {
       if (mounted) setState(() => _loadingLocation = false);
       return;
@@ -318,10 +306,6 @@ class _RescuePageState extends State<RescuePage> {
   Future<void> _fetchCurrentLocation() async {
     setState(() => _loadingLocation = true);
 
-    // Seed the pin with any cached last-known fix right away, so the map
-    // reflects the user's own location as early as possible instead of
-    // sitting on the hardcoded camera-framing default while we wait on
-    // permission checks and a fresh GPS fix below.
     if (!_hasResolvedLocation) {
       try {
         final cached = await Geolocator.getLastKnownPosition();
@@ -329,7 +313,6 @@ class _RescuePageState extends State<RescuePage> {
           await _updatePin(LatLng(cached.latitude, cached.longitude));
         }
       } catch (_) {
-        // Ignore — we still attempt a fresh fix below regardless.
       }
     }
 
@@ -678,10 +661,13 @@ class _RescuePageState extends State<RescuePage> {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined,
                   color: AppColors.textPrimary),
-              title: Text('Choose photo from gallery',
+              title: Text('Choose photos from gallery',
                   style: GoogleFonts.zain(
                       fontSize: 15, color: AppColors.textPrimary)),
-              onTap: () => Navigator.pop(context, 'photo_gallery'),
+              subtitle: Text('Select up to ${_mediaFiles.length} at once',
+                  style: GoogleFonts.zain(
+                      fontSize: 12, color: AppColors.textSecondary)),
+              onTap: () => Navigator.pop(context, 'photo_gallery_multi'),
             ),
             ListTile(
               leading: const Icon(Icons.videocam_outlined,
@@ -717,6 +703,11 @@ class _RescuePageState extends State<RescuePage> {
 
     if (action == null || action == 'remove') return;
 
+    if (action == 'photo_gallery_multi') {
+      await _pickMultipleImages(startIndex: index);
+      return;
+    }
+
     XFile? file;
     bool isVideo = false;
 
@@ -724,10 +715,6 @@ class _RescuePageState extends State<RescuePage> {
       case 'photo_camera':
         file = await _picker.pickImage(
             source: ImageSource.camera, imageQuality: 80, maxWidth: 1280);
-        break;
-      case 'photo_gallery':
-        file = await _picker.pickImage(
-            source: ImageSource.gallery, imageQuality: 80, maxWidth: 1280);
         break;
       case 'video_camera':
         file = await _picker.pickVideo(
@@ -745,6 +732,39 @@ class _RescuePageState extends State<RescuePage> {
 
     if (file != null && mounted) {
       setState(() => _mediaFiles[index] = _MediaItem(file: file!, isVideo: isVideo));
+    }
+  }
+
+  Future<void> _pickMultipleImages({required int startIndex}) async {
+    final picked = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1280);
+    if (picked.isEmpty || !mounted) return;
+
+    final emptySlots = [
+      if (_mediaFiles[startIndex] == null) startIndex,
+      for (int i = 0; i < _mediaFiles.length; i++)
+        if (i != startIndex && _mediaFiles[i] == null) i,
+    ];
+
+    final placeCount =
+    picked.length < emptySlots.length ? picked.length : emptySlots.length;
+
+    setState(() {
+      for (int i = 0; i < placeCount; i++) {
+        _mediaFiles[emptySlots[i]] = _MediaItem(file: picked[i], isVideo: false);
+      }
+    });
+
+    if (placeCount < picked.length && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            placeCount == 0
+                ? 'You already have ${_mediaFiles.length} photos/videos added — remove one first.'
+                : 'Only $placeCount of ${picked.length} photos were added (max ${_mediaFiles.length} total).',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     }
   }
 
@@ -914,10 +934,6 @@ class _RescuePageState extends State<RescuePage> {
     }
   }
 
-  // Gives the page's own location fetch (already running since initState)
-  // a brief window to finish, rather than proceeding with no location at
-  // all just because the person scanned before the map settled. Bounded so
-  // a stuck/denied GPS fix never blocks the scan indefinitely.
   Future<void> _awaitResolvedLocation({
     Duration timeout = const Duration(seconds: 6),
   }) async {
@@ -933,8 +949,6 @@ class _RescuePageState extends State<RescuePage> {
 
     final tagId = AppLinks.tagIdFromScan(result);
     if (tagId == null) {
-      // Doesn't look like one of our tags (or a bare ID at all) — just note
-      // whatever was scanned on this report, same as before.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Tag scanned: $result'),
@@ -982,8 +996,6 @@ class _RescuePageState extends State<RescuePage> {
         return;
       }
 
-      // A confirmed tag with a resolved location — go straight to notifying
-      // the owner and chatting, instead of continuing this manual report.
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -1251,6 +1263,14 @@ class _RescuePageState extends State<RescuePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildLabel('Include images and videos', required: true),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Tap any box, then "Choose photos from gallery" to '
+                        'select several at once — no need to tap each box. '
+                        'At least 2 are required, up to 4 total.',
+                    style: GoogleFonts.zain(
+                        fontSize: 11, color: AppColors.textSecondary),
+                  ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
