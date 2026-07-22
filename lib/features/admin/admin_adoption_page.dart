@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 
 class AdminAdoptionPage extends StatelessWidget {
   final bool showDonations;
@@ -109,22 +111,26 @@ class _ProcessSteps extends StatelessWidget {
     {
       'label': 'Application\nReview',
       'icon': Icons.description_outlined,
-      'badge': 2
+      'badge': 2,
+      'tab': AdoptionStatus.pending,
     },
     {
       'label': 'Set\nInterview',
       'icon': Icons.calendar_month_outlined,
-      'badge': 0
+      'badge': 0,
+      'tab': AdoptionStatus.interview,
     },
     {
       'label': 'Animal\nRelease',
       'icon': Icons.favorite_outline,
-      'badge': 0
+      'badge': 0,
+      'tab': AdoptionStatus.approved,
     },
     {
       'label': 'Post-\nAdoption',
       'icon': Icons.star_outline,
-      'badge': 1
+      'badge': 1,
+      'tab': AdoptionStatus.adopted,
     },
   ];
 
@@ -133,7 +139,12 @@ class _ProcessSteps extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: _steps.map((step) {
-        return Column(
+        return GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => AdoptionApplicationReviewPage(initialStatus: step['tab'] as AdoptionStatus)),
+          ),
+          child: Column(
           children: [
             Stack(
               clipBehavior: Clip.none,
@@ -180,6 +191,7 @@ class _ProcessSteps extends StatelessWidget {
                   fontSize: 11, color: AppColors.textSecondary),
             ),
           ],
+          ),
         );
       }).toList(),
     );
