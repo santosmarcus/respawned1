@@ -125,124 +125,6 @@ List<LatLng> decodePolyline(String encoded) {
   return points;
 }
 
-Future<String?> _showDeclineAssignmentDialog() async {
-  final reasons = [
-    'Outside my service area / too far to respond in time',
-    'Already committed to another active case',
-    "Vehicle/carrier not suited to this animal",
-    "Safety concern I'm not equipped to handle",
-    'Personal unavailability (emergency, off-duty)',
-    'Other',
-  ];
-  final selected = <String>{};
-  String? other;
-
-  return showDialog<String>(
-    context: context,
-    barrierDismissible: false,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setDlg) => Dialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  Center(
-                    child: Text('Decline Assignment',
-                        style: GoogleFonts.tiltWarp(
-                            fontSize: 18, color: AppColors.textPrimary)),
-                  ),
-                  Positioned(
-                    right: 0,
-                    child: GestureDetector(
-                      onTap: () => Navigator.pop(ctx),
-                      child: const Icon(Icons.close,
-                          size: 20, color: AppColors.textSecondary),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              ...reasons.map((r) => CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                value: selected.contains(r),
-                activeColor: AppColors.textPrimary,
-                side: const BorderSide(color: AppColors.textPrimary),
-                title: Text(r,
-                    style: GoogleFonts.zain(
-                        fontSize: 14, color: AppColors.textPrimary)),
-                onChanged: (v) => setDlg(() {
-                  if (v == true) {
-                    selected.add(r);
-                  } else {
-                    selected.remove(r);
-                  }
-                }),
-              )),
-              if (selected.contains('Other')) ...[
-                const SizedBox(height: 8),
-                TextField(
-                  onChanged: (v) => other = v,
-                  style: GoogleFonts.zain(
-                      fontSize: 14, color: AppColors.textPrimary),
-                  decoration: InputDecoration(
-                    hintText: 'Describe reason…',
-                    hintStyle: GoogleFonts.zain(
-                        fontSize: 13, color: AppColors.textSecondary),
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.slaterspwn),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.textPrimary),
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: selected.isEmpty
-                      ? null
-                      : () {
-                    final reasonStr = [
-                      ...selected.where((r) => r != 'Other'),
-                      if (selected.contains('Other') &&
-                          other != null &&
-                          other!.isNotEmpty)
-                        other!,
-                    ].join(', ');
-                    Navigator.pop(ctx, reasonStr);
-                  },
-                  child: Text('Confirm',
-                      style: GoogleFonts.zain(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: selected.isEmpty
-                              ? AppColors.textSecondary
-                              : Colors.redAccent)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
 // Status
 // accepted         - rider accepted, not yet started
 // ongoing          - otw to pickup
@@ -314,6 +196,124 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       _mapController
           ?.animateCamera(CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
     });
+  }
+
+  Future<String?> _showDeclineAssignmentDialog() async {
+    final reasons = [
+      'Outside my service area / too far to respond in time',
+      'Already committed to another active case',
+      "Vehicle/carrier not suited to this animal",
+      "Safety concern I'm not equipped to handle",
+      'Personal unavailability (emergency, off-duty)',
+      'Other',
+    ];
+    final selected = <String>{};
+    String? other;
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => Dialog(
+          backgroundColor: AppColors.background,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Center(
+                      child: Text('Decline Assignment',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 18, color: AppColors.textPrimary)),
+                    ),
+                    Positioned(
+                      right: 0,
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(ctx),
+                        child: const Icon(Icons.close,
+                            size: 20, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ...reasons.map((r) => CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: selected.contains(r),
+                  activeColor: AppColors.textPrimary,
+                  side: const BorderSide(color: AppColors.textPrimary),
+                  title: Text(r,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary)),
+                  onChanged: (v) => setDlg(() {
+                    if (v == true) {
+                      selected.add(r);
+                    } else {
+                      selected.remove(r);
+                    }
+                  }),
+                )),
+                if (selected.contains('Other')) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    onChanged: (v) => other = v,
+                    style: GoogleFonts.zain(
+                        fontSize: 14, color: AppColors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Describe reason…',
+                      hintStyle: GoogleFonts.zain(
+                          fontSize: 13, color: AppColors.textSecondary),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: AppColors.slaterspwn),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: AppColors.textPrimary),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: selected.isEmpty
+                        ? null
+                        : () {
+                      final reasonStr = [
+                        ...selected.where((r) => r != 'Other'),
+                        if (selected.contains('Other') &&
+                            other != null &&
+                            other!.isNotEmpty)
+                          other!,
+                      ].join(', ');
+                      Navigator.pop(ctx, reasonStr);
+                    },
+                    child: Text('Confirm',
+                        style: GoogleFonts.zain(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: selected.isEmpty
+                                ? AppColors.textSecondary
+                                : Colors.redAccent)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _declineAssignment() async {
