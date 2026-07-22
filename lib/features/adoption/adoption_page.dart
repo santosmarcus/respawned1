@@ -1,8 +1,12 @@
-import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
+import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/widgets/animal_record_card.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
@@ -33,6 +37,20 @@ class Animal {
   final List<String> keyCharacteristics;
   final List<String> rescueBackground;
 
+  // Public adoption-availability label ("Available"/"Reserved"/"Adopted"/
+  // "Not Available") — see _publicStatusLabel. Never one of the internal
+  // AdoptionStatus values (Pending/Interview/Rejected/...), which describe
+  // an application, not the animal, and live in a different collection.
+  final String? publicStatus;
+  // Real animal-record photo, when this Animal was built from a live
+  // AnimalRecord (see _animalToCard below) — null falls back to the
+  // existing placeholder icon, same as before real data existed.
+  final String? photoUrl;
+  // Every photo on the source AnimalRecord, for AnimalPage's swipeable
+  // gallery — photoUrl above (single) is kept for any code path that only
+  // ever needed one image.
+  final List<String> photoUrls;
+
   Animal({
     required this.id,
     required this.name,
@@ -49,112 +67,111 @@ class Animal {
     this.coatLength = 'Short',
     this.keyCharacteristics = const [],
     this.rescueBackground = const [],
+    this.publicStatus,
+    this.photoUrl,
+    this.photoUrls = const [],
   });
 }
 
-final List<Animal> _allAnimals = [
-  Animal(
-    id: 1,
-    name: 'Brownie',
-    breed: 'Aspin',
-    age: '2 year old',
-    description: 'Playful brown dog',
-    healthTags: const ['Vaccinated', 'Spayed/Neutered'],
-    gender: AnimalGender.male,
-    category: AnimalCategory.dog,
-    cardColor: AppColors.greenrspwn,
-    size: 'Medium',
-    coatLength: 'Short',
-    keyCharacteristics: const [
-      'Good With Children',
-      'Knows Commands',
-      'First-Time Owner Friendly',
-      'Low Maintenance',
-    ],
-    rescueBackground: const ['Rescued From Street'],
-  ),
-  Animal(
-    id: 2,
-    name: 'Minnie',
-    breed: 'Aspin',
-    age: '3 year old',
-    description: 'Playful white dog',
-    healthTags: const ['Vaccinated'],
-    gender: AnimalGender.female,
-    category: AnimalCategory.dog,
-    cardColor: AppColors.lavenderrspwn,
-    badge: 'Good with other pets',
-    size: 'Small',
-    coatLength: 'Medium',
-    keyCharacteristics: const [
-      'Good With Other Animals',
-      'Calm',
-      'Leash Trained',
-    ],
-    rescueBackground: const ['Rescued From Street'],
-  ),
-  Animal(
-    id: 3,
-    name: 'Whiskers',
-    breed: 'Puspin',
-    age: '2 year old',
-    description: 'Curious orange cat',
-    healthTags: const ['Vaccinated', 'Dewormed'],
-    gender: AnimalGender.male,
-    category: AnimalCategory.cat,
-    cardColor: AppColors.pinkrspwn,
-    size: 'Small',
-    coatLength: 'Short',
-    keyCharacteristics: const ['Playful', 'Shy'],
-    rescueBackground: const ['Abandoned'],
-  ),
-  Animal(
-    id: 4,
-    name: 'Luna',
-    breed: 'Puspin',
-    age: '1 year old',
-    description: 'Gentle black cat',
-    healthTags: const ['Vaccinated'],
-    gender: AnimalGender.female,
-    category: AnimalCategory.cat,
-    cardColor: AppColors.tearspwn,
-    badge: 'Good with children',
-    size: 'Small',
-    coatLength: 'Short',
-    keyCharacteristics: const ['Good With Children', 'Calm'],
-    rescueBackground: const ['Surrendered By Owner'],
-  ),
+// Deterministic, stable-forever string -> non-negative int hash (FNV-1a,
+// 32-bit) — used only to bridge a real AnimalRecord's Firestore string id
+// into the legacy `Animal.id` (int) shape that AnimalPage/AdoptionProcess/
+// favorites persistence are built around (see the plan's scope note on why
+// that pipeline isn't being rewired to string ids in this change). Never
+// String.hashCode: that's explicitly not guaranteed stable across Dart
+// versions/platforms, and favorites persistence depends on this id staying
+// the same for the same animal across app runs.
+int stableIntIdFor(String value) {
+  var hash = 0x811C9DC5;
+  for (final unit in value.codeUnits) {
+    hash ^= unit;
+    hash = (hash * 0x01000193) & 0xFFFFFFFF;
+  }
+  return hash & 0x7FFFFFFF;
+}
+
+// A small, deterministic (not random) card-color rotation for real animal
+// records, which don't carry a stored color of their own.
+const List<Color> _cardColorRotation = [
+  AppColors.greenrspwn,
+  AppColors.lavenderrspwn,
+  AppColors.pinkrspwn,
+  AppColors.tearspwn,
 ];
 
-// Options offered in the adoption filter sheet, mirroring the fields
-// captured on the animal intake form.
+/// Public-facing availability label — deliberately only ever one of these
+/// four values. Internal application statuses (Pending/Interview/Rejected/
+/// Withdrawn/...) belong to the applicant's own AdoptionApplication/
+/// AdoptionStatus (a different collection this page never queries) and are
+/// never surfaced here.
+String _publicStatusLabel(AnimalRecord r) {
+  if (r.isAdopted) return 'Adopted';
+  if (r.isReserved) return 'Reserved';
+  if (r.isAdoptable) return 'Available';
+  return 'Not Available';
+}
+
+/// Only animals the public should ever see on this screen. Reserved
+/// animals stay visible with a "Reserved" label (see _publicStatusLabel)
+/// rather than being hidden — the same precedent the admin's own Animal
+/// Records list already follows for reserved animals (a "Reserved" pill,
+/// not an exclusion). Deceased, archived, not-yet-ready, and already-
+/// adopted animals never show.
+bool isPubliclyVisible(AnimalRecord a) => !a.archived && !a.isDeceased && (a.isAdoptable || a.isReserved);
+
+/// Same three labels the create form itself writes into `health`/derives
+/// from its own checkboxes — reused for both the filter sheet's "Health"
+/// matching and the card's health chips, instead of a separately-maintained
+/// list.
+List<String> healthTagsOf(AnimalRecord r) => [
+      if (r.vaccinated) 'Vaccinated',
+      if (r.spayedNeutered) 'Spayed/Neutered',
+      if (r.dewormed) 'Dewormed',
+    ];
+
+/// Maps a real AnimalRecord onto the Animal shape AnimalCard/AnimalPage/
+/// AdoptionFilters already understand — only ever reads public fields
+/// (name/species/breed/sex/size/coatLength/age/description/health flags/
+/// characteristics/rescue background/photos). Never reads
+/// reservedForUserId, adoptedByUserId, intakeStaffId, rescuedBy,
+/// vetClinicName, intakeNotes, currentCaseId, treatmentLog, management
+/// logs, or reporter contact info — those have no field on Animal to land
+/// in, so there is no path for them to leak into this screen.
+Animal animalRecordToCard(AnimalRecord r, int index) {
+  final healthTags = healthTagsOf(r);
+  final sexLower = r.sex.toLowerCase();
+  final speciesLower = r.species.toLowerCase();
+
+  return Animal(
+    id: stableIntIdFor(r.id),
+    name: r.name.isNotEmpty ? r.name : r.species,
+    breed: r.breed,
+    age: r.age,
+    description: r.description,
+    healthTags: healthTags,
+    gender: sexLower == 'female' ? AnimalGender.female : AnimalGender.male,
+    category: speciesLower == 'cat' ? AnimalCategory.cat : AnimalCategory.dog,
+    cardColor: _cardColorRotation[index % _cardColorRotation.length],
+    size: r.size,
+    coatLength: r.coatLength,
+    keyCharacteristics: r.keyCharacteristics,
+    rescueBackground: r.rescueBackground,
+    publicStatus: _publicStatusLabel(r),
+    photoUrl: r.photoUrls.isNotEmpty ? r.photoUrls.first : null,
+    photoUrls: r.photoUrls,
+  );
+}
+
+// Options offered in the adoption filter sheet — mirroring the fields the
+// current Animal Record actually supports (see
+// core/models/rescue/animal_characteristics.dart), not the wider set this
+// sheet used to offer that the create form has no checkbox for at all.
 const List<String> kSizeOptions = ['Small', 'Medium', 'Large'];
 const List<String> kCoatLengthOptions = ['Short', 'Medium', 'Long'];
 const List<String> kHealthOptions = [
   'Vaccinated',
   'Spayed/Neutered',
   'Dewormed',
-];
-const List<String> kKeyCharacteristicOptions = [
-  'Good With Children',
-  'Knows Commands',
-  'First-Time Owner Friendly',
-  'Low Maintenance',
-  'Shy',
-  'Playful',
-  'Calm',
-  'Good With Other Animals',
-  'Special Needs',
-  'Leash Trained',
-  'Crate Trained',
-  'Protective',
-];
-const List<String> kRescueBackgroundOptions = [
-  'Rescued From Street',
-  'Abandoned',
-  'Rescued From Abuse',
-  'Surrendered By Owner',
-  'Transferred From Shelter',
 ];
 
 // Holds the currently selected filter values. An empty set for a given
@@ -221,11 +238,11 @@ class AdoptionFilters {
   bool _matchesAll(Set<String> selected, List<String> values) =>
       selected.isEmpty || selected.every(values.contains);
 
-  bool matches(Animal animal) {
+  bool matches(AnimalRecord animal) {
     return _matchesAny(breeds, animal.breed) &&
         _matchesAny(sizes, animal.size) &&
         _matchesAny(coatLengths, animal.coatLength) &&
-        _matchesAll(health, animal.healthTags) &&
+        _matchesAll(health, healthTagsOf(animal)) &&
         _matchesAll(keyCharacteristics, animal.keyCharacteristics) &&
         _matchesAll(rescueBackground, animal.rescueBackground);
   }
@@ -233,32 +250,30 @@ class AdoptionFilters {
 
 // AdoptionPage
 
-class AdoptionPage extends StatefulWidget {
+class AdoptionPage extends ConsumerStatefulWidget {
   const AdoptionPage({super.key});
 
   @override
-  State<AdoptionPage> createState() => _AdoptionPageState();
+  ConsumerState<AdoptionPage> createState() => _AdoptionPageState();
 }
 
-class _AdoptionPageState extends State<AdoptionPage> {
+class _AdoptionPageState extends ConsumerState<AdoptionPage> {
   int _filterIndex = 0;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-  late List<Animal> _animals;
 
-  // Statuses that mean the animal is no longer up for adoption: either the
-  // adoption has fully completed, or the animal is currently placed with an
-  // adopter (a pending return doesn't free it up again automatically).
-  static const List<String> _adoptedStatuses = [
-    'completed',
-    'return_requested',
-    'return_approved',
-  ];
+  // Favorite animal ids (the stable synthetic int id — see
+  // stableIntIdFor), loaded once and updated locally on toggle. Animal
+  // objects are rebuilt fresh from the live stream on every emission, so
+  // "favorited" can't be mutated in place the way it could when the list
+  // was a static constant — it's derived from this set instead.
+  Set<int> _favoriteIds = {};
 
-  // Animal ids that are already adopted, kept in sync in real time so the
-  // list updates the moment an adoption is finalized elsewhere in the app.
-  Set<int> _adoptedAnimalIds = {};
-  StreamSubscription<QuerySnapshot>? _adoptionsSub;
+  // Cached from the most recent successful data emission, purely to
+  // populate the breed-filter sheet's options without re-deriving them
+  // from whatever partial state might be visible at the moment the sheet
+  // opens.
+  List<AnimalRecord> _lastLoadedRecords = const [];
 
   // Preference-based filters (breed, size, coat length, health, key
   // characteristics, rescue background) applied on top of the category tabs
@@ -268,55 +283,22 @@ class _AdoptionPageState extends State<AdoptionPage> {
   @override
   void initState() {
     super.initState();
-    _animals = List.from(_allAnimals);
     _loadFavorites();
-    _listenAdoptedAnimals();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _adoptionsSub?.cancel();
     super.dispose();
   }
 
-  // Listens to the 'adoptions' collection and tracks which animalIds are
-  // already adopted, so they can be excluded from the adoption page.
-  void _listenAdoptedAnimals() {
-    _adoptionsSub = FirebaseFirestore.instance
-        .collection('adoptions')
-        .where('status', whereIn: _adoptedStatuses)
-        .snapshots()
-        .listen((snapshot) {
-      final ids = <int>{};
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final personal = (data['personal'] as Map?) ?? {};
-        final animalId = personal['animalId'];
-        if (animalId is int) {
-          ids.add(animalId);
-        } else if (animalId is num) {
-          ids.add(animalId.toInt());
-        }
-      }
-      if (mounted) {
-        setState(() => _adoptedAnimalIds = ids);
-      }
-    }, onError: (_) {
-      // If the listener fails (e.g. offline), keep whatever list we already
-      // have instead of crashing the page.
-    });
-  }
-
-  List<Animal> get _filtered {
-    return _animals.where((p) {
-      // Already-adopted animals are removed from the adoption page entirely.
-      if (_adoptedAnimalIds.contains(p.id)) return false;
-
+  List<AnimalRecord> _applyTabsSearchAndFilters(List<AnimalRecord> records) {
+    final q = _searchQuery.toLowerCase();
+    return records.where((p) {
+      final species = p.species.toLowerCase();
       final matchCategory = _filterIndex == 0 ||
-          (_filterIndex == 1 && p.category == AnimalCategory.dog) ||
-          (_filterIndex == 2 && p.category == AnimalCategory.cat);
-      final q = _searchQuery.toLowerCase();
+          (_filterIndex == 1 && species == 'dog') ||
+          (_filterIndex == 2 && species == 'cat');
       final matchSearch = q.isEmpty ||
           p.name.toLowerCase().contains(q) ||
           p.breed.toLowerCase().contains(q) ||
@@ -329,7 +311,7 @@ class _AdoptionPageState extends State<AdoptionPage> {
   // Distinct breeds currently available, used to populate the breed filter
   // so the sheet never offers a breed nothing in the list actually has.
   List<String> get _availableBreeds =>
-      _allAnimals.map((a) => a.breed).toSet().toList()..sort();
+      _lastLoadedRecords.map((a) => a.breed).where((b) => b.isNotEmpty).toSet().toList()..sort();
 
   Future<void> _openFilterSheet() async {
     final result = await showModalBottomSheet<AdoptionFilters>(
@@ -346,37 +328,44 @@ class _AdoptionPageState extends State<AdoptionPage> {
     }
   }
 
-  Future<void> _toggleFavorite(Animal animal) async {
+  Future<void> _toggleFavorite(AnimalRecord animal) async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
+    final id = stableIntIdFor(animal.id);
 
     final favRef = FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .collection('favorites')
-        .doc(animal.id.toString());
+        .doc(id.toString());
 
+    final nowFavorited = !_favoriteIds.contains(id);
     setState(() {
-      animal.favorited = !animal.favorited;
+      if (nowFavorited) {
+        _favoriteIds = {..._favoriteIds, id};
+      } else {
+        _favoriteIds = {..._favoriteIds}..remove(id);
+      }
     });
 
-    if(animal.favorited){
+    if (nowFavorited) {
       await favRef.set({
-        'animalId': animal.id,
+        'animalId': id,
         'name': animal.name,
         'breed': animal.breed,
         'age': animal.age,
         'description': animal.description,
-        'gender': animal.gender.name,
-        'category': animal.category.name,
+        'gender': animal.sex,
+        'category': animal.species,
         'timestamp': FieldValue.serverTimestamp(),
       });
-    }else{
+    } else {
       await favRef.delete();
     }
   }
 
-  Future<void> _loadFavorites() async{
-    final uid = FirebaseAuth.instance.currentUser!.uid;
+  Future<void> _loadFavorites() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
 
     final snapshot = await FirebaseFirestore.instance
         .collection('users')
@@ -384,17 +373,15 @@ class _AdoptionPageState extends State<AdoptionPage> {
         .collection('favorites')
         .get();
 
-    final favId = snapshot.docs.map((d) => int.parse(d.id)).toSet();
+    final favIds = snapshot.docs.map((d) => int.tryParse(d.id)).whereType<int>().toSet();
 
-    setState(() {
-      for(var animal in _animals){
-        animal.favorited = favId.contains(animal.id);
-      }
-    });
+    if (mounted) setState(() => _favoriteIds = favIds);
   }
 
   @override
   Widget build(BuildContext context) {
+    final recordsAsync = ref.watch(allAnimalRecordsProvider);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -480,7 +467,7 @@ class _AdoptionPageState extends State<AdoptionPage> {
                         hintText: 'Search',
                         hintStyle: GoogleFonts.zain(
                           fontSize: 15,
-                          color: AppColors.textPrimary.withOpacity(0.6),
+                          color: AppColors.textPrimary.withValues(alpha: 0.6),
                         ),
                         prefixIcon: const Icon(
                           Icons.search,
@@ -575,39 +562,60 @@ class _AdoptionPageState extends State<AdoptionPage> {
 
           const SizedBox(height: 16),
 
-          // Animal list
+          // Animal list — Loading / Error / Empty / Data, handled
+          // explicitly (never treats an empty successful result as still
+          // loading, never shows the empty-state copy for a failed query).
           Expanded(
-            child: _filtered.isEmpty
-                ? _EmptyState(
-              filterIndex: _filterIndex,
-              hasActiveFilters: _activeFilters.activeCount > 0 ||
-                  _searchQuery.isNotEmpty,
-              onClearFilters: () {
-                setState(() {
-                  _activeFilters = const AdoptionFilters();
-                  _searchQuery = '';
-                  _searchController.clear();
-                });
-              },
-            )
-                : ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _filtered.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final animal = _filtered[index];
-                return AnimalCard(
-                  animal: animal,
-                  onFavorite: () => _toggleFavorite(animal),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => AnimalPage(
-                          animal: animal,
-                          onFavoriteToggle: () => _toggleFavorite(animal),
-                        ),
-                      ),
+            child: recordsAsync.when(
+              loading: () => const _LoadingState(),
+              error: (error, _) => _ErrorState(
+                onRetry: () => ref.invalidate(allAnimalRecordsProvider),
+              ),
+              data: (records) {
+                final visible = records.where(isPubliclyVisible).toList();
+                _lastLoadedRecords = visible;
+
+                final filtered = _applyTabsSearchAndFilters(visible);
+
+                if (filtered.isEmpty) {
+                  return _EmptyState(
+                    filterIndex: _filterIndex,
+                    hasActiveFilters: _activeFilters.activeCount > 0 || _searchQuery.isNotEmpty,
+                    onClearFilters: () {
+                      setState(() {
+                        _activeFilters = const AdoptionFilters();
+                        _searchQuery = '';
+                        _searchController.clear();
+                      });
+                    },
+                  );
+                }
+
+                return ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final record = filtered[index];
+                    return AnimalRecordCard(
+                      animal: record,
+                      favorited: _favoriteIds.contains(stableIntIdFor(record.id)),
+                      onFavorite: () => _toggleFavorite(record),
+                      publicStatusLabel: _publicStatusLabel(record),
+                      extraChips: [for (final t in healthTagsOf(record)) CardChip(t)],
+                      onTap: () {
+                        final animal = animalRecordToCard(record, index)
+                          ..favorited = _favoriteIds.contains(stableIntIdFor(record.id));
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => AnimalPage(
+                              animal: animal,
+                              onFavoriteToggle: () => _toggleFavorite(record),
+                            ),
+                          ),
+                        );
+                      },
                     );
                   },
                 );
@@ -617,6 +625,60 @@ class _AdoptionPageState extends State<AdoptionPage> {
 
           const SizedBox(height: 12),
         ],
+      ),
+    );
+  }
+}
+
+// Loading / error states
+
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _ErrorState({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 40, color: AppColors.textSecondary),
+            const SizedBox(height: 16),
+            Text(
+              'Could not load animals available for adoption.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Please check your connection and try again.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary.withValues(alpha: 0.7)),
+            ),
+            const SizedBox(height: 18),
+            ElevatedButton(
+              onPressed: onRetry,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              child: Text('Retry', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -659,199 +721,10 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-// Animal card
-
-class AnimalCard extends StatelessWidget {
-  final Animal animal;
-  final VoidCallback onFavorite;
-  final VoidCallback onTap;
-
-  const AnimalCard({
-    required this.animal,
-    required this.onFavorite,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: animal.cardColor,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Photo placeholder
-                Container(
-                  width: 90,
-                  height: 90,
-                  decoration: BoxDecoration(
-                    color: AppColors.background.withOpacity(0.55),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.pets,
-                    size: 36,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-
-                const SizedBox(width: 14),
-
-                // Details
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Name + gender icon
-                      Row(
-                        children: [
-                          Text(
-                            animal.name,
-                            style: GoogleFonts.tiltWarp(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Icon(
-                            animal.gender == AnimalGender.male
-                                ? Icons.male
-                                : Icons.female,
-                            size: 16,
-                            color: AppColors.textPrimary,
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 2),
-
-                      Text(
-                        animal.breed,
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        animal.age,
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        animal.description,
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      // Health tags
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: animal.healthTags
-                            .map((tag) => _Tag(label: tag))
-                            .toList(),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Favorite button
-          Positioned(
-            top: 10,
-            right: 12,
-            child: GestureDetector(
-              onTap: onFavorite,
-              behavior: HitTestBehavior.opaque,
-              child: Icon(
-                animal.favorited ? Icons.favorite : Icons.favorite_border,
-                size: 22,
-                color: animal.favorited
-                    ? const Color(0xFFE05C5C)
-                    : AppColors.textPrimary,
-              ),
-            ),
-          ),
-
-          // badge
-          if (animal.badge != null)
-            Positioned(
-              bottom: -10,
-              left: 12,
-              child: Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.yellowrspwn,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  animal.badge!,
-                  style: GoogleFonts.zain(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// Health tag
-
-class _Tag extends StatelessWidget {
-  final String label;
-  const _Tag({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: AppColors.background.withOpacity(0.6),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.zain(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: AppColors.textPrimary,
-        ),
-      ),
-    );
-  }
-}
-// Empty state — shown when no dogs/cats match the current tab, search
-// query, or preference filters.
+// Empty state — shown when the query succeeded but nothing matches (either
+// there are no adoptable animals at all, or the current tab/search/
+// preference filters exclude everything). Never shown while loading or on
+// a failed query — see _LoadingState/_ErrorState above.
 
 class _EmptyState extends StatelessWidget {
   final int filterIndex;
@@ -887,7 +760,7 @@ class _EmptyState extends StatelessWidget {
               width: 88,
               height: 88,
               decoration: BoxDecoration(
-                color: AppColors.yellowrspwn.withOpacity(0.4),
+                color: AppColors.yellowrspwn.withValues(alpha: 0.4),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -898,9 +771,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              hasActiveFilters
-                  ? 'No $_subject match your search'
-                  : 'No $_subject available right now',
+              hasActiveFilters ? 'No $_subject match your search' : 'No adoptions yet',
               textAlign: TextAlign.center,
               style: GoogleFonts.tiltWarp(
                 fontSize: 17,
@@ -912,11 +783,11 @@ class _EmptyState extends StatelessWidget {
             Text(
               hasActiveFilters
                   ? 'Try adjusting your filters or search to see more pets.'
-                  : 'Check back soon — new rescues are added all the time!',
+                  : 'There are currently no animals available for adoption. Please check again later.',
               textAlign: TextAlign.center,
               style: GoogleFonts.zain(
                 fontSize: 14,
-                color: AppColors.textPrimary.withOpacity(0.7),
+                color: AppColors.textPrimary.withValues(alpha: 0.7),
               ),
             ),
             if (hasActiveFilters) ...[
@@ -1067,7 +938,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
                         style: GoogleFonts.zain(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary.withOpacity(0.7),
+                          color: AppColors.textPrimary.withValues(alpha: 0.7),
                         ),
                       ),
                     ),
@@ -1121,10 +992,35 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
                       ),
                     ),
                     const SizedBox(height: 22),
+                    // Temperament / Compatibility / Training are three
+                    // separate sections here (matching what the create form
+                    // actually asks and the admin Profile tab actually
+                    // displays), but all three write into the same
+                    // `keyCharacteristics` set — that's genuinely one flat
+                    // array on the Animal Record itself; only the *display*
+                    // groups it into three labeled sections.
                     _FilterSection(
-                      label: 'Key Characteristics',
+                      label: 'Temperament',
                       child: _CheckboxGroup(
-                        options: kKeyCharacteristicOptions,
+                        options: kTemperamentValues,
+                        selected: _keyCharacteristics,
+                        onToggle: (v) => _toggle(_keyCharacteristics, v),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    _FilterSection(
+                      label: 'Compatibility',
+                      child: _CheckboxGroup(
+                        options: kCompatibilityValues,
+                        selected: _keyCharacteristics,
+                        onToggle: (v) => _toggle(_keyCharacteristics, v),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    _FilterSection(
+                      label: 'Training',
+                      child: _CheckboxGroup(
+                        options: kTrainingValues,
                         selected: _keyCharacteristics,
                         onToggle: (v) => _toggle(_keyCharacteristics, v),
                       ),
@@ -1133,7 +1029,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
                     _FilterSection(
                       label: 'Rescue Background',
                       child: _CheckboxGroup(
-                        options: kRescueBackgroundOptions,
+                        options: kRescueBackgroundValues,
                         selected: _rescueBackground,
                         onToggle: (v) => _toggle(_rescueBackground, v),
                       ),
@@ -1231,7 +1127,7 @@ class _ChipGroup extends StatelessWidget {
             decoration: BoxDecoration(
               color: isSelected
                   ? AppColors.greenrspwn
-                  : AppColors.lavenderrspwn.withOpacity(0.5),
+                  : AppColors.lavenderrspwn.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
                 color: isSelected

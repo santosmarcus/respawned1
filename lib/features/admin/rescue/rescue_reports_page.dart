@@ -12,6 +12,7 @@ import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_case_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_filter_sheet.dart';
+import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
 class RescueReportsPage extends ConsumerStatefulWidget {
   const RescueReportsPage({super.key});
@@ -80,11 +81,15 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      drawer: const AdminDrawer(),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: AppColors.background),
-          onPressed: () {},
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: AppColors.background),
+            tooltip: 'Menu',
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
         ),
         title: Text('Rescue Reports',
             style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
+import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
 class AdminAdoptionPage extends StatelessWidget {
   final bool showDonations;
@@ -12,11 +15,15 @@ class AdminAdoptionPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      drawer: const AdminDrawer(),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: AppColors.background),
-          onPressed: () {},
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: AppColors.background),
+            tooltip: 'Menu',
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
         ),
         title: Text(
           showDonations ? 'Donation/Sponsorship' : 'Adoption',
@@ -106,43 +113,29 @@ class AdminAdoptionPage extends StatelessWidget {
   }
 }
 
-class _ProcessSteps extends StatelessWidget {
-  final List<Map<String, dynamic>> _steps = [
-    {
-      'label': 'Application\nReview',
-      'icon': Icons.description_outlined,
-      'badge': 2,
-      'tab': AdoptionStatus.pending,
-    },
-    {
-      'label': 'Set\nInterview',
-      'icon': Icons.calendar_month_outlined,
-      'badge': 0,
-      'tab': AdoptionStatus.interview,
-    },
-    {
-      'label': 'Animal\nRelease',
-      'icon': Icons.favorite_outline,
-      'badge': 0,
-      'tab': AdoptionStatus.approved,
-    },
-    {
-      'label': 'Post-\nAdoption',
-      'icon': Icons.star_outline,
-      'badge': 1,
-      'tab': AdoptionStatus.adopted,
-    },
+class _ProcessSteps extends ConsumerWidget {
+  static const _steps = [
+    (label: 'Application\nReview', icon: Icons.description_outlined, tab: AdoptionStatus.pending),
+    (label: 'Set\nInterview', icon: Icons.calendar_month_outlined, tab: AdoptionStatus.interview),
+    (label: 'Animal\nRelease', icon: Icons.favorite_outline, tab: AdoptionStatus.approved),
+    (label: 'Post-\nAdoption', icon: Icons.star_outline, tab: AdoptionStatus.adopted),
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: _steps.map((step) {
+        // Real, live counts instead of hardcoded numbers — no badge at all
+        // while still loading or once the count is zero, a real count once
+        // it's known and positive.
+        final countAsync = ref.watch(adoptionsByStatusesProvider([step.tab]));
+        final count = countAsync.asData?.value.length;
+
         return GestureDetector(
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => AdoptionApplicationReviewPage(initialStatus: step['tab'] as AdoptionStatus)),
+            MaterialPageRoute(builder: (_) => AdoptionApplicationReviewPage(initialStatus: step.tab)),
           ),
           child: Column(
           children: [
@@ -156,10 +149,10 @@ class _ProcessSteps extends StatelessWidget {
                     color: AppColors.slaterspwn,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(step['icon'] as IconData,
+                  child: Icon(step.icon,
                       color: AppColors.textPrimary, size: 26),
                 ),
-                if ((step['badge'] as int) > 0)
+                if (count != null && count > 0)
                   Positioned(
                     top: -6,
                     right: -6,
@@ -172,7 +165,7 @@ class _ProcessSteps extends StatelessWidget {
                       ),
                       child: Center(
                         child: Text(
-                          '${step['badge']}',
+                          '$count',
                           style: const TextStyle(
                               fontSize: 11,
                               color: Colors.white,
@@ -185,7 +178,7 @@ class _ProcessSteps extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              step['label'] as String,
+              step.label,
               textAlign: TextAlign.center,
               style: GoogleFonts.zain(
                   fontSize: 11, color: AppColors.textSecondary),

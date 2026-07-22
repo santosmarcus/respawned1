@@ -3,11 +3,17 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../app_theme.dart';
+import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
+import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
 import 'adoption_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 
-// Extended detail data
+// Extended detail data — no longer keyed by a hardcoded per-name map (that
+// was fabricated demo data unrelated to any real Animal Record field, e.g.
+// a "date of birth" for whichever four names happened to exist in the old
+// static catalog). AnimalRecord has no date-of-birth field at all, so this
+// honestly shows "Unknown" for every animal instead of inventing one.
 class _AnimalDetail {
   final String dateOfBirth;
   final String size;
@@ -32,59 +38,6 @@ class _AnimalDetail {
   });
 }
 
-const Map<String, _AnimalDetail> _detailMap = {
-  'Brownie': _AnimalDetail(
-    dateOfBirth: 'January 1, 2024',
-    size: 'Medium',
-    coatLength: 'Short',
-    health: ['Vaccinated', 'Spayed', 'Neutered', 'Dewormed'],
-    keyCharacteristics: [
-      'Good with children',
-      'Knows commands',
-      'First-Time Owner Friendly',
-      'Low maintenance',
-    ],
-    rescueBackground: ['Rescued from street'],
-    description:
-    'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.',
-    organization: 'Loved by the Gapz',
-    orgSubtitle: 'Rescued by this organization since 2024',
-  ),
-  'Minnie': _AnimalDetail(
-    dateOfBirth: 'March 5, 2022',
-    size: 'Small',
-    coatLength: 'Medium',
-    health: ['Vaccinated'],
-    keyCharacteristics: ['Good with other pets', 'Calm', 'Indoor-friendly'],
-    rescueBackground: ['Rescued from street'],
-    description: 'Playful white dog who loves cuddles and short walks.',
-    organization: 'Loved by the Gapz',
-    orgSubtitle: 'Rescued by this organization since 2022',
-  ),
-  'Whiskers': _AnimalDetail(
-    dateOfBirth: 'June 10, 2023',
-    size: 'Small',
-    coatLength: 'Short',
-    health: ['Vaccinated', 'Dewormed'],
-    keyCharacteristics: ['Curious', 'Playful', 'Indoor-friendly'],
-    rescueBackground: ['Rescued from street'],
-    description: 'Curious orange cat who enjoys exploring and window-watching.',
-    organization: 'Loved by the Gapz',
-    orgSubtitle: 'Rescued by this organization since 2023',
-  ),
-  'Luna': _AnimalDetail(
-    dateOfBirth: 'September 20, 2024',
-    size: 'Small',
-    coatLength: 'Short',
-    health: ['Vaccinated'],
-    keyCharacteristics: ['Good with children', 'Gentle', 'Quiet'],
-    rescueBackground: ['Rescued from street'],
-    description: 'Gentle black cat with a calm temperament, perfect for families.',
-    organization: 'Loved by the Gapz',
-    orgSubtitle: 'Rescued by this organization since 2024',
-  ),
-};
-
 // Animal page
 class AnimalPage extends StatefulWidget {
   final Animal animal;
@@ -105,21 +58,18 @@ class _AnimalPageState extends State<AnimalPage> {
 
   _AnimalDetail get _detail {
     final animal = widget.animal;
-    final fallback = _detailMap[animal.name];
     return _AnimalDetail(
-      dateOfBirth: fallback?.dateOfBirth ?? 'Unknown',
+      dateOfBirth: 'Unknown',
       size: animal.size,
       coatLength: animal.coatLength,
       health: animal.healthTags,
       keyCharacteristics: animal.keyCharacteristics.isNotEmpty
           ? animal.keyCharacteristics
           : (animal.badge != null ? [animal.badge!] : []),
-      rescueBackground: animal.rescueBackground.isNotEmpty
-          ? animal.rescueBackground
-          : ['Rescued from street'],
-      description: fallback?.description ?? animal.description,
-      organization: fallback?.organization ?? 'ResPAWnd Partner',
-      orgSubtitle: fallback?.orgSubtitle ?? 'Verified rescue organization',
+      rescueBackground: animal.rescueBackground,
+      description: animal.description,
+      organization: 'ResPAWnd Partner',
+      orgSubtitle: 'Verified rescue organization',
     );
   }
 
@@ -239,18 +189,13 @@ class _AnimalPageState extends State<AnimalPage> {
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          // photo of animal
-          Stack(
-            children: [
-              Container(
-                height: 260,
-                width: double.infinity,
-                color: animal.cardColor,
-                child: const Center(
-                  child: Icon(Icons.pets, size: 80, color: AppColors.textSecondary),
-                ),
-              ),
-
+          // Animal photo gallery — swipeable when there's more than one
+          // image, same paw placeholder as before when there are none.
+          AnimalImageGallery(
+            photoUrls: animal.photoUrls,
+            height: 260,
+            backgroundColor: animal.cardColor,
+            overlays: [
               // Back button
               Positioned(
                 top: MediaQuery.of(context).padding.top + 8,
@@ -324,26 +269,16 @@ class _AnimalPageState extends State<AnimalPage> {
 
                   const SizedBox(height: 16),
 
-                  // Animal Information
+                  // Animal Information — gender lives next to the name
+                  // above (icon only); it's deliberately not repeated here.
                   _SectionHeader(label: 'Animal Information'),
                   const SizedBox(height: 10),
-                  _InfoGrid(rows: [
-                    _InfoRow(
-                      left: _InfoCell(label: 'Breed', value: animal.breed),
-                      center: _InfoCell(label: 'Age', value: animal.age),
-                      right: _InfoCell(
-                          label: 'Date of Birth', value: detail.dateOfBirth),
-                    ),
-                    _InfoRow(
-                      left: _InfoCell(
-                          label: 'Gender',
-                          value: animal.gender == AnimalGender.male
-                              ? 'Male'
-                              : 'Female'),
-                      center: _InfoCell(label: 'Size', value: detail.size),
-                      right: _InfoCell(
-                          label: 'Coat Length', value: detail.coatLength),
-                    ),
+                  AnimalBasicInfoRow(fields: [
+                    InfoField('Breed', animal.breed.isNotEmpty ? animal.breed : 'Not provided'),
+                    InfoField('Age', animal.age.isNotEmpty ? animal.age : 'Not provided'),
+                    InfoField('Date of Birth', detail.dateOfBirth),
+                    InfoField('Size', detail.size),
+                    InfoField('Coat Length', detail.coatLength),
                   ]),
 
                   const SizedBox(height: 20),
@@ -574,67 +509,6 @@ class _SectionHeader extends StatelessWidget {
         fontWeight: FontWeight.bold,
         color: AppColors.textPrimary,
       ),
-    );
-  }
-}
-
-class _InfoCell {
-  final String label;
-  final String value;
-  const _InfoCell({required this.label, required this.value});
-}
-
-class _InfoRow {
-  final _InfoCell left;
-  final _InfoCell center;
-  final _InfoCell right;
-  const _InfoRow({required this.left, required this.center, required this.right});
-}
-
-class _InfoGrid extends StatelessWidget {
-  final List<_InfoRow> rows;
-  const _InfoGrid({required this.rows});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: rows.map((row) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Row(
-            children: [
-              Expanded(child: _InfoCellWidget(cell: row.left)),
-              Expanded(child: _InfoCellWidget(cell: row.center)),
-              Expanded(child: _InfoCellWidget(cell: row.right)),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _InfoCellWidget extends StatelessWidget {
-  final _InfoCell cell;
-  const _InfoCellWidget({required this.cell});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          cell.label,
-          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-        ),
-        Text(
-          cell.value,
-          style: GoogleFonts.zain(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary),
-        ),
-      ],
     );
   }
 }

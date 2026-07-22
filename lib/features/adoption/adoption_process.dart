@@ -101,12 +101,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   File? _governmentIdFile;
   File? _proofOfAddressFile;
   //File? _digitalSignatureFile;
-  File? _homePhotosFile;
+  // Home Photos supports multiple images — a newly-picked list plus,
+  // when resuming an in-progress application, whatever was already
+  // uploaded in an earlier session (kept separate so removing one only
+  // removes that one, exactly like CreateAnimalRecordPage's own
+  // existing/newly-picked image split).
+  final List<File> _homePhotosFiles = [];
+  List<String> _existingHomePhotoUrls = [];
 
   String? _governmentIdUrl;
   String? _proofOfAddressUrl;
   //String? _digitalSignatureUrl;
-  String? _homePhotosUrl;
 
   bool _isUploadingGovId = false;
   bool _isUploadingProof = false;
@@ -265,6 +270,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
+  /// Adds to the existing selection rather than replacing it — repeated
+  /// taps let the applicant keep adding more photos, matching "allow
+  /// adding more images afterward." No maximum: the current design never
+  /// defined one.
+  Future<void> _addHomePhotos() async {
+    final picked = await _picker.pickMultiImage(imageQuality: 80);
+    if (picked.isNotEmpty) {
+      setState(() => _homePhotosFiles.addAll(picked.map((x) => File(x.path))));
+    }
+  }
+
   //upload helper
   Future<String?> _uploadFile(File? file, String pathSegment, String adoptionId) async {
     if (file == null) return null;
@@ -272,6 +288,25 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         .ref('adoptions/$adoptionId/$pathSegment.jpg');
     await ref.putFile(file);
     return await ref.getDownloadURL();
+  }
+
+  /// Uploads every picked Home Photo (any count — no fixed maximum) in
+  /// parallel and returns the resulting URLs in the same order the files
+  /// were picked. Kept entirely separate from _uploadFile's single-file
+  /// Future.wait list below on purpose: unpacking a variable-length upload
+  /// by a fixed position is exactly what caused the RangeError this
+  /// replaces (see the class doc comment / _submitAdoptionForm).
+  Future<List<String>> _uploadHomePhotos(List<File> files, String adoptionId) async {
+    if (files.isEmpty) return const [];
+    final urls = await Future.wait([
+      for (var i = 0; i < files.length; i++)
+        () async {
+          final ref = FirebaseStorage.instance.ref('adoptions/$adoptionId/home_photos/img_$i.jpg');
+          await ref.putFile(files[i]);
+          return ref.getDownloadURL();
+        }(),
+    ]);
+    return urls;
   }
 
   Future<void> _pickDate() async {
@@ -447,7 +482,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _governmentIdUrl = uploads['governmentId'] as String?;
         _proofOfAddressUrl = uploads['proofOfAddress'] as String?;
         //_digitalSignatureUrl = uploads['digitalSignature'] as String?;
-        _homePhotosUrl = uploads['homePhotos'] as String?;
+        // homePhotos may be a single legacy String or the current List —
+        // same dual-shape tolerance the admin document reader already has.
+        final homePhotosRaw = uploads['homePhotos'];
+        _existingHomePhotoUrls = homePhotosRaw is List
+            ? homePhotosRaw.whereType<String>().toList()
+            : (homePhotosRaw is String && homePhotosRaw.isNotEmpty ? [homePhotosRaw] : []);
 
         // Agreements
         _agreeCare = agreement['care'] as bool? ?? false;
@@ -537,17 +577,26 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
       final docRef = FirebaseFirestore.instance.collection('adoptions').doc();
 
+      // Government ID / Proof of Address are the only two single-file
+      // uploads left in this Future.wait — this list's length must always
+      // match the two unpack lines directly below it. Home Photos is a
+      // variable-length list and is uploaded separately via
+      // _uploadHomePhotos precisely so it can never desync this fixed-size
+      // unpack again (this positional mismatch — a disabled third upload
+      // shrinking this list without the indices below being renumbered —
+      // was the exact cause of the RangeError this replaces).
       final results = await Future.wait([
         _uploadFile(_governmentIdFile, 'government_id', docRef.id),
         _uploadFile(_proofOfAddressFile, 'proof_of_address', docRef.id),
         //_uploadFile(_digitalSignatureFile, 'digital_signature', docRef.id),
-        _uploadFile(_homePhotosFile, 'home_photos', docRef.id),
       ]);
 
       _governmentIdUrl = results[0];
       _proofOfAddressUrl = results[1];
       ///_digitalSignatureUrl = results[2];
-      _homePhotosUrl = results[3];
+
+      final newHomePhotoUrls = await _uploadHomePhotos(_homePhotosFiles, docRef.id);
+      final homePhotoUrls = [..._existingHomePhotoUrls, ...newHomePhotoUrls];
 
       await docRef.set({
         'personal': {
@@ -605,7 +654,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           'governmentId': _governmentIdUrl,
           'proofOfAddress': _proofOfAddressUrl,
           //'digitalSignature': _digitalSignatureUrl,
-          'homePhotos': _homePhotosUrl,
+          // A list, not a single URL — every uploaded home photo is kept,
+          // never overwritten by only the most recent one. The admin
+          // Required Documents reader already accepts either shape.
+          'homePhotos': homePhotoUrls,
         },
         'agreement': {
           'reason': _reasonCtrl.text.trim(),
@@ -714,11 +766,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _governmentIdFile = null;
     _proofOfAddressFile = null;
     //_digitalSignatureFile = null;
-    _homePhotosFile = null;
+    _homePhotosFiles.clear();
+    _existingHomePhotoUrls = [];
     _governmentIdUrl = null;
     _proofOfAddressUrl = null;
     //_digitalSignatureUrl = null;
-    _homePhotosUrl = null;
 
     _agreeCare = false;
     _agreeNoAbandon = false;
@@ -1277,15 +1329,22 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                       onPicked: (f) => setState(() => _digitalSignatureFile = f),
                     ),
                   ),*/
-                  _UploadBox(
-                    label: 'Home Photos',
-                    file: _homePhotosFile,
-                    isUploading: _isUploadingHomePhotos,
-                    onTap: () => _pickUploadFile(
-                      onPicked: (f) => setState(() => _homePhotosFile = f),
-                    ),
-                  ),
                 ],
+              ),
+
+              const SizedBox(height: 18),
+
+              // Home Photos — multiple images, not a single fixed slot: add
+              // more afterward, remove any one before submitting, every
+              // selected photo is uploaded and its URL saved (never
+              // overwritten by only the most recent pick).
+              _HomePhotosPicker(
+                existingUrls: _existingHomePhotoUrls,
+                newFiles: _homePhotosFiles,
+                isUploading: _isUploadingHomePhotos,
+                onAdd: _addHomePhotos,
+                onRemoveExisting: (i) => setState(() => _existingHomePhotoUrls.removeAt(i)),
+                onRemoveNew: (i) => setState(() => _homePhotosFiles.removeAt(i)),
               ),
 
               const SizedBox(height: 22),
@@ -1764,6 +1823,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         animalName: widget.animal.name,
         organizationName: 'Loved by the Gapz',
         feeAmount: adoptionFeeAmount,
+        animalPhotoUrl: widget.animal.photoUrl,
       ),
     );
 
@@ -1965,12 +2025,18 @@ class _ReviewPaymentSheet extends StatefulWidget {
   final String animalName;
   final String organizationName;
   final double feeAmount;
+  // The animal's own real photo — kept entirely separate from the
+  // applicant's uploaded Home Photos / documents (different fields,
+  // different widgets); this summary card must never show either of those
+  // instead of the animal itself.
+  final String? animalPhotoUrl;
 
   const _ReviewPaymentSheet({
     required this.adoptionId,
     required this.animalName,
     required this.organizationName,
     required this.feeAmount,
+    this.animalPhotoUrl,
   });
 
   @override
@@ -2034,15 +2100,17 @@ class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
             // Adoption info row
             Row(
               children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: AppColors.tearspwn,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.pets,
-                      size: 26, color: AppColors.textPrimary),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: widget.animalPhotoUrl != null
+                      ? Image.network(
+                          widget.animalPhotoUrl!,
+                          width: 60,
+                          height: 60,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _petThumbPlaceholder(),
+                        )
+                      : _petThumbPlaceholder(),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2247,6 +2315,13 @@ class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
       if (mounted) setState(() => _submitting = false);
     }
   }
+
+  Widget _petThumbPlaceholder() => Container(
+        width: 60,
+        height: 60,
+        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+        child: const Icon(Icons.pets, size: 26, color: AppColors.textPrimary),
+      );
 }
 
 // Terms and Conditions page (Adoption Day)
@@ -2828,6 +2903,107 @@ class _CounterButton extends StatelessWidget {
             color: onTap == null
                 ? AppColors.textPrimary.withOpacity(0.5)
                 : AppColors.textPrimary),
+      ),
+    );
+  }
+}
+
+/// Multi-image Home Photos picker — thumbnails in a wrapping grid, an "add"
+/// tile that always adds to the existing selection (never replaces it),
+/// and a remove button on every thumbnail. Mirrors the existing
+/// existing/newly-picked split `CreateAnimalRecordPage` already uses for
+/// its own multi-image picker, so this isn't a second pattern.
+class _HomePhotosPicker extends StatelessWidget {
+  final List<String> existingUrls;
+  final List<File> newFiles;
+  final bool isUploading;
+  final VoidCallback onAdd;
+  final ValueChanged<int> onRemoveExisting;
+  final ValueChanged<int> onRemoveNew;
+
+  const _HomePhotosPicker({
+    required this.existingUrls,
+    required this.newFiles,
+    required this.isUploading,
+    required this.onAdd,
+    required this.onRemoveExisting,
+    required this.onRemoveNew,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Home Photos', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (var i = 0; i < existingUrls.length; i++)
+              _PhotoThumb(
+                child: Image.network(existingUrls[i], fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
+                onRemove: () => onRemoveExisting(i),
+              ),
+            for (var i = 0; i < newFiles.length; i++)
+              _PhotoThumb(
+                child: Image.file(newFiles[i], fit: BoxFit.cover),
+                onRemove: () => onRemoveNew(i),
+              ),
+            InkWell(
+              onTap: isUploading ? null : onAdd,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  color: AppColors.yellowrspwn.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.greenrspwn.withOpacity(0.6), width: 1.2),
+                ),
+                child: isUploading
+                    ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                    : const Center(child: Icon(Icons.add_a_photo_outlined, size: 24, color: AppColors.greenrspwn)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _PhotoThumb extends StatelessWidget {
+  final Widget child;
+  final VoidCallback onRemove;
+  const _PhotoThumb({required this.child, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 90,
+      height: 90,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(width: 90, height: 90, child: child),
+          ),
+          Positioned(
+            top: -6,
+            right: -6,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                child: const Icon(Icons.close, size: 14, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -4,7 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'animal_record_detail_page.dart';
 import 'create_animal_record_page.dart';
 
@@ -46,18 +48,20 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   final _searchController = TextEditingController();
   _SortOption _sort = _SortOption.recentlyUpdated;
 
-  // Extra filters (spec section 12) — surfaced via the tune icon's sheet
-  // rather than the compact chip row, since the row is already used for
-  // species/status.
+  // Extra filters — surfaced inside the Filter & Sort sheet, along with
+  // _statusFilter (the old standalone "All ▾" dropdown next to the species
+  // chips has been removed — this sheet is now the single filter/sort
+  // entry point, per spec).
   bool? _adoptableOnly;
   bool? _inTreatmentOnly;
   bool? _vaccinatedOnly;
   bool? _hasRescueBackground;
   bool _includeArchived = false;
 
-  final List<String> _statusFilters = [
-    'All', 'Adoptable', 'In Treatment', 'Adopted', 'Deceased', 'Closed'
-  ];
+  // 'Closed' dropped — it never corresponded to any real AnimalRecord field
+  // value (adoptionStatus is only not_ready/adoptable/reserved/adopted/
+  // deceased).
+  static const List<String> _statusFilters = ['All', 'Adoptable', 'In Treatment', 'Adopted', 'Deceased'];
 
   Color _statusColor(String status) {
     switch (status) {
@@ -65,10 +69,17 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       case 'In Treatment':  return AppColors.pinkrspwn;
       case 'Adopted':       return AppColors.lavenderrspwn;
       case 'Deceased':      return AppColors.slaterspwn;
-      case 'Closed':        return AppColors.tearspwn;
       default:              return AppColors.slaterspwn;
     }
   }
+
+  int get _sheetActiveFilterCount =>
+      (_statusFilter != 'All' ? 1 : 0) +
+      (_adoptableOnly == true ? 1 : 0) +
+      (_inTreatmentOnly == true ? 1 : 0) +
+      (_vaccinatedOnly == true ? 1 : 0) +
+      (_hasRescueBackground == true ? 1 : 0) +
+      (_includeArchived ? 1 : 0);
 
   @override
   void dispose() {
@@ -153,81 +164,131 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   Future<void> _openFilterSheet() async {
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.background,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Filter & Sort', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-                const SizedBox(height: 12),
-                Text('Sort by', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: _SortOption.values
-                      .map((s) => ChoiceChip(
-                            label: Text(s.label),
-                            selected: _sort == s,
-                            selectedColor: AppColors.yellowrspwn,
-                            onSelected: (_) => setSheetState(() => _sort = s),
-                          ))
-                      .toList(),
-                ),
-                const SizedBox(height: 16),
-                Text('Filters', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Adoptable only'),
-                  value: _adoptableOnly ?? false,
-                  onChanged: (v) => setSheetState(() => _adoptableOnly = v),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('In treatment only'),
-                  value: _inTreatmentOnly ?? false,
-                  onChanged: (v) => setSheetState(() => _inTreatmentOnly = v),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Vaccinated (on file) only'),
-                  value: _vaccinatedOnly ?? false,
-                  onChanged: (v) => setSheetState(() => _vaccinatedOnly = v),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Has rescue background'),
-                  value: _hasRescueBackground ?? false,
-                  onChanged: (v) => setSheetState(() => _hasRescueBackground = v),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Include archived'),
-                  value: _includeArchived,
-                  onChanged: (v) => setSheetState(() => _includeArchived = v ?? false),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      setState(() {});
-                      Navigator.pop(ctx);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
-                    child: Text('Apply', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+        builder: (ctx, setSheetState) => DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          minChildSize: 0.4,
+          maxChildSize: 0.92,
+          expand: false,
+          builder: (context, scrollController) => SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Filter & Sort', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+                      TextButton(
+                        onPressed: () => setSheetState(() {
+                          _statusFilter = 'All';
+                          _adoptableOnly = null;
+                          _inTreatmentOnly = null;
+                          _vaccinatedOnly = null;
+                          _hasRescueBackground = null;
+                          _includeArchived = false;
+                        }),
+                        child: const Text('Clear'),
+                      ),
+                    ],
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: ListView(
+                      controller: scrollController,
+                      children: [
+                        Text('Sort by', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _SortOption.values
+                              .map((s) => ChoiceChip(
+                                    label: Text(s.label),
+                                    selected: _sort == s,
+                                    selectedColor: AppColors.yellowrspwn,
+                                    onSelected: (_) => setSheetState(() => _sort = s),
+                                  ))
+                              .toList(),
+                        ),
+                        const SizedBox(height: 16),
+                        Text('Status', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _statusFilters
+                              .map((s) => ChoiceChip(
+                                    label: Text(s),
+                                    selected: _statusFilter == s,
+                                    selectedColor: _statusFilter == 'All' ? AppColors.greenrspwn : _statusColor(s),
+                                    onSelected: (_) => setSheetState(() => _statusFilter = s),
+                                  ))
+                              .toList(),
+                        ),
+                        const SizedBox(height: 16),
+                        Text('Filters', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Adoptable only'),
+                          value: _adoptableOnly ?? false,
+                          onChanged: (v) => setSheetState(() => _adoptableOnly = v),
+                        ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('In treatment only'),
+                          value: _inTreatmentOnly ?? false,
+                          onChanged: (v) => setSheetState(() => _inTreatmentOnly = v),
+                        ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Vaccinated (on file) only'),
+                          value: _vaccinatedOnly ?? false,
+                          onChanged: (v) => setSheetState(() => _vaccinatedOnly = v),
+                        ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Has rescue background'),
+                          value: _hasRescueBackground ?? false,
+                          onChanged: (v) => setSheetState(() => _hasRescueBackground = v),
+                        ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Include archived'),
+                          value: _includeArchived,
+                          onChanged: (v) => setSheetState(() => _includeArchived = v ?? false),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {});
+                        Navigator.pop(ctx);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.yellowrspwn,
+                        foregroundColor: AppColors.textPrimary,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      ),
+                      child: Text('Apply', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -242,11 +303,15 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      drawer: const AdminDrawer(),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: AppColors.background),
-          onPressed: () {},
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: AppColors.background),
+            tooltip: 'Menu',
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
         ),
         title: Text('Animal Records',
             style: GoogleFonts.tiltWarp(
@@ -298,15 +363,35 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                 const SizedBox(width: 10),
                 GestureDetector(
                   onTap: _openFilterSheet,
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.yellowrspwn,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.tune,
-                        color: AppColors.textPrimary, size: 20),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppColors.yellowrspwn,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.tune,
+                            color: AppColors.textPrimary, size: 20),
+                      ),
+                      if (_sheetActiveFilterCount > 0)
+                        Positioned(
+                          top: -4,
+                          right: -4,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(color: Color(0xFFE05C5C), shape: BoxShape.circle),
+                            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                            child: Text(
+                              '$_sheetActiveFilterCount',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
@@ -315,12 +400,15 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
 
           const SizedBox(height: 12),
 
-          // Species + Status filters row
+          // Species quick chips — the standalone status dropdown that used
+          // to sit here was removed; status is now one of the Filter & Sort
+          // sheet's own options (see _openFilterSheet), with the badge
+          // above showing how many sheet filters (including status) are
+          // active.
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
-                // Species filter
                 _FilterChip(
                   label: 'Dogs',
                   selected: _speciesFilter == 'Dogs',
@@ -335,61 +423,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   onTap: () => setState(() =>
                   _speciesFilter =
                   _speciesFilter == 'Cats' ? 'All' : 'Cats'),
-                ),
-                const Spacer(),
-                // Status filter dropdown
-                PopupMenuButton<String>(
-                  onSelected: (val) =>
-                      setState(() => _statusFilter = val),
-                  color: AppColors.background,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  itemBuilder: (_) => _statusFilters
-                      .map((s) => PopupMenuItem(
-                    value: s,
-                    child: Row(
-                      children: [
-                        if (s != 'All')
-                          Container(
-                            width: 10,
-                            height: 10,
-                            margin: const EdgeInsets.only(right: 8),
-                            decoration: BoxDecoration(
-                              color: _statusColor(s),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        Text(s,
-                            style: GoogleFonts.zain(
-                                fontSize: 13,
-                                color: AppColors.textPrimary)),
-                      ],
-                    ),
-                  ))
-                      .toList(),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _statusFilter == 'All'
-                          ? AppColors.greenrspwn
-                          : _statusColor(_statusFilter),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_statusFilter,
-                            style: GoogleFonts.zain(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary)),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.arrow_drop_down,
-                            size: 16, color: AppColors.textPrimary),
-                      ],
-                    ),
-                  ),
                 ),
               ],
             ),
@@ -425,8 +458,20 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final a = sorted[index];
-                    return _AnimalCard(
+                    // Cheap, doc-level-only attention signals — no extra
+                    // subcollection watches on the list page (see
+                    // animal_record_repository.dart's streamAllAnimalRecords
+                    // doc comment on why this stays client-side and bounded
+                    // to what's already loaded).
+                    final chips = <CardChip>[
+                      if (!a.vaccinated) const CardChip('Vaccine'),
+                      if (a.currentCaseId != null) const CardChip('In Treatment', color: AppColors.pinkrspwn),
+                      if (a.isReserved) const CardChip('Reserved', color: AppColors.lavenderrspwn),
+                      if (a.archived) const CardChip('Archived', color: AppColors.slaterspwn),
+                    ];
+                    return AnimalRecordCard(
                       animal: a,
+                      extraChips: chips,
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -469,170 +514,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       ),
     );
   }
-}
-
-class _AnimalCard extends StatelessWidget {
-  final AnimalRecord animal;
-  final VoidCallback onTap;
-
-  const _AnimalCard({
-    required this.animal,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // AnimalRecord.fromFirestore already falls back to a minimal record
-    // (rather than throwing) when a document's shape defeats even the safe
-    // per-field parsing helpers — isMalformed flags that here so this one
-    // row renders as an explicit placeholder instead of silently showing
-    // blank/wrong fields.
-    if (animal.isMalformed) {
-      return Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.slaterspwn),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.error_outline, color: AppColors.slaterspwn),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Could not display this record (${animal.id}) — its data may be from an older format.',
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Cheap, doc-level-only attention signals — no extra subcollection
-    // watches on the list page (see animal_record_repository.dart's
-    // streamAllAnimalRecords doc comment on why this stays client-side and
-    // bounded to what's already loaded).
-    final needsAttention = <String>[
-      if (!animal.vaccinated) 'Vaccine',
-      if (animal.currentCaseId != null) 'In Treatment',
-    ];
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 6)
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Photo
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: animal.photoUrls.isNotEmpty
-                  ? Image.network(animal.photoUrls.first,
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _photoPlaceholder())
-                  : _photoPlaceholder(),
-            ),
-
-            const SizedBox(width: 12),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(animal.name.isNotEmpty ? animal.name : animal.species,
-                            style: GoogleFonts.tiltWarp(
-                                fontSize: 15,
-                                color: AppColors.textPrimary)),
-                      ),
-                      Icon(
-                        animal.sex == 'Female' ? Icons.female : Icons.male,
-                        size: 16,
-                        color: AppColors.textSecondary,
-                      ),
-                    ],
-                  ),
-                  Text(animal.breed.isNotEmpty ? animal.breed : animal.species,
-                      style: GoogleFonts.zain(
-                          fontSize: 12, color: AppColors.textSecondary)),
-                  if (animal.age.isNotEmpty)
-                    Text(animal.age,
-                        style: GoogleFonts.zain(
-                            fontSize: 12, color: AppColors.textSecondary)),
-                  Text(animal.description,
-                      style: GoogleFonts.zain(
-                          fontSize: 12, color: AppColors.textSecondary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      for (final t in needsAttention)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.yellowrspwn.withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(t, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
-                        ),
-                      if (animal.isReserved)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.lavenderrspwn,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text('Reserved', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
-                        ),
-                      if (animal.archived)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.slaterspwn,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text('Archived', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _photoPlaceholder() => Container(
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(
-          color: AppColors.tearspwn,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: const Icon(Icons.pets,
-            size: 32, color: AppColors.textSecondary),
-      );
 }
 
 class _FilterChip extends StatelessWidget {
