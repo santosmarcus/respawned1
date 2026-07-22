@@ -16,6 +16,7 @@ import 'collar_tag_data_model.dart';
 import 'collar_tag_form_screen.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'pet_found_chat.dart';
+import 'lost_pet_location_picker.dart';
 
 //  Pet Identification Card Screen
 class CollarIdTagCardScreen extends StatefulWidget {
@@ -547,6 +548,24 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     }
 
     final goingLost = _tag.status != 'lost';
+
+    // Marking a pet lost needs a pin for exactly where it was last seen —
+    // that's what shows up for other users on the Explore Reports map.
+    // Ask for it before touching Firestore so backing out of the picker
+    // leaves the tag's status untouched.
+    PickedLostLocation? lastSeen;
+    if (goingLost) {
+      lastSeen = await Navigator.push<PickedLostLocation>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LastSeenLocationPicker(
+            petName: _tag.name.isNotEmpty ? _tag.name : 'your pet',
+          ),
+        ),
+      );
+      if (lastSeen == null) return; // user backed out of pinning a location
+    }
+
     setState(() => _updatingStatus = true);
     try {
       final tagId = _tag.tagId;
@@ -555,13 +574,41 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       final update = <String, dynamic>{
         'status': goingLost ? 'lost' : 'active',
       };
-      if (!goingLost && _tag.activeRescueSessionId != null) {
-        await FirebaseFirestore.instance
-            .collection('rescueSessions')
-            .doc(_tag.activeRescueSessionId)
-            .set({'status': 'resolved'}, SetOptions(merge: true));
-        update['activeRescueSessionId'] = FieldValue.delete();
-      } else if (goingLost && _tag.activeRescueSessionId != null) {
+      if (goingLost) {
+        update['lastSeenLat'] = lastSeen!.lat;
+        update['lastSeenLng'] = lastSeen.lng;
+        update['lastSeenAddress'] = lastSeen.address;
+        update['lostAt'] = FieldValue.serverTimestamp();
+      } else {
+        // Clear the pin so the pet immediately disappears from the
+        // Explore Reports map once it's found.
+        update['lastSeenLat'] = FieldValue.delete();
+        update['lastSeenLng'] = FieldValue.delete();
+        update['lastSeenAddress'] = FieldValue.delete();
+        update['lostAt'] = FieldValue.delete();
+      }
+
+      // Resolve any rescue session still hanging off this tag — whether
+      // we're marking it found (the normal close-out) or marking it lost
+      // again while an old session never got formally resolved (e.g.
+      // nobody tapped "Mark as Found" last time). Without this, that old
+      // session stays status:'active' in Firestore, and the NEXT scan's
+      // resolveScannedTagId() reuses it instead of starting fresh — since
+      // that old session may already have chatEnabledByOwner:true from the
+      // previous round, the "tap to enable live chat" prompt then never
+      // shows again on subsequent lost/found cycles. Resolving it here
+      // guarantees every new lost cycle gets a brand-new session (with
+      // chatEnabledByOwner reset to false) the next time someone scans.
+      if (_tag.activeRescueSessionId != null) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('rescueSessions')
+              .doc(_tag.activeRescueSessionId)
+              .set({'status': 'resolved'}, SetOptions(merge: true));
+        } catch (_) {
+          // Best-effort cleanup — never block marking the tag lost/found
+          // just because the old session doc couldn't be touched.
+        }
         update['activeRescueSessionId'] = FieldValue.delete();
       }
 
@@ -580,9 +627,20 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
         setState(() {
           _tag.status = goingLost ? 'lost' : 'active';
           _tag.activeRescueSessionId = null;
+          if (goingLost) {
+            _tag.lastSeenLat = lastSeen!.lat;
+            _tag.lastSeenLng = lastSeen.lng;
+            _tag.lastSeenAddress = lastSeen.address;
+            _tag.lostAt = DateTime.now();
+          } else {
+            _tag.lastSeenLat = null;
+            _tag.lastSeenLng = null;
+            _tag.lastSeenAddress = null;
+            _tag.lostAt = null;
+          }
         });
         _showSnack(goingLost
-            ? 'Marked as lost. Your contact info is now visible to anyone who scans the tag.'
+            ? 'Marked as lost. Your contact info is now visible to anyone who scans the tag, and the pin is now on the Explore Reports map.'
             : 'Welcome back! Marked as found.');
       }
     } catch (e) {

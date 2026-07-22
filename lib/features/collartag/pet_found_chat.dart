@@ -67,13 +67,29 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
     try {
       await _sessionRef.set({'status': 'resolved'}, SetOptions(merge: true));
 
-      await FirebaseFirestore.instance
-          .collection('collarTags')
-          .doc(widget.tagId)
-          .set({
+      final tagRef =
+      FirebaseFirestore.instance.collection('collarTags').doc(widget.tagId);
+      final update = <String, dynamic>{
         'status': 'active',
         'activeRescueSessionId': FieldValue.delete(),
-      }, SetOptions(merge: true));
+      };
+      await tagRef.set(update, SetOptions(merge: true));
+
+      // Keep the owner's users/{uid}/collarTags mirror in sync too — this
+      // screen previously only wrote the root collarTags doc, so a pet
+      // resolved from here (rather than the ID card's own toggle) left
+      // the mirrored copy stuck showing status:'lost' forever, which is
+      // what CollarTagsListScreen actually reads from.
+      final tagSnap = await tagRef.get();
+      final ownerId = tagSnap.data()?['ownerId'] as String?;
+      if (ownerId != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(ownerId)
+            .collection('collarTags')
+            .doc(widget.tagId)
+            .set(update, SetOptions(merge: true));
+      }
 
       if (mounted) Navigator.pop(context);
     } catch (e) {

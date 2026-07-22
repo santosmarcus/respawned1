@@ -9,6 +9,7 @@ import 'package:respawnd1/features/generalhome/activity_feed.dart';
 import 'package:respawnd1/features/generalhome/all_activity_page.dart';
 import 'package:respawnd1/features/rescue/all_explore_page.dart';
 import 'explore_reports_map.dart';
+import 'nearby_report.dart';
 import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
@@ -72,142 +73,148 @@ class HomeScreen extends StatelessWidget {
           }
         },
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 16),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 16),
 
-            ExploreReportsMap(
-              onSeeAll: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AllExploreReportsPage()),
-              ),
-            ),
+                ExploreReportsMap(
+                  onSeeAll: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AllExploreReportsPage()),
+                  ),
+                ),
 
-            const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-            // Quick action cards
-            SizedBox(
-              height: 140,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  _QuickActionCard(
-                    label: 'Report a\nRescue',
-                    color: AppColors.lavenderrspwn,
-                    onTap: (){
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const RescuePage(),
+                // Quick action cards
+                SizedBox(
+                  height: 140,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    children: [
+                      _QuickActionCard(
+                        label: 'Report a\nRescue',
+                        color: AppColors.lavenderrspwn,
+                        onTap: (){
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const RescuePage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _QuickActionCard(
+                        label: 'Adopt a\nRescue',
+                        color: AppColors.greenrspwn,
+                        onTap: (){
+                          Navigator.push(context, MaterialPageRoute(
+                            builder: (context) => AdoptionPage(),
+                          ),
+                          );
+                        },
+                      ),
+                      _QuickActionCard(
+                        label: 'Donate or\nSponsor',
+                        color: AppColors.pinkrspwn,
+                        onTap: (){
+                          Navigator.push(context, MaterialPageRoute(
+                            builder: (context) => DonationPage(),
+                          ),
+                          );
+                        },
+                      ),
+                      _QuickActionCard(
+                        label: 'Volunteer',
+                        color: AppColors.yellowrspwn,
+                        onTap: (){
+                          Navigator.push(context, MaterialPageRoute(
+                            builder: (context) => VolunteerPage(),
+                          ),
+                          );
+                        },
+                      ),
+                      _QuickActionCard(
+                        label: 'Organization',
+                        color: AppColors.lavenderrspwn,
+                        onTap: (){
+                          Navigator.push(context, MaterialPageRoute(
+                            builder: (context) => OrganizationsListPage(),
+                          ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Active Cases section
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Activity',
+                        style: GoogleFonts.tiltWarp(fontSize: 16,
+                          fontWeight: FontWeight.normal,
+                          color: AppColors.textPrimary,
                         ),
-                      );
-                    },
-                  ),
-                  _QuickActionCard(
-                    label: 'Adopt a\nRescue',
-                    color: AppColors.greenrspwn,
-                    onTap: (){
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => AdoptionPage(),
                       ),
-                      );
-                    },
-                  ),
-                  _QuickActionCard(
-                    label: 'Donate or\nSponsor',
-                    color: AppColors.pinkrspwn,
-                    onTap: (){
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => DonationPage(),
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const AllActivityPage(),
+                          ),
+                        ),
+                        child: Text(
+                          'See All',
+                          style: GoogleFonts.zain(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
                       ),
-                      );
-                    },
+                    ],
                   ),
-                  _QuickActionCard(
-                    label: 'Volunteer',
-                    color: AppColors.yellowrspwn,
-                    onTap: (){
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => VolunteerPage(),
-                      ),
-                      );
-                    },
-                  ),
-                  _QuickActionCard(
-                    label: 'Organization',
-                    color: AppColors.lavenderrspwn,
-                    onTap: (){
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => OrganizationsListPage(),
-                      ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
+                ),
 
-            const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
-            // Active Cases section
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Activity',
-                    style: GoogleFonts.tiltWarp(fontSize: 16,
+                ActivityFeed(),
+
+                const SizedBox(height: 28),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    'Post Adoption',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
                       fontWeight: FontWeight.normal,
                       color: AppColors.textPrimary,
                     ),
                   ),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AllActivityPage(),
-                      ),
-                    ),
-                    child: Text(
-                      'See All',
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            ActivityFeed(),
-
-            const SizedBox(height: 28),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Post Adoption',
-                style: GoogleFonts.tiltWarp(
-                  fontSize: 16,
-                  fontWeight: FontWeight.normal,
-                  color: AppColors.textPrimary,
                 ),
-              ),
+                const SizedBox(height: 20),
+
+                const PostAdoption(),
+
+                const SizedBox(height: 24)
+              ],
             ),
-            const SizedBox(height: 20),
+          ),
 
-            const PostAdoption(),
-
-            const SizedBox(height: 24)
-          ],
-        ),
+          const NearbyReportBanner(),
+        ],
       ),
     );
   }

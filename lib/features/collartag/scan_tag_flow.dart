@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -19,17 +20,20 @@ class TagScanOutcome {
   final String? tagId;
   final String? sessionId;
   final String? petName;
+  final bool isOwner;
 
   const TagScanOutcome.notFound()
       : tagExists = false,
         tagId = null,
         sessionId = null,
-        petName = null;
+        petName = null,
+        isOwner = false;
 
   const TagScanOutcome.found({
     required this.tagId,
     required this.sessionId,
     required this.petName,
+    required this.isOwner,
   }) : tagExists = true;
 }
 
@@ -52,25 +56,24 @@ Future<TagScanOutcome> resolveScannedTagId(
 
   final tagData = tagSnap.data() as Map<String, dynamic>;
   final petName = tagData['name'] as String? ?? '';
-  final existingSessionId = tagData['activeRescueSessionId'] as String?;
 
-  String? sessionId;
-  if (existingSessionId != null && existingSessionId.isNotEmpty) {
-    final existingSnap = await FirebaseFirestore.instance
-        .collection('rescueSessions')
-        .doc(existingSessionId)
-        .get();
-    final existingStatus = existingSnap.data()?['status'] as String?;
-    if (existingSnap.exists && existingStatus == 'active') {
-      sessionId = existingSessionId;
-    }
-  }
-  sessionId ??= await _createRescueSession(tagId, location: location);
+  // Whoever is scanning gets the owner-side experience (the "tap to
+  // enable live chat" control) only if they're actually signed in as this
+  // tag's owner — otherwise they're a finder and just wait for the owner
+  // to enable chat. Previously this was never checked at all: every scan
+  // was treated as a finder, so an owner scanning their own tag (e.g. to
+  // test the flow, or because they're checking it themselves) would never
+  // see the enable-chat prompt, only ever "Waiting for the owner…".
+  final currentUid = FirebaseAuth.instance.currentUser?.uid;
+  final isOwner = currentUid != null && currentUid == tagData['ownerId'];
+
+  final sessionId = await _getOrCreateRescueSession(tagId, location: location);
 
   return TagScanOutcome.found(
     tagId: tagId,
     sessionId: sessionId,
     petName: petName,
+    isOwner: isOwner,
   );
 }
 
@@ -130,7 +133,7 @@ Future<void> startTagScan(BuildContext context) async {
           tagId: outcome.tagId!,
           sessionId: outcome.sessionId!,
           petName: outcome.petName!,
-          isOwner: false,
+          isOwner: outcome.isOwner,
         ),
       ),
     );
@@ -147,31 +150,37 @@ Future<void> startTagScan(BuildContext context) async {
   }
 }
 
-Future<String> _createRescueSession(
+// Session creation happens server-side via the getOrCreateRescueSession
+// Cloud Function (functions/index.js) instead of a direct client write to
+// rescueSessions/collarTags. The finder scanning a tag is essentially never
+// its owner, so that write previously depended on Firestore rules allowing
+// an authenticated-but-non-owner user to create a rescueSessions doc and
+// merge activeRescueSessionId onto someone else's collarTags document — the
+// exact same category of problem that blocked the fully-anonymous web
+// fallback (index.html) from working at all. Routing both through the same
+// admin-privileged callable removes that dependency entirely, so neither
+// path needs special-cased Firestore rules for this one operation.
+Future<String> _getOrCreateRescueSession(
     String tagId, {
       ScanLocation? location,
     }) async {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-
-  final sessionRef =
-  FirebaseFirestore.instance.collection('rescueSessions').doc();
-  await sessionRef.set({
+  final callable =
+  FirebaseFunctions.instance.httpsCallable('getOrCreateRescueSession');
+  final result = await callable.call(<String, dynamic>{
     'tagId': tagId,
-    'finderId': uid,
-    'status': 'active',
-    'chatEnabledByOwner': false,
-    if (location != null) 'lat': location.lat,
-    if (location != null) 'lng': location.lng,
-    if (location?.address != null) 'address': location!.address,
-    'createdAt': FieldValue.serverTimestamp(),
+    if (location != null)
+      'location': {
+        'lat': location.lat,
+        'lng': location.lng,
+        if (location.address != null) 'address': location.address,
+      },
   });
-
-  await FirebaseFirestore.instance
-      .collection('collarTags')
-      .doc(tagId)
-      .set({'activeRescueSessionId': sessionRef.id}, SetOptions(merge: true));
-
-  return sessionRef.id;
+  final data = Map<String, dynamic>.from(result.data as Map);
+  final sessionId = data['sessionId'] as String?;
+  if (sessionId == null) {
+    throw Exception('Could not start a rescue session for this tag.');
+  }
+  return sessionId;
 }
 
 Future<String?> _reverseGeocode(double lat, double lng) async {

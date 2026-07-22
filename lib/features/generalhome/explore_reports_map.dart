@@ -151,14 +151,12 @@ class ReportMapEntry {
 /// Statuses that mean a report shouldn't show up in the public feed/map.
 const Set<String> kDismissedCaseStatuses = {
   'dismissed',
+  'ended'
   'cancelled',
   'withdrawn',
   'rejected',
 };
 
-/// Shared filter used by both the map and the "See All" list: drop the
-/// current user's own reports, dismissed/cancelled ones, and duplicate
-/// entries from a multi-animal group (only the group's first doc is kept).
 List<ReportMapEntry> extractPublicReports(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
     ) {
@@ -170,6 +168,14 @@ List<ReportMapEntry> extractPublicReports(
     if (data['reporterId'] == currentUserId) continue;
     if (kDismissedCaseStatuses.contains(status)) continue;
 
+
+    final isEndedRescue = status == 'closed' ||
+        status.contains('completed') ||
+        status.contains('ended') ||
+        status == 'merged';
+    if (isEndedRescue) continue;
+    if (data['hiddenFromExplore'] == true) continue;
+
     final groupId = data['groupId'] as String?;
     if (groupId != null && groupId != doc.id) continue;
 
@@ -179,9 +185,6 @@ List<ReportMapEntry> extractPublicReports(
   return out;
 }
 
-/// Full-width map replacing the old "Explore Reports" horizontal list.
-/// Shows every open public report as a color-coded pin and offers a
-/// filter row underneath so people can narrow the map down by report type.
 class ExploreReportsMap extends StatefulWidget {
   final VoidCallback? onSeeAll;
   const ExploreReportsMap({super.key, this.onSeeAll});
@@ -272,14 +275,9 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       _mapController?.animateCamera(CameraUpdate.newLatLng(_initialCamera));
       _saveLastLocation(pos.latitude, pos.longitude);
     } catch (_) {
-      // Silently keep the Pateros fallback — the map still works without it.
+
     }
   }
-
-  // Best-effort — powers the "check in on a nearby report?" nudge, which
-  // needs a rough last-known location per user to find who's nearby a
-  // report that's gone unconfirmed for a while. Never blocks the map on
-  // failure.
   void _saveLastLocation(double lat, double lng) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -293,10 +291,6 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     ).catchError((_) {});
   }
 
-  /// Kicks off (once) building this report's marker icon: an urgency-colored
-  /// ring with the report's photo in the middle. A plain ring appears first
-  /// so the pin shows up immediately, then gets upgraded once the photo
-  /// finishes downloading.
   Future<void> _ensureIconFor(ReportMapEntry r) async {
     if (_iconCache.containsKey(r.caseId) ||
         _iconRequestsInFlight.contains(r.caseId)) {
@@ -330,9 +324,6 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     _iconRequestsInFlight.remove(r.caseId);
   }
 
-  /// Draws a white-gapped ring (colored by urgency) with either the report's
-  /// photo cropped into a circle in the middle, or a plain tinted fill if no
-  /// photo is available yet.
   Future<BitmapDescriptor> _buildRingIcon(Color ringColor, {Uint8List? photoBytes}) async {
     const double size = 112;
     const double ringWidth = 8;
@@ -408,10 +399,6 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                     myLocationButtonEnabled: false,
                     zoomControlsEnabled: false,
                     mapToolbarEnabled: false,
-                    // Without this, a drag that starts on the map is claimed
-                    // by the page's SingleChildScrollView instead of panning
-                    // the map — this is what makes the map "not work" when
-                    // it's embedded in a scrollable Home screen.
                     gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
                       Factory<OneSequenceGestureRecognizer>(
                             () => EagerGestureRecognizer(),

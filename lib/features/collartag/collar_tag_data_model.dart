@@ -28,6 +28,11 @@ class CollarTagData {
   String status;
   String? activeRescueSessionId;
 
+  double? lastSeenLat;
+  double? lastSeenLng;
+  String? lastSeenAddress;
+  DateTime? lostAt;
+
   // Generated / system fields
   String? tagId;        // Firestore document ID
   String? qrCodeUrl;
@@ -59,6 +64,10 @@ class CollarTagData {
     this.ownerFacebookLink = '',
     this.status = 'active',
     this.activeRescueSessionId,
+    this.lastSeenLat,
+    this.lastSeenLng,
+    this.lastSeenAddress,
+    this.lostAt,
     this.tagId,
     this.qrCodeUrl,
     this.createdAt,
@@ -97,15 +106,6 @@ class CollarTagData {
     //   'nfcWrittenAt': Timestamp.fromDate(nfcWrittenAt!),
   };
 
-  // Firestore deserialisation
-
-  // Defensive on purpose: a bad cast here throws inside
-  // CollarTagData.fromFirestore, which CollarTagsListScreen's _listen()
-  // silently swallows per-doc ("skip malformed doc") — so a single
-  // wrongly-typed createdAt doesn't just lose that field, it makes the
-  // *entire tag* vanish from the list with no visible error. Handles a
-  // genuine Timestamp (the normal case), a String (in case an older/other
-  // write path ever stored it differently), or anything else/missing.
   static DateTime? _parseCreatedAt(dynamic value) {
     if (value == null) return null;
     if (value is Timestamp) return value.toDate();
@@ -137,6 +137,10 @@ class CollarTagData {
         ownerFacebookLink: data['ownerFacebookLink'] as String? ?? '',
         status: data['status'] as String? ?? 'active',
         activeRescueSessionId: data['activeRescueSessionId'] as String?,
+        lastSeenLat: (data['lastSeenLat'] as num?)?.toDouble(),
+        lastSeenLng: (data['lastSeenLng'] as num?)?.toDouble(),
+        lastSeenAddress: data['lastSeenAddress'] as String?,
+        lostAt: _parseCreatedAt(data['lostAt']),
         qrCodeUrl: data['qrCodeUrl'] as String?,
         createdAt: _parseCreatedAt(data['createdAt']),
         ownerId: data['ownerId'] as String?,

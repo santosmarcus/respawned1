@@ -14,9 +14,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
+import 'package:respawnd1/core/repos/directions_repository.dart';
+import 'package:respawnd1/core/models/rescue/route_result.dart';
 
-// Same Google Geocoding key used elsewhere in the rescue flow (rescue_page.dart)
-// for turning a lat/lng into a human-readable address.
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
 
@@ -99,9 +99,7 @@ class _TrackCasePageState extends State<TrackCasePage> {
         final isReporter = FirebaseAuth.instance.currentUser?.uid != null &&
             FirebaseAuth.instance.currentUser?.uid == data?['reporterId'];
 
-        // Navigate to completed page when case reaches any final state —
-        // covers 'completed'/'closed' as well as variants like 'Rescue
-        // Completed' or 'Rescue Ended' that other flows may write.
+
         final normalizedStatus = status.toString().toLowerCase();
         final isFinalStatus = normalizedStatus == 'closed' ||
             normalizedStatus.contains('completed') ||
@@ -133,13 +131,26 @@ class _TrackCasePageState extends State<TrackCasePage> {
           ),
           body: Column(
             children: [
-              // The map is always the top element on this page — it shows
-              // the case's pickup pin plus, once a transporter has been
-              // assigned/starts moving, the drop-off pin, live transporter
-              // position, and the route traveled so far.
               SizedBox(
-                height: 200,
-                child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
+                height: 232,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 200,
+                      child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
+                    ),
+                    Positioned(
+                      left: 24,
+                      right: 24,
+                      bottom: 0,
+                      child: _EtaCard(caseId: widget.caseId, data: data ?? {}),
+                    ),
+                  ],
+                ),
               ),
 
               // Bottom panel
@@ -269,11 +280,7 @@ class _TabButton extends StatelessWidget {
   }
 }
 
-// Transit progress map shown to everyone viewing this case — pickup marker,
-// drop-off marker (once assigned), the transporter's live position, and the
-// route actually traveled so far (built from the periodic location pings
-// the transporter's app writes to cases/{caseId}/tracking). Before a
-// transporter is assigned this just shows the reported pickup location.
+
 class _TrackCaseMap extends StatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
@@ -322,9 +329,6 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
           }
         }
 
-        // Current transporter position: latest ping if we have one,
-        // otherwise fall back to the last known lat/lng stored on the
-        // case doc itself.
         final riderPos = trail.isNotEmpty ? trail.last : riderLastKnown;
 
         final center = riderPos ?? pickup ?? dropoff ?? const LatLng(14.5416, 121.0644);
@@ -359,10 +363,6 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
             ),
         };
 
-        // The traveled route: pickup, then every recorded ping in order.
-        // If there's no ping history yet but we do have both endpoints,
-        // fall back to a straight pickup→drop-off line so progress is
-        // still visible from the very start.
         final routePoints = <LatLng>[
           if (pickup != null) pickup,
           ...trail,
@@ -390,6 +390,122 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
               ),
             },
           ),
+        );
+      },
+    );
+  }
+}
+
+class _EtaCard extends StatefulWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _EtaCard({required this.caseId, required this.data});
+
+  @override
+  State<_EtaCard> createState() => _EtaCardState();
+}
+
+class _EtaCardState extends State<_EtaCard> {
+  final _directionsRepository = DirectionsRepository();
+
+  LatLng? _latLngFrom(Map<String, dynamic> data, String latKey, String lngKey) {
+    final lat = data[latKey];
+    final lng = data[lngKey];
+    if (lat is num && lng is num) return LatLng(lat.toDouble(), lng.toDouble());
+    return null;
+  }
+
+  String _formatDuration(Duration d) {
+    final totalMinutes = (d.inSeconds / 60).round();
+    if (totalMinutes < 1) return '<1 min';
+    if (totalMinutes < 60) return '$totalMinutes min';
+    final hours = totalMinutes ~/ 60;
+    final minutes = totalMinutes % 60;
+    return minutes == 0 ? '${hours}h' : '${hours}h ${minutes}m';
+  }
+
+  String _formatDistance(double km) =>
+      km < 10 ? '${km.toStringAsFixed(1)}km' : '${km.round()}km';
+
+  @override
+  Widget build(BuildContext context) {
+    final pickup = _latLngFrom(widget.data, 'lat', 'lng');
+    final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng');
+    final riderLastKnown = _latLngFrom(widget.data, 'riderLastLat', 'riderLastLng');
+    final destination = dropoff ?? pickup;
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .collection('tracking')
+          .orderBy('timestamp')
+          .limitToLast(1)
+          .snapshots(),
+      builder: (context, snapshot) {
+        LatLng? riderPos = riderLastKnown;
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+          final d = snapshot.data!.docs.last.data() as Map<String, dynamic>;
+          final lat = d['lat'];
+          final lng = d['lng'];
+          if (lat is num && lng is num) riderPos = LatLng(lat.toDouble(), lng.toDouble());
+        }
+
+        if (riderPos == null || destination == null) {
+          return const SizedBox.shrink();
+        }
+
+        return FutureBuilder<RouteResult>(
+          future: _directionsRepository.fetchRoute(origin: riderPos, destination: destination),
+          builder: (context, routeSnapshot) {
+            final route = routeSnapshot.data;
+            if (route == null) return const SizedBox.shrink();
+
+            final distanceLabel = _formatDistance(route.distanceKm);
+            final headline = route.duration != null
+                ? '${_formatDuration(route.duration!)}   $distanceLabel away'
+                : '$distanceLabel away';
+
+            return Container(
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.12),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    headline,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  if (route.duration != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Estimated time of arrival',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.zain(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -612,8 +728,7 @@ class _TrackingTabState extends State<_TrackingTab> {
     );
   }
 
-  // Shared header style for the two collapsible sections below — a title
-  // plus a chevron that flips the section's visibility.
+
   Widget _collapsibleHeader({
     required String title,
     required bool expanded,
@@ -1325,9 +1440,7 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
-// Community Report — lets any viewer (reporter included) see a feed of
-// sighting/status updates from the community, and lets them submit one of
-// four quick report types to help verify the case is still accurate.
+
 class _CommunityReportSection extends StatefulWidget {
   final String caseId;
   const _CommunityReportSection({required this.caseId});
@@ -1347,19 +1460,10 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
   final _locationController = TextEditingController();
   final _picker = ImagePicker();
 
-  // Safe, sanctioned support actions a general user can offer without
-  // physically handling the animal — physical handling stays reserved for
-  // verified volunteers/transporters.
-  bool _isWatching = false;
-  bool _canProvideCare = false;
-  bool _someoneElseWatching = false;
-  final _watcherContactController = TextEditingController();
-
   @override
   void dispose() {
     _commentController.dispose();
     _locationController.dispose();
-    _watcherContactController.dispose();
     super.dispose();
   }
 
@@ -1405,10 +1509,6 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
     }
   }
 
-  // Auto-detects the reporter's current GPS location and reverse-geocodes
-  // it into a readable address, so the "Location Found" field for a
-  // moved-animal report is prefilled instead of requiring manual typing.
-  // The field stays editable afterward in case it needs correcting.
   Future<void> _autoDetectLocation() async {
     if (_detectingLocation) return;
     setState(() {
@@ -1483,7 +1583,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
           resolvedAddress = data['results'][0]['formatted_address'];
         }
       } catch (_) {
-        // Keep the coordinate fallback already assigned above.
+
       }
 
       if (mounted) setState(() => _locationController.text = resolvedAddress);
@@ -1544,17 +1644,9 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
         'newAddress':
         _selectedType == 'moved' ? _locationController.text.trim() : null,
         'photoUrl': photoUrl,
-        'isWatching': _isWatching,
-        'canProvideCare': _canProvideCare,
-        'someoneElseWatching': _someoneElseWatching,
-        'watcherContact':
-        _someoneElseWatching ? _watcherContactController.text.trim() : null,
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      // Mirror this into the case's audit trail (same collection staff
-      // actions are logged to) so a community report is part of the
-      // case's official, timestamped record — not just an informal comment.
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
@@ -1566,9 +1658,6 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
         'actorRole': null,
         'details': {
           'type': _selectedType,
-          'isWatching': _isWatching,
-          'canProvideCare': _canProvideCare,
-          'someoneElseWatching': _someoneElseWatching,
         },
         'timestamp': FieldValue.serverTimestamp(),
       });
@@ -1578,13 +1667,9 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
           _selectedType = null;
           _pickedImage = null;
           _expanded = false;
-          _isWatching = false;
-          _canProvideCare = false;
-          _someoneElseWatching = false;
         });
         _commentController.clear();
         _locationController.clear();
-        _watcherContactController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Thanks! Your report has been submitted.'),
@@ -1639,27 +1724,6 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _safeActionSwitch(String label, bool value, ValueChanged<bool> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: GoogleFonts.zain(fontSize: 12.5, color: AppColors.textPrimary),
-            ),
-          ),
-          Switch(
-            value: value,
-            activeColor: AppColors.textPrimary,
-            onChanged: onChanged,
-          ),
-        ],
       ),
     );
   }
@@ -1722,58 +1786,6 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
 
             const SizedBox(height: 14),
 
-            // Safe, sanctioned ways a general user can help right now —
-            // monitoring/support only, never physical handling of the
-            // animal (that stays reserved for verified volunteers).
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'How can you help right now?',
-                style: GoogleFonts.zain(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary),
-              ),
-            ),
-            const SizedBox(height: 4),
-            _safeActionSwitch(
-              "I'm currently keeping watch",
-              _isWatching,
-                  (v) => setState(() => _isWatching = v),
-            ),
-            _safeActionSwitch(
-              'I can safely provide food/water',
-              _canProvideCare,
-                  (v) => setState(() => _canProvideCare = v),
-            ),
-            _safeActionSwitch(
-              'Someone nearby is watching it',
-              _someoneElseWatching,
-                  (v) => setState(() => _someoneElseWatching = v),
-            ),
-            if (_someoneElseWatching) ...[
-              const SizedBox(height: 6),
-              TextField(
-                controller: _watcherContactController,
-                keyboardType: TextInputType.phone,
-                style: GoogleFonts.zain(fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: "Watcher's contact number (optional)",
-                  hintStyle: GoogleFonts.zain(
-                      fontSize: 12, color: AppColors.textSecondary),
-                  contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: AppColors.slaterspwn),
-                  ),
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 10),
             if (_selectedType == 'moved') ...[
               Align(
                 alignment: Alignment.centerLeft,
@@ -1912,31 +1924,6 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
     return '${months[d.month]} ${d.day}, ${d.year}';
   }
 
-  Widget _safeActionBadge(String label, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.greenrspwn.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: AppColors.greenrspwn),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _reportTile(Map<String, dynamic> r) {
     final ts = r['timestamp'] as Timestamp?;
     final date = ts?.toDate();
@@ -2016,24 +2003,6 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
                     child: Text(comment,
                         style: GoogleFonts.zain(
                             fontSize: 14, color: AppColors.textSecondary)),
-                  ),
-                if (r['isWatching'] == true ||
-                    r['canProvideCare'] == true ||
-                    r['someoneElseWatching'] == true)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        if (r['isWatching'] == true)
-                          _safeActionBadge('Keeping watch', Icons.visibility_outlined),
-                        if (r['canProvideCare'] == true)
-                          _safeActionBadge('Providing food/water', Icons.water_drop_outlined),
-                        if (r['someoneElseWatching'] == true)
-                          _safeActionBadge('Someone watching', Icons.groups_outlined),
-                      ],
-                    ),
                   ),
               ],
             ),

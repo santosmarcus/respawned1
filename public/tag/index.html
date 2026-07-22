@@ -129,6 +129,7 @@
 <!-- Firebase (compat) SDKs — client-side, no auth required for finders -->
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-functions-compat.js"></script>
 <script>
     const firebaseConfig = {
       apiKey: "AIzaSyCJcdSf3qyq9C-JRByBWxxnyE6Kp37XLtE",
@@ -140,6 +141,13 @@
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
+    // Session creation and message sending go through callables (below)
+    // instead of direct Firestore writes — this page has no signed-in
+    // user, so any direct write would need Firestore rules open to
+    // anonymous callers. Reads/listening stay direct Firestore calls.
+    const functions = firebase.functions();
+    const getOrCreateRescueSessionFn = functions.httpsCallable('getOrCreateRescueSession');
+    const sendRescueSessionMessageFn = functions.httpsCallable('sendRescueSessionMessage');
 
     function tagIdFromPath() {
       const parts = window.location.pathname.split("/").filter(Boolean);
@@ -187,11 +195,10 @@
           const text = input.value.trim();
           if (!text) return;
           input.value = "";
-          sessionRef.collection("messages").add({
-            sender: "finder",
-            text,
-            sentAt: firebase.firestore.FieldValue.serverTimestamp(),
-          }).catch(() => {});
+          sendRescueSessionMessageFn({sessionId, sender: "finder", text}).catch((e) => {
+            console.error("ResPAWnd: could not send message", e);
+            input.value = text; // let them retry instead of silently losing it
+          });
         };
         input.onkeydown = (e) => { if (e.key === "Enter") sendBtn.click(); };
       }
@@ -222,43 +229,33 @@
       });
     }
 
-    async function createSession(tagId, tag) {
-      const loc = await getLocation();
-      const expiresAt = firebase.firestore.Timestamp.fromDate(
-        new Date(Date.now() + 24 * 60 * 60 * 1000)
-      );
-      const sessionRef = db.collection("rescueSessions").doc();
-      await sessionRef.set({
-        tagId,
-        ownerId: tag.ownerId,
-        status: "open",
-        chatEnabledByOwner: false,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        expiresAt,
-        lat: loc ? loc.lat : null,
-        lng: loc ? loc.lng : null,
-      });
-      await db.collection("collarTags").doc(tagId).set(
-        { activeRescueSessionId: sessionRef.id },
-        { merge: true }
-      );
-      return sessionRef;
-    }
-
+    // Session creation happens server-side (see getOrCreateRescueSession in
+    // functions/index.js) instead of writing rescueSessions/collarTags
+    // directly from here — this page has no signed-in user at all, so a
+    // direct client write depends on Firestore rules allowing anonymous
+    // writes to those collections. Rather than opening that up (anyone who
+    // knows a tag ID — visible right in the QR-code URL — could otherwise
+    // write to it), the callable does this under admin privileges and
+    // hands back just the session ID. Reading/listening to that session
+    // afterward is still a plain Firestore read, unaffected by this.
     async function getOrCreateSession(tagId, tag) {
-      if (tag.activeRescueSessionId) {
-        const existing = await db.collection("rescueSessions").doc(tag.activeRescueSessionId).get();
-        if (existing.exists) {
-          const d = existing.data();
-          const stillOpen = d.status === "open" && d.expiresAt.toMillis() > Date.now();
-          if (stillOpen) return existing.ref;
-        }
-        return null;
-      }
       try {
-        return await createSession(tagId, tag);
+        const loc = await getLocation();
+        const result = await getOrCreateRescueSessionFn({
+          tagId,
+          location: loc ? {lat: loc.lat, lng: loc.lng} : null,
+        });
+        const sessionId = result && result.data && result.data.sessionId;
+        if (!sessionId) return null;
+        return db.collection("rescueSessions").doc(sessionId);
       } catch (e) {
-        return null; // e.g. another visitor's session creation raced ahead of us
+        // Most likely cause here is the callable itself rejecting the
+        // request (tag not found, or qrEnabled still false) rather than a
+        // permissions issue, since this call no longer depends on
+        // Firestore security rules for writes at all.
+        console.error("ResPAWnd: could not create/reuse a rescue session via the callable.", e);
+        window.__resPawndSessionError = e;
+        return null;
       }
     }
 
@@ -321,7 +318,11 @@
 
         ${ownerSection}
 
-        ${sessionRef ? chatSectionHtml({ chatEnabledByOwner: false }) : ""}
+        ${sessionRef
+          ? chatSectionHtml({ chatEnabledByOwner: false })
+          : (window.__resPawndSessionError
+              ? `<div class="chat-waiting">Live chat couldn't be started right now. Please try again shortly.</div>`
+              : "")}
 
         ${callBtn}
         <a class="cta secondary" href="https://play.google.com/store/apps" target="_blank" rel="noopener">Get the ResPAWnd app</a>
