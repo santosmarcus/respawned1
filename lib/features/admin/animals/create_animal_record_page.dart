@@ -25,6 +25,24 @@ class CreateAnimalRecordPage extends StatefulWidget {
   final int? stepCurrent;
   final int? stepTotal;
 
+  /// Edit mode — set both to reuse this same form for the Animal Record
+  /// header's "Edit Profile" action instead of building a second form.
+  /// When set, every field initializes from [existingData] (not
+  /// [prefillData]), Save updates that doc in place instead of creating a
+  /// new one, and the receipt-gating/duplicate-prevention checks that only
+  /// make sense for a brand-new rescue-linked record are skipped.
+  final String? existingAnimalId;
+  final Map<String, dynamic>? existingData;
+
+  /// True (default) when this page owns its own Navigator route — Save
+  /// pops it on success, same as it always has. AnimalRecordsFlowPage sets
+  /// this to false: it embeds this widget directly in its own build() (not
+  /// via Navigator.push), and drives which animal is shown via its own
+  /// reactive rebuild off completedAnimalRecordIndexesProvider — a pop from
+  /// in here would close the whole flow after Animal 1 instead of letting
+  /// it advance to Animal 2/3 in place.
+  final bool popOnSuccess;
+
   const CreateAnimalRecordPage({
     super.key,
     this.prefillData,
@@ -32,7 +50,12 @@ class CreateAnimalRecordPage extends StatefulWidget {
     this.sourceAnimalIndex,
     this.stepCurrent,
     this.stepTotal,
+    this.existingAnimalId,
+    this.existingData,
+    this.popOnSuccess = true,
   });
+
+  bool get isEditing => existingAnimalId != null;
 
   @override
   State<CreateAnimalRecordPage> createState() =>
@@ -44,6 +67,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // requires at least one, so this never blocks submission.
   final _picker = ImagePicker();
   final List<XFile> _pickedImages = [];
+  // Edit mode only — already-uploaded photos, individually removable;
+  // newly picked images are uploaded and appended alongside whatever
+  // remains of this list on Save.
+  late List<String> _existingPhotoUrls =
+      List<String>.from(widget.existingData?['photoUrls'] ?? const []);
   bool _isUploadingImages = false;
   String? _imageError;
 
@@ -102,6 +130,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   };
 
   String get _saveButtonLabel {
+    if (widget.isEditing) return 'Save Changes';
     if (widget.stepCurrent == null || widget.stepTotal == null) return 'Create Record';
     return widget.stepCurrent! >= widget.stepTotal! ? 'Finish' : 'Save and Continue';
   }
@@ -119,7 +148,47 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   @override
   void initState() {
     super.initState();
-    _prefill();
+    if (widget.isEditing) {
+      _prefillFromExisting();
+    } else {
+      _prefill();
+    }
+  }
+
+  /// Edit mode — every field starts from the record's own saved values
+  /// (never the original report; that prefill only applies to brand-new
+  /// records).
+  void _prefillFromExisting() {
+    final d = widget.existingData!;
+    _nameController.text = d['name'] as String? ?? '';
+    _ageController.text = d['age'] as String? ?? '';
+    _descriptionController.text = d['description'] as String? ?? '';
+    _tagsController.text = List<String>.from(d['tags'] ?? const []).join(', ');
+    _selectedSpecies = (d['species'] as String?)?.isNotEmpty == true ? d['species'] as String : null;
+    _selectedBreed = (d['breed'] as String?)?.isNotEmpty == true ? d['breed'] as String : null;
+    _selectedSex = (d['sex'] as String?)?.isNotEmpty == true ? d['sex'] as String : null;
+    _selectedSize = (d['size'] as String?)?.isNotEmpty == true ? d['size'] as String : null;
+    _selectedCoatLength = (d['coatLength'] as String?)?.isNotEmpty == true ? d['coatLength'] as String : null;
+    _isAdoptable = d['adoptionStatus'] == 'adoptable';
+    _vaccinated = d['vaccinated'] as bool? ?? false;
+    _spayedNeutered = d['spayedNeutered'] as bool? ?? false;
+    _dewormed = d['dewormed'] as bool? ?? false;
+
+    final chars = List<String>.from(d['keyCharacteristics'] ?? const []);
+    for (final key in _temperament.keys) {
+      if (chars.contains(key)) _temperament[key] = true;
+    }
+    for (final key in _compatibility.keys) {
+      if (chars.contains(key)) _compatibility[key] = true;
+    }
+    for (final key in _training.keys) {
+      if (chars.contains(key)) _training[key] = true;
+    }
+
+    final background = List<String>.from(d['rescueBackground'] ?? const []);
+    for (final key in _rescueBackground.keys) {
+      if (background.contains(key)) _rescueBackground[key] = true;
+    }
   }
 
   /// Prefills whatever the source rescue report/case already captured.
@@ -257,8 +326,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       // Details button) against live Firestore state, so this can't be
       // bypassed by reaching this page through another path. See
       // RescueCaseRepository.confirmAnimalReceived, whose write to
-      // `intakeReceivedAt` is what unlocks this.
-      if (widget.linkedCaseId != null) {
+      // `intakeReceivedAt` is what unlocks this. Doesn't apply when
+      // editing an already-existing record.
+      if (!widget.isEditing && widget.linkedCaseId != null) {
         final caseSnap = await FirebaseFirestore.instance.collection('cases').doc(widget.linkedCaseId).get();
         if (caseSnap.data()?['intakeReceivedAt'] == null) {
           if (mounted) {
@@ -277,8 +347,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       // Duplicate-prevention: re-check against live Firestore state right
       // before writing, not just the flow page's snapshot from when it was
       // opened — guards the "user taps Confirm repeatedly" / two flow
-      // instances open at once edge cases.
-      if (widget.linkedCaseId != null && widget.sourceAnimalIndex != null) {
+      // instances open at once edge cases. Doesn't apply when editing.
+      if (!widget.isEditing && widget.linkedCaseId != null && widget.sourceAnimalIndex != null) {
         final existing = await FirebaseFirestore.instance
             .collection('animals')
             .where('linkedCaseId', isEqualTo: widget.linkedCaseId)
@@ -296,10 +366,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
       final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-      // Pre-allocated so image Storage paths can be scoped under this
-      // record's own id (animalRecords/{id}/images/...) before the
-      // document itself is written.
-      final docRef = FirebaseFirestore.instance.collection('animals').doc();
+      // Pre-allocated (new records only) so image Storage paths can be
+      // scoped under this record's own id (animalRecords/{id}/images/...)
+      // before the document itself is written. Editing reuses the
+      // existing id instead.
+      final docRef = widget.isEditing
+          ? FirebaseFirestore.instance.collection('animals').doc(widget.existingAnimalId)
+          : FirebaseFirestore.instance.collection('animals').doc();
 
       final uploadedUrls = <String>[];
       if (_pickedImages.isNotEmpty) {
@@ -308,12 +381,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           for (var i = 0; i < _pickedImages.length; i++) {
             final file = _pickedImages[i];
             final ext = file.path.contains('.') ? file.path.split('.').last : 'jpg';
-            final url = await _uploadImage(file, 'animalRecords/${docRef.id}/images/$i.$ext');
+            final filename = '${DateTime.now().millisecondsSinceEpoch}_$i.$ext';
+            final url = await _uploadImage(file, 'animalRecords/${docRef.id}/images/$filename');
             uploadedUrls.add(url);
           }
         } catch (e) {
-          // Never create the record with a partially-uploaded image set —
-          // keep the picked images in the form so Save can be retried.
+          // Never save with a partially-uploaded image set — keep the
+          // picked images in the form so Save can be retried.
           if (mounted) {
             setState(() {
               _isLoading = false;
@@ -348,9 +422,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       if (_spayedNeutered) health.add('Spayed/Neutered');
       if (_dewormed) health.add('Dewormed');
 
-      final fallbackPhotoUrl = widget.prefillData?['photoUrl'] as String?;
-
-      await docRef.set({
+      final sharedFields = {
         'name': _nameController.text.trim(),
         'age': _ageController.text.trim(),
         'species': _selectedSpecies,
@@ -367,32 +439,49 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'rescueBackground': selectedBackground,
         'tags': tags,
         'adoptionStatus': _isAdoptable ? 'adoptable' : 'not_ready',
-        'status': 'intake',
-        'linkedCaseId': widget.linkedCaseId ?? '',
-        if (widget.sourceAnimalIndex != null) 'sourceAnimalIndex': widget.sourceAnimalIndex,
-        'rescuedBy': widget.prefillData?['rescuedBy'] ?? 'Loved by the Gapz',
-        'intakeStaffId': uid,
-        'photoUrls': uploadedUrls.isNotEmpty ? uploadedUrls : (fallbackPhotoUrl != null ? [fallbackPhotoUrl] : []),
-        'treatmentLog': [],
-        'createdAt': FieldValue.serverTimestamp(),
-        // prefilled from intake/the source rescue report if available
-        if (widget.prefillData != null) ...{
-          'vetClinicName': widget.prefillData!['vetClinicName'] ?? '',
-          'intakeNotes': widget.prefillData!['intakeNotes'] ?? '',
-          'reporterName': widget.prefillData!['reporterName'] ?? '',
-          'transporterName': widget.prefillData!['transporterName'] ?? '',
-          if (widget.prefillData!['rescueDate'] is Timestamp) 'rescueDate': widget.prefillData!['rescueDate'],
-        }
-      });
+      };
+
+      if (widget.isEditing) {
+        await docRef.update({
+          ...sharedFields,
+          'photoUrls': [..._existingPhotoUrls, ...uploadedUrls],
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        final fallbackPhotoUrl = widget.prefillData?['photoUrl'] as String?;
+        await docRef.set({
+          ...sharedFields,
+          'status': 'intake',
+          'linkedCaseId': widget.linkedCaseId ?? '',
+          if (widget.sourceAnimalIndex != null) 'sourceAnimalIndex': widget.sourceAnimalIndex,
+          'rescuedBy': widget.prefillData?['rescuedBy'] ?? 'Loved by the Gapz',
+          'intakeStaffId': uid,
+          'photoUrls': uploadedUrls.isNotEmpty ? uploadedUrls : (fallbackPhotoUrl != null ? [fallbackPhotoUrl] : []),
+          'treatmentLog': [],
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+          // prefilled from intake/the source rescue report if available
+          if (widget.prefillData != null) ...{
+            'vetClinicName': widget.prefillData!['vetClinicName'] ?? '',
+            'intakeNotes': widget.prefillData!['intakeNotes'] ?? '',
+            'reporterName': widget.prefillData!['reporterName'] ?? '',
+            'transporterName': widget.prefillData!['transporterName'] ?? '',
+            if (widget.prefillData!['rescueDate'] is Timestamp) 'rescueDate': widget.prefillData!['rescueDate'],
+          }
+        });
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Animal record created!'),
+          SnackBar(
+            content: Text(widget.isEditing ? 'Profile updated!' : 'Animal record created!'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context);
+        // See widget.popOnSuccess's doc comment — AnimalRecordsFlowPage
+        // stays on screen and reactively advances to the next animal
+        // itself instead of this page popping the whole flow.
+        if (widget.popOnSuccess) Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
@@ -418,15 +507,16 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           icon: const Icon(Icons.arrow_back, color: AppColors.background),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Animal Records',
+        title: Text(widget.isEditing ? 'Edit Profile' : 'Animal Records',
             style: GoogleFonts.tiltWarp(
                 fontSize: 18, color: AppColors.background)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined,
-                color: AppColors.background),
-            onPressed: () {},
-          ),
+          if (!widget.isEditing)
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined,
+                  color: AppColors.background),
+              onPressed: () {},
+            ),
         ],
       ),
       body: SingleChildScrollView(
@@ -436,9 +526,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           children: [
             Center(
               child: Text(
-                  widget.stepCurrent != null && widget.stepTotal != null
-                      ? 'Create Animal Record'
-                      : 'Create New Record',
+                  widget.isEditing
+                      ? 'Edit Profile'
+                      : (widget.stepCurrent != null && widget.stepTotal != null
+                          ? 'Create Animal Record'
+                          : 'Create New Record'),
                   style: GoogleFonts.tiltWarp(
                       fontSize: 20, color: AppColors.textPrimary)),
             ),
@@ -459,6 +551,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               spacing: 10,
               runSpacing: 10,
               children: [
+                for (var i = 0; i < _existingPhotoUrls.length; i++)
+                  _ExistingImageThumb(
+                    url: _existingPhotoUrls[i],
+                    onRemove: _isLoading ? null : () => setState(() => _existingPhotoUrls.removeAt(i)),
+                  ),
                 for (var i = 0; i < _pickedImages.length; i++)
                   _PickedImageThumb(file: _pickedImages[i], onRemove: _isLoading ? null : () => _removeImage(i)),
                 GestureDetector(
@@ -771,8 +868,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 // Reusable widgets
 class _FieldLabel extends StatelessWidget {
   final String label;
-  final bool required;
-  const _FieldLabel(this.label, {this.required = false});
+  const _FieldLabel(this.label);
 
   @override
   Widget build(BuildContext context) => Row(
@@ -782,9 +878,6 @@ class _FieldLabel extends StatelessWidget {
               fontSize: 14,
               fontWeight: FontWeight.w600,
               color: AppColors.textPrimary)),
-      if (required)
-        const Text(' *',
-            style: TextStyle(color: Colors.red, fontSize: 14)),
     ],
   );
 }
@@ -927,6 +1020,50 @@ class _SpeciesCheck extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _ExistingImageThumb extends StatelessWidget {
+  final String url;
+  final VoidCallback? onRemove;
+  const _ExistingImageThumb({required this.url, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 80,
+      height: 80,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(url,
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                    width: 80,
+                    height: 80,
+                    color: AppColors.tearspwn,
+                    child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary))),
+          ),
+          if (onRemove != null)
+            Positioned(
+              top: -6,
+              right: -6,
+              child: GestureDetector(
+                onTap: onRemove,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _PickedImageThumb extends StatelessWidget {

@@ -1,0 +1,223 @@
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
+import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
+
+const String _kNA = 'Not provided';
+
+// Mirrors CreateAnimalRecordPage's three characteristic groups exactly —
+// keyCharacteristics is one flat array in Firestore (see that form's own
+// comment on why), so displaying it back out in the same three labeled
+// groups means re-partitioning by the same key sets here.
+const List<String> _kTemperamentKeys = ['Friendly', 'Shy', 'Playful', 'Calm'];
+const List<String> _kCompatibilityKeys = ['Good with children', 'Good with other pets', 'First-time owner friendly'];
+const List<String> _kTrainingKeys = ['Leash trained', 'Crate trained', 'Potty trained', 'Knows commands'];
+
+class AnimalProfileTab extends StatelessWidget {
+  final AnimalRecord animal;
+  const AnimalProfileTab({super.key, required this.animal});
+
+  String _orNA(String v) => v.isEmpty ? _kNA : v;
+
+  @override
+  Widget build(BuildContext context) {
+    final temperament = animal.keyCharacteristics.where(_kTemperamentKeys.contains).toList();
+    final compatibility = animal.keyCharacteristics.where(_kCompatibilityKeys.contains).toList();
+    final training = animal.keyCharacteristics.where(_kTrainingKeys.contains).toList();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: _InfoItem('Age', _orNA(animal.age))),
+              Expanded(child: _InfoItem('Size', _orNA(animal.size))),
+            ],
+          ),
+          Row(
+            children: [
+              Expanded(child: _InfoItem('Coat Length', _orNA(animal.coatLength))),
+              Expanded(child: _InfoItem('Sex', _orNA(animal.sex))),
+            ],
+          ),
+          Row(
+            children: [
+              Expanded(child: _InfoItem('Breed', _orNA(animal.breed))),
+              // No dedicated color/markings field yet — that text is folded
+              // into Description at intake time (see
+              // create_animal_record_page.dart's _prefill), so this is
+              // honestly "not provided" as its own field rather than
+              // guessed out of free text.
+              const Expanded(child: _InfoItem('Color / Markings', _kNA)),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+          _SectionLabel('Temperament'),
+          const SizedBox(height: 6),
+          _ChipsOrNA(items: temperament),
+
+          const SizedBox(height: 16),
+          _SectionLabel('Compatibility'),
+          const SizedBox(height: 6),
+          _ChipsOrNA(items: compatibility),
+
+          const SizedBox(height: 16),
+          _SectionLabel('Training'),
+          const SizedBox(height: 6),
+          _ChipsOrNA(items: training),
+
+          const SizedBox(height: 16),
+          _SectionLabel('Rescue Background'),
+          const SizedBox(height: 6),
+          _ChipsOrNA(items: animal.rescueBackground),
+
+          const SizedBox(height: 16),
+          _SectionLabel('Description'),
+          const SizedBox(height: 6),
+          Text(_orNA(animal.description), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary, height: 1.4)),
+
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(child: _InfoItem('Rescued By', _orNA(animal.rescuedBy))),
+              Expanded(child: _InfoItem('Adoptable', animal.isAdoptable ? 'Yes' : 'No')),
+            ],
+          ),
+          if (animal.isReserved || animal.isAdopted)
+            _InfoItem(
+              animal.isAdopted ? 'Adopted' : 'Reserved',
+              animal.isAdopted
+                  ? (animal.adoptedAt != null ? '${animal.adoptedAt!.month}/${animal.adoptedAt!.day}/${animal.adoptedAt!.year}' : 'Yes')
+                  : 'Reserved · application #${animal.reservedApplicationId?.substring(0, 6) ?? ''}',
+            ),
+
+          if (animal.hasSourceCase) ...[
+            const SizedBox(height: 8),
+            _SectionLabel('Source Rescue Case'),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => RescueDetailPage(caseId: animal.linkedCaseId, data: const {})),
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.description_outlined, color: AppColors.textPrimary, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text('#${shortCaseId(animal.linkedCaseId)} — view rescue record',
+                          style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    ),
+                    const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 16),
+          _SectionLabel('Tags'),
+          const SizedBox(height: 6),
+          _ChipsOrNA(items: animal.tags),
+
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AdoptionApplicationReviewPage(
+                        animalId: animal.id,
+                        animalName: animal.name.isNotEmpty ? animal.name : animal.species,
+                      ),
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.textPrimary),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  ),
+                  child: Text('View Applications', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {},
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.textPrimary),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  ),
+                  child: Text('View Donations', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String label;
+  const _SectionLabel(this.label);
+  @override
+  Widget build(BuildContext context) =>
+      Text(label, style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary));
+}
+
+class _InfoItem extends StatelessWidget {
+  final String label;
+  final String value;
+  const _InfoItem(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          Text(value, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChipsOrNA extends StatelessWidget {
+  final List<String> items;
+  const _ChipsOrNA({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Text(_kNA, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: items
+          .map((label) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(20)),
+                child: Text(label, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              ))
+          .toList(),
+    );
+  }
+}

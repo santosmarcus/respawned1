@@ -12,6 +12,8 @@ import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
+import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/core/models/adoption/return_request.dart';
 
 enum _NotifKind { rescue, adoption }
 
@@ -51,6 +53,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   final Map<String, StreamSubscription<QuerySnapshot>> _messageSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _communityReportSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _checkinSubs = {};
+  final Map<String, StreamSubscription<QuerySnapshot>> _followUpSubs = {};
 
   List<_NotifItem> _caseStatusItems = [];
   List<_NotifItem> _adoptionStatusItems = [];
@@ -59,10 +62,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   final Map<String, List<_NotifItem>> _checkinItemsByAdoption = {};
   final Map<String, _NotifItem?> _dueItemsByAdoption = {};
 
-  final Map<String, String> _adoptionStatusById = {};
-  final Map<String, DateTime?> _adoptionDateById = {};
   final Map<String, String> _adoptionLabelById = {};
-  final Map<String, Set<String>> _submittedCheckinIds = {};
 
   DateTime? _lastSeenAt;
   Set<String> _dismissedIds = {};
@@ -234,13 +234,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (mounted) setState(() => _messageItemsByCase[caseId] = items);
   }
 
+  // Exact-match messages (fixed text, no variable content).
   static const Map<String, String> _notifiableAdoptionMessages = {
     'Appointment booked.': 'Application Review',
     'Application approved. Appointment confirmed.': 'Time to Meet',
     'Adoption Completed!': 'Adoption Day',
+    'Animal released — adoption completed.': 'Adoption Day',
     'Return request approved.': 'Return Approved',
+    'Return approved.': 'Return Approved',
+    'Retrieval scheduled.': 'Return Pickup Scheduled',
+    'Post-adoption monitoring completed.': 'Post-Adoption',
   };
-  static const _monitoredStatuses = {'completed', 'return_requested'};
+  // Prefix-match messages whose text carries variable content (a reason, an
+  // actor name, ...) — checked in order after the exact-match map misses.
+  static const Map<String, String> _notifiableAdoptionMessagePrefixes = {
+    'Return declined': 'Return Declined',
+    'Follow-up reminder sent': 'Post-Adoption Reminder',
+    'A follow-up was rescheduled': 'Post-Adoption',
+  };
+
+  String? _classifyAdoptionStatusType(String message) {
+    final exact = _notifiableAdoptionMessages[message];
+    if (exact != null) return exact;
+    for (final entry in _notifiableAdoptionMessagePrefixes.entries) {
+      if (message.startsWith(entry.key)) return entry.value;
+    }
+    return null;
+  }
 
   void _onAdoptionsUpdate(QuerySnapshot snap) {
     final items = <_NotifItem>[];
@@ -250,7 +270,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       final personal = (data['personal'] as Map?) ?? {};
       final animalName = personal['animalName'] as String? ?? 'Pet';
       final label = 'Adoption - $animalName';
-      final status = data['status'] as String? ?? '';
       final history = (data['statusHistory'] as List?)?.cast<Map>() ?? [];
 
       for (final h in history) {
@@ -258,7 +277,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         if (ts is! Timestamp) continue;
 
         final statusMessage = h['status'] as String? ?? '';
-        final notifType = _notifiableAdoptionMessages[statusMessage];
+        final notifType = _classifyAdoptionStatusType(statusMessage);
         if (notifType == null) continue;
 
         items.add(_NotifItem(
@@ -272,8 +291,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       }
 
       _adoptionLabelById[doc.id] = label;
-      _adoptionStatusById[doc.id] = status;
-      _adoptionDateById[doc.id] = extractAdoptionCompletedDate(data);
 
       if (!_checkinSubs.containsKey(doc.id)) {
         _checkinSubs[doc.id] = FirebaseFirestore.instance
@@ -284,7 +301,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             .listen((checkinSnap) => _onCheckinsUpdate(doc.id, checkinSnap));
       }
 
-      _recomputeDueReminder(doc.id);
+      // Due-reminder computation now reads the admin-generated `followUps`
+      // subcollection directly (see AdoptionApplicationRepository.
+      // releaseWithFollowUps) instead of a fixed buildCheckinSchedule — an
+      // adoption with no follow-ups planned, or whose monitoring is already
+      // marked complete, naturally has no open/undue followUps doc, so no
+      // extra status check is needed here.
+      if (!_followUpSubs.containsKey(doc.id)) {
+        _followUpSubs[doc.id] = FirebaseFirestore.instance
+            .collection('adoptions')
+            .doc(doc.id)
+            .collection('followUps')
+            .snapshots()
+            .listen((followUpSnap) => _onFollowUpsUpdate(doc.id, followUpSnap));
+      }
     }
 
     if (mounted) setState(() => _adoptionStatusItems = items);
@@ -292,12 +322,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   void _onCheckinsUpdate(String adoptionId, QuerySnapshot snap) {
     final label = _adoptionLabelById[adoptionId] ?? 'Adoption';
-    final submittedIds = <String>{};
     final items = <_NotifItem>[];
 
     for (final doc in snap.docs) {
-      submittedIds.add(doc.id);
-
       final data = doc.data() as Map<String, dynamic>;
       final ts = data['submittedAt'];
       if (ts is! Timestamp) continue;
@@ -313,44 +340,38 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ));
     }
 
-    _submittedCheckinIds[adoptionId] = submittedIds;
     if (mounted) {
       setState(() => _checkinItemsByAdoption[adoptionId] = items);
     }
-    _recomputeDueReminder(adoptionId);
   }
 
-  void _recomputeDueReminder(String adoptionId) {
-    final status = _adoptionStatusById[adoptionId];
-    final adoptedDate = _adoptionDateById[adoptionId];
+  void _onFollowUpsUpdate(String adoptionId, QuerySnapshot snap) {
     final label = _adoptionLabelById[adoptionId] ?? 'Adoption';
-
-    if (status == null ||
-        !_monitoredStatuses.contains(status) ||
-        adoptedDate == null) {
-      if (mounted) setState(() => _dueItemsByAdoption[adoptionId] = null);
-      return;
-    }
-
-    final submitted = _submittedCheckinIds[adoptionId] ?? {};
-    final schedule = buildCheckinSchedule(adoptedDate);
     final now = DateTime.now();
 
-    Checkpoint? due;
-    for (final c in schedule) {
-      if (!submitted.contains(c.id) && !c.dueDate.isAfter(now)) {
-        due = c;
-        break;
+    DateTime? dueDate;
+    int? dueSequence;
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final status = data['status'] as String? ?? 'scheduled';
+      if (status == 'completed' || status == 'cancelled' || data['submittedAt'] != null) continue;
+      final scheduledTs = data['scheduledDate'];
+      if (scheduledTs is! Timestamp) continue;
+      final scheduled = scheduledTs.toDate();
+      if (scheduled.isAfter(now)) continue;
+      if (dueDate == null || scheduled.isBefore(dueDate)) {
+        dueDate = scheduled;
+        dueSequence = (data['sequenceNumber'] as num?)?.toInt();
       }
     }
 
-    final item = due == null
+    final item = dueDate == null
         ? null
         : _NotifItem(
       refLabel: label,
       type: 'Post-Adoption Check-in',
-      message: '${due.label} is due.',
-      timestamp: due.dueDate,
+      message: 'Follow-up ${dueSequence ?? ''} is due.',
+      timestamp: dueDate,
       kind: _NotifKind.adoption,
       docId: adoptionId,
     );
@@ -369,6 +390,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       s.cancel();
     }
     for (final s in _checkinSubs.values) {
+      s.cancel();
+    }
+    for (final s in _followUpSubs.values) {
       s.cancel();
     }
     super.dispose();
@@ -446,16 +470,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       if (data == null || !mounted) return;
 
       final status = data['status'] as String? ?? '';
-      if (status == 'return_approved') {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ReturnApprovedPage(adoptionId: item.docId),
-          ),
-        );
-        return;
-      }
-      if (status == 'completed' || status == 'return_requested') {
+      final isAdopted = AdoptionStatus.adopted.queryValues.contains(status);
+      if (isAdopted) {
+        final returnRequest = ReturnRequest.fromMap(data['returnRequest'] as Map<String, dynamic>?);
+        if (returnRequest != null &&
+            (returnRequest.status.isApprovedAwaitingSchedule ||
+                returnRequest.status == ReturnRequestStatus.retrievalScheduled ||
+                returnRequest.status == ReturnRequestStatus.retrieved)) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ReturnApprovedPage(adoptionId: item.docId),
+            ),
+          );
+          return;
+        }
         Navigator.push(
           context,
           MaterialPageRoute(

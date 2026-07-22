@@ -67,13 +67,142 @@ class RescueCaseRepository {
   Stream<List<RescueCase>> streamCasesByStatuses(List<RescueStatus> statuses) {
     final values = statuses.expand((s) => s.queryValues).toSet().toList();
     if (values.isEmpty) return Stream.value(const []);
+    // Animal-record admissions (see createAdmissionCase) skip the Rescue
+    // Review stage by construction — they're never written with status
+    // pendingReview/awaitingAssignment's own review intent in mind, just
+    // its "needs a clinic/transporter" mechanics reused. Excluding them
+    // specifically from a query that's ONLY for those review-queue statuses
+    // keeps Rescue Reports focused on community-submitted reports, while
+    // any other status list (ongoing/treatment/intake/completed) still
+    // includes them — those views are meant to show every case in motion,
+    // regardless of source.
+    final isReviewQueueQuery = statuses.every((s) =>
+        s == RescueStatus.pendingReview || s == RescueStatus.accepted || s == RescueStatus.awaitingAssignment);
     // Firestore whereIn supports up to 30 values; our alias lists are well
     // under that even for the broadest status (ongoing).
     return _cases
         .where('status', whereIn: values)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map(RescueCase.fromFirestore).where(_isPrimaryGroupMember).toList());
+        .map((snap) => snap.docs
+            .map(RescueCase.fromFirestore)
+            .where(_isPrimaryGroupMember)
+            .where((c) => !isReviewQueueQuery || c.raw['sourceType'] != 'animalRecordAdmission')
+            .toList());
+  }
+
+  /// Creates a `cases` doc directly in the "needs a clinic + transporter"
+  /// state — the entry point for AdmitAnimalPage (Animal Record -> Medical
+  /// -> Admit Animal), for an animal already owned/managed by the
+  /// organization that later needs vet care. Deliberately skips every
+  /// rescue-report concept (Rescue Review, Accept/Reject, Possible
+  /// Duplicate, Community Reports) by starting at
+  /// RescueStatus.awaitingAssignment with no saved clinic yet, which is
+  /// exactly the state RescueDetailPage's own "Select Clinic" branch reads
+  /// — the caller opens showSelectClinicSheet directly instead of routing
+  /// through that page. See streamCasesByStatuses' isReviewQueueQuery guard
+  /// for how this stays out of the Rescue Reports review queue while still
+  /// appearing in Ongoing/Treatment/Intake once it's moving.
+  Future<String> createAdmissionCase({
+    required String sourceAnimalRecordId,
+    required String animalName,
+    required String species,
+    required String admissionReason,
+    String? admissionNotes,
+    required double lat,
+    required double lng,
+    String? shelterAddress,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final ref = _cases.doc();
+    final now = Timestamp.now();
+    await ref.set({
+      'status': RescueStatus.awaitingAssignment.firestoreValue,
+      'sourceType': 'animalRecordAdmission',
+      'sourceAnimalRecordId': sourceAnimalRecordId,
+      'admissionReason': admissionReason,
+      if (admissionNotes != null && admissionNotes.isNotEmpty) 'admissionNotes': admissionNotes,
+      'animalType': species,
+      'condition': admissionNotes ?? '',
+      'reporterName': actorName,
+      'lat': lat,
+      'lng': lng,
+      if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
+      'urgency': 'Medium',
+      'createdAt': FieldValue.serverTimestamp(),
+      'statusHistory': [
+        {'status': 'Medical admission opened for $animalName ($admissionReason).', 'timestamp': now},
+      ],
+    });
+    await addActivityLog(
+      caseId: ref.id,
+      action: 'animal_record_admission_created',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'reason': admissionReason},
+    );
+    return ref.id;
+  }
+
+  /// Opens a case directly at [RescueStatus.intake] for an animal that's
+  /// being returned by its adopter — same "the animal record already
+  /// exists, this isn't a fresh public report" reasoning as
+  /// [createAdmissionCase], so it skips Rescue Review/Accept/Assign the same
+  /// way. IntakeDetailPage reads `sourceType == 'adoptionReturn'` to show
+  /// the "Intake Source: Adoption Return" banner. Called from
+  /// AdoptionApplicationRepository.confirmAnimalRetrieved's "Proceed to
+  /// Intake" step — never creates a new `animals/{id}` doc, only this
+  /// `cases` doc pointing back at the existing one.
+  Future<String> createReturnIntakeCase({
+    required String sourceAnimalRecordId,
+    required String animalName,
+    required String species,
+    required String returnRequestId,
+    required String previousAdoptionId,
+    required String adopterName,
+    required String returnReason,
+    String? returnExplanation,
+    List<String> returnPhotos = const [],
+    required DateTime retrievedAt,
+    required double lat,
+    required double lng,
+    String? shelterAddress,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final ref = _cases.doc();
+    final now = Timestamp.now();
+    await ref.set({
+      'status': RescueStatus.intake.firestoreValue,
+      'sourceType': 'adoptionReturn',
+      'sourceAnimalRecordId': sourceAnimalRecordId,
+      'returnRequestId': returnRequestId,
+      'previousAdoptionId': previousAdoptionId,
+      'animalType': species,
+      'reporterName': adopterName,
+      'condition': returnExplanation ?? returnReason,
+      'admissionReason': returnReason,
+      if (returnExplanation != null && returnExplanation.isNotEmpty) 'admissionNotes': returnExplanation,
+      'photoUrls': returnPhotos,
+      'retrievedAt': Timestamp.fromDate(retrievedAt),
+      'lat': lat,
+      'lng': lng,
+      if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
+      'urgency': 'Medium',
+      'createdAt': FieldValue.serverTimestamp(),
+      'statusHistory': [
+        {'status': 'Adoption return intake opened for $animalName.', 'timestamp': now},
+      ],
+    });
+    await addActivityLog(
+      caseId: ref.id,
+      action: 'adoption_return_intake_created',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'returnRequestId': returnRequestId},
+    );
+    return ref.id;
   }
 
   /// Backward compatibility for reports submitted before multi-animal
@@ -1160,6 +1289,49 @@ class RescueCaseRepository {
       'quarantineStatus': 'completed',
       'quarantineEndedAt': Timestamp.fromDate(scheduledEnd),
       'quarantineEndReason': 'Automatic — scheduled duration elapsed.',
+    });
+  }
+
+  // ---- Intake completion -------------------------------------------------
+
+  /// Intake completion = animal received at the shelter AND every expected
+  /// animal record has been created — quarantine is optional and never
+  /// blocks this (its own status lives on independent fields and is never
+  /// read here). Reuses [RescueStatus.completed] as the "left the active
+  /// pipeline, still visible in case history" terminal state — the exact
+  /// same status a deceased-case close already reaches (see
+  /// RescueStatus.completed's queryValues including the legacy 'closed'
+  /// alias) — rather than inventing a second, parallel status field. Cheap,
+  /// client-triggered reconciliation (mirrors
+  /// [checkAndCompleteQuarantineIfDue]'s own pattern/TODO) called from
+  /// IntakeDetailPage's live rebuild and from AnimalRecordsFlowPage the
+  /// instant the last record is created — a transaction re-checks the same
+  /// guard against the freshest doc, so calling this redundantly from both
+  /// places (or twice in a race) is always harmless.
+  Future<void> checkAndCompleteIntakeIfDue(
+    RescueCase c, {
+    required int totalAnimalsExpected,
+    required int completedCount,
+  }) async {
+    if (c.intakeReceivedAt == null) return;
+    if (completedCount < totalAnimalsExpected) return;
+    if (c.status == RescueStatus.completed) return;
+
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(_caseDoc(c.id));
+      if (!snap.exists) return;
+      final data = snap.data()!;
+      if (RescueStatus.fromFirestoreValue(data['status'] as String?) == RescueStatus.completed) return;
+      if (data['intakeReceivedAt'] == null) return;
+
+      final now = Timestamp.now();
+      tx.update(_caseDoc(c.id), {
+        'status': RescueStatus.completed.firestoreValue,
+        'intakeCompletedAt': now,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Intake completed — all animal records created.', 'timestamp': now}
+        ]),
+      });
     });
   }
 

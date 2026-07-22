@@ -1,22 +1,59 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'animal_record_detail_page.dart';
 import 'create_animal_record_page.dart';
 
-class AnimalRecordsPage extends StatefulWidget {
+enum _SortOption {
+  recentlyUpdated,
+  nameAsc,
+  nameDesc,
+  newestIntake,
+  oldestIntake,
+  age,
+  species,
+  adoptionStatus,
+}
+
+extension on _SortOption {
+  String get label => switch (this) {
+        _SortOption.recentlyUpdated => 'Recently Updated',
+        _SortOption.nameAsc => 'Name A–Z',
+        _SortOption.nameDesc => 'Name Z–A',
+        _SortOption.newestIntake => 'Newest Intake',
+        _SortOption.oldestIntake => 'Oldest Intake',
+        _SortOption.age => 'Age',
+        _SortOption.species => 'Species',
+        _SortOption.adoptionStatus => 'Adoption Status',
+      };
+}
+
+class AnimalRecordsPage extends ConsumerStatefulWidget {
   const AnimalRecordsPage({super.key});
 
   @override
-  State<AnimalRecordsPage> createState() => _AnimalRecordsPageState();
+  ConsumerState<AnimalRecordsPage> createState() => _AnimalRecordsPageState();
 }
 
-class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
+class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   String _speciesFilter = 'All';
   String _statusFilter = 'All';
   String _searchQuery = '';
   final _searchController = TextEditingController();
+  _SortOption _sort = _SortOption.recentlyUpdated;
+
+  // Extra filters (spec section 12) — surfaced via the tune icon's sheet
+  // rather than the compact chip row, since the row is already used for
+  // species/status.
+  bool? _adoptableOnly;
+  bool? _inTreatmentOnly;
+  bool? _vaccinatedOnly;
+  bool? _hasRescueBackground;
+  bool _includeArchived = false;
 
   final List<String> _statusFilters = [
     'All', 'Adoptable', 'In Treatment', 'Adopted', 'Deceased', 'Closed'
@@ -33,27 +70,176 @@ class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
     }
   }
 
-  Query _buildQuery() {
-    Query q = FirebaseFirestore.instance.collection('animals');
-    if (_speciesFilter != 'All') {
-      q = q.where('species',
-          isEqualTo: _speciesFilter == 'Dogs' ? 'Dog' : 'Cat');
-    }
-    if (_statusFilter != 'All') {
-      q = q.where('adoptionStatus',
-          isEqualTo: _statusFilter.toLowerCase().replaceAll(' ', '_'));
-    }
-    return q.orderBy('createdAt', descending: true);
-  }
-
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
   }
 
+  bool _matchesSearch(AnimalRecord a, String query) {
+    if (query.isEmpty) return true;
+    final q = query.toLowerCase();
+    return a.name.toLowerCase().contains(q) ||
+        a.species.toLowerCase().contains(q) ||
+        a.breed.toLowerCase().contains(q) ||
+        a.tags.any((t) => t.toLowerCase().contains(q)) ||
+        (a.hasSourceCase && shortCaseId(a.linkedCaseId).toLowerCase().contains(q)) ||
+        shortCaseId(a.id).toLowerCase().contains(q) ||
+        a.rescuedBy.toLowerCase().contains(q);
+  }
+
+  bool _matchesFilters(AnimalRecord a) {
+    if (!_includeArchived && a.archived) return false;
+    if (_speciesFilter != 'All' && a.species != (_speciesFilter == 'Dogs' ? 'Dog' : 'Cat')) return false;
+    if (_statusFilter != 'All') {
+      final want = _statusFilter.toLowerCase().replaceAll(' ', '_');
+      if (want == 'in_treatment') {
+        if (a.currentCaseId == null) return false;
+      } else if (a.adoptionStatus != want) {
+        return false;
+      }
+    }
+    if (_adoptableOnly == true && !a.isAdoptable) return false;
+    if (_inTreatmentOnly == true && a.currentCaseId == null) return false;
+    if (_vaccinatedOnly == true && !a.vaccinated) return false;
+    if (_hasRescueBackground == true && a.rescueBackground.isEmpty) return false;
+    return true;
+  }
+
+  int? _leadingNumber(String s) {
+    final match = RegExp(r'\d+').firstMatch(s);
+    return match == null ? null : int.tryParse(match.group(0)!);
+  }
+
+  List<AnimalRecord> _sorted(List<AnimalRecord> records) {
+    final list = [...records];
+    int byDateDesc(DateTime? a, DateTime? b) => (b ?? DateTime(0)).compareTo(a ?? DateTime(0));
+    switch (_sort) {
+      case _SortOption.recentlyUpdated:
+        list.sort((a, b) => byDateDesc(a.updatedAt ?? a.createdAt, b.updatedAt ?? b.createdAt));
+        break;
+      case _SortOption.nameAsc:
+        list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        break;
+      case _SortOption.nameDesc:
+        list.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+        break;
+      case _SortOption.newestIntake:
+        list.sort((a, b) => byDateDesc(a.createdAt, b.createdAt));
+        break;
+      case _SortOption.oldestIntake:
+        list.sort((a, b) => byDateDesc(b.createdAt, a.createdAt));
+        break;
+      case _SortOption.age:
+        list.sort((a, b) {
+          final an = _leadingNumber(a.age);
+          final bn = _leadingNumber(b.age);
+          if (an == null && bn == null) return 0;
+          if (an == null) return 1;
+          if (bn == null) return -1;
+          return an.compareTo(bn);
+        });
+        break;
+      case _SortOption.species:
+        list.sort((a, b) => a.species.toLowerCase().compareTo(b.species.toLowerCase()));
+        break;
+      case _SortOption.adoptionStatus:
+        list.sort((a, b) => a.adoptionStatus.compareTo(b.adoptionStatus));
+        break;
+    }
+    return list;
+  }
+
+  Future<void> _openFilterSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Filter & Sort', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+                const SizedBox(height: 12),
+                Text('Sort by', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _SortOption.values
+                      .map((s) => ChoiceChip(
+                            label: Text(s.label),
+                            selected: _sort == s,
+                            selectedColor: AppColors.yellowrspwn,
+                            onSelected: (_) => setSheetState(() => _sort = s),
+                          ))
+                      .toList(),
+                ),
+                const SizedBox(height: 16),
+                Text('Filters', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Adoptable only'),
+                  value: _adoptableOnly ?? false,
+                  onChanged: (v) => setSheetState(() => _adoptableOnly = v),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('In treatment only'),
+                  value: _inTreatmentOnly ?? false,
+                  onChanged: (v) => setSheetState(() => _inTreatmentOnly = v),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Vaccinated (on file) only'),
+                  value: _vaccinatedOnly ?? false,
+                  onChanged: (v) => setSheetState(() => _vaccinatedOnly = v),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Has rescue background'),
+                  value: _hasRescueBackground ?? false,
+                  onChanged: (v) => setSheetState(() => _hasRescueBackground = v),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Include archived'),
+                  value: _includeArchived,
+                  onChanged: (v) => setSheetState(() => _includeArchived = v ?? false),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {});
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                    child: Text('Apply', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    final recordsAsync = ref.watch(allAnimalRecordsProvider);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -95,9 +281,9 @@ class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
                       style: GoogleFonts.zain(
                           fontSize: 14, color: AppColors.textPrimary),
                       decoration: InputDecoration(
-                        hintText: 'Search',
+                        hintText: 'Search name, species, breed, tag, case ID…',
                         hintStyle: GoogleFonts.zain(
-                            fontSize: 14,
+                            fontSize: 13,
                             color: AppColors.textPrimary
                                 .withValues(alpha: 0.6)),
                         prefixIcon: const Icon(Icons.search,
@@ -110,15 +296,18 @@ class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: AppColors.yellowrspwn,
-                    borderRadius: BorderRadius.circular(12),
+                GestureDetector(
+                  onTap: _openFilterSheet,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.yellowrspwn,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.tune,
+                        color: AppColors.textPrimary, size: 20),
                   ),
-                  child: const Icon(Icons.tune,
-                      color: AppColors.textPrimary, size: 20),
                 ),
               ],
             ),
@@ -210,14 +399,17 @@ class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
 
           // Animal list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _buildQuery().snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+            child: recordsAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
+                child: Text('Could not load animal records: $e',
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              ),
+              data: (all) {
+                final filtered = all.where((a) => _matchesFilters(a) && _matchesSearch(a, _searchQuery)).toList();
+                final sorted = _sorted(filtered);
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                if (sorted.isEmpty) {
                   return Center(
                     child: Text('No animal records found.',
                         style: GoogleFonts.zain(
@@ -226,34 +418,21 @@ class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
                   );
                 }
 
-                final docs = snapshot.data!.docs.where((doc) {
-                  if (_searchQuery.isEmpty) return true;
-                  final d = doc.data() as Map<String, dynamic>;
-                  final name =
-                  (d['name'] ?? '').toString().toLowerCase();
-                  final breed =
-                  (d['breed'] ?? '').toString().toLowerCase();
-                  return name.contains(_searchQuery.toLowerCase()) ||
-                      breed.contains(_searchQuery.toLowerCase());
-                }).toList();
-
                 return ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: docs.length,
+                  itemCount: sorted.length,
                   separatorBuilder: (context, index) =>
                   const SizedBox(height: 12),
                   itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
+                    final a = sorted[index];
                     return _AnimalCard(
-                      animalId: doc.id,
-                      data: data,
+                      animal: a,
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => AnimalRecordDetailPage(
-                            animalId: doc.id,
-                            data: data,
+                            animalId: a.id,
+                            data: a.raw,
                           ),
                         ),
                       ),
@@ -275,6 +454,7 @@ class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
                 minimumSize: const Size(double.infinity, 50),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
@@ -292,20 +472,52 @@ class _AnimalRecordsPageState extends State<AnimalRecordsPage> {
 }
 
 class _AnimalCard extends StatelessWidget {
-  final String animalId;
-  final Map<String, dynamic> data;
+  final AnimalRecord animal;
   final VoidCallback onTap;
 
   const _AnimalCard({
-    required this.animalId,
-    required this.data,
+    required this.animal,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isSelected = false; // highlight logic if needed
-    final healthTags = List<String>.from(data['health'] ?? []);
+    // AnimalRecord.fromFirestore already falls back to a minimal record
+    // (rather than throwing) when a document's shape defeats even the safe
+    // per-field parsing helpers — isMalformed flags that here so this one
+    // row renders as an explicit placeholder instead of silently showing
+    // blank/wrong fields.
+    if (animal.isMalformed) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.slaterspwn),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline, color: AppColors.slaterspwn),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Could not display this record (${animal.id}) — its data may be from an older format.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Cheap, doc-level-only attention signals — no extra subcollection
+    // watches on the list page (see animal_record_repository.dart's
+    // streamAllAnimalRecords doc comment on why this stays client-side and
+    // bounded to what's already loaded).
+    final needsAttention = <String>[
+      if (!animal.vaccinated) 'Vaccine',
+      if (animal.currentCaseId != null) 'In Treatment',
+    ];
 
     return GestureDetector(
       onTap: onTap,
@@ -314,9 +526,6 @@ class _AnimalCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: isSelected
-              ? Border.all(color: AppColors.textPrimary, width: 2)
-              : null,
           boxShadow: [
             BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -327,15 +536,15 @@ class _AnimalCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Photo
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppColors.tearspwn,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.pets,
-                  size: 32, color: AppColors.textSecondary),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: animal.photoUrls.isNotEmpty
+                  ? Image.network(animal.photoUrls.first,
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _photoPlaceholder())
+                  : _photoPlaceholder(),
             ),
 
             const SizedBox(width: 12),
@@ -346,31 +555,27 @@ class _AnimalCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Text(data['name'] ?? 'Unnamed',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 15,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(animal.name.isNotEmpty ? animal.name : animal.species,
+                            style: GoogleFonts.tiltWarp(
+                                fontSize: 15,
+                                color: AppColors.textPrimary)),
+                      ),
                       Icon(
-                        data['sex'] == 'Female'
-                            ? Icons.female
-                            : Icons.male,
+                        animal.sex == 'Female' ? Icons.female : Icons.male,
                         size: 16,
                         color: AppColors.textSecondary,
                       ),
                     ],
                   ),
-                  Text(data['breed'] ?? data['species'] ?? '',
+                  Text(animal.breed.isNotEmpty ? animal.breed : animal.species,
                       style: GoogleFonts.zain(
                           fontSize: 12, color: AppColors.textSecondary)),
-                  Text(
-                    data['age'] != null
-                        ? '${data['age']} year old'
-                        : '',
-                    style: GoogleFonts.zain(
-                        fontSize: 12, color: AppColors.textSecondary),
-                  ),
-                  Text(data['description'] ?? '',
+                  if (animal.age.isNotEmpty)
+                    Text(animal.age,
+                        style: GoogleFonts.zain(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                  Text(animal.description,
                       style: GoogleFonts.zain(
                           fontSize: 12, color: AppColors.textSecondary),
                       maxLines: 1,
@@ -378,22 +583,36 @@ class _AnimalCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
-                    children: healthTags
-                        .map((t) => Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.background,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: AppColors.slaterspwn),
-                      ),
-                      child: Text(t,
-                          style: GoogleFonts.zain(
-                              fontSize: 10,
-                              color: AppColors.textPrimary)),
-                    ))
-                        .toList(),
+                    runSpacing: 4,
+                    children: [
+                      for (final t in needsAttention)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.yellowrspwn.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(t, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+                        ),
+                      if (animal.isReserved)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.lavenderrspwn,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text('Reserved', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+                        ),
+                      if (animal.archived)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.slaterspwn,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text('Archived', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -403,6 +622,17 @@ class _AnimalCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _photoPlaceholder() => Container(
+        width: 80,
+        height: 80,
+        decoration: BoxDecoration(
+          color: AppColors.tearspwn,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Icon(Icons.pets,
+            size: 32, color: AppColors.textSecondary),
+      );
 }
 
 class _FilterChip extends StatelessWidget {
