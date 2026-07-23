@@ -49,6 +49,7 @@ dependencies:
   google_fonts: ^8.0.2
   http: ^1.6.0
   url_launcher: ^6.3.1
+  fl_chart: ^0.69.2  # charts for the admin Analytics dashboard
   #sign in
   google_sign_in: ^6.2.1
   flutter_facebook_auth: ^7.1.5
@@ -147,4 +148,3 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
-

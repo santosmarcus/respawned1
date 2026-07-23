@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,10 +14,16 @@ import '../../../app_theme.dart';
 class ServiceFilterSheet extends StatefulWidget {
   final double initialRange;
   final ValueChanged<double> onApply;
+  // The rider's last-known location (e.g. ServiceScreen's _currentLocation).
+  // If null — the rider opened the filter before ever going online — the
+  // sheet resolves its own location so the map still has something real to
+  // center on.
+  final LatLng? currentLocation;
 
   const ServiceFilterSheet({
     required this.initialRange,
     required this.onApply,
+    this.currentLocation,
   });
 
   @override
@@ -27,11 +34,74 @@ class ServiceFilterSheet extends StatefulWidget {
 class _ServiceFilterSheetState
     extends State<ServiceFilterSheet> {
   late double _range;
+  GoogleMapController? _mapController;
+  LatLng? _center;
+  bool _loadingLocation = false;
 
   @override
   void initState() {
     super.initState();
     _range = widget.initialRange;
+    _center = widget.currentLocation;
+    if (_center == null) {
+      _resolveLocation();
+    }
+  }
+
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _resolveLocation() async {
+    setState(() => _loadingLocation = true);
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+      if (mounted) {
+        setState(() => _center = LatLng(pos.latitude, pos.longitude));
+        // Wait a frame so the map's finished attaching before we move it.
+        WidgetsBinding.instance.addPostFrameCallback((_) => _fitToRange());
+      }
+    } catch (_) {
+      // Fall back to the map's "location unavailable" state below.
+    } finally {
+      if (mounted) setState(() => _loadingLocation = false);
+    }
+  }
+
+  // A rough (but plenty accurate for a filter preview) lat/lng bounding box
+  // for a circle of the given radius around center.
+  LatLngBounds _boundsForRadius(LatLng center, double km) {
+    final latDelta = km / 111.0;
+    final lngDelta =
+        km / (111.0 * math.cos(center.latitude * math.pi / 180)).abs();
+    return LatLngBounds(
+      southwest: LatLng(center.latitude - latDelta, center.longitude - lngDelta),
+      northeast: LatLng(center.latitude + latDelta, center.longitude + lngDelta),
+    );
+  }
+
+  void _fitToRange() {
+    final center = _center;
+    final controller = _mapController;
+    if (controller == null || center == null) return;
+    controller.animateCamera(
+      CameraUpdate.newLatLngBounds(_boundsForRadius(center, _range), 32),
+    );
   }
 
   @override
@@ -96,12 +166,54 @@ class _ServiceFilterSheetState
 
           const SizedBox(height: 12),
 
-          // Map placeholder
+          // Live map — centered on the rider, with a circle showing the
+          // selected service range.
           Container(
             height: 200,
+            clipBehavior: Clip.hardEdge,
             decoration: BoxDecoration(
               color: AppColors.slaterspwn,
               borderRadius: BorderRadius.circular(16),
+            ),
+            child: _center == null
+                ? Center(
+              child: _loadingLocation
+                  ? const CircularProgressIndicator(
+                  color: AppColors.textPrimary)
+                  : Text('Location unavailable',
+                  style: GoogleFonts.nunito(
+                      fontSize: 13, color: AppColors.textPrimary)),
+            )
+                : GoogleMap(
+              initialCameraPosition:
+              CameraPosition(target: _center!, zoom: 11),
+              onMapCreated: (ctrl) {
+                _mapController = ctrl;
+                WidgetsBinding.instance
+                    .addPostFrameCallback((_) => _fitToRange());
+              },
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              scrollGesturesEnabled: false,
+              rotateGesturesEnabled: false,
+              tiltGesturesEnabled: false,
+              markers: {
+                Marker(
+                  markerId: const MarkerId('service_center'),
+                  position: _center!,
+                ),
+              },
+              circles: {
+                Circle(
+                  circleId: const CircleId('service_range'),
+                  center: _center!,
+                  radius: _range * 1000,
+                  fillColor: AppColors.greenrspwn.withOpacity(0.15),
+                  strokeColor: AppColors.greenrspwn,
+                  strokeWidth: 2,
+                ),
+              },
             ),
           ),
 
@@ -123,6 +235,7 @@ class _ServiceFilterSheetState
               max: 200,
               divisions: 199,
               onChanged: (v) => setState(() => _range = v),
+              onChangeEnd: (_) => _fitToRange(),
             ),
           ),
 

@@ -92,7 +92,7 @@ class HomeScreen extends StatelessWidget {
 
                 // Quick action cards
                 SizedBox(
-                  height: 140,
+                  height: 65,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),

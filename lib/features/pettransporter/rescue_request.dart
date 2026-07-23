@@ -33,6 +33,21 @@ class _RescueRequestState extends State<RescueRequest> {
   bool _isAccepting = false;
   bool _isDeclining = false;
 
+  // Statuses that count as "still my active job" — mirrors the set
+  // transporter_profile.dart's _StatsRow uses to count "Ongoing", so a
+  // rider is considered busy for the same range of the trip's lifecycle
+  // everywhere in the app.
+  static const _activeStatuses = {
+    'assigned',
+    'accepted',
+    'ongoing',
+    'arrived',
+    'treatment',
+    'dropoff',
+    'searching_clinic',
+    'in_transit_shelter',
+  };
+
   Future<void> _startNow() async {
     setState(() => _isAccepting = true);
 
@@ -53,7 +68,8 @@ class _RescueRequestState extends State<RescueRequest> {
         // the admin's Assign Rider screen (which listens on this exact
         // assignment doc) sees the acceptance, and the case's own
         // status/assignedVolunteer* fields get updated the same way the
-        // legacy flow below always did.
+        // legacy flow below always did. RescueCaseRepository.acceptAssignment
+        // already enforces the single-active-assignment guard for this path.
         final verification =
         userData?['transporterVerification'] as Map<String, dynamic>?;
         await RescueCaseRepository().acceptAssignment(
@@ -65,6 +81,32 @@ class _RescueRequestState extends State<RescueRequest> {
           riderPlate: (verification?['licensePlate'] as String?) ?? '',
         );
       } else {
+        // Open-pickup-pool path — nothing has guarded this one yet, so a
+        // rider must not be allowed to pick up a second job while one is
+        // already active.
+        final assignedSnap = await FirebaseFirestore.instance
+            .collection('cases')
+            .where('assignedVolunteerId', isEqualTo: uid)
+            .get();
+        final hasOtherActiveCase = assignedSnap.docs.any((doc) {
+          if (doc.id == widget.caseId) return false;
+          final status = doc.data()['status'] as String? ?? '';
+          return _activeStatuses.contains(status);
+        });
+
+        if (hasOtherActiveCase) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'You already have an ongoing transit. Finish it before accepting a new one.'),
+                backgroundColor: Colors.redAccent,
+              ),
+            );
+          }
+          return;
+        }
+
         await FirebaseFirestore.instance
             .collection('cases')
             .doc(widget.caseId)

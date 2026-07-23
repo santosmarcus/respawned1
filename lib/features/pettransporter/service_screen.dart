@@ -30,9 +30,53 @@ class _ServiceScreenState extends State<ServiceScreen> {
   LatLng? _currentLocation;
 
   @override
+  void initState() {
+    super.initState();
+    _loadSavedServiceRange();
+  }
+
+  @override
   void dispose(){
     _mapController?.dispose();
     super.dispose();
+  }
+
+  // The service range is personal to each transporter and should persist
+  // across sessions/app restarts — not silently reset to the 100km default
+  // every time they reopen the app — so it's saved on their own user doc
+  // and reloaded here whenever this screen starts up.
+  Future<void> _loadSavedServiceRange() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final doc =
+      await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final saved = (doc.data()?['serviceRangeKm'] as num?)?.toDouble();
+      if (saved != null && mounted) {
+        setState(() => _serviceRangeKm = saved);
+      }
+    } catch (_) {
+      // Keep the default range if it can't be loaded — never block the
+      // transporter from going online over this.
+    }
+  }
+
+  // Called every time the transporter applies a new range from the filter
+  // sheet, so they can change it "whenever they feel like it" and it
+  // sticks for next time too.
+  Future<void> _saveServiceRange(double km) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'serviceRangeKm': km}, SetOptions(merge: true));
+    } catch (_) {
+      // Non-critical — the new range still applies for this session even
+      // if the save fails; worst case it just falls back to the last
+      // successfully saved value (or the default) next time the app opens.
+    }
   }
 
   @override
@@ -360,7 +404,11 @@ class _ServiceScreenState extends State<ServiceScreen> {
       backgroundColor: Colors.transparent,
       builder: (_) => ServiceFilterSheet(
         initialRange: _serviceRangeKm,
-        onApply: (km) => setState(() => _serviceRangeKm = km),
+        currentLocation: _currentLocation,
+        onApply: (km) {
+          setState(() => _serviceRangeKm = km);
+          _saveServiceRange(km);
+        },
       ),);
   }
 
@@ -425,6 +473,19 @@ class _ServiceRequestList extends StatelessWidget {
               final status = d['status'];
               final assignedId = d['assignedVolunteerId'];
 
+              // Note: single-active-transit is already enforced upstream —
+              // RescueCaseRepository.createAssignmentOffer throws
+              // ActiveAssignmentConflictException (with its own
+              // View Pending / Track Case / Reassign Transporter
+              // resolution) before a conflicting offer can even be
+              // created, and the legacy open-pool accept path in
+              // rescue_request.dart guards itself the same way at
+              // accept-time. This list must never hide a genuine
+              // isOfferedToMe assignment on top of that — doing so here
+              // used a cruder signal (the case's own assignedVolunteerId/
+              // status) that can disagree with the real source of truth
+              // (the transportAssignments docs), and silently hid
+              // legitimate admin-assigned offers from the transporter.
               final isMineActive = assignedId == currentRiderUid &&
                   (status == 'assigned' ||
                       status == 'accepted' ||

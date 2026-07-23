@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -6,6 +8,7 @@ import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/admin_adoption_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
+import 'package:respawnd1/features/adminhome/analytics_dashboard.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -16,6 +19,28 @@ class AdminHomeScreen extends StatefulWidget {
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _currentIndex = 0;
+  AdminAnalyticsCategory _analyticsCategory = AdminAnalyticsCategory.rescue;
+  String? _orgId;
+  bool _resolvingOrg = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveOrg();
+  }
+
+  // Scopes analytics queries to the admin's own organization when one is on
+  // file. During this testing phase `users/{uid}.organizationId` may not be
+  // populated for every account yet — in that case we fail open and show
+  // analytics across all organizations rather than an empty dashboard.
+  Future<void> _resolveOrg() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      _orgId = doc.data()?['organizationId'] as String?;
+    }
+    if (mounted) setState(() => _resolvingOrg = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,8 +48,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       drawer: const _AdminDrawer(),
       appBar: AppBar(
         //leading: IconButton(
-          //icon: const Icon(Icons.menu, color: AppColors.background),
-          //onPressed: () {},
+        //icon: const Icon(Icons.menu, color: AppColors.background),
+        //onPressed: () {},
         //),
         leading: Builder(
           builder: (context) => IconButton(
@@ -161,39 +186,51 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
             const SizedBox(height: 16),
 
-            // Stats grid
-            GridView.count(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.3,
-              children: [
-                _StatCard(
-                  label: 'Total Rescues',
-                  value: '124',
-                  trend: '+1.2%',
-                  trendLabel: 'vs Last month',
-                ),
-                _StatCard(
-                  label: 'Total Adoptions',
-                  value: '12',
-                  showTrend: false,
-                ),
-                _StatCard(
-                  label: 'Total Volunteer Events',
-                  value: '124',
-                  trend: '+1.2%',
-                  trendLabel: 'vs Last month',
-                ),
-                _StatCard(
-                  label: 'Total Donations',
-                  value: 'Php. 23,495',
-                  showTrend: false,
-                  valueFontSize: 20,
-                ),
-              ],
+            // Analytics
+            Text('Analytics',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 10),
+
+            // Category picker — Rescue / Adoptions / Donations / Shelter
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: AdminAnalyticsCategory.values.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
+                  final category = AdminAnalyticsCategory.values[i];
+                  final selected = _analyticsCategory == category;
+                  return GestureDetector(
+                    onTap: () => setState(() => _analyticsCategory = category),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: selected ? AppColors.textPrimary : Colors.transparent,
+                        border: Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(category.label,
+                          style: GoogleFonts.zain(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: selected ? AppColors.background : AppColors.textPrimary)),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            _resolvingOrg
+                ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
+            )
+                : AdminAnalyticsSection(
+              category: _analyticsCategory,
+              orgId: _orgId,
             ),
 
             const SizedBox(height: 24),
@@ -299,70 +336,6 @@ class _Divider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
         width: 1, height: 40, color: AppColors.slaterspwn);
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final String? trend;
-  final String? trendLabel;
-  final bool showTrend;
-  final double valueFontSize;
-
-  const _StatCard({
-    required this.label,
-    required this.value,
-    this.trend,
-    this.trendLabel,
-    this.showTrend = true,
-    this.valueFontSize = 28,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-          )
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: GoogleFonts.zain(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
-          const Spacer(),
-          Text(value,
-              style: GoogleFonts.tiltWarp(
-                  fontSize: valueFontSize,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary)),
-          if (showTrend && trend != null) ...[
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                const Icon(Icons.trending_up,
-                    size: 12, color: Colors.green),
-                const SizedBox(width: 4),
-                Text('$trend\n${trendLabel ?? ''}',
-                    style: GoogleFonts.zain(
-                        fontSize: 10, color: AppColors.textSecondary)),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
   }
 }
 

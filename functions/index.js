@@ -1,11 +1,78 @@
 const {onSchedule} = require('firebase-functions/v2/scheduler');
-const {onCall, HttpsError} = require('firebase-functions/v2/https');
+const {onDocumentCreated} = require('firebase-functions/v2/firestore');
+const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
+const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
 const db = admin.firestore();
 
-const DISMISSED_STATUSES = ['dismissed', 'cancelled', 'withdrawn', 'rejected'];
+exports.getOrCreateRescueSession = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const {tagId, location} = request.data || {};
+  if (!tagId) {
+    throw new HttpsError('invalid-argument', 'tagId is required.');
+  }
+
+  const tagRef = db.collection('collarTags').doc(tagId);
+  const tagSnap = await tagRef.get();
+  if (!tagSnap.exists) {
+    throw new HttpsError('not-found', 'This tag is not registered.');
+  }
+  const tagData = tagSnap.data();
+
+  const lat = location && typeof location.lat === 'number' ? location.lat : null;
+  const lng = location && typeof location.lng === 'number' ? location.lng : null;
+  const address = location && typeof location.address === 'string' ? location.address : null;
+
+  // Reuse the existing session if this tag already has one that's still
+  // active, instead of spawning a new one on every re-scan of an
+  // already-lost pet.
+  const existingSessionId = tagData.activeRescueSessionId;
+  if (existingSessionId) {
+    const existingSnap = await db.collection('rescueSessions').doc(existingSessionId).get();
+    if (existingSnap.exists && existingSnap.data().status !== 'resolved') {
+      return {sessionId: existingSessionId};
+    }
+  }
+
+  const sessionRef = db.collection('rescueSessions').doc();
+  await sessionRef.set({
+    tagId,
+    status: 'active',
+    chatEnabledByOwner: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    ...(lat !== null ? {lat} : {}),
+    ...(lng !== null ? {lng} : {}),
+    ...(address !== null ? {address} : {}),
+  });
+
+  const tagUpdate = {
+    status: 'lost',
+    activeRescueSessionId: sessionRef.id,
+    lostAt: admin.firestore.FieldValue.serverTimestamp(),
+    ...(lat !== null ? {lastSeenLat: lat} : {}),
+    ...(lng !== null ? {lastSeenLng: lng} : {}),
+    ...(address !== null ? {lastSeenAddress: address} : {}),
+  };
+
+  await tagRef.set(tagUpdate, {merge: true});
+
+  const ownerId = tagData.ownerId;
+  if (ownerId) {
+    await db
+      .collection('users')
+      .doc(ownerId)
+      .collection('collarTags')
+      .doc(tagId)
+      .set(tagUpdate, {merge: true});
+  }
+
+  return {sessionId: sessionRef.id};
+});
 const UNCONFIRMED_THRESHOLD_MINUTES = 15;
 const NUDGE_COOLDOWN_MINUTES = 20;
 const RADIUS_KM = 5;
@@ -84,6 +151,32 @@ async function notifyNearbyUsers({lat, lng, excludeUid, title, body, data}) {
   return tokens.length;
 }
 
+// 1. Immediate alert the moment a new case is reported.
+exports.notifyNewCaseReported = onDocumentCreated(
+  'cases/{caseId}',
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const c = snap.data();
+
+    if (c.lat == null || c.lng == null) return;
+
+    const status = (c.status || '').toLowerCase();
+    if (DISMISSED_STATUSES.includes(status)) return;
+
+    await notifyNearbyUsers({
+      lat: c.lat,
+      lng: c.lng,
+      excludeUid: c.reporterId,
+      title: 'New rescue report near you',
+      body: 'A rescue report just came in nearby — tap to see if you can help.',
+      data: {
+        type: 'new_case_nearby',
+        caseId: event.params.caseId,
+      },
+    });
+  },
+);
 
 exports.notifyUnconfirmedReports = onSchedule('every 5 minutes', async () => {
   const now = admin.firestore.Timestamp.now();
@@ -143,82 +236,4 @@ exports.notifyUnconfirmedReports = onSchedule('every 5 minutes', async () => {
       lastNudgeSentAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   }
-});
-
-
-// Lost/found chat for scanners who don't have the app
-
-exports.getOrCreateRescueSession = onCall(async (request) => {
-  const tagId = request.data && request.data.tagId;
-  if (!tagId || typeof tagId !== 'string') {
-    throw new HttpsError('invalid-argument', 'tagId is required.');
-  }
-
-  const tagRef = db.collection('collarTags').doc(tagId);
-  const tagSnap = await tagRef.get();
-  if (!tagSnap.exists) {
-    throw new HttpsError('not-found', "This pet ID tag doesn't exist or was removed.");
-  }
-  const tag = tagSnap.data();
-  if (!tag.qrEnabled) {
-    throw new HttpsError(
-      'failed-precondition',
-      "This tag's QR code hasn't been approved for public viewing yet.",
-    );
-  }
-
-  if (tag.activeRescueSessionId) {
-    const existingSnap = await db
-      .collection('rescueSessions')
-      .doc(tag.activeRescueSessionId)
-      .get();
-    if (existingSnap.exists && existingSnap.data().status === 'active') {
-      return {sessionId: existingSnap.id};
-    }
-
-  }
-
-  const loc = request.data && request.data.location;
-  const sessionRef = db.collection('rescueSessions').doc();
-  await sessionRef.set({
-    tagId,
-    ownerId: tag.ownerId || null,
-    finderId: request.auth ? request.auth.uid : null,
-    status: 'active',
-    chatEnabledByOwner: false,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    lat: loc && typeof loc.lat === 'number' ? loc.lat : null,
-    lng: loc && typeof loc.lng === 'number' ? loc.lng : null,
-    address: loc && typeof loc.address === 'string' && loc.address.trim() !== ''
-      ? loc.address.trim()
-      : null,
-  });
-  await tagRef.set({activeRescueSessionId: sessionRef.id}, {merge: true});
-
-  return {sessionId: sessionRef.id};
-});
-
-exports.sendRescueSessionMessage = onCall(async (request) => {
-  const {sessionId, sender, text} = request.data || {};
-  if (!sessionId || typeof sessionId !== 'string') {
-    throw new HttpsError('invalid-argument', 'sessionId is required.');
-  }
-  const trimmed = (text || '').toString().trim();
-  if (!trimmed) {
-    throw new HttpsError('invalid-argument', 'A non-empty message is required.');
-  }
-
-  const sessionRef = db.collection('rescueSessions').doc(sessionId);
-  const sessionSnap = await sessionRef.get();
-  if (!sessionSnap.exists) {
-    throw new HttpsError('not-found', 'This rescue session no longer exists.');
-  }
-
-  await sessionRef.collection('messages').add({
-    sender: sender === 'owner' ? 'owner' : 'finder',
-    text: trimmed,
-    sentAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return {ok: true};
 });

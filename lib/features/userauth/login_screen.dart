@@ -281,13 +281,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       Navigator.of(context).popUntil((route) => route.isFirst);
                     }
                   } catch (e) {
-                    // Was a generic "Google sign-in failed." with no detail
-                    // — on an emulator this is almost always
-                    // PlatformException(sign_in_failed, ..., 10, ...) =
-                    // DEVELOPER_ERROR (debug SHA-1 not registered with the
-                    // Firebase/OAuth client), or the emulator image has no
-                    // Google Play Services at all. Surfacing the real
-                    // message makes that diagnosable instead of a dead end.
                     if (mounted) {
                       setState(() => _errorMessage = 'Google sign-in failed: $e');
                     }
@@ -298,7 +291,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 12),
 
 // Facebook button
-              _SocialButton(
+             /* _SocialButton(
                 label: 'Continue with Facebook',
                 iconData: Icons.facebook,
                 onTap: () async {
@@ -316,7 +309,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 },
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 12),*/
 
 // Phone button
               _SocialButton(
