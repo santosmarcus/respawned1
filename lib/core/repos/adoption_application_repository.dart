@@ -1,4 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
@@ -55,6 +58,10 @@ class AdoptionApplicationRepository {
   Stream<List<AdoptionApplication>> streamByStatuses(List<AdoptionStatus> statuses) {
     final values = statuses.expand((s) => s.queryValues).toSet().toList();
     if (values.isEmpty) return Stream.value(const []);
+    // Same diagnostic as RescueCaseRepository.streamCasesByStatuses — see
+    // its comment for why this matters even though rules are wide open.
+    debugPrint('[AdoptionApplicationRepository] projectId=${Firebase.app().options.projectId} '
+        'uid=${FirebaseAuth.instance.currentUser?.uid} statuses=$values');
     return _adoptions
         .where('status', whereIn: values)
         .snapshots()
@@ -70,11 +77,17 @@ class AdoptionApplicationRepository {
 
   /// Every application for one animal record — powers both the Animal
   /// Record's "View Applications" link and the review list's animal
-  /// filter. Keyed by animalId (Firestore field `personal.animalId`), not
-  /// by animal name.
-  Stream<List<AdoptionApplication>> streamForAnimal(String animalId) {
+  /// filter. [animalRecordId] must be the real `animals/{id}` Firestore
+  /// document id (see AdoptionApplication's own doc comment) — deliberately
+  /// queries `personal.animalRecordId`, never the legacy `personal.animalId`
+  /// (a stringified hash or pre-migration catalog int that never equals a
+  /// real document id), so this only ever returns applications submitted
+  /// after animalRecordId started being written. Older applications for the
+  /// same animal won't surface here; there is no reliable way to reverse
+  /// their legacy animalId back into this animal's real id.
+  Stream<List<AdoptionApplication>> streamForAnimal(String animalRecordId) {
     return _adoptions
-        .where('personal.animalId', isEqualTo: animalId)
+        .where('personal.animalRecordId', isEqualTo: animalRecordId)
         .snapshots()
         .map((snap) => snap.docs.map(AdoptionApplication.fromFirestore).toList());
   }
@@ -106,6 +119,47 @@ class AdoptionApplicationRepository {
       'interviewCompletedBy': actorName,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Interview completed by $actorName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+  }
+
+  /// Admin confirms the interview the applicant booked — moves the
+  /// application from Pending into Interview. New applications (and a
+  /// freshly-booked appointment) stay Pending until this runs; the user's
+  /// own Book Appointment step only ever saves appointmentDate/Time/Type,
+  /// it never sets status itself (see adoption_process.dart's
+  /// _saveAppointment).
+  Future<void> confirmInterview({
+    required String applicationId,
+    required String actorName,
+  }) async {
+    await _adoptionDoc(applicationId).update({
+      'status': AdoptionStatus.interview.firestoreValue,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Interview confirmed by organization.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+  }
+
+  /// Admin-side interview reschedule — edits the SAME appointment fields
+  /// the user's own Book Appointment step writes (appointmentDate/Time/
+  /// Type), never a second/parallel schedule. Preserves the original
+  /// application `createdAt`/submission date untouched, and never touches
+  /// release/adoption scheduling fields (scheduledReleaseDate etc.) — those
+  /// are a deliberately separate schedule.
+  Future<void> rescheduleInterview({
+    required String applicationId,
+    required DateTime date,
+    required String time,
+    required String type,
+    required String actorName,
+  }) async {
+    await _adoptionDoc(applicationId).update({
+      'appointmentDate': Timestamp.fromDate(date),
+      'appointmentTime': time,
+      'appointmentType': type,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Interview rescheduled by organization.', 'timestamp': Timestamp.now()}
       ]),
     });
   }

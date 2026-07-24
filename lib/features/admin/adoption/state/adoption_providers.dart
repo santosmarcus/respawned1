@@ -11,9 +11,29 @@ final adoptionApplicationProvider = StreamProvider.family<AdoptionApplication?, 
   return ref.watch(adoptionApplicationRepositoryProvider).streamApplication(id);
 });
 
-final adoptionsByStatusesProvider = StreamProvider.family<List<AdoptionApplication>, List<AdoptionStatus>>((ref, statuses) {
+// autoDispose so a listener is torn down once nothing is watching it
+// anymore, instead of staying subscribed to Firestore forever.
+final adoptionsByStatusesProvider =
+    StreamProvider.family.autoDispose<List<AdoptionApplication>, List<AdoptionStatus>>((ref, statuses) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamByStatuses(statuses);
 });
+
+/// Stable, cached single-status lists. [adoptionsByStatusesProvider] is a
+/// StreamProvider.family keyed by a List, and Dart's List uses identity
+/// equality — a fresh `[status]` literal built inline in a widget's build()
+/// method (as every call site here used to write) registers as a brand-new
+/// family key on every rebuild, which starts a brand-new Firestore listener
+/// in the `loading` state; that listener resolving to data is itself what
+/// triggers the next rebuild, which builds yet another fresh `[status]` list
+/// — an unbroken loading/rebuild cycle. This was the exact cause of the
+/// Adoption Applications page never leaving its loading animation. Callers
+/// should use [statusFilter] instead of writing `[status]` directly so the
+/// same status always resolves to the same family instance.
+final Map<AdoptionStatus, List<AdoptionStatus>> _singleStatusLists = {
+  for (final s in AdoptionStatus.values) s: List.unmodifiable([s]),
+};
+
+List<AdoptionStatus> statusFilter(AdoptionStatus status) => _singleStatusLists[status]!;
 
 final allAdoptionsProvider = StreamProvider<List<AdoptionApplication>>((ref) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamAll();

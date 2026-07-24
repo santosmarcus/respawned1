@@ -8,8 +8,11 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
 import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/core/widgets/photo_thumbnail_strip.dart';
+import 'package:respawnd1/features/adoption/interview_scheduling.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/adoption_rejection_sheet.dart';
+import 'package:respawnd1/features/admin/adoption/widgets/interview_reschedule_sheet.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/release_details_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
@@ -60,6 +63,15 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     }
   }
 
+  Future<void> _confirmInterview(AdoptionApplication app) async {
+    final confirmed = await showConfirmActionDialog(context,
+        title: 'Confirm Interview?',
+        message: 'This moves the application from Pending to Interview and locks in the applicant\'s booked slot.',
+        confirmLabel: 'Confirm Interview');
+    if (!confirmed) return;
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).confirmInterview(applicationId: app.id, actorName: _actorName));
+  }
+
   Future<void> _completeInterview(AdoptionApplication app) async {
     final confirmed = await showConfirmActionDialog(context,
         title: 'Complete Interview?',
@@ -80,21 +92,21 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).markNoShow(applicationId: app.id, actorName: _actorName));
   }
 
-  void _showReschedulePlaceholder() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Reschedule', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: Text(
-          'Rescheduling is not available yet.\n\n'
-          'TODO: admin-proposed schedules, applicant confirmation, notifications, and previous-schedule history.',
-          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-      ),
+  Future<void> _reschedule(AdoptionApplication app) async {
+    final result = await showInterviewRescheduleSheet(
+      context,
+      initialDate: app.appointmentDate,
+      initialTime: app.appointmentTime,
+      initialType: app.appointmentType,
     );
+    if (result == null) return;
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).rescheduleInterview(
+          applicationId: app.id,
+          date: result.date,
+          time: result.time,
+          type: result.type,
+          actorName: _actorName,
+        ));
   }
 
   Future<void> _setFitAssessment(AdoptionApplication app, FitAssessmentValue value) async {
@@ -130,22 +142,43 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
         ));
   }
 
+  // reserve/unreserve/release all take a real animals/{id} doc id for a
+  // direct document lookup — app.animalId is the legacy hash/catalog-int
+  // join key and would never resolve to the actual animal doc (see
+  // AdoptionApplication's own doc comment). app.animalRecordId is the
+  // reliable one; applications submitted before it existed can't be
+  // reserved/released from here, so that's surfaced as a clear message
+  // rather than a silent "Animal record not found" failure from _run.
   Future<void> _reserve(AdoptionApplication app) async {
+    final animalRecordId = app.animalRecordId;
+    if (animalRecordId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("This application predates linked animal records and can't be reserved automatically."),
+          backgroundColor: Colors.redAccent));
+      return;
+    }
     final confirmed = await showConfirmActionDialog(context,
         title: 'Reserve ${app.animalName}?',
         message: 'This reserves the animal for ${app.adopterName} and prevents other reservations while it stays reserved.',
         confirmLabel: 'Reserve');
     if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).reserve(applicationId: app.id, animalId: app.animalId));
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).reserve(applicationId: app.id, animalId: animalRecordId));
   }
 
   Future<void> _unreserve(AdoptionApplication app) async {
+    final animalRecordId = app.animalRecordId;
+    if (animalRecordId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("This application predates linked animal records and can't be unreserved automatically."),
+          backgroundColor: Colors.redAccent));
+      return;
+    }
     final confirmed = await showConfirmActionDialog(context,
         title: 'Unreserve ${app.animalName}?',
         message: 'This clears the reservation and returns the animal to the adoptable list. The application stays Approved.',
         confirmLabel: 'Unreserve');
     if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).unreserve(applicationId: app.id, animalId: app.animalId));
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).unreserve(applicationId: app.id, animalId: animalRecordId));
   }
 
   // The admin now sets the release date and follow-up schedule on the
@@ -193,6 +226,13 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                   )),
 
                   const SizedBox(height: 12),
+                  _ApplicantHistorySection(
+                    app: app,
+                    expanded: _historyExpanded,
+                    onToggle: () => setState(() => _historyExpanded = !_historyExpanded),
+                  ),
+
+                  const SizedBox(height: 12),
                   _FitAssessmentCard(app: app, onSelect: (v) => _setFitAssessment(app, v)),
 
                   const SizedBox(height: 12),
@@ -203,22 +243,16 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                   ),
 
                   const SizedBox(height: 12),
-                  _ApplicantHistorySection(
-                    app: app,
-                    expanded: _historyExpanded,
-                    onToggle: () => setState(() => _historyExpanded = !_historyExpanded),
-                  ),
-
-                  const SizedBox(height: 12),
                   _DocumentsSection(app: app),
 
                   const SizedBox(height: 12),
                   _AppointmentSection(
                     app: app,
                     busy: _busy,
+                    onConfirmInterview: () => _confirmInterview(app),
                     onCompleteInterview: () => _completeInterview(app),
                     onNoShow: () => _markNoShow(app),
-                    onReschedule: _showReschedulePlaceholder,
+                    onReschedule: () => _reschedule(app),
                   ),
 
                   const SizedBox(height: 12),
@@ -251,7 +285,10 @@ class _AnimalHeaderCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final animal = ref.watch(animalRecordProvider(app.animalId)).asData?.value;
+    // app.animalId is the legacy join key, never a real animals/{id} doc
+    // id — see AdoptionApplication's own doc comment.
+    final animalRecordId = app.animalRecordId;
+    final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
     final photoUrl = animal?.photoUrls.isNotEmpty == true ? animal!.photoUrls.first : null;
 
     return GestureDetector(
@@ -430,6 +467,9 @@ class _ApplicantHistorySection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (app.adopterId.isEmpty) return const SizedBox.shrink();
+    // Watched unconditionally (not gated on `expanded`) so Riverpod keeps
+    // one cached subscription regardless of how many times the tile is
+    // toggled — expanding never triggers a fresh Firestore query.
     final historyAsync = ref.watch(adoptionsForApplicantProvider(app.adopterId));
     final all = historyAsync.asData?.value ?? const <AdoptionApplication>[];
     final others = all.where((a) => a.id != app.id).toList();
@@ -451,23 +491,28 @@ class _ApplicantHistorySection extends ConsumerWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Applicant History', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                Text('Application History', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                 Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textSecondary),
               ],
             ),
           ),
-          const SizedBox(height: 6),
-          Text('Previous applications: ${all.length}', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-          Text('Successful adoptions: $successful', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-          Text('Rejected applications: $rejected', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-          Text('Withdrawn applications: $withdrawn', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-          Text('Active applications: $active', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
           if (expanded) ...[
-            const Divider(height: 20),
-            if (others.isEmpty)
-              Text('No other applications from this applicant.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
-            else
-              for (final a in others)
+            const SizedBox(height: 10),
+            if (historyAsync.isLoading)
+              const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
+            else if (historyAsync.hasError)
+              Text('Could not load application history.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+            else ...[
+              Text('Previous applications: ${all.length}', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+              Text('Successful adoptions: $successful', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+              Text('Rejected applications: $rejected', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+              Text('Withdrawn applications: $withdrawn', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+              Text('Active applications: $active', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+              const Divider(height: 20),
+              if (others.isEmpty)
+                Text('No other applications from this applicant.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+              else
+                for (final a in others)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Column(
@@ -485,6 +530,7 @@ class _ApplicantHistorySection extends ConsumerWidget {
                     ],
                   ),
                 ),
+            ],
           ],
         ],
       ),
@@ -498,27 +544,68 @@ class _DocumentsSection extends StatelessWidget {
   final AdoptionApplication app;
   const _DocumentsSection({required this.app});
 
+  bool _looksLikeUrl(String v) => v.startsWith('http://') || v.startsWith('https://');
+
+  /// Accepts every shape a value under `uploads.*` has actually been
+  /// written as: null, a single URL string, a list of URL strings, or (for
+  /// older/legacy entries) a list of maps carrying the URL under a
+  /// url/downloadUrl/imageUrl key. Never crashes on an unexpected shape —
+  /// anything that isn't recognizably a URL is silently dropped rather than
+  /// shown broken.
   List<String> _urlsFor(dynamic value) {
     if (value == null) return const [];
-    if (value is String) return value.isEmpty ? const [] : [value];
-    if (value is List) return value.whereType<String>().toList();
+    if (value is String) return _looksLikeUrl(value) ? [value] : const [];
+    if (value is List) {
+      final urls = <String>[];
+      for (final item in value) {
+        if (item is String && _looksLikeUrl(item)) {
+          urls.add(item);
+        } else if (item is Map) {
+          final url = item['url'] ?? item['downloadUrl'] ?? item['imageUrl'];
+          if (url is String && _looksLikeUrl(url)) urls.add(url);
+        }
+      }
+      return urls;
+    }
+    if (value is Map) {
+      final url = value['url'] ?? value['downloadUrl'] ?? value['imageUrl'];
+      return (url is String && _looksLikeUrl(url)) ? [url] : const [];
+    }
     return const [];
   }
 
   @override
   Widget build(BuildContext context) {
     final uploads = (app.raw['uploads'] as Map?) ?? const {};
-    final categories = <(String, List<String>)>[
-      ('Government ID', _urlsFor(uploads['governmentId'])),
-      ('Proof of Address', _urlsFor(uploads['proofOfAddress'])),
-      ('Home Photos', _urlsFor(uploads['homePhotos'])),
-    ];
+    final governmentId = _urlsFor(uploads['governmentId']);
+    final proofOfAddress = _urlsFor(uploads['proofOfAddress']);
+    // Never read from anything but uploads.homePhotos — never
+    // applicationDocuments, treatmentMedia, receipts, or the Animal
+    // Record's own images.
+    final homePhotos = _urlsFor(uploads['homePhotos']);
 
     return _SectionCard(
       title: 'Required Documents',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [for (final (label, urls) in categories) _DocumentRow(label: label, urls: urls)],
+        children: [
+          _DocumentRow(label: 'Government ID', urls: governmentId),
+          _DocumentRow(label: 'Proof of Address', urls: proofOfAddress),
+          const SizedBox(height: 4),
+          Text('Home Photos${homePhotos.length > 1 ? ' (${homePhotos.length})' : ''}',
+              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          if (homePhotos.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(kNotProvided, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: PhotoThumbnailStrip(photoUrls: homePhotos),
+            ),
+        ],
       ),
     );
   }
@@ -606,20 +693,38 @@ class _DocumentRow extends StatelessWidget {
 class _AppointmentSection extends StatelessWidget {
   final AdoptionApplication app;
   final bool busy;
+  final VoidCallback onConfirmInterview;
   final VoidCallback onCompleteInterview;
   final VoidCallback onNoShow;
   final VoidCallback onReschedule;
   const _AppointmentSection({
     required this.app,
     required this.busy,
+    required this.onConfirmInterview,
     required this.onCompleteInterview,
     required this.onNoShow,
     required this.onReschedule,
   });
 
+  ButtonStyle _yellowButton({bool enabled = true}) => ElevatedButton.styleFrom(
+        backgroundColor: enabled ? AppColors.yellowrspwn : AppColors.slaterspwn,
+        foregroundColor: AppColors.textPrimary,
+        disabledBackgroundColor: AppColors.slaterspwn,
+        disabledForegroundColor: AppColors.textSecondary,
+      );
+
   @override
   Widget build(BuildContext context) {
     final hasAppointment = app.appointmentDate != null;
+    // A booked appointment stays Pending until the admin explicitly
+    // confirms it (adoption_process.dart's own booking step no longer
+    // advances status itself) — Complete Interview / Mark as No-show only
+    // make sense once that confirmation has happened.
+    final isPending = app.status == AdoptionStatus.pending;
+    final isConfirmed = app.status == AdoptionStatus.interview;
+    final interviewTimeArrived = hasAppointment &&
+        !DateTime.now().isBefore(combineInterviewDateTime(app.appointmentDate!, app.appointmentTime));
+
     return _SectionCard(
       title: 'Appointment Details',
       child: Column(
@@ -631,24 +736,61 @@ class _AppointmentSection extends StatelessWidget {
           ]),
           Row(children: [
             Expanded(child: _InfoItem('Type', app.appointmentType ?? kNotProvided)),
-            Expanded(child: _InfoItem('Status', app.interviewCompletedAt != null
-                ? 'Completed'
-                : (app.noShowAt != null ? 'No-show' : (hasAppointment ? 'Scheduled' : 'Not scheduled')))),
+            Expanded(
+              child: _InfoItem(
+                  'Status',
+                  app.interviewCompletedAt != null
+                      ? 'Completed'
+                      : (app.noShowAt != null
+                          ? 'No-show'
+                          : (isConfirmed
+                              ? 'Scheduled'
+                              : (hasAppointment ? 'Awaiting confirmation' : 'Not scheduled')))),
+            ),
           ]),
           if (app.interviewCompletedAt != null)
             _InfoItem('Interview Completed', '${_fmtDateTime(app.interviewCompletedAt)}${app.interviewCompletedBy != null ? ' · ${app.interviewCompletedBy}' : ''}'),
           if (app.noShowAt != null) _InfoItem('No-show recorded', _fmtDateTime(app.noShowAt)),
           const SizedBox(height: 8),
-          if (hasAppointment && app.status != AdoptionStatus.rejected && app.status != AdoptionStatus.withdrawn)
+          // Once adopted (release completed), the interview loop is over —
+          // Confirm/Complete/Reschedule/No-show no longer make sense and
+          // are removed from the active action area entirely, not just
+          // disabled. The Date/Time/Type/Status fields above stay visible
+          // as read-only history.
+          if (hasAppointment &&
+              app.status != AdoptionStatus.rejected &&
+              app.status != AdoptionStatus.withdrawn &&
+              app.status != AdoptionStatus.adopted)
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (app.interviewCompletedAt == null)
-                  OutlinedButton(onPressed: busy ? null : onCompleteInterview, child: const Text('Complete Interview')),
-                if (app.interviewCompletedAt == null)
-                  OutlinedButton(onPressed: busy ? null : onNoShow, child: const Text('Mark as No-show')),
-                OutlinedButton(onPressed: onReschedule, child: const Text('Reschedule')),
+                if (isPending)
+                  ElevatedButton(
+                    onPressed: busy ? null : onConfirmInterview,
+                    style: _yellowButton(),
+                    child: const Text('Confirm Interview'),
+                  ),
+                if (isConfirmed && app.interviewCompletedAt == null) ...[
+                  ElevatedButton(
+                    // Grayed out until the scheduled interview time has
+                    // actually arrived — can't complete an interview that
+                    // hasn't happened yet.
+                    onPressed: (busy || !interviewTimeArrived) ? null : onCompleteInterview,
+                    style: _yellowButton(enabled: interviewTimeArrived),
+                    child: const Text('Complete Interview'),
+                  ),
+                  ElevatedButton(
+                    onPressed: busy ? null : onNoShow,
+                    style: _yellowButton(),
+                    child: const Text('Mark as No-show'),
+                  ),
+                ],
+                ElevatedButton(
+                  onPressed: busy ? null : onReschedule,
+                  style: _yellowButton(),
+                  child: const Text('Reschedule'),
+                ),
               ],
             ),
         ],
@@ -696,34 +838,41 @@ class _NotesSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final notesAsync = ref.watch(adoptionNotesProvider(app.id));
     final notes = notesAsync.asData?.value ?? const <Map<String, dynamic>>[];
+    // Once adopted, historical notes stay visible but read-only — adding
+    // new interview notes no longer makes sense once the interview loop
+    // is over.
+    final canEditNotes = app.status != AdoptionStatus.adopted;
 
     return _SectionCard(
       title: 'Interview Notes',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Private to your organization — never shown to the applicant.',
-              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: controller,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'General observations, home/environment concerns, pet-care knowledge, '
-                  'financial preparedness, compatibility, follow-up concerns, recommendation…',
-              isDense: true,
+          if (canEditNotes) ...[
+            Text('Private to your organization — never shown to the applicant.',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: controller,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                hintText: 'General observations, home/environment concerns, pet-care knowledge, '
+                    'financial preparedness, compatibility, follow-up concerns, recommendation…',
+                isDense: true,
+              ),
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
             ),
-            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: ElevatedButton(
-              onPressed: busy ? null : onSave,
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
-              child: const Text('Save Note'),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton(
+                onPressed: busy ? null : onSave,
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                child: const Text('Save Note'),
+              ),
             ),
-          ),
+          ] else if (notes.isEmpty)
+            Text('No interview notes were recorded.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
           if (notes.isNotEmpty) ...[
             const Divider(height: 20),
             Text('History', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
@@ -795,7 +944,10 @@ class _ActionsSection extends ConsumerWidget {
           ),
         );
       case AdoptionStatus.approved:
-        final animal = ref.watch(animalRecordProvider(app.animalId)).asData?.value;
+        // app.animalId is the legacy join key, never a real doc id.
+        final approvedAnimalRecordId = app.animalRecordId;
+        final animal =
+            approvedAnimalRecordId == null ? null : ref.watch(animalRecordProvider(approvedAnimalRecordId)).asData?.value;
         final isReservedForThis = animal?.reservedApplicationId == app.id;
         return Column(
           children: [

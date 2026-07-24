@@ -195,21 +195,30 @@ class _TriStateRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Label above the selector (not side-by-side) — a Row with a label
+    // like "Deworming status" plus a 3-segment Unknown/No/Yes button had no
+    // Expanded/Flexible on either side, so it overflowed horizontally on
+    // narrow screens ("RIGHT OVERFLOWED BY ... PIXELS"). Stacking instead
+    // of squeezing them onto one line fixes that at any width.
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          SegmentedButton<bool?>(
-            segments: const [
-              ButtonSegment(value: null, label: Text('Unknown')),
-              ButtonSegment(value: false, label: Text('No')),
-              ButtonSegment(value: true, label: Text('Yes')),
-            ],
-            selected: {value},
-            onSelectionChanged: (s) => onChanged(s.first),
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<bool?>(
+              segments: const [
+                ButtonSegment(value: null, label: Text('Unknown')),
+                ButtonSegment(value: false, label: Text('No')),
+                ButtonSegment(value: true, label: Text('Yes')),
+              ],
+              selected: {value},
+              onSelectionChanged: (s) => onChanged(s.first),
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            ),
           ),
         ],
       ),

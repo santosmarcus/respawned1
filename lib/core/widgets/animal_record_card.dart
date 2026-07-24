@@ -4,6 +4,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 
+/// The animal's gender icon, or null for 'Unknown'/unset sex — never
+/// guesses Male as a default. Shared by the list card and the admin/user
+/// detail-page headers so gender reads identically everywhere it appears.
+IconData? genderIconFor(String sex) => switch (sex.toLowerCase()) {
+      'male' => Icons.male,
+      'female' => Icons.female,
+      _ => null,
+    };
+
 /// One chip shown in an [AnimalRecordCard]'s chip row — label + color, used
 /// for both the admin's attention/status chips and the user's health tags.
 class CardChip {
@@ -71,6 +80,7 @@ class AnimalRecordCard extends StatelessWidget {
     }
 
     final displayName = animal.name.isNotEmpty ? animal.name : animal.species;
+    final genderIcon = genderIconFor(animal.sex);
     final subtitle = [
       if (animal.species.isNotEmpty) animal.species,
       if (animal.breed.isNotEmpty) animal.breed,
@@ -115,14 +125,13 @@ class AnimalRecordCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(width: 6),
                       // Gender icon sits directly beside the name — never
-                      // alone at the card's far-right edge.
-                      Icon(
-                        animal.sex.toLowerCase() == 'female' ? Icons.female : Icons.male,
-                        size: 16,
-                        color: AppColors.textSecondary,
-                      ),
+                      // alone at the card's far-right edge, and hidden
+                      // entirely (not defaulted to Male) for Unknown/unset.
+                      if (genderIcon != null) ...[
+                        const SizedBox(width: 6),
+                        Icon(genderIcon, size: 16, color: AppColors.textSecondary),
+                      ],
                       if (onFavorite != null) ...[
                         const SizedBox(width: 4),
                         GestureDetector(

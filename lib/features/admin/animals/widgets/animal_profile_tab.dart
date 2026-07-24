@@ -28,12 +28,18 @@ class AnimalProfileTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Species/Age/Size, Breed/Coat Length/Color-Markings — the same
+          // six-field structure and order the user-side detail page
+          // (animal_page.dart) uses, so both surfaces read identically. Sex
+          // is deliberately not a field here — it's already represented as
+          // the gender icon beside the name above, and repeating it as text
+          // would be a duplicate gender row.
           AnimalBasicInfoRow(fields: [
+            InfoField('Species', _orNA(animal.species)),
             InfoField('Age', _orNA(animal.age)),
             InfoField('Size', _orNA(animal.size)),
-            InfoField('Coat Length', _orNA(animal.coatLength)),
-            InfoField('Sex', _orNA(animal.sex)),
             InfoField('Breed', _orNA(animal.breed)),
+            InfoField('Coat Length', _orNA(animal.coatLength)),
             // No dedicated color/markings field yet — that text is folded
             // into Description at intake time (see
             // create_animal_record_page.dart's _prefill), so this is

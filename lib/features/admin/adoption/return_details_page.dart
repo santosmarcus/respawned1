@@ -8,6 +8,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/core/widgets/photo_thumbnail_strip.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/retrieval_schedule_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
@@ -85,16 +86,33 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
         ));
   }
 
+  // app.animalId is the legacy hash/catalog-int join key and would never
+  // resolve to the real animal doc these calls update — animalRecordId is
+  // the reliable one (see AdoptionApplication's own doc comment).
   Future<void> _confirmRetrieved(AdoptionApplication app) async {
+    final animalRecordId = app.animalRecordId;
+    if (animalRecordId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("This application predates linked animal records and can't be updated automatically."),
+          backgroundColor: Colors.redAccent));
+      return;
+    }
     final confirmed = await showConfirmActionDialog(context,
         title: 'Confirm Animal Retrieved?', message: '${app.animalName} will be marked as physically retrieved from the adopter.', confirmLabel: 'Confirm Retrieved');
     if (!confirmed) return;
     await _run(() => ref
         .read(adoptionApplicationRepositoryProvider)
-        .confirmAnimalRetrieved(applicationId: widget.applicationId, animalId: app.animalId, actorName: _actorName));
+        .confirmAnimalRetrieved(applicationId: widget.applicationId, animalId: animalRecordId, actorName: _actorName));
   }
 
   Future<void> _proceedToIntake(AdoptionApplication app) async {
+    final animalRecordId = app.animalRecordId;
+    if (animalRecordId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("This application predates linked animal records and can't be updated automatically."),
+          backgroundColor: Colors.redAccent));
+      return;
+    }
     final confirmed = await showConfirmActionDialog(context,
         title: 'Proceed to Intake?', message: '${app.animalName} will enter Intake as an Adoption Return using its existing animal record.', confirmLabel: 'Proceed to Intake');
     if (!confirmed) return;
@@ -112,7 +130,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
 
       final caseId = await ref.read(adoptionApplicationRepositoryProvider).proceedToIntake(
             applicationId: widget.applicationId,
-            animalId: app.animalId,
+            animalId: animalRecordId,
             actorUid: uid,
             actorName: _actorName,
             shelterLat: destination.lat!,
@@ -208,19 +226,10 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
                           const SizedBox(height: 10),
                           Text('Photos (${r.images.length})', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
                           const SizedBox(height: 6),
-                          SizedBox(
-                            height: 90,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: r.images.length,
-                              separatorBuilder: (_, __) => const SizedBox(width: 8),
-                              itemBuilder: (context, i) => ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: Image.network(r.images[i], width: 90, height: 90, fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => Container(width: 90, height: 90, color: AppColors.tearspwn)),
-                              ),
-                            ),
-                          ),
+                          // Tapping any thumbnail opens the same swipeable,
+                          // page-indicated fullscreen viewer used elsewhere
+                          // (FullscreenImageGallery) — reused, not rebuilt.
+                          PhotoThumbnailStrip(photoUrls: r.images, size: 90),
                         ],
                       ],
                     ),
