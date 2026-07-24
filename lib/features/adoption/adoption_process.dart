@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
+import 'package:respawnd1/features/adoption/interview_scheduling.dart';
 
 enum _AdoptionProcess {
   intro,           // 1st step - Lets start
@@ -30,16 +31,20 @@ const List<String> _stepLabels = [
 ];
 
 
-// TODO(animal-catalog): widget.animal comes from this file's own hardcoded
-// _allAnimals catalog (adoption_page.dart), not a live read of the real
-// `animals` Firestore collection the admin Animal Records module manages —
-// a pre-existing disconnect, not something this round's admin Adoption
-// Application Review work introduced. Until the browsing catalog itself is
-// reconnected to Firestore, `personal.animalId` on a submitted application
-// generally will NOT match a real `animals/{id}` document, so admin-side
-// animal-record linking (View Applications from an Animal Record, per-
-// application animal photo lookups) only works for applications whose id
-// happens to coincide with a real doc id.
+// widget.animal is now always built from a live AnimalRecord
+// (adoption_page.dart's animalRecordToCard) — the old hardcoded catalog
+// this comment used to describe is gone. `widget.animal.id` is still a
+// one-way stableIntIdFor hash of the real animal document id (kept only so
+// this legacy int-keyed screen/AdoptionProcess/favorites pipeline doesn't
+// need rewiring), so it can never be reversed back into a real
+// `animals/{id}` id for a Firestore document lookup. Real
+// document/query operations against the `animals` collection (reserve,
+// clearReservationOnWithdrawal, admin-side "View Applications" linking)
+// must use `widget.animal.animalRecordId` instead — the actual Firestore
+// id, carried alongside `id` for exactly this purpose. `personal.animalId`
+// stays on the submitted document only for backward-compatible display/
+// dedupe matching against older applications written the same way;
+// `personal.animalRecordId` (added below) is the real, reliable join key.
 class AdoptionProcess extends StatefulWidget {
   final Animal animal;
   final String? existingAdoptionId;
@@ -86,7 +91,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   //Lifestyle & Care
   String? _hoursAlone;
-  final _caregiverCtrl = TextEditingController();
+  // Dropdown, not freeform text — a small closed set of real answers, same
+  // reasoning as the rest of this form's radio questions.
+  static const _caregiverOptions = ['Me', 'Family', 'Housekeeper'];
+  String? _primaryCaregiver;
   String? _petStayLocation;
   bool _canAffordFood = false;
   bool _canAffordVaccinations = false;
@@ -101,12 +109,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   File? _governmentIdFile;
   File? _proofOfAddressFile;
   //File? _digitalSignatureFile;
-  File? _homePhotosFile;
+  // Home Photos supports multiple images — a newly-picked list plus,
+  // when resuming an in-progress application, whatever was already
+  // uploaded in an earlier session (kept separate so removing one only
+  // removes that one, exactly like CreateAnimalRecordPage's own
+  // existing/newly-picked image split).
+  final List<File> _homePhotosFiles = [];
+  List<String> _existingHomePhotoUrls = [];
 
   String? _governmentIdUrl;
   String? _proofOfAddressUrl;
   //String? _digitalSignatureUrl;
-  String? _homePhotosUrl;
 
   bool _isUploadingGovId = false;
   bool _isUploadingProof = false;
@@ -173,29 +186,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     setState(() => _reviewStep = target == _step ? null : target);
   }
 
-  // timeslots
-  static const Map<int, List<String>> _timeSlots = {
-    0: ['9:00 AM', '10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    1: [
-      '9:00 AM',
-      '10:00 AM',
-      '11:00 AM',
-      '1:00 PM',
-      '2:00 PM',
-      '3:00 PM',
-      '4:00 PM'
-    ],
-    2: ['10:00 AM', '11:00 AM', '2:00 PM', '3:00 PM'],
-    3: ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '3:00 PM', '4:00 PM'],
-    4: ['9:00 AM', '10:00 AM', '2:00 PM', '3:00 PM', '4:00 PM'],
-    5: ['10:00 AM', '11:00 AM', '12:00 PM'],
-    6: [], // Sunday – closed
-  };
-
+  // Interview visit types + day-of-week time slots — now the shared
+  // interview_scheduling.dart source of truth (also used by the admin's
+  // Reschedule action), not a copy private to this screen.
   List<String> get _slotsForDate {
     if (_appointmentDate == null) return [];
-    final dow = (_appointmentDate!.weekday - 1) % 7;
-    return _timeSlots[dow] ?? [];
+    return interviewSlotsForDate(_appointmentDate!);
   }
 
   @override
@@ -227,7 +223,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _phoneCtrl.dispose();
     _residenceOtherCtrl.dispose();
     _currentOtherTypeCtrl.dispose();
-    _caregiverCtrl.dispose();
     _reasonCtrl.dispose();
     super.dispose();
   }
@@ -265,6 +260,35 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
+  static const _maxHomePhotos = 6;
+
+  /// Adds to the existing selection rather than replacing it — repeated
+  /// taps let the applicant keep adding more photos, matching "allow
+  /// adding more images afterward." Capped at [_maxHomePhotos] total
+  /// (existing + newly picked combined) — extra picks beyond the cap are
+  /// dropped with a message rather than silently accepted.
+  Future<void> _addHomePhotos() async {
+    final picked = await _picker.pickMultiImage(imageQuality: 80);
+    if (picked.isEmpty) return;
+
+    final currentTotal = _existingHomePhotoUrls.length + _homePhotosFiles.length;
+    final room = _maxHomePhotos - currentTotal;
+    if (room <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('You can upload at most $_maxHomePhotos home photos.'), backgroundColor: Colors.redAccent),
+      );
+      return;
+    }
+
+    final accepted = picked.take(room).toList();
+    if (accepted.length < picked.length && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Only $room more photo(s) can be added (max $_maxHomePhotos total).'), backgroundColor: Colors.redAccent),
+      );
+    }
+    setState(() => _homePhotosFiles.addAll(accepted.map((x) => File(x.path))));
+  }
+
   //upload helper
   Future<String?> _uploadFile(File? file, String pathSegment, String adoptionId) async {
     if (file == null) return null;
@@ -272,6 +296,25 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         .ref('adoptions/$adoptionId/$pathSegment.jpg');
     await ref.putFile(file);
     return await ref.getDownloadURL();
+  }
+
+  /// Uploads every picked Home Photo (any count — no fixed maximum) in
+  /// parallel and returns the resulting URLs in the same order the files
+  /// were picked. Kept entirely separate from _uploadFile's single-file
+  /// Future.wait list below on purpose: unpacking a variable-length upload
+  /// by a fixed position is exactly what caused the RangeError this
+  /// replaces (see the class doc comment / _submitAdoptionForm).
+  Future<List<String>> _uploadHomePhotos(List<File> files, String adoptionId) async {
+    if (files.isEmpty) return const [];
+    final urls = await Future.wait([
+      for (var i = 0; i < files.length; i++)
+        () async {
+          final ref = FirebaseStorage.instance.ref('adoptions/$adoptionId/home_photos/img_$i.jpg');
+          await ref.putFile(files[i]);
+          return ref.getDownloadURL();
+        }(),
+    ]);
+    return urls;
   }
 
   Future<void> _pickDate() async {
@@ -339,11 +382,15 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   // existed — so an application submitted before this change still resumes
   // at the right step. See AdoptionStatus.fromFirestoreValue for the same
   // mapping used admin-side.
-  _AdoptionProcess _stepForStatus(String? status) {
+  // [hasAppointment]: a Pending application with an already-booked
+  // appointment (booked but not yet admin-confirmed — see _saveAppointment,
+  // which no longer advances status itself) should resume on the Review
+  // step, not send the applicant back to re-book.
+  _AdoptionProcess _stepForStatus(String? status, {required bool hasAppointment}) {
     switch (status) {
       case 'pending':
       case 'pending_appointment':
-        return _AdoptionProcess.bookAppointment;
+        return hasAppointment ? _AdoptionProcess.appReview : _AdoptionProcess.bookAppointment;
       case 'interview':
       case 'under_review':
         return _AdoptionProcess.appReview;
@@ -431,7 +478,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
         // Lifestyle & Care
         _hoursAlone = lifestyle['hoursAlone'] as String?;
-        _caregiverCtrl.text = lifestyle['primaryCaregiver'] as String? ?? '';
+        // Only accepted if it matches one of the dropdown's own options —
+        // an older application may have freeform text here from before
+        // this became a closed set; that legacy value just isn't
+        // preselected rather than being force-mapped to a guess.
+        final savedCaregiver = lifestyle['primaryCaregiver'] as String?;
+        _primaryCaregiver = _caregiverOptions.contains(savedCaregiver) ? savedCaregiver : null;
         _petStayLocation = lifestyle['petStayLocation'] as String?;
         _canAffordFood = canAfford['food'] as bool? ?? false;
         _canAffordVaccinations = canAfford['vaccinations'] as bool? ?? false;
@@ -447,7 +499,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _governmentIdUrl = uploads['governmentId'] as String?;
         _proofOfAddressUrl = uploads['proofOfAddress'] as String?;
         //_digitalSignatureUrl = uploads['digitalSignature'] as String?;
-        _homePhotosUrl = uploads['homePhotos'] as String?;
+        // homePhotos may be a single legacy String or the current List —
+        // same dual-shape tolerance the admin document reader already has.
+        final homePhotosRaw = uploads['homePhotos'];
+        _existingHomePhotoUrls = homePhotosRaw is List
+            ? homePhotosRaw.whereType<String>().toList()
+            : (homePhotosRaw is String && homePhotosRaw.isNotEmpty ? [homePhotosRaw] : []);
 
         // Agreements
         _agreeCare = agreement['care'] as bool? ?? false;
@@ -473,7 +530,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         // cleared again by unreserve/release.
         _isReservedForMe = data['reservedAt'] != null;
 
-        _step = _stepForStatus(data['status'] as String?);
+        _step = _stepForStatus(data['status'] as String?, hasAppointment: appointmentTs is Timestamp);
         _isLoadingExisting = false;
       });
     } catch (e) {
@@ -491,6 +548,29 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
   Future<void> _submitAdoptionForm() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    // _RadioGroup/the caregiver dropdown aren't FormFields, so
+    // _formKey.validate() above never sees them — every radio question in
+    // this form could previously be submitted unanswered.
+    final missingAnswers = <String>[
+      if (_residenceType == null) 'Residence Type',
+      if (_ownershipStatus == null) 'Ownership Status',
+      if (_petsVaccinated == null) 'current pets vaccinated status',
+      if (_petsSpayedNeutered == null) 'current pets spayed/neutered status',
+      if (_hoursAlone == null) 'hours animal will be left alone',
+      if (_primaryCaregiver == null) 'Primary Caregiver',
+      if (_petStayLocation == null) 'where pet will stay',
+      if (_monthlyBudget == null) 'Monthly Pet Budget',
+    ];
+    if (missingAnswers.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please answer: ${missingAnswers.join(', ')}.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
 
     if (!_agreeCare ||
         !_agreeNoAbandon ||
@@ -510,16 +590,32 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
-      final existing = await FirebaseFirestore.instance
+      // Checked by both keys: personal.animalId (legacy — matches older
+      // applications written before animalRecordId existed) and
+      // personal.animalRecordId (the real animal doc id, reliable for
+      // every application submitted after this fix). Neither alone is
+      // guaranteed to see every prior application for this exact animal.
+      final legacyExisting = FirebaseFirestore.instance
           .collection('adoptions')
           .where('personal.animalId', isEqualTo: '${widget.animal.id}')
           .get();
+      final byRecordIdExisting = widget.animal.animalRecordId.isEmpty
+          ? Future.value(null)
+          : FirebaseFirestore.instance
+              .collection('adoptions')
+              .where('personal.animalRecordId', isEqualTo: widget.animal.animalRecordId)
+              .get();
+      final existingResults = await Future.wait([legacyExisting, byRecordIdExisting]);
 
-      final stillActiveOrDone = existing.docs.any((doc) {
-        final data = doc.data();
-        final status = data['status'] as String? ?? '';
-        return status != 'rejected' && status != 'withdrawn';
-      });
+      bool blocks(QuerySnapshot<Map<String, dynamic>>? snap) {
+        if (snap == null) return false;
+        return snap.docs.any((doc) {
+          final status = doc.data()['status'] as String? ?? '';
+          return status != 'rejected' && status != 'withdrawn';
+        });
+      }
+
+      final stillActiveOrDone = blocks(existingResults[0]) || blocks(existingResults[1]);
 
       if (stillActiveOrDone) {
         if (mounted) {
@@ -537,26 +633,41 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
       final docRef = FirebaseFirestore.instance.collection('adoptions').doc();
 
+      // Government ID / Proof of Address are the only two single-file
+      // uploads left in this Future.wait — this list's length must always
+      // match the two unpack lines directly below it. Home Photos is a
+      // variable-length list and is uploaded separately via
+      // _uploadHomePhotos precisely so it can never desync this fixed-size
+      // unpack again (this positional mismatch — a disabled third upload
+      // shrinking this list without the indices below being renumbered —
+      // was the exact cause of the RangeError this replaces).
       final results = await Future.wait([
         _uploadFile(_governmentIdFile, 'government_id', docRef.id),
         _uploadFile(_proofOfAddressFile, 'proof_of_address', docRef.id),
         //_uploadFile(_digitalSignatureFile, 'digital_signature', docRef.id),
-        _uploadFile(_homePhotosFile, 'home_photos', docRef.id),
       ]);
 
       _governmentIdUrl = results[0];
       _proofOfAddressUrl = results[1];
       ///_digitalSignatureUrl = results[2];
-      _homePhotosUrl = results[3];
+
+      final newHomePhotoUrls = await _uploadHomePhotos(_homePhotosFiles, docRef.id);
+      final homePhotoUrls = [..._existingHomePhotoUrls, ...newHomePhotoUrls];
 
       await docRef.set({
         'personal': {
           'adopterId': uid,
-          // Stored as a string (not the raw int) so it can match a real
-          // `animals/{id}` Firestore document id — see the TODO on
-          // AdoptionProcess for the current catalog/Firestore disconnect
-          // this doesn't fully resolve.
+          // Legacy join key — a stringified stableIntIdFor hash, kept only
+          // for matching against applications written the same way before
+          // animalRecordId existed. Never reliably reversible to a real
+          // animals/{id} doc; see the class doc comment above.
           'animalId': '${widget.animal.id}',
+          // The real animals/{id} Firestore document id — the reliable join
+          // key going forward for admin-side "View Applications" and any
+          // other lookup that needs to resolve back to the actual
+          // AnimalRecord. Omitted (not written as '') if unavailable.
+          if (widget.animal.animalRecordId.isNotEmpty)
+            'animalRecordId': widget.animal.animalRecordId,
           'animalName': widget.animal.name,
           'adopterName': _nameCtrl.text.trim(),
           'adopterEmail': _emailCtrl.text.trim(),
@@ -588,7 +699,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         },
         'lifestyle': {
           'hoursAlone': _hoursAlone,
-          'primaryCaregiver': _caregiverCtrl.text.trim(),
+          'primaryCaregiver': _primaryCaregiver,
           'petStayLocation': _petStayLocation,
           'canAfford': {
             'food': _canAffordFood,
@@ -605,7 +716,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           'governmentId': _governmentIdUrl,
           'proofOfAddress': _proofOfAddressUrl,
           //'digitalSignature': _digitalSignatureUrl,
-          'homePhotos': _homePhotosUrl,
+          // A list, not a single URL — every uploaded home photo is kept,
+          // never overwritten by only the most recent one. The admin
+          // Required Documents reader already accepts either shape.
+          'homePhotos': homePhotoUrls,
         },
         'agreement': {
           'reason': _reasonCtrl.text.trim(),
@@ -654,7 +768,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         'appointmentType': _appointmentType,
         'appointmentDate': Timestamp.fromDate(_appointmentDate!),
         'appointmentTime': _appointmentTime,
-        'status': 'interview',
+        // Deliberately NOT writing 'status' here — the application stays
+        // Pending (whatever it already was) until the admin's Confirm
+        // Interview action moves it into Interview. This used to jump
+        // straight to 'interview' the moment the applicant booked a slot,
+        // skipping the admin confirmation step entirely.
         'statusHistory': FieldValue.arrayUnion([{
           'status': 'Appointment booked.',
           'timestamp': Timestamp.now(),
@@ -700,7 +818,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _petsSpayedNeutered = null;
 
     _hoursAlone = null;
-    _caregiverCtrl.clear();
+    _primaryCaregiver = null;
     _petStayLocation = null;
     _canAffordFood = false;
     _canAffordVaccinations = false;
@@ -714,11 +832,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _governmentIdFile = null;
     _proofOfAddressFile = null;
     //_digitalSignatureFile = null;
-    _homePhotosFile = null;
+    _homePhotosFiles.clear();
+    _existingHomePhotoUrls = [];
     _governmentIdUrl = null;
     _proofOfAddressUrl = null;
     //_digitalSignatureUrl = null;
-    _homePhotosUrl = null;
 
     _agreeCare = false;
     _agreeNoAbandon = false;
@@ -789,14 +907,16 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       // reservation so it becomes available again — never touches an
       // already-completed release (see the repository method's own doc
       // comment on why that's flagged for manual resolution instead).
-      await AdoptionApplicationRepository().clearReservationOnWithdrawal(
-        applicationId: _adoptionId!,
-        // TODO(animal-catalog): widget.animal.id is this screen's local
-        // mock-catalog int id, not necessarily a real `animals/{id}`
-        // Firestore document id — see the class doc comment for why. This
-        // call is a no-op (safely) if no matching animal doc exists.
-        animalId: '${widget.animal.id}',
-      );
+      // Must be the real animals/{id} doc id (animalRecordId) — this is a
+      // direct document lookup, not a query, so the stringified
+      // stableIntIdFor hash (widget.animal.id) would never resolve to the
+      // actual animal document and this call would silently no-op.
+      if (widget.animal.animalRecordId.isNotEmpty) {
+        await AdoptionApplicationRepository().clearReservationOnWithdrawal(
+          applicationId: _adoptionId!,
+          animalId: widget.animal.animalRecordId,
+        );
+      }
 
       setState(() => _step = _AdoptionProcess.withdrawn);
     } catch (e) {
@@ -1148,10 +1268,22 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 onChanged: (v) => setState(() => _hoursAlone = v),
               ),
               const SizedBox(height: 12),
-              _FormField(
-                  controller: _caregiverCtrl,
-                  label: 'Primary Caregiver',
-                  hint: 'Enter'),
+              Text('Primary Caregiver',
+                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              DropdownButtonFormField<String>(
+                initialValue: _primaryCaregiver,
+                hint: Text('Select', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
+                items: _caregiverOptions.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+                onChanged: (v) => setState(() => _primaryCaregiver = v),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: AppColors.yellowrspwn.withValues(alpha: 0.3),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                ),
+              ),
               const SizedBox(height: 16),
               _RadioGroup<String>(
                 label: 'Where will pet stay?',
@@ -1277,15 +1409,22 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                       onPicked: (f) => setState(() => _digitalSignatureFile = f),
                     ),
                   ),*/
-                  _UploadBox(
-                    label: 'Home Photos',
-                    file: _homePhotosFile,
-                    isUploading: _isUploadingHomePhotos,
-                    onTap: () => _pickUploadFile(
-                      onPicked: (f) => setState(() => _homePhotosFile = f),
-                    ),
-                  ),
                 ],
+              ),
+
+              const SizedBox(height: 18),
+
+              // Home Photos — multiple images, not a single fixed slot: add
+              // more afterward, remove any one before submitting, every
+              // selected photo is uploaded and its URL saved (never
+              // overwritten by only the most recent pick).
+              _HomePhotosPicker(
+                existingUrls: _existingHomePhotoUrls,
+                newFiles: _homePhotosFiles,
+                isUploading: _isUploadingHomePhotos,
+                onAdd: _addHomePhotos,
+                onRemoveExisting: (i) => setState(() => _existingHomePhotoUrls.removeAt(i)),
+                onRemoveNew: (i) => setState(() => _homePhotosFiles.removeAt(i)),
               ),
 
               const SizedBox(height: 22),
@@ -1377,7 +1516,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
         // visit type
         Row(
-          children: ['On-site Visit', 'Online'].map((type) {
+          children: kInterviewTypes.map((type) {
             final selected = _appointmentType == type;
             return GestureDetector(
               onTap: () => setState(() => _appointmentType = type),
@@ -1418,11 +1557,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               var initialDate = _appointmentDate ?? firstDate;
               if (initialDate.isBefore(firstDate)) initialDate = firstDate;
               if (initialDate.isAfter(lastDate)) initialDate = lastDate;
+              // initialDate must itself be selectable — nudge off a Sunday
+              // rather than let CalendarDatePicker's own assertion fail.
+              if (isInterviewClosedDay(initialDate)) initialDate = initialDate.add(const Duration(days: 1));
 
               return CalendarDatePicker(
                 initialDate: initialDate,
                 firstDate: firstDate,
                 lastDate: lastDate,
+                // Sundays aren't just shown as unavailable — they can't be
+                // tapped at all.
+                selectableDayPredicate: (date) => !isInterviewClosedDay(date),
                 onDateChanged: (picked) {
                   setState(() {
                     _appointmentDate = picked;
@@ -1582,6 +1727,32 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           style: GoogleFonts.zain(
               fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
+
+        // The actual booked interview date/time, so "confirm your
+        // appointment" above isn't the only information the applicant sees
+        // about a slot they already picked.
+        if (_appointmentDate != null && _appointmentTime != null) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.yellowrspwn.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.event_available, color: AppColors.greenrspwn, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '$_appointmentType  ·  ${_formatDate(_appointmentDate!)}  ·  $_appointmentTime',
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
 
         if (!_isReadOnly) ...[
           const SizedBox(height: 28),
@@ -1764,6 +1935,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         animalName: widget.animal.name,
         organizationName: 'Loved by the Gapz',
         feeAmount: adoptionFeeAmount,
+        animalPhotoUrl: widget.animal.photoUrl,
       ),
     );
 
@@ -1965,12 +2137,18 @@ class _ReviewPaymentSheet extends StatefulWidget {
   final String animalName;
   final String organizationName;
   final double feeAmount;
+  // The animal's own real photo — kept entirely separate from the
+  // applicant's uploaded Home Photos / documents (different fields,
+  // different widgets); this summary card must never show either of those
+  // instead of the animal itself.
+  final String? animalPhotoUrl;
 
   const _ReviewPaymentSheet({
     required this.adoptionId,
     required this.animalName,
     required this.organizationName,
     required this.feeAmount,
+    this.animalPhotoUrl,
   });
 
   @override
@@ -2034,15 +2212,17 @@ class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
             // Adoption info row
             Row(
               children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: AppColors.tearspwn,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.pets,
-                      size: 26, color: AppColors.textPrimary),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: widget.animalPhotoUrl != null
+                      ? Image.network(
+                          widget.animalPhotoUrl!,
+                          width: 60,
+                          height: 60,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _petThumbPlaceholder(),
+                        )
+                      : _petThumbPlaceholder(),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2247,6 +2427,13 @@ class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
       if (mounted) setState(() => _submitting = false);
     }
   }
+
+  Widget _petThumbPlaceholder() => Container(
+        width: 60,
+        height: 60,
+        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+        child: const Icon(Icons.pets, size: 26, color: AppColors.textPrimary),
+      );
 }
 
 // Terms and Conditions page (Adoption Day)
@@ -2828,6 +3015,107 @@ class _CounterButton extends StatelessWidget {
             color: onTap == null
                 ? AppColors.textPrimary.withOpacity(0.5)
                 : AppColors.textPrimary),
+      ),
+    );
+  }
+}
+
+/// Multi-image Home Photos picker — thumbnails in a wrapping grid, an "add"
+/// tile that always adds to the existing selection (never replaces it),
+/// and a remove button on every thumbnail. Mirrors the existing
+/// existing/newly-picked split `CreateAnimalRecordPage` already uses for
+/// its own multi-image picker, so this isn't a second pattern.
+class _HomePhotosPicker extends StatelessWidget {
+  final List<String> existingUrls;
+  final List<File> newFiles;
+  final bool isUploading;
+  final VoidCallback onAdd;
+  final ValueChanged<int> onRemoveExisting;
+  final ValueChanged<int> onRemoveNew;
+
+  const _HomePhotosPicker({
+    required this.existingUrls,
+    required this.newFiles,
+    required this.isUploading,
+    required this.onAdd,
+    required this.onRemoveExisting,
+    required this.onRemoveNew,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Home Photos', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (var i = 0; i < existingUrls.length; i++)
+              _PhotoThumb(
+                child: Image.network(existingUrls[i], fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
+                onRemove: () => onRemoveExisting(i),
+              ),
+            for (var i = 0; i < newFiles.length; i++)
+              _PhotoThumb(
+                child: Image.file(newFiles[i], fit: BoxFit.cover),
+                onRemove: () => onRemoveNew(i),
+              ),
+            InkWell(
+              onTap: isUploading ? null : onAdd,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  color: AppColors.yellowrspwn.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.greenrspwn.withOpacity(0.6), width: 1.2),
+                ),
+                child: isUploading
+                    ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                    : const Center(child: Icon(Icons.add_a_photo_outlined, size: 24, color: AppColors.greenrspwn)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _PhotoThumb extends StatelessWidget {
+  final Widget child;
+  final VoidCallback onRemove;
+  const _PhotoThumb({required this.child, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 90,
+      height: 90,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(width: 90, height: 90, child: child),
+          ),
+          Positioned(
+            top: -6,
+            right: -6,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                child: const Icon(Icons.close, size: 14, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -138,7 +138,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       itemBuilder: (context, index) {
         final animal = _favorites[index];
 
-        return AnimalCard(
+        return _FavoriteCard(
           animal: animal,
           onFavorite: () => _toggleFavorite(animal),
           onTap: () {
@@ -156,6 +156,81 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       },
     );
   }
+}
+
+/// A favorited animal is stored as a lightweight snapshot (name/breed/age/
+/// description/gender/category — no photo, no live status), not a live
+/// AnimalRecord, so this can't reuse the shared AnimalRecordCard (which
+/// requires one). Kept minimal and local to this screen rather than
+/// reviving a second general-purpose card widget.
+class _FavoriteCard extends StatelessWidget {
+  final Animal animal;
+  final VoidCallback onFavorite;
+  final VoidCallback onTap;
+
+  const _FavoriteCard({required this.animal, required this.onFavorite, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: animal.photoUrl != null
+                  ? Image.network(animal.photoUrl!, width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _placeholder())
+                  : _placeholder(),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(animal.name,
+                            style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(animal.gender == AnimalGender.male ? Icons.male : Icons.female, size: 16, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: onFavorite,
+                        behavior: HitTestBehavior.opaque,
+                        child: const Icon(Icons.favorite, size: 20, color: Color(0xFFE05C5C)),
+                      ),
+                    ],
+                  ),
+                  if (animal.breed.isNotEmpty) Text(animal.breed, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  if (animal.age.isNotEmpty) Text(animal.age, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  if (animal.description.isNotEmpty)
+                    Text(animal.description,
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder() => Container(
+        width: 80,
+        height: 80,
+        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+        child: const Icon(Icons.pets, size: 32, color: AppColors.textSecondary),
+      );
 }
 
 class _ComingSoonTab extends StatelessWidget {

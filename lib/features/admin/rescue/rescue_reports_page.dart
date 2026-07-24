@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +13,21 @@ import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_case_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_filter_sheet.dart';
+import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+
+String _friendlyCasesError(Object err) {
+  if (err is FirebaseException && err.code == 'permission-denied') {
+    // Deployed rules allow any authenticated user — a denial here means
+    // this request isn't reaching Firestore as an authenticated user of
+    // the right project (wrong Firebase config/project, or a server-side
+    // enforcement like App Check rejecting it before rules even run), not
+    // a role/account setup problem. See the debug log this repository
+    // prints (projectId/uid) right before this query runs.
+    return "This request wasn't accepted by Firestore. Check that the app "
+        'is connected to the right Firebase project, then retry.';
+  }
+  return 'Could not load reports.';
+}
 
 class RescueReportsPage extends ConsumerStatefulWidget {
   const RescueReportsPage({super.key});
@@ -80,11 +96,15 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      drawer: const AdminDrawer(),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: AppColors.background),
-          onPressed: () {},
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: AppColors.background),
+            tooltip: 'Menu',
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
         ),
         title: Text('Rescue Reports',
             style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
@@ -271,9 +291,27 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
               error: (err, _) => Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text('Could not load reports: $err',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.lock_outline, size: 32, color: AppColors.textSecondary),
+                      const SizedBox(height: 10),
+                      Text(
+                        _friendlyCasesError(err),
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(height: 14),
+                      OutlinedButton(
+                        // Invalidates only this one tab's family instance — a
+                        // deliberate manual re-subscribe, never an automatic
+                        // retry loop.
+                        onPressed: () => ref.invalidate(
+                            casesByStatusesProvider(ref.read(effectiveStatusesProvider))),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               data: (cases) {

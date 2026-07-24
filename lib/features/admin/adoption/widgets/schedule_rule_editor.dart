@@ -49,6 +49,23 @@ class _ScheduleRuleEditorSheet extends StatefulWidget {
   State<_ScheduleRuleEditorSheet> createState() => _ScheduleRuleEditorSheetState();
 }
 
+// Reasonable min/max per interval unit, so combinations like "every 38
+// days" can't be entered at all — capped low enough that every remaining
+// combination reads as a sensible check-in cadence. Duration is capped at
+// 12 regardless of its unit (weeks/months/years).
+int _intervalMaxFor(IntervalUnit unit) => switch (unit) {
+      IntervalUnit.day => 7,
+      IntervalUnit.week => 4,
+      IntervalUnit.month => 12,
+    };
+const int _intervalMin = 1;
+const int _durationMin = 1;
+const int _durationMax = 12;
+
+// num.clamp returns num, not int — a plain helper avoids a cast at every
+// call site.
+int _clampInt(int value, int min, int max) => value < min ? min : (value > max ? max : value);
+
 class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
   late int _intervalValue;
   late IntervalUnit _intervalUnit;
@@ -62,10 +79,12 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
   void initState() {
     super.initState();
     final e = widget.existing;
-    _intervalValue = e?.intervalValue ?? 1;
     _intervalUnit = e?.intervalUnit ?? IntervalUnit.week;
-    _durationValue = e?.durationValue ?? 1;
+    // Clamped even for an existing rule, in case it was saved before these
+    // limits existed (e.g. a stray "every 38 days").
+    _intervalValue = _clampInt(e?.intervalValue ?? 1, _intervalMin, _intervalMaxFor(_intervalUnit));
     _durationUnit = e?.durationUnit ?? DurationUnit.month;
+    _durationValue = _clampInt(e?.durationValue ?? 1, _durationMin, _durationMax);
     _startMode = e?.startMode ?? (widget.earlierRules.isEmpty ? StartMode.releaseDate : StartMode.afterPreviousRule);
     _customStartDate = e?.customStartDate;
     _previousRuleId = e?.previousRuleId ?? (widget.earlierRules.isNotEmpty ? widget.earlierRules.last.ruleId : null);
@@ -106,11 +125,17 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
     if (picked != null) setState(() => _customStartDate = picked);
   }
 
-  Widget _stepperField({required String label, required int value, required ValueChanged<int> onChanged, int min = 1}) {
+  Widget _stepperField({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+    int min = 1,
+    required int max,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+        Text('$label (max $max)', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
         Row(
           children: [
             IconButton(
@@ -118,7 +143,10 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
               onPressed: value > min ? () => onChanged(value - 1) : null,
             ),
             Text('$value', style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: () => onChanged(value + 1)),
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              onPressed: value < max ? () => onChanged(value + 1) : null,
+            ),
           ],
         ),
       ],
@@ -143,14 +171,27 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
             const SizedBox(height: 6),
             Row(
               children: [
-                Expanded(child: _stepperField(label: 'Every', value: _intervalValue, onChanged: (v) => setState(() => _intervalValue = v))),
+                Expanded(
+                  child: _stepperField(
+                    label: 'Every',
+                    value: _intervalValue,
+                    max: _intervalMaxFor(_intervalUnit),
+                    onChanged: (v) => setState(() => _intervalValue = v),
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButtonFormField<IntervalUnit>(
                     initialValue: _intervalUnit,
                     decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
                     items: IntervalUnit.values.map((u) => DropdownMenuItem(value: u, child: Text('${u.label}(s)'))).toList(),
-                    onChanged: (v) => setState(() => _intervalUnit = v ?? _intervalUnit),
+                    onChanged: (v) => setState(() {
+                      _intervalUnit = v ?? _intervalUnit;
+                      // Switching units can make the current value invalid
+                      // (e.g. 6 days is fine, 6 weeks isn't) — clamp instead
+                      // of allowing an out-of-range combination to persist.
+                      _intervalValue = _clampInt(_intervalValue, _intervalMin, _intervalMaxFor(_intervalUnit));
+                    }),
                   ),
                 ),
               ],
@@ -161,7 +202,14 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
             const SizedBox(height: 6),
             Row(
               children: [
-                Expanded(child: _stepperField(label: 'For', value: _durationValue, onChanged: (v) => setState(() => _durationValue = v))),
+                Expanded(
+                  child: _stepperField(
+                    label: 'For',
+                    value: _durationValue,
+                    max: _durationMax,
+                    onChanged: (v) => setState(() => _durationValue = v),
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButtonFormField<DurationUnit>(
@@ -218,7 +266,10 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Preview', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  Text(
+                    preview.isEmpty ? 'Preview' : 'Preview — ${preview.length} follow-up${preview.length == 1 ? '' : 's'}',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
                   const SizedBox(height: 6),
                   if (preview.isEmpty)
                     Text('No dates generated — check the interval and duration.',

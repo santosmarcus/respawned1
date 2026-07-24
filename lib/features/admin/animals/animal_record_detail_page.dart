@@ -6,6 +6,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
+import 'package:respawnd1/core/widgets/animal_record_card.dart' show genderIconFor;
 import 'package:respawnd1/features/admin/animals/create_animal_record_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_management_tab.dart';
@@ -153,80 +155,54 @@ class _AnimalRecordHeader extends StatelessWidget {
     return 'Not Ready for Adoption';
   }
 
-  IconData get _speciesIcon => switch (animal.species.toLowerCase()) {
-        'cat' => Icons.cruelty_free_outlined,
-        'dog' => Icons.pets_outlined,
-        _ => Icons.pets_outlined,
-      };
-
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      color: AppColors.background,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Large scrollable gallery — shared with the user detail page
+        // (animal_page.dart) instead of the small 64×64 avatar this used
+        // to be, per the unified detail-page design. The decorative
+        // species/paw badge that used to sit bottom-right on top of the
+        // gallery has been removed — it added nothing the gallery itself
+        // (paging, tap-to-fullscreen, placeholder) doesn't already convey.
+        AnimalImageGallery(photoUrls: animal.photoUrls, height: 220),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: animal.photoUrls.isNotEmpty
-                        ? Image.network(animal.photoUrls.first,
-                            width: 64,
-                            height: 64,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => _avatarPlaceholder())
-                        : _avatarPlaceholder(),
-                  ),
-                  Positioned(
-                    right: -2,
-                    bottom: -2,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(color: AppColors.yellowrspwn, shape: BoxShape.circle),
-                      child: Icon(_speciesIcon, size: 12, color: AppColors.textPrimary),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              Builder(builder: (_) {
+                final genderIcon = genderIconFor(animal.sex);
+                return Row(
                   children: [
                     Text(animal.name.isNotEmpty ? animal.name : animal.species,
                         style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.textPrimary)),
-                    Text(_statusText, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                    if (genderIcon != null) ...[
+                      const SizedBox(width: 8),
+                      Icon(genderIcon, size: 20, color: AppColors.textPrimary),
+                    ],
+                  ],
+                );
+              }),
+              Text(_statusText, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 14),
+              Container(
+                decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(50)),
+                child: Row(
+                  children: [
+                    _TabButton(label: 'Profile', index: 0, selected: tabIndex == 0, onTap: onTabChanged),
+                    _TabButton(label: 'Medical', index: 1, selected: tabIndex == 1, onTap: onTabChanged),
+                    _TabButton(label: 'Management', index: 2, selected: tabIndex == 2, onTap: onTabChanged),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Container(
-            decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(50)),
-            child: Row(
-              children: [
-                _TabButton(label: 'Profile', index: 0, selected: tabIndex == 0, onTap: onTabChanged),
-                _TabButton(label: 'Medical', index: 1, selected: tabIndex == 1, onTap: onTabChanged),
-                _TabButton(label: 'Management', index: 2, selected: tabIndex == 2, onTap: onTabChanged),
-              ],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
-
-  Widget _avatarPlaceholder() => Container(
-        width: 64,
-        height: 64,
-        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(14)),
-        child: const Icon(Icons.pets, color: AppColors.textSecondary),
-      );
 }
 
 class _TabButton extends StatelessWidget {

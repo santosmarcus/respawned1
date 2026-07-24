@@ -1307,6 +1307,10 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
       _showSnack('Please select a return reason.');
       return;
     }
+    if (_reason == 'Other' && _otherReasonCtrl.text.trim().isEmpty) {
+      _showSnack('Please specify the reason.');
+      return;
+    }
     if (_urgency == null) {
       _showSnack('Please select a retrieval urgency.');
       return;

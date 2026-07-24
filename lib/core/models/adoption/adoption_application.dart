@@ -110,7 +110,18 @@ class AdoptionApplication {
   final String adopterPhone;
   final String? adopterAge;
   final String? adopterCity;
+  // Legacy join key — either a raw pre-migration catalog int (e.g. `4`) or
+  // a stringified stableIntIdFor hash, neither reliably reversible to a
+  // real `animals/{id}` doc id. Kept only for backward-compatible display
+  // and dedupe matching against older applications; never used to look up
+  // or query the animals collection.
   final String animalId;
+  // The real `animals/{id}` Firestore document id — present on every
+  // application submitted after this field was added (see
+  // adoption_process.dart), null for older applications that only have the
+  // legacy animalId above. This is the reliable key for admin-side
+  // animal-record linking (View Applications, per-application photo lookup).
+  final String? animalRecordId;
   final String animalName;
 
   final AdoptionStatus status;
@@ -177,6 +188,7 @@ class AdoptionApplication {
     this.adopterAge,
     this.adopterCity,
     required this.animalId,
+    this.animalRecordId,
     required this.animalName,
     required this.status,
     this.createdAt,
@@ -248,6 +260,7 @@ class AdoptionApplication {
       // rather than a real `animals/{id}` Firestore document id. See
       // AdoptionProcess's own doc comment for the underlying disconnect.
       animalId: personal['animalId'] == null ? '' : '${personal['animalId']}',
+      animalRecordId: personal['animalRecordId'] as String?,
       animalName: personal['animalName'] as String? ?? '',
       status: AdoptionStatus.fromFirestoreValue(data['status'] as String?),
       createdAt: ts(data['createdAt']),

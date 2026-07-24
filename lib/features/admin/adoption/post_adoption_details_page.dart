@@ -452,30 +452,56 @@ class _FollowUpCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   _AdopterResponseViewer(applicationId: applicationId, followUpId: followUp.id, submitted: followUp.submittedAt != null),
                   const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Expanded(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            if (!followUp.isTerminal)
+                              ElevatedButton(
+                                onPressed: busy ? null : onSendReminder,
+                                style:
+                                    ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                                child: const Text('Send Reminder'),
+                              ),
+                            if (followUp.status == FollowUpStatus.submitted)
+                              ElevatedButton(
+                                onPressed: busy ? null : onConfirmReceipt,
+                                style: ElevatedButton.styleFrom(backgroundColor: AppColors.greenrspwn, foregroundColor: Colors.white),
+                                child: const Text('Confirm Receipt'),
+                              ),
+                            if (followUp.status == FollowUpStatus.confirmed)
+                              ElevatedButton(
+                                onPressed: busy ? null : onComplete,
+                                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                                child: const Text('Mark as Complete'),
+                              ),
+                            if (!followUp.isTerminal && followUp.status != FollowUpStatus.confirmed)
+                              ElevatedButton(
+                                onPressed: busy ? null : onManualComplete,
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                child: const Text('Close without response'),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // Reschedule moved off the main action row and into a
+                      // secondary overflow menu — it was cluttering the row
+                      // as a same-weight button next to the actual primary
+                      // actions above; functionality is unchanged.
                       if (!followUp.isTerminal)
-                        OutlinedButton(onPressed: busy ? null : onSendReminder, child: const Text('Send Reminder')),
-                      if (followUp.status == FollowUpStatus.submitted)
-                        ElevatedButton(
-                          onPressed: busy ? null : onConfirmReceipt,
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.greenrspwn, foregroundColor: Colors.white),
-                          child: const Text('Confirm Receipt'),
+                        PopupMenuButton<void>(
+                          icon: const Icon(Icons.more_vert, color: AppColors.textSecondary),
+                          itemBuilder: (context) => [
+                            PopupMenuItem(
+                              onTap: busy ? null : onReschedule,
+                              child: const Text('Reschedule'),
+                            ),
+                          ],
                         ),
-                      if (followUp.status == FollowUpStatus.confirmed)
-                        ElevatedButton(
-                          onPressed: busy ? null : onComplete,
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
-                          child: const Text('Mark as Complete'),
-                        ),
-                      if (!followUp.isTerminal && followUp.status != FollowUpStatus.confirmed)
-                        TextButton(
-                          onPressed: busy ? null : onManualComplete,
-                          child: const Text('Close without response', style: TextStyle(color: Colors.redAccent)),
-                        ),
-                      if (!followUp.isTerminal) OutlinedButton(onPressed: busy ? null : onReschedule, child: const Text('Reschedule')),
                     ],
                   ),
                 ],

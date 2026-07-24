@@ -2,20 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 
 const String _kNA = 'Not provided';
-
-// Mirrors CreateAnimalRecordPage's three characteristic groups exactly —
-// keyCharacteristics is one flat array in Firestore (see that form's own
-// comment on why), so displaying it back out in the same three labeled
-// groups means re-partitioning by the same key sets here.
-const List<String> _kTemperamentKeys = ['Friendly', 'Shy', 'Playful', 'Calm'];
-const List<String> _kCompatibilityKeys = ['Good with children', 'Good with other pets', 'First-time owner friendly'];
-const List<String> _kTrainingKeys = ['Leash trained', 'Crate trained', 'Potty trained', 'Knows commands'];
 
 class AnimalProfileTab extends StatelessWidget {
   final AnimalRecord animal;
@@ -25,38 +19,34 @@ class AnimalProfileTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final temperament = animal.keyCharacteristics.where(_kTemperamentKeys.contains).toList();
-    final compatibility = animal.keyCharacteristics.where(_kCompatibilityKeys.contains).toList();
-    final training = animal.keyCharacteristics.where(_kTrainingKeys.contains).toList();
+    final temperament = animal.keyCharacteristics.where(kTemperamentValues.contains).toList();
+    final compatibility = animal.keyCharacteristics.where(kCompatibilityValues.contains).toList();
+    final training = animal.keyCharacteristics.where(kTrainingValues.contains).toList();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(child: _InfoItem('Age', _orNA(animal.age))),
-              Expanded(child: _InfoItem('Size', _orNA(animal.size))),
-            ],
-          ),
-          Row(
-            children: [
-              Expanded(child: _InfoItem('Coat Length', _orNA(animal.coatLength))),
-              Expanded(child: _InfoItem('Sex', _orNA(animal.sex))),
-            ],
-          ),
-          Row(
-            children: [
-              Expanded(child: _InfoItem('Breed', _orNA(animal.breed))),
-              // No dedicated color/markings field yet — that text is folded
-              // into Description at intake time (see
-              // create_animal_record_page.dart's _prefill), so this is
-              // honestly "not provided" as its own field rather than
-              // guessed out of free text.
-              const Expanded(child: _InfoItem('Color / Markings', _kNA)),
-            ],
-          ),
+          // Species/Age/Size, Breed/Coat Length/Color-Markings — the same
+          // six-field structure and order the user-side detail page
+          // (animal_page.dart) uses, so both surfaces read identically. Sex
+          // is deliberately not a field here — it's already represented as
+          // the gender icon beside the name above, and repeating it as text
+          // would be a duplicate gender row.
+          AnimalBasicInfoRow(fields: [
+            InfoField('Species', _orNA(animal.species)),
+            InfoField('Age', _orNA(animal.age)),
+            InfoField('Size', _orNA(animal.size)),
+            InfoField('Breed', _orNA(animal.breed)),
+            InfoField('Coat Length', _orNA(animal.coatLength)),
+            // No dedicated color/markings field yet — that text is folded
+            // into Description at intake time (see
+            // create_animal_record_page.dart's _prefill), so this is
+            // honestly "not provided" as its own field rather than
+            // guessed out of free text.
+            const InfoField('Color / Markings', _kNA),
+          ]),
 
           const SizedBox(height: 12),
           _SectionLabel('Temperament'),

@@ -159,6 +159,20 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
   }
 
   Future<void> _markReleased(AdoptionApplication app) async {
+    // app.animalId is the legacy hash/catalog-int join key and would never
+    // resolve to the real animal doc this transaction updates (see
+    // AdoptionApplication's own doc comment) — animalRecordId is the
+    // reliable one. _releaseGuard already blocks the button that calls this
+    // whenever the animal can't be resolved, so this null check is just
+    // defense in depth, not the primary guard.
+    final animalRecordId = app.animalRecordId;
+    if (animalRecordId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("This application predates linked animal records and can't be released automatically."),
+          backgroundColor: Colors.redAccent));
+      return;
+    }
+
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Mark ${app.animalName} as Released?',
@@ -171,7 +185,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     try {
       await ref.read(adoptionApplicationRepositoryProvider).releaseWithFollowUps(
             applicationId: widget.applicationId,
-            animalId: app.animalId,
+            animalId: animalRecordId,
             actorName: _actorName,
             releaseDate: _releaseDate,
             rules: _rules,
@@ -208,8 +222,10 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
           ? const Center(child: CircularProgressIndicator())
           : Builder(builder: (context) {
               _initFromRemote(app);
-              final animalAsync = ref.watch(animalRecordProvider(app.animalId));
-              final animal = animalAsync.asData?.value;
+              // app.animalId is the legacy join key, never a real doc id —
+              // see the comment on _markReleased.
+              final animalRecordId = app.animalRecordId;
+              final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
               final guard = _releaseGuard(app, animal);
 
               return SingleChildScrollView(

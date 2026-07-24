@@ -58,6 +58,33 @@ class AnimalHealthDetails {
       };
 }
 
+/// True for a real Firebase Storage download URL — false for a local
+/// device path, a temporary picker URI, a bare Storage path (`gs://...`),
+/// or an empty string. No writer in this codebase currently saves
+/// anything but a real download URL, but this guards against ever
+/// rendering one of those instead of just failing to load silently.
+bool looksLikeDownloadUrl(String value) => value.startsWith('http://') || value.startsWith('https://');
+
+/// `photoUrls` is the only field name any current writer in this codebase
+/// uses for animal images (see create_animal_record_page.dart) — this
+/// fallback chain exists only for documents written by something outside
+/// this codebase (a script, a console edit, ...) that used a different
+/// field name. Tries, in order: `photoUrls` -> legacy `images`/`imageUrls`
+/// (also lists) -> legacy `photoUrl`/`imageUrl` (single strings). Every
+/// candidate is filtered through [looksLikeDownloadUrl] so a local path or
+/// empty string never gets treated as a usable photo.
+List<String> _parsePhotoUrls(Map<String, dynamic> data) {
+  for (final key in ['photoUrls', 'images', 'imageUrls']) {
+    final list = parseStringList(data[key]).where(looksLikeDownloadUrl).toList();
+    if (list.isNotEmpty) return list;
+  }
+  for (final key in ['photoUrl', 'imageUrl', 'profileImage']) {
+    final single = parseOptionalString(data[key]);
+    if (single != null && looksLikeDownloadUrl(single)) return [single];
+  }
+  return const [];
+}
+
 /// Parses `animals/{id}` — the same collection/doc CreateAnimalRecordPage
 /// already writes to; this is a typed read-side view of it, not a new
 /// collection. Every field here already exists on that doc (see
@@ -261,7 +288,7 @@ class AnimalRecord {
       linkedCaseId: parseRequiredString(data['linkedCaseId']),
       sourceAnimalIndex: parseOptionalInt(data['sourceAnimalIndex']),
       rescuedBy: parseRequiredString(data['rescuedBy']),
-      photoUrls: parseStringList(data['photoUrls']),
+      photoUrls: _parsePhotoUrls(data),
       createdAt: createdAtRaw is Timestamp
           ? createdAtRaw.toDate()
           : (intakeDateRaw is Timestamp ? intakeDateRaw.toDate() : null),
