@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
 import 'adoption_page.dart';
@@ -10,6 +11,7 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/adoption/interview_scheduling.dart';
 
 enum _AdoptionProcess {
@@ -69,6 +71,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   final _ageCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
   String? _city;
 
   // Household & Living Information
@@ -78,7 +81,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   int _householdMembers = 0;
 
   //Pet Experience
-  bool _hadPetsBefore = false;
+  // Nullable so "not answered yet" is a real, detectable state — a plain
+  // bool defaulting to false meant this could silently submit as "No"
+  // without the applicant ever touching it.
+  String? _hadPetsBeforeAnswer;
   int _currentDogs = 0;
   int _currentCats = 0;
   int _currentBirds = 0;
@@ -221,6 +227,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _ageCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
+    _addressCtrl.dispose();
     _residenceOtherCtrl.dispose();
     _currentOtherTypeCtrl.dispose();
     _reasonCtrl.dispose();
@@ -308,7 +315,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     if (files.isEmpty) return const [];
     final urls = await Future.wait([
       for (var i = 0; i < files.length; i++)
-        () async {
+            () async {
           final ref = FirebaseStorage.instance.ref('adoptions/$adoptionId/home_photos/img_$i.jpg');
           await ref.putFile(files[i]);
           return ref.getDownloadURL();
@@ -454,6 +461,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _emailCtrl.text = personal['adopterEmail'] as String? ?? '';
         _ageCtrl.text = personal['adopterAge'] as String? ?? '';
         _phoneCtrl.text = personal['adopterPhone'] as String? ?? '';
+        _addressCtrl.text = personal['adopterAddress'] as String? ?? '';
         _city = personal['adopterCity'] as String?;
 
         // Household & Living Information
@@ -464,7 +472,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _householdMembers = household['householdMembers'] as int? ?? 0;
 
         // Pet Experience
-        _hadPetsBefore = petExperience['hadPetsBefore'] as bool? ?? false;
+        _hadPetsBeforeAnswer = petExperience['hadPetsBefore'] == null
+            ? null
+            : ((petExperience['hadPetsBefore'] as bool? ?? false) ? 'Yes' : 'No');
         _currentDogs = currentPets['dogs'] as int? ?? 0;
         _currentCats = currentPets['cats'] as int? ?? 0;
         _currentBirds = currentPets['birds'] as int? ?? 0;
@@ -555,6 +565,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     final missingAnswers = <String>[
       if (_residenceType == null) 'Residence Type',
       if (_ownershipStatus == null) 'Ownership Status',
+      if (_householdMembers <= 0) 'Number of Household Members',
+      if (_hadPetsBeforeAnswer == null) 'Owned pets before',
       if (_petsVaccinated == null) 'current pets vaccinated status',
       if (_petsSpayedNeutered == null) 'current pets spayed/neutered status',
       if (_hoursAlone == null) 'hours animal will be left alone',
@@ -566,6 +578,40 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Please answer: ${missingAnswers.join(', ')}.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (!_canAffordFood ||
+        !_canAffordVaccinations ||
+        !_canAffordVetVisits ||
+        !_canAffordEmergencyCare ||
+        !_canAffordGrooming ||
+        !_canAffordCareSupplies) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Please confirm you can afford all listed pet care costs.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    final missingUploads = <String>[
+      if (_governmentIdFile == null && _governmentIdUrl == null)
+        'Government ID',
+      if (_proofOfAddressFile == null && _proofOfAddressUrl == null)
+        'Proof of Address',
+      if (_homePhotosFiles.isEmpty && _existingHomePhotoUrls.isEmpty)
+        'at least one Home Photo',
+    ];
+    if (missingUploads.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please upload: ${missingUploads.join(', ')}.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -602,9 +648,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       final byRecordIdExisting = widget.animal.animalRecordId.isEmpty
           ? Future.value(null)
           : FirebaseFirestore.instance
-              .collection('adoptions')
-              .where('personal.animalRecordId', isEqualTo: widget.animal.animalRecordId)
-              .get();
+          .collection('adoptions')
+          .where('personal.animalRecordId', isEqualTo: widget.animal.animalRecordId)
+          .get();
       final existingResults = await Future.wait([legacyExisting, byRecordIdExisting]);
 
       bool blocks(QuerySnapshot<Map<String, dynamic>>? snap) {
@@ -673,6 +719,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           'adopterEmail': _emailCtrl.text.trim(),
           'adopterAge': _ageCtrl.text.trim(),
           'adopterPhone': _phoneCtrl.text.trim(),
+          'adopterAddress': _addressCtrl.text.trim(),
           'adopterCity': _city,
         },
         'household': {
@@ -684,7 +731,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           'householdMembers': _householdMembers,
         },
         'petExperience': {
-          'hadPetsBefore': _hadPetsBefore,
+          'hadPetsBefore': _hadPetsBeforeAnswer == 'Yes',
           'currentPets': {
             'dogs': _currentDogs,
             'cats': _currentCats,
@@ -806,7 +853,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _ownershipStatus = null;
     _householdMembers = 0;
 
-    _hadPetsBefore = false;
+    _hadPetsBeforeAnswer = null;
     _currentDogs = 0;
     _currentCats = 0;
     _currentBirds = 0;
@@ -1093,13 +1140,20 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               // Personal Information
               _SectionTitle('Personal Information'),
               const SizedBox(height: 12),
-              _FormField(controller: _nameCtrl, label: 'Name', hint: ' '),
+              _FormField(
+                controller: _nameCtrl,
+                label: 'Name',
+                hint: ' ',
+                inputFormatters: [AppInputFormatters.nameOnly],
+                validator: (v) => AppValidators.name(v, fieldName: 'Name'),
+              ),
               const SizedBox(height: 12),
               _FormField(
                   controller: _emailCtrl,
                   label: 'Email',
                   hint: 'Email@email.com',
-                  keyboardType: TextInputType.emailAddress),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: AppValidators.email),
               const SizedBox(height: 12),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1110,7 +1164,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                         controller: _phoneCtrl,
                         label: 'Number',
                         hint: '+63 989 989 989',
-                        keyboardType: TextInputType.phone),
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: AppInputFormatters.phoneFlexible,
+                        validator: AppValidators.phFlexiblePhone),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -1118,9 +1174,21 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                         controller: _ageCtrl,
                         label: 'Age',
                         hint: ' ',
-                        keyboardType: TextInputType.number),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [AppInputFormatters.digitsOnly],
+                        validator: (v) => AppValidators.wholeNumber(
+                          v,
+                          fieldName: 'Age',
+                          min: 18,
+                        )),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              _FormField(
+                controller: _addressCtrl,
+                label: 'Complete Address',
+                hint: 'House No., Street, Barangay',
               ),
               const SizedBox(height: 12),
               _DropdownField<String>(
@@ -1156,6 +1224,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Residence Type',
                 value: _residenceType,
+                required: true,
                 options: const [
                   'House',
                   'Apartment',
@@ -1176,12 +1245,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Ownership Status',
                 value: _ownershipStatus,
+                required: true,
                 options: const ['Owned', 'Renting (Allowed Pets)', 'Living with Parents'],
                 onChanged: (v) => setState(() => _ownershipStatus = v),
               ),
               const SizedBox(height: 12),
               _CounterField(
                 label: 'Number of Household Members',
+                required: true,
                 value: _householdMembers,
                 onChanged: (v) => setState(() => _householdMembers = v),
               ),
@@ -1191,12 +1262,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               // Pet Experience
               _SectionTitle('Pet Experience'),
               const SizedBox(height: 8),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text('Owned pets before?',
-                    style: GoogleFonts.zain(fontSize: 14)),
-                value: _hadPetsBefore,
-                onChanged: (v) => setState(() => _hadPetsBefore = v!),
+              _RadioGroup<String>(
+                label: 'Owned pets before?',
+                value: _hadPetsBeforeAnswer,
+                required: true,
+                options: const ['Yes', 'No'],
+                onChanged: (v) => setState(() => _hadPetsBeforeAnswer = v),
               ),
               const SizedBox(height: 8),
               Text('Current pets',
@@ -1240,6 +1311,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Are all current pets vaccinated?',
                 value: _petsVaccinated,
+                required: true,
                 options: const ['Yes', 'Some', 'None', 'Not Applicable'],
                 onChanged: (v) => setState(() => _petsVaccinated = v),
               ),
@@ -1247,6 +1319,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Are all current pets spayed/neutered?',
                 value: _petsSpayedNeutered,
+                required: true,
                 options: const ['Yes', 'Some', 'None', 'Not Applicable'],
                 onChanged: (v) => setState(() => _petsSpayedNeutered = v),
               ),
@@ -1259,6 +1332,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Hours animal will be left alone',
                 value: _hoursAlone,
+                required: true,
                 options: const [
                   'Less than 2 hours',
                   '2-4',
@@ -1268,8 +1342,13 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 onChanged: (v) => setState(() => _hoursAlone = v),
               ),
               const SizedBox(height: 12),
-              Text('Primary Caregiver',
-                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              Row(
+                children: [
+                  Text('Primary Caregiver',
+                      style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+                ],
+              ),
               const SizedBox(height: 4),
               DropdownButtonFormField<String>(
                 initialValue: _primaryCaregiver,
@@ -1288,6 +1367,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Where will pet stay?',
                 value: _petStayLocation,
+                required: true,
                 options: const ['Indoors', 'Outdoors', 'Mixed'],
                 onChanged: (v) => setState(() => _petStayLocation = v),
               ),
@@ -1295,11 +1375,15 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text('Can you afford? (check all that apply)',
-                      style: GoogleFonts.zain(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
+                  Row(
+                    children: [
+                      Text('Can you afford? (check all that apply)',
+                          style: GoogleFonts.zain(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                    ],
+                  ),
                   const SizedBox(width: 4),
                   const _InfoTooltip(
                     message:
@@ -1360,6 +1444,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               _RadioGroup<String>(
                 label: 'Monthly Pet Budget',
                 value: _monthlyBudget,
+                required: true,
                 options: const [
                   'Under P1,000',
                   'P1,000-P3,000',
@@ -1389,6 +1474,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                     label: 'Government ID',
                     file: _governmentIdFile,
                     isUploading: _isUploadingGovId,
+                    required: true,
                     onTap: () => _pickUploadFile(
                       onPicked: (f) => setState(() => _governmentIdFile = f),
                     ),
@@ -1397,6 +1483,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                     label: 'Proof of Address',
                     file: _proofOfAddressFile,
                     isUploading: _isUploadingProof,
+                    required: true,
                     onTap: () => _pickUploadFile(
                       onPicked: (f) => setState(() => _proofOfAddressFile = f),
                     ),
@@ -1895,10 +1982,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               onTap: _openReviewPayment,
             )
           else
-            // The organization completes the actual handoff (Release
-            // Animal, from the admin Adoption Application Review module) —
-            // this screen just reflects that live once it happens, rather
-            // than letting the applicant self-declare adoption complete.
+          // The organization completes the actual handoff (Release
+          // Animal, from the admin Adoption Application Review module) —
+          // this screen just reflects that live once it happens, rather
+          // than letting the applicant self-declare adoption complete.
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2216,12 +2303,12 @@ class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
                   borderRadius: BorderRadius.circular(10),
                   child: widget.animalPhotoUrl != null
                       ? Image.network(
-                          widget.animalPhotoUrl!,
-                          width: 60,
-                          height: 60,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _petThumbPlaceholder(),
-                        )
+                    widget.animalPhotoUrl!,
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _petThumbPlaceholder(),
+                  )
                       : _petThumbPlaceholder(),
                 ),
                 const SizedBox(width: 12),
@@ -2429,11 +2516,11 @@ class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
   }
 
   Widget _petThumbPlaceholder() => Container(
-        width: 60,
-        height: 60,
-        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
-        child: const Icon(Icons.pets, size: 26, color: AppColors.textPrimary),
-      );
+    width: 60,
+    height: 60,
+    decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+    child: const Icon(Icons.pets, size: 26, color: AppColors.textPrimary),
+  );
 }
 
 // Terms and Conditions page (Adoption Day)
@@ -2756,6 +2843,9 @@ class _FormField extends StatelessWidget {
   final TextInputType keyboardType;
   final int maxLines;
   final bool readOnly;
+  final bool required;
+  final String? Function(String?)? validator;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _FormField({
     required this.controller,
@@ -2764,6 +2854,9 @@ class _FormField extends StatelessWidget {
     this.keyboardType = TextInputType.text,
     this.maxLines = 1,
     this.readOnly = false,
+    this.required = true,
+    this.validator,
+    this.inputFormatters,
   });
 
   @override
@@ -2771,13 +2864,19 @@ class _FormField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.zain(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
-          ),
+        Row(
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            if (required)
+              const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+          ],
         ),
         const SizedBox(height: 4),
         TextFormField(
@@ -2785,9 +2884,14 @@ class _FormField extends StatelessWidget {
           keyboardType: keyboardType,
           maxLines: maxLines,
           readOnly: readOnly,
+          inputFormatters: inputFormatters,
           style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
-          validator: (v) =>
-          (v == null || v.trim().isEmpty) ? 'This field is required' : null,
+          validator: validator ??
+              (required
+                  ? (v) => (v == null || v.trim().isEmpty)
+                  ? 'This field is required'
+                  : null
+                  : null),
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: GoogleFonts.zain(
@@ -2885,12 +2989,14 @@ class _RadioGroup<T> extends StatelessWidget {
   final T? value;
   final List<T> options;
   final ValueChanged<T?> onChanged;
+  final bool required;
 
   const _RadioGroup({
     required this.label,
     required this.value,
     required this.options,
     required this.onChanged,
+    this.required = false,
   });
 
   @override
@@ -2898,12 +3004,18 @@ class _RadioGroup<T> extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.zain(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary),
+        Row(
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
+            ),
+            if (required)
+              const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+          ],
         ),
         const SizedBox(height: 2),
         ...options.map((o) {
@@ -2942,11 +3054,13 @@ class _CounterField extends StatelessWidget {
   final String label;
   final int value;
   final ValueChanged<int> onChanged;
+  final bool required;
 
   const _CounterField({
     required this.label,
     required this.value,
     required this.onChanged,
+    this.required = false,
   });
 
   @override
@@ -2956,10 +3070,16 @@ class _CounterField extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              label,
-              style: GoogleFonts.zain(
-                  fontSize: 14, color: AppColors.textPrimary),
+            child: Row(
+              children: [
+                Text(
+                  label,
+                  style: GoogleFonts.zain(
+                      fontSize: 14, color: AppColors.textPrimary),
+                ),
+                if (required)
+                  const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+              ],
             ),
           ),
           _CounterButton(
@@ -3047,7 +3167,12 @@ class _HomePhotosPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Home Photos', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        Row(
+          children: [
+            Text('Home Photos', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+          ],
+        ),
         const SizedBox(height: 6),
         Wrap(
           spacing: 10,
@@ -3126,12 +3251,14 @@ class _UploadBox extends StatelessWidget {
   final File? file;
   final bool isUploading;
   final VoidCallback onTap;
+  final bool required;
 
   const _UploadBox({
     required this.label,
     required this.file,
     required this.onTap,
     this.isUploading = false,
+    this.required = false,
   });
 
   @override
@@ -3141,12 +3268,18 @@ class _UploadBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: GoogleFonts.zain(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary),
+          Row(
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.zain(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary),
+              ),
+              if (required)
+                const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+            ],
           ),
           const SizedBox(height: 6),
           InkWell(

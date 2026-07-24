@@ -151,7 +151,7 @@ class ReportMapEntry {
 /// Statuses that mean a report shouldn't show up in the public feed/map.
 const Set<String> kDismissedCaseStatuses = {
   'dismissed',
-  'ended'
+  'ended',
   'cancelled',
   'withdrawn',
   'rejected',

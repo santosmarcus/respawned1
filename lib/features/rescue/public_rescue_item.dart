@@ -25,6 +25,8 @@ class PublicRescueItem {
   final DateTime? createdAt;
   final String animalType;
   final String urgency;
+  final double? lat;
+  final double? lng;
 
   const PublicRescueItem({
     required this.caseId,
@@ -35,6 +37,8 @@ class PublicRescueItem {
     required this.createdAt,
     required this.animalType,
     required this.urgency,
+    this.lat,
+    this.lng,
   });
 
   factory PublicRescueItem.fromDoc(
@@ -68,6 +72,8 @@ class PublicRescueItem {
       createdAt: ts?.toDate(),
       animalType: animalSummary,
       urgency: data['urgency'] as String? ?? '',
+      lat: (data['lat'] as num?)?.toDouble(),
+      lng: (data['lng'] as num?)?.toDouble(),
     );
   }
 }

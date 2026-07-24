@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:video_player/video_player.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
@@ -320,8 +321,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
             const SizedBox(height: 16),
 
-            if (c.photoUrls.isNotEmpty)
-              _PhotoCarousel(photoUrls: c.photoUrls)
+            if (c.photoUrls.isNotEmpty || c.videoUrls.isNotEmpty)
+              _PhotoCarousel(photoUrls: c.photoUrls, videoUrls: c.videoUrls)
             else
               Container(
                 height: 200,
@@ -735,7 +736,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
 class _PhotoCarousel extends StatefulWidget {
   final List<String> photoUrls;
-  const _PhotoCarousel({required this.photoUrls});
+  final List<String> videoUrls;
+  const _PhotoCarousel({required this.photoUrls, this.videoUrls = const []});
 
   @override
   State<_PhotoCarousel> createState() => _PhotoCarouselState();
@@ -745,6 +747,11 @@ class _PhotoCarouselState extends State<_PhotoCarousel> {
   int _current = 0;
   final PageController _ctrl = PageController();
 
+  // Photos first, then videos — matches the order they were shown while
+  // being attached in the report form.
+  late final List<String> _items = [...widget.photoUrls, ...widget.videoUrls];
+  late final int _videoStartIndex = widget.photoUrls.length;
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -753,19 +760,24 @@ class _PhotoCarouselState extends State<_PhotoCarousel> {
           height: 220,
           child: PageView.builder(
             controller: _ctrl,
-            itemCount: widget.photoUrls.length,
+            itemCount: _items.length,
             onPageChanged: (i) => setState(() => _current = i),
-            itemBuilder: (_, i) => ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                widget.photoUrls[i],
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: AppColors.tearspwn,
-                  child: const Icon(Icons.broken_image, size: 48, color: AppColors.textSecondary),
+            itemBuilder: (_, i) {
+              final isVideo = i >= _videoStartIndex;
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: isVideo
+                    ? _NetworkVideoTile(url: _items[i])
+                    : Image.network(
+                  _items[i],
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    color: AppColors.tearspwn,
+                    child: const Icon(Icons.broken_image, size: 48, color: AppColors.textSecondary),
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
         Positioned(
@@ -778,12 +790,94 @@ class _PhotoCarouselState extends State<_PhotoCarousel> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              '${_current + 1}/${widget.photoUrls.length}',
+              '${_current + 1}/${_items.length}',
               style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+// A single video within the carousel — starts paused with a play button
+// overlay (rather than autoplaying every video the moment it's swiped
+// into view), and tears down its controller as soon as it's disposed.
+class _NetworkVideoTile extends StatefulWidget {
+  final String url;
+  const _NetworkVideoTile({required this.url});
+
+  @override
+  State<_NetworkVideoTile> createState() => _NetworkVideoTileState();
+}
+
+class _NetworkVideoTileState extends State<_NetworkVideoTile> {
+  VideoPlayerController? _controller;
+  bool _ready = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    _controller = controller;
+    controller.initialize().then((_) {
+      if (!mounted) return;
+      setState(() => _ready = true);
+    }).catchError((_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) {
+      return Container(
+        color: AppColors.tearspwn,
+        child: const Center(
+          child: Icon(Icons.videocam_off_outlined, size: 48, color: AppColors.textSecondary),
+        ),
+      );
+    }
+    if (!_ready || _controller == null) {
+      return Container(
+        color: Colors.black87,
+        child: const Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+    final controller = _controller!;
+    return GestureDetector(
+      onTap: () => setState(() {
+        controller.value.isPlaying ? controller.pause() : controller.play();
+      }),
+      child: Stack(
+        alignment: Alignment.center,
+        fit: StackFit.expand,
+        children: [
+          FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: controller.value.size.width,
+              height: controller.value.size.height,
+              child: VideoPlayer(controller),
+            ),
+          ),
+          AnimatedOpacity(
+            opacity: controller.value.isPlaying ? 0 : 1,
+            duration: const Duration(milliseconds: 200),
+            child: const Icon(Icons.play_circle_fill, size: 56, color: Colors.white70),
+          ),
+        ],
+      ),
     );
   }
 }

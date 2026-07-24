@@ -195,7 +195,7 @@ class _UserProfileState extends State<UserProfile> {
                   ),
                   _ProfileTile(
                     icon: Icons.sell,
-                    label: 'Create Pet Collar Tag',
+                    label: 'Pet Collar Tag',
                     onTap: (){
                       Navigator.push(context,
                         MaterialPageRoute(builder: (_) => const CollarTagHomeScreen()),);

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
@@ -28,12 +29,14 @@ class NearbyReportBanner extends StatefulWidget {
 class _NearbyReportBannerState extends State<NearbyReportBanner>
     with SingleTickerProviderStateMixin {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _casesSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userDocSub;
   late final AnimationController _controller;
   late final Animation<Offset> _slide;
 
   double? _userLat;
   double? _userLng;
   String? _uid;
+  DateTime? _bannerCursor; // last time THIS device's banner checked for nearby cases
 
   final Set<String> _seenCaseIds = {};
   bool _sawFirstSnapshot = false;
@@ -66,25 +69,84 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
     _init();
   }
 
+  bool _nearbyListenersStarted = false;
+
   Future<void> _init() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     _uid = uid;
 
-    try {
-      final userDoc =
-      await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    // Listen live instead of a one-shot get(). `lastLat`/`lastLng` are
+    // written asynchronously by ExploreReportsMap (after a Geolocator call
+    // that can take several seconds and may prompt for permission), and
+    // that widget mounts at the same time as this one on HomeScreen. A
+    // one-shot read here would frequently race ahead of that write, see
+    // null, and give up for the rest of the session. Listening means we
+    // pick up the location the moment it lands, whenever that happens.
+    _userDocSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((userDoc) {
       final data = userDoc.data();
       final lat = (data?['lastLat'] as num?)?.toDouble();
       final lng = (data?['lastLng'] as num?)?.toDouble();
-      if (lat == null || lng == null) return; // no known location yet
+      if (lat == null || lng == null) return; // still no known location
       _userLat = lat;
       _userLng = lng;
-    } catch (_) {
-      return;
-    }
+      if (!_nearbyListenersStarted) {
+        _nearbyListenersStarted = true;
+        final cursorTs = data?['lastNearbyBannerSeenAt'];
+        _bannerCursor = cursorTs is Timestamp ? cursorTs.toDate() : null;
+        _listenNearbyCases();
+      }
+    }, onError: (_) {});
 
-    _listenNearbyCases();
+    // Don't just sit and wait on ExploreReportsMap to save a location —
+    // ask the device directly too, so the banner can activate even if the
+    // map widget isn't on screen, is slow, or its write fails silently.
+    _tryDirectLocationFallback(uid);
+  }
+
+  Future<void> _tryDirectLocationFallback(String uid) async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () async {
+          final last = await Geolocator.getLastKnownPosition();
+          if (last == null) {
+            throw TimeoutException('Location request timed out');
+          }
+          return last;
+        },
+      );
+      if (!mounted) return;
+
+      // Persist so the rest of the app (map, cloud functions) benefits too.
+      await FirebaseFirestore.instance.collection('users').doc(uid).set(
+        {
+          'lastLat': pos.latitude,
+          'lastLng': pos.longitude,
+          'lastLocationAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+      // No need to touch _userLat/_userLng or start listeners here — the
+      // Firestore write above will come back through _userDocSub above.
+    } catch (_) {
+      // Silent: if this fails, the live user-doc listener above will still
+      // pick up a location whenever ExploreReportsMap (or anything else)
+      // manages to save one.
+    }
   }
 
   void _listenNearbyCases() {
@@ -109,8 +171,29 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
       for (final doc in snap.docs) {
         _seenCaseIds.add(doc.id);
         _maybeTrackCommunityReports(doc);
+
+        // Surface reports that already existed nearby before this device
+        // started watching — e.g. the app was closed when they came in, or
+        // this is the first time we've ever had a location for this user.
+        // Deduped by a persisted cursor so the same old case doesn't pop a
+        // banner again on every subsequent app open.
+        final data = doc.data();
+        final createdTs = data?['createdAt'];
+        final createdAt = createdTs is Timestamp ? createdTs.toDate() : null;
+        final isNewSinceLastCheck =
+            _bannerCursor == null || (createdAt != null && createdAt.isAfter(_bannerCursor!));
+        if (isNewSinceLastCheck) {
+          _maybeEnqueueNearbyCase(
+            doc,
+            lat: lat,
+            lng: lng,
+            title: 'Rescue report nearby',
+            message: "There's an unresolved report within 5km — tap to see if you can help.",
+          );
+        }
       }
       _sawFirstSnapshot = true;
+      _persistBannerCursor();
       return;
     }
 
@@ -124,27 +207,46 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
       if (_seenCaseIds.contains(doc.id)) continue;
       _seenCaseIds.add(doc.id);
 
-      final data = doc.data();
-      if (data == null) continue;
-      if (data['reporterId'] == _uid) continue;
-
-      final status = (data['status'] as String? ?? '').toLowerCase();
-      if (_kDismissedCaseStatuses.contains(status)) continue;
-
-      final caseLat = (data['lat'] as num?)?.toDouble();
-      final caseLng = (data['lng'] as num?)?.toDouble();
-      if (caseLat == null || caseLng == null) continue;
-
-      if (haversineDistanceKm(lat, lng, caseLat, caseLng) > _kNearbyRadiusKm) {
-        continue;
-      }
-
-      _enqueue(_NearbyAlert(
-        caseId: doc.id,
+      _maybeEnqueueNearbyCase(
+        doc,
+        lat: lat,
+        lng: lng,
         title: 'New rescue report near you',
         message: 'Tap to see if you can help.',
-      ));
+      );
     }
+  }
+
+  void _maybeEnqueueNearbyCase(
+      DocumentSnapshot<Map<String, dynamic>> doc, {
+        required double lat,
+        required double lng,
+        required String title,
+        required String message,
+      }) {
+    final data = doc.data();
+    if (data == null) return;
+    if (data['reporterId'] == _uid) return;
+
+    final status = (data['status'] as String? ?? '').toLowerCase();
+    if (_kDismissedCaseStatuses.contains(status)) return;
+
+    final caseLat = (data['lat'] as num?)?.toDouble();
+    final caseLng = (data['lng'] as num?)?.toDouble();
+    if (caseLat == null || caseLng == null) return;
+
+    if (haversineDistanceKm(lat, lng, caseLat, caseLng) > _kNearbyRadiusKm) return;
+
+    _enqueue(_NearbyAlert(caseId: doc.id, title: title, message: message));
+  }
+
+  void _persistBannerCursor() {
+    final uid = _uid;
+    if (uid == null) return;
+    FirebaseFirestore.instance.collection('users').doc(uid).set(
+      {'lastNearbyBannerSeenAt': FieldValue.serverTimestamp()},
+      SetOptions(merge: true),
+    ).catchError((_) {});
   }
 
   void _maybeTrackCommunityReports(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -244,6 +346,7 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
   @override
   void dispose() {
     _casesSub?.cancel();
+    _userDocSub?.cancel();
     for (final s in _communityReportSubs.values) {
       s.cancel();
     }
@@ -262,70 +365,75 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
         bottom: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _openCurrent,
-              borderRadius: BorderRadius.circular(18),
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.lavenderrspwn,
-                  borderRadius: BorderRadius.circular(18),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.12),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: const BoxDecoration(
-                        color: AppColors.background,
-                        shape: BoxShape.circle,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 96),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _openCurrent,
+                borderRadius: BorderRadius.circular(18),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.lavenderrspwn,
+                    borderRadius: BorderRadius.circular(18),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
-                      child: const Icon(Icons.pets,
-                          size: 20, color: AppColors.textPrimary),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _current!.title,
-                            style: GoogleFonts.tiltWarp(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: const BoxDecoration(
+                          color: AppColors.background,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.pets,
+                            size: 20, color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _current!.title,
+                              style: GoogleFonts.tiltWarp(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _current!.message,
-                            style: GoogleFonts.zain(
-                              fontSize: 13,
-                              color: AppColors.textPrimary.withOpacity(0.75),
+                            const SizedBox(height: 2),
+                            Text(
+                              _current!.message,
+                              style: GoogleFonts.zain(
+                                fontSize: 13,
+                                color: AppColors.textPrimary.withOpacity(0.75),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    GestureDetector(
-                      onTap: _dismissCurrent,
-                      behavior: HitTestBehavior.opaque,
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(Icons.close,
-                            size: 18, color: AppColors.textPrimary),
+                      GestureDetector(
+                        onTap: _dismissCurrent,
+                        behavior: HitTestBehavior.opaque,
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.close,
+                              size: 18, color: AppColors.textPrimary),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

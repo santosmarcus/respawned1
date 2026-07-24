@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/userauth/phonelogin_screen.dart';
@@ -37,21 +38,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
   Future<void> _handleSignUp() async {
     setState(() { _errorMessage = null; _isLoading = true; });
 
-    if (/*_nameController.text.trim().isEmpty ||*/
-    _emailController.text.trim().isEmpty ||
-        _passwordController.text.trim().isEmpty) {
-      setState(() {
-        _errorMessage = 'Please fill in all fields.';
-        _isLoading = false;
-      });
+    final emailError = AppValidators.email(_emailController.text);
+    if (emailError != null) {
+      setState(() { _errorMessage = emailError; _isLoading = false; });
       return;
     }
 
-    if (_passwordController.text.trim().length < 8) {
-      setState(() {
-        _errorMessage = 'Password must be at least 8 characters long.';
-        _isLoading = false;
-      });
+    final passwordError = AppValidators.password(_passwordController.text);
+    if (passwordError != null) {
+      setState(() { _errorMessage = passwordError; _isLoading = false; });
       return;
     }
 
@@ -72,10 +67,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'email-already-in-use') {
-        // This can happen if an earlier attempt created the Auth account
-        // but something after it (e.g. a Firestore write) failed, or the
-        // person tapped Sign Up twice. Instead of dead-ending, try signing
-        // them into the account that already exists with these credentials.
         try {
           await _authService.signIn(
             email: _emailController.text.trim(),
@@ -135,11 +126,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
         setState(() => _isLoading = false); // user cancelled the picker
       }
     } catch (e) {
-      // Was a generic "Google sign-in failed." with no detail — on an
-      // emulator this is almost always PlatformException(sign_in_failed,
-      // ..., 10, ...) = DEVELOPER_ERROR (debug SHA-1 not registered with
-      // the Firebase/OAuth client) or missing Google Play Services on the
-      // emulator image. Surfacing the real message makes that diagnosable.
       if (mounted) {
         setState(() {
           _errorMessage = 'Google sign-in failed: $e';
@@ -168,18 +154,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  // Both social sign-in paths used to unconditionally push EnterDetailsScreen
-  // — including for a returning user who already finished onboarding (e.g.
-  // they tapped "Sign Up" instead of "Log In", or re-authenticated). That
-  // forced them back through the whole details+role flow every time.
-  //
-  // Note: AuthService._createUserDoc gives every new social sign-in
-  // `role: 'general'` immediately, so AuthService.isNewUser (which checks
-  // for an EMPTY role) is always false here and can't be used to detect
-  // "first time" for Google/Facebook — only for the email/password path,
-  // which explicitly starts with role: ''. `firstName` is never set by
-  // _createUserDoc, so its absence is the real "still needs the details
-  // form" signal for social sign-in.
   Future<void> _routeAfterSocialSignIn(String uid) async {
     final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     final firstName = (doc.data()?['firstName'] as String?)?.trim() ?? '';
@@ -190,8 +164,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
         MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
       );
     } else {
-      // Already onboarded — let AuthWrapper (main.dart) route based on
-      // their existing role instead of re-forcing onboarding.
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
@@ -229,7 +201,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
-                  hintText: 'Enter Email Address',
+                  hintText: 'Enter Email Address *',
                   prefixIcon: Icon(Icons.email_outlined),
                 ),
               ),
@@ -241,7 +213,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 controller: _passwordController,
                 obscureText: _obscurePassword,
                 decoration: InputDecoration(
-                  hintText: 'Enter Password',
+                  hintText: 'Enter Password *',
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     icon: Icon(

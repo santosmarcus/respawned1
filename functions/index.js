@@ -1,5 +1,5 @@
 const {onSchedule} = require('firebase-functions/v2/scheduler');
-const {onDocumentCreated} = require('firebase-functions/v2/firestore');
+const {onDocumentCreated, onDocumentUpdated} = require('firebase-functions/v2/firestore');
 const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
 const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
@@ -33,8 +33,41 @@ exports.getOrCreateRescueSession = onCall(async (request) => {
   // already-lost pet.
   const existingSessionId = tagData.activeRescueSessionId;
   if (existingSessionId) {
-    const existingSnap = await db.collection('rescueSessions').doc(existingSessionId).get();
+    const existingRef = db.collection('rescueSessions').doc(existingSessionId);
+    const existingSnap = await existingRef.get();
     if (existingSnap.exists && existingSnap.data().status !== 'resolved') {
+      // Keep the location fresh on every re-scan — a later scan (better
+      // GPS fix, a successful reverse-geocode where an earlier one failed,
+      // or the animal having moved somewhere new) shouldn't be stuck
+      // showing whatever the very first scan happened to save.
+      if (lat !== null && lng !== null) {
+        await existingRef.set(
+          {
+            lat,
+            lng,
+            ...(address !== null ? {address} : {}),
+            lastScannedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          {merge: true},
+        );
+
+        const tagRescanUpdate = {
+          lastSeenLat: lat,
+          lastSeenLng: lng,
+          ...(address !== null ? {lastSeenAddress: address} : {}),
+        };
+        await tagRef.set(tagRescanUpdate, {merge: true});
+        const rescanOwnerId = tagData.ownerId;
+        if (rescanOwnerId) {
+          await db
+            .collection('users')
+            .doc(rescanOwnerId)
+            .collection('collarTags')
+            .doc(tagId)
+            .set(tagRescanUpdate, {merge: true});
+        }
+      }
+
       return {sessionId: existingSessionId};
     }
   }
@@ -79,6 +112,11 @@ const RADIUS_KM = 5;
 
 const CASES_SCAN_LIMIT = 300;
 
+// Statuses that mean a case is no longer active and shouldn't trigger
+// nearby-user push notifications. Keep in sync with the client-side
+// `_kDismissedCaseStatuses` in nearby_report.dart.
+const DISMISSED_STATUSES = ['dismissed', 'cancelled', 'withdrawn', 'rejected'];
+
 const PICKED_UP_STATUSES = [
   'treatment',
   'dropoff',
@@ -117,6 +155,21 @@ function hasReceivedResponse(c, communityReportsCount) {
   if (communityReportsCount > 0) return true;
   if (hasBeenPickedUp(c)) return true;
   return false;
+}
+
+async function notifyUser({uid, title, body, data}) {
+  if (!uid) return false;
+  const userDoc = await db.collection('users').doc(uid).get();
+  if (!userDoc.exists) return false;
+  const token = userDoc.data().fcmToken;
+  if (!token) return false;
+
+  await admin.messaging().send({
+    token,
+    notification: {title, body},
+    data,
+  });
+  return true;
 }
 
 async function notifyNearbyUsers({lat, lng, excludeUid, title, body, data}) {
@@ -234,6 +287,98 @@ exports.notifyUnconfirmedReports = onSchedule('every 5 minutes', async () => {
 
     await caseDoc.ref.update({
       lastNudgeSentAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+});
+
+const REPORTER_NOTIFY_STATUSES = {
+  unable_to_locate: {
+    title: 'Update on your rescue report',
+    body: "The transporter couldn't find the animal at the location you "
+      + 'reported. Can you confirm or update the location?',
+  },
+  awaiting_reporter_response: {
+    title: 'Update on your rescue report',
+    body: 'The transporter could not find the animal and could not reach '
+      + 'you. Please respond with an updated location if you can.',
+  },
+  pickup_attempt_unsuccessful: {
+    title: 'We tried to reach you',
+    body: 'A pickup attempt was made for your rescue report, but we '
+      + "couldn't reach you. Please respond so we can reschedule.",
+  },
+  needs_specialized_assistance: {
+    title: 'Update on your rescue report',
+    body: 'Pickup was postponed because the animal could not be safely '
+      + 'handled. Our team is arranging specialized assistance.',
+  },
+};
+
+
+exports.notifyOnEndReasonStatus = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!after || before.status === after.status) return;
+
+    const config = REPORTER_NOTIFY_STATUSES[after.status];
+    if (!config) return;
+
+    await notifyUser({
+      uid: after.reporterId,
+      title: config.title,
+      body: config.body,
+      data: {
+        type: 'case_status_update',
+        caseId: event.params.caseId,
+        status: after.status,
+      },
+    });
+
+    if (after.status === 'needs_specialized_assistance') {
+      await db.collection('adminAlerts').add({
+        type: 'needs_specialized_assistance',
+        caseId: event.params.caseId,
+        reason: after.endReason || null,
+        notes: after.endReasonNotes || null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        resolved: false,
+      });
+    }
+  },
+);
+
+
+const REPORTER_RESPONSE_TIMEOUT_HOURS = 48;
+
+exports.expireStaleReporterResponses = onSchedule('every 60 minutes', async () => {
+  const cutoffMs = Date.now() - REPORTER_RESPONSE_TIMEOUT_HOURS * 60 * 60 * 1000;
+
+  const casesSnap = await db
+    .collection('cases')
+    .where('status', 'in', [
+      'unable_to_locate',
+      'awaiting_reporter_response',
+      'pickup_attempt_unsuccessful',
+    ])
+    .get();
+
+  for (const caseDoc of casesSnap.docs) {
+    const c = caseDoc.data();
+    const awaitingSince = c.awaitingReporterSince;
+    if (!awaitingSince) continue;
+    if (awaitingSince.toMillis() > cutoffMs) continue;
+
+    await caseDoc.ref.update({
+      status: 'cancelled',
+      statusHistory: admin.firestore.FieldValue.arrayUnion([
+        {
+          status: `Case automatically closed after ${REPORTER_RESPONSE_TIMEOUT_HOURS}h with no reporter response.`,
+          timestamp: admin.firestore.Timestamp.now(),
+        },
+      ]),
+      awaitingReporterSince: admin.firestore.FieldValue.delete(),
     });
   }
 });

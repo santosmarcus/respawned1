@@ -3,8 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 import '../../../app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_id_tag_screen.dart';
@@ -22,6 +24,8 @@ class CollarTagFormScreen extends StatefulWidget {
 }
 
 class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
+  final _formKey = GlobalKey<FormState>();
+
   // Pet Info
   final _nameCtrl = TextEditingController();
   final _breedCtrl = TextEditingController(); // specific breed
@@ -186,9 +190,9 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
   }
 
   Future<void> _submit() async {
-    if (_nameCtrl.text.trim().isEmpty || _ownerNameCtrl.text.trim().isEmpty) {
+    if (!_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in pet name and owner name.')),
+        const SnackBar(content: Text('Please fix the highlighted fields.')),
       );
       return;
     }
@@ -332,146 +336,24 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
 
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 8),
-            _sectionLabel('Pet Information'),
-            const SizedBox(height: 10),
-
-            // Pet image
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: _pickPetImage,
-                  child: Container(
-                    width: 90,
-                    height: 90,
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                          color: AppColors.textPrimary.withOpacity(0.3),
-                          style: BorderStyle.solid),
-                      borderRadius: BorderRadius.circular(8),
-                      color: AppColors.tearspwn.withOpacity(0.3),
-                    ),
-                    child: _petImage != null
-                        ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.file(_petImage!, fit: BoxFit.cover),
-                    )
-                        : const Center(
-                      child: Icon(Icons.add,
-                          size: 32, color: AppColors.textPrimary),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Insert Pet Image',
-                        style: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textPrimary)),
-                    const Text(' *',
-                        style: TextStyle(color: Colors.red, fontSize: 13)),
-                  ],
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 14),
-            _field(_nameCtrl, 'Name'),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                child: _datePickerField(
-                  label: 'Birthday',
-                  displayText: _birthdayDisplay,
-                  onTap: _pickBirthday,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Sex',
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    _SingleChoiceRow(
-                      value: _sex,
-                      options: const ['M', 'F'],
-                      onChanged: (v) => setState(() => _sex = v),
-                    ),
-                  ],
-                ),
-              ),
-            ]),
-
-            const SizedBox(height: 14),
-            Text(
-              'Pet Type',
-              style: GoogleFonts.zain(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            _SingleChoiceRow(
-              value: _petType,
-              options: const ['Dog', 'Cat'],
-              onChanged: (v) => setState(() => _petType = v),
-            ),
-            if (_petType != null) ...[
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+              _sectionLabel('Pet Information'),
               const SizedBox(height: 10),
-              _field(
-                _breedCtrl,
-                _petType == 'Dog'
-                    ? 'Breed (e.g. Labrador Retriever)'
-                    : 'Breed (e.g. Persian)',
-              ),
-            ],
 
-            const SizedBox(height: 10),
-            _field(_colorCtrl, 'Color/Markings'),
-            const SizedBox(height: 10),
-            _sectionLabel('Brief Pet Description'),
-            const SizedBox(height: 6),
-            _field(_descCtrl, 'Enter description'),
-
-            const SizedBox(height: 24),
-            _sectionLabel('Health Information'),
-            const SizedBox(height: 8),
-            _CheckRow(
-              label: 'Spayed/Neutered',
-              value: _spayedNeutered,
-              onChanged: (v) => setState(() => _spayedNeutered = v),
-            ),
-            const SizedBox(height: 6),
-            _CheckRow(
-              label: 'Vaccinated',
-              value: _vaccinated,
-              onChanged: (v) => setState(() => _vaccinated = v),
-            ),
-
-            if (_vaccinated) ...[
-              const SizedBox(height: 10),
+              // Pet image
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   GestureDetector(
-                    onTap: _pickVaccinationImage,
+                    onTap: _pickPetImage,
                     child: Container(
-                      width: 80,
-                      height: 80,
+                      width: 90,
+                      height: 90,
                       decoration: BoxDecoration(
                         border: Border.all(
                             color: AppColors.textPrimary.withOpacity(0.3),
@@ -479,78 +361,235 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                         borderRadius: BorderRadius.circular(8),
                         color: AppColors.tearspwn.withOpacity(0.3),
                       ),
-                      child: _vaccinationImage != null
+                      child: _petImage != null
                           ? ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.file(_vaccinationImage!, fit: BoxFit.cover),
+                        child: Image.file(_petImage!, fit: BoxFit.cover),
                       )
                           : const Center(
                         child: Icon(Icons.add,
-                            size: 28, color: AppColors.textPrimary),
+                            size: 32, color: AppColors.textPrimary),
                       ),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Text('Vaccination Record\nImage',
-                      style: GoogleFonts.zain(
-                          fontSize: 13, color: AppColors.textPrimary)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Insert Pet Image',
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: AppColors.textPrimary)),
+                      const Text(' *',
+                          style: TextStyle(color: Colors.red, fontSize: 13)),
+                    ],
+                  ),
                 ],
               ),
-            ],
 
-            const SizedBox(height: 14),
-            _sectionLabel('Allergies'),
-            const SizedBox(height: 6),
-            _field(_allergiesCtrl, 'Enter condition'),
-
-            const SizedBox(height: 14),
-            _sectionLabel('Current/Existing Medical Condition'),
-            const SizedBox(height: 6),
-            _field(_medicalCtrl, 'Enter condition'),
-
-            const SizedBox(height: 16),
-            _sectionLabel('Owner Information'),
-            const SizedBox(height: 10),
-            _field(_ownerNameCtrl, 'Name'),
-            const SizedBox(height: 10),
-            _field(_ownerMobileCtrl, 'Mobile Number',
-                keyboardType: TextInputType.phone),
-            const SizedBox(height: 10),
-            _field(_ownerEmailCtrl, 'Email',
-                keyboardType: TextInputType.emailAddress),
-            const SizedBox(height: 10),
-            _field(_ownerFacebookCtrl, 'Facebook Link',
-                keyboardType: TextInputType.url),
-
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _submitting ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  elevation: 0,
-                ),
-                child: _submitting
-                    ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.textPrimary),
-                )
-                    : Text('Generate Collar Tag',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary)),
+              const SizedBox(height: 14),
+              _field(
+                _nameCtrl,
+                'Name',
+                required: true,
+                inputFormatters: [AppInputFormatters.nameOnly],
+                validator: (v) => AppValidators.name(v, fieldName: 'Pet name'),
               ),
-            ),
-            const SizedBox(height: 32),
-          ],
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  child: _datePickerField(
+                    required: true,
+                    label: 'Birthday',
+                    displayText: _birthdayDisplay,
+                    onTap: _pickBirthday,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Sex',
+                            style: GoogleFonts.zain(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const Text(' *',
+                              style: TextStyle(color: Colors.red, fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      _SingleChoiceRow(
+                        value: _sex,
+                        options: const ['M', 'F'],
+                        onChanged: (v) => setState(() => _sex = v),
+                      ),
+                    ],
+                  ),
+                ),
+              ]),
+
+              const SizedBox(height: 14),
+
+            Text(
+                'Pet Type',
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              _SingleChoiceRow(
+                value: _petType,
+                options: const ['Dog', 'Cat'],
+                onChanged: (v) => setState(() => _petType = v),
+              ),
+              if (_petType != null) ...[
+                const SizedBox(height: 10),
+                _field(
+                  _breedCtrl,
+                  _petType == 'Dog'
+                      ? 'Breed (e.g. Labrador Retriever)'
+                      : 'Breed (e.g. Persian)',
+                  required: true,
+                ),
+              ],
+
+              const SizedBox(height: 10),
+              _field(_colorCtrl, 'Color/Markings'),
+              const SizedBox(height: 10),
+              _sectionLabel('Brief Pet Description'),
+              const SizedBox(height: 6),
+              _field(_descCtrl, 'Enter description'),
+
+              const SizedBox(height: 24),
+              _sectionLabel('Health Information'),
+              const SizedBox(height: 8),
+              _CheckRow(
+                label: 'Spayed/Neutered',
+                value: _spayedNeutered,
+                onChanged: (v) => setState(() => _spayedNeutered = v),
+              ),
+              const SizedBox(height: 6),
+              _CheckRow(
+                label: 'Vaccinated',
+                value: _vaccinated,
+                onChanged: (v) => setState(() => _vaccinated = v),
+              ),
+
+              if (_vaccinated) ...[
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    GestureDetector(
+                      onTap: _pickVaccinationImage,
+                      child: Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: AppColors.textPrimary.withOpacity(0.3),
+                              style: BorderStyle.solid),
+                          borderRadius: BorderRadius.circular(8),
+                          color: AppColors.tearspwn.withOpacity(0.3),
+                        ),
+                        child: _vaccinationImage != null
+                            ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(_vaccinationImage!, fit: BoxFit.cover),
+                        )
+                            : const Center(
+                          child: Icon(Icons.add,
+                              size: 28, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text('Vaccination Record\nImage',
+                        style: GoogleFonts.zain(
+                            fontSize: 13, color: AppColors.textPrimary)),
+                  ],
+                ),
+              ],
+
+              const SizedBox(height: 14),
+              _sectionLabel('Allergies'),
+              const SizedBox(height: 6),
+              _field(_allergiesCtrl, 'Enter condition'),
+
+              const SizedBox(height: 14),
+              _sectionLabel('Current/Existing Medical Condition'),
+              const SizedBox(height: 6),
+              _field(_medicalCtrl, 'Enter condition'),
+
+              const SizedBox(height: 16),
+              _sectionLabel('Owner Information'),
+              const SizedBox(height: 10),
+              _field(
+                _ownerNameCtrl,
+                'Name',
+                required: true,
+                inputFormatters: [AppInputFormatters.nameOnly],
+                validator: (v) => AppValidators.name(v, fieldName: 'Owner name'),
+              ),
+              const SizedBox(height: 10),
+              _field(
+                _ownerMobileCtrl,
+                'Mobile Number',
+                keyboardType: TextInputType.phone,
+                required: true,
+                inputFormatters: AppInputFormatters.phoneFlexible,
+                validator: AppValidators.phFlexiblePhone,
+              ),
+              const SizedBox(height: 10),
+              _field(
+                _ownerEmailCtrl,
+                'Email',
+                keyboardType: TextInputType.emailAddress,
+                required: true,
+                validator: AppValidators.email,
+              ),
+              const SizedBox(height: 10),
+              _field(_ownerFacebookCtrl, 'Facebook Link',
+                  keyboardType: TextInputType.url),
+
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _submitting ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    foregroundColor: AppColors.textPrimary,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                  ),
+                  child: _submitting
+                      ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.textPrimary),
+                  )
+                      : Text('Generate Collar Tag',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary)),
+                ),
+              ),
+              const SizedBox(height: 32),
+            ],
+          ),
         ),
       ),
     );
@@ -568,17 +607,27 @@ Widget _field(
     String label, {
       TextInputType keyboardType = TextInputType.text,
       int maxLines = 1,
+      bool required = false,
+      String? Function(String?)? validator,
+      List<TextInputFormatter>? inputFormatters,
     }) =>
     Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.zain(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textSecondary,
-          ),
+        Row(
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            if (required)
+              const Text(' *',
+                  style: TextStyle(color: Colors.red, fontSize: 13)),
+          ],
         ),
         const SizedBox(height: 4),
 
@@ -586,6 +635,9 @@ Widget _field(
           controller: ctrl,
           keyboardType: keyboardType,
           maxLines: maxLines,
+          inputFormatters: inputFormatters,
+          validator: validator,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
           style: GoogleFonts.zain(
             fontSize: 15,
             color: AppColors.textPrimary,
@@ -625,12 +677,23 @@ Widget _field(
                 width: 1.5,
               ),
             ),
+
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Colors.redAccent, width: 1),
+            ),
+
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
+            ),
           ),
         ),
       ],
     );
 
 Widget _datePickerField({
+  bool required = false,
   required String label,
   required String displayText,
   required VoidCallback onTap,
@@ -638,13 +701,20 @@ Widget _datePickerField({
     Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.zain(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textSecondary,
-          ),
+        Row(
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            if (required)
+              const Text(' *',
+                  style: TextStyle(color: Colors.red, fontSize: 13)),
+          ],
         ),
         const SizedBox(height: 4),
         InkWell(
@@ -686,6 +756,7 @@ class _SingleChoiceRow extends StatelessWidget {
   final List<String> options;
   final ValueChanged<String> onChanged;
 
+
   const _SingleChoiceRow({
     required this.value,
     required this.options,
@@ -699,6 +770,7 @@ class _SingleChoiceRow extends StatelessWidget {
         for (final option in options)
           Padding(
             padding: const EdgeInsets.only(right: 12),
+
             child: GestureDetector(
               onTap: () => onChanged(option),
               child: Row(
@@ -711,6 +783,7 @@ class _SingleChoiceRow extends StatelessWidget {
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     onChanged: (v) => onChanged(v ?? option),
                   ),
+
                   const SizedBox(width: 2),
                   Text(option,
                       style: GoogleFonts.zain(

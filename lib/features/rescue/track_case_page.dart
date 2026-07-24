@@ -1602,8 +1602,10 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
   }
 
   Future<void> _submit() async {
-    if (_selectedType == null || _submitting) return;
-    if (_selectedType == 'moved' && _locationController.text.trim().isEmpty) {
+    if (_selectedType == null || _submitting || _detectingLocation) return;
+    if (_selectedType == 'moved' &&
+        (_locationController.text.trim().isEmpty ||
+            _locationController.text.trim() == 'Detecting your location…')) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter the new location.'),
@@ -1871,7 +1873,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _submitting ? null : _submit,
+                onPressed: (_submitting || _detectingLocation) ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
                   foregroundColor: AppColors.textPrimary,

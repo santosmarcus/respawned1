@@ -25,7 +25,23 @@ enum RescueStatus {
   treatment,
   intake,
   completed,
-  cancelled;
+  cancelled,
+  // The four statuses below back the pet-transporter "End Reason" flow in
+  // transit_progress_page.dart (_showCloseTransitDialog /
+  // _resolveEndReason). Unlike [cancelled], none of these mean the rescue
+  // itself failed — the case is still expected to be picked up, either by
+  // the same transporter once the reporter responds, or (for
+  // [needsSpecializedAssistance]) by a different handler org staff assign.
+  // A scheduled Cloud Function (see functions/index.js
+  // expireStaleReporterResponses) auto-closes [unableToLocate],
+  // [awaitingReporterResponse], and [pickupUnsuccessful] cases after a
+  // configurable no-response window; [needsSpecializedAssistance] is
+  // intentionally excluded from that auto-expiry since it's waiting on
+  // staff/organization action, not the reporter.
+  unableToLocate,
+  awaitingReporterResponse,
+  pickupUnsuccessful,
+  needsSpecializedAssistance;
 
   /// The canonical string this module writes to Firestore for this status.
   ///
@@ -52,19 +68,23 @@ enum RescueStatus {
   /// this getter just wasn't writing it. Now it does, so the write and the
   /// read finally agree.
   String get firestoreValue => switch (this) {
-        RescueStatus.pendingReview => 'pending',
-        RescueStatus.accepted => 'accepted',
-        RescueStatus.awaitingAssignment => 'accepted',
-        RescueStatus.rejected => 'rejected',
-        RescueStatus.referred => 'referred',
-        RescueStatus.possibleDuplicate => 'possibleDuplicate',
-        RescueStatus.merged => 'merged',
-        RescueStatus.ongoing => 'ongoing',
-        RescueStatus.treatment => 'in_treatment',
-        RescueStatus.intake => 'intake',
-        RescueStatus.completed => 'completed',
-        RescueStatus.cancelled => 'cancelled',
-      };
+    RescueStatus.pendingReview => 'pending',
+    RescueStatus.accepted => 'accepted',
+    RescueStatus.awaitingAssignment => 'accepted',
+    RescueStatus.rejected => 'rejected',
+    RescueStatus.referred => 'referred',
+    RescueStatus.possibleDuplicate => 'possibleDuplicate',
+    RescueStatus.merged => 'merged',
+    RescueStatus.ongoing => 'ongoing',
+    RescueStatus.treatment => 'in_treatment',
+    RescueStatus.intake => 'intake',
+    RescueStatus.completed => 'completed',
+    RescueStatus.cancelled => 'cancelled',
+    RescueStatus.unableToLocate => 'unable_to_locate',
+    RescueStatus.awaitingReporterResponse => 'awaiting_reporter_response',
+    RescueStatus.pickupUnsuccessful => 'pickup_attempt_unsuccessful',
+    RescueStatus.needsSpecializedAssistance => 'needs_specialized_assistance',
+  };
 
   /// Every raw Firestore string that should be treated as this status when
   /// reading, including legacy/sub-state strings written by other features.
@@ -97,6 +117,10 @@ enum RescueStatus {
     RescueStatus.intake: ['intake'],
     RescueStatus.completed: ['completed', 'closed'],
     RescueStatus.cancelled: ['cancelled'],
+    RescueStatus.unableToLocate: ['unable_to_locate'],
+    RescueStatus.awaitingReporterResponse: ['awaiting_reporter_response'],
+    RescueStatus.pickupUnsuccessful: ['pickup_attempt_unsuccessful'],
+    RescueStatus.needsSpecializedAssistance: ['needs_specialized_assistance'],
   };
 
   static RescueStatus fromFirestoreValue(String? value) {
@@ -112,41 +136,58 @@ enum RescueStatus {
   List<String> get queryValues => _legacyAliases[this] ?? [firestoreValue];
 
   String get label => switch (this) {
-        RescueStatus.pendingReview => 'Pending Review',
-        RescueStatus.accepted => 'Accepted',
-        RescueStatus.awaitingAssignment => 'Awaiting Assignment',
-        RescueStatus.rejected => 'Rejected',
-        RescueStatus.referred => 'Referred',
-        RescueStatus.possibleDuplicate => 'Possible Duplicate',
-        RescueStatus.merged => 'Merged',
-        RescueStatus.ongoing => 'Ongoing',
-        RescueStatus.treatment => 'In Treatment',
-        RescueStatus.intake => 'Intake',
-        RescueStatus.completed => 'Completed',
-        RescueStatus.cancelled => 'Cancelled',
-      };
+    RescueStatus.pendingReview => 'Pending Review',
+    RescueStatus.accepted => 'Accepted',
+    RescueStatus.awaitingAssignment => 'Awaiting Assignment',
+    RescueStatus.rejected => 'Rejected',
+    RescueStatus.referred => 'Referred',
+    RescueStatus.possibleDuplicate => 'Possible Duplicate',
+    RescueStatus.merged => 'Merged',
+    RescueStatus.ongoing => 'Ongoing',
+    RescueStatus.treatment => 'In Treatment',
+    RescueStatus.intake => 'Intake',
+    RescueStatus.completed => 'Completed',
+    RescueStatus.cancelled => 'Cancelled',
+    RescueStatus.unableToLocate => 'Unable to Locate Animal',
+    RescueStatus.awaitingReporterResponse => 'Awaiting Reporter Response',
+    RescueStatus.pickupUnsuccessful => 'Pickup Attempt Unsuccessful',
+    RescueStatus.needsSpecializedAssistance => 'Needs Specialized Assistance',
+  };
 
   Color get color => switch (this) {
-        RescueStatus.pendingReview => AppColors.slaterspwn,
-        RescueStatus.accepted => AppColors.yellowrspwn,
-        RescueStatus.awaitingAssignment => AppColors.yellowrspwn,
-        RescueStatus.rejected => const Color(0xFFE05353),
-        RescueStatus.referred => AppColors.lavenderrspwn,
-        RescueStatus.possibleDuplicate => const Color(0xFFE0A030),
-        RescueStatus.merged => AppColors.tearspwn,
-        RescueStatus.ongoing => AppColors.greenrspwn,
-        RescueStatus.treatment => const Color(0xFF4E8FE0),
-        RescueStatus.intake => const Color(0xFF9C7A4C),
-        RescueStatus.completed => const Color(0xFF4CAF6D),
-        RescueStatus.cancelled => AppColors.textSecondary,
-      };
+    RescueStatus.pendingReview => AppColors.slaterspwn,
+    RescueStatus.accepted => AppColors.yellowrspwn,
+    RescueStatus.awaitingAssignment => AppColors.yellowrspwn,
+    RescueStatus.rejected => const Color(0xFFE05353),
+    RescueStatus.referred => AppColors.lavenderrspwn,
+    RescueStatus.possibleDuplicate => const Color(0xFFE0A030),
+    RescueStatus.merged => AppColors.tearspwn,
+    RescueStatus.ongoing => AppColors.greenrspwn,
+    RescueStatus.treatment => const Color(0xFF4E8FE0),
+    RescueStatus.intake => const Color(0xFF9C7A4C),
+    RescueStatus.completed => const Color(0xFF4CAF6D),
+    RescueStatus.cancelled => AppColors.textSecondary,
+    RescueStatus.unableToLocate => const Color(0xFFE0A030),
+    RescueStatus.awaitingReporterResponse => const Color(0xFFE0A030),
+    RescueStatus.pickupUnsuccessful => const Color(0xFFE0A030),
+    RescueStatus.needsSpecializedAssistance => const Color(0xFFE05353),
+  };
 
   /// True once the case has left the active triage/rescue pipeline.
   bool get isTerminal =>
       this == RescueStatus.rejected ||
-      this == RescueStatus.merged ||
-      this == RescueStatus.completed ||
-      this == RescueStatus.cancelled;
+          this == RescueStatus.merged ||
+          this == RescueStatus.completed ||
+          this == RescueStatus.cancelled;
+
+  /// True for the three reporter-facing "waiting on you" statuses that the
+  /// scheduled auto-expiry function in functions/index.js
+  /// (expireStaleReporterResponses) will close automatically if the
+  /// reporter never responds within the configured window.
+  bool get isAwaitingReporterResponse =>
+      this == RescueStatus.unableToLocate ||
+          this == RescueStatus.awaitingReporterResponse ||
+          this == RescueStatus.pickupUnsuccessful;
 }
 
 /// Rescue urgency level. Kept as a thin typed wrapper around the existing
@@ -159,21 +200,21 @@ enum UrgencyLevel {
   low;
 
   String get firestoreValue => switch (this) {
-        UrgencyLevel.critical => 'Critical',
-        UrgencyLevel.medium => 'Medium',
-        UrgencyLevel.low => 'Low',
-      };
+    UrgencyLevel.critical => 'Critical',
+    UrgencyLevel.medium => 'Medium',
+    UrgencyLevel.low => 'Low',
+  };
 
   static UrgencyLevel? fromFirestoreValue(String? value) => switch (value) {
-        'Critical' => UrgencyLevel.critical,
-        'Medium' => UrgencyLevel.medium,
-        'Low' => UrgencyLevel.low,
-        _ => null,
-      };
+    'Critical' => UrgencyLevel.critical,
+    'Medium' => UrgencyLevel.medium,
+    'Low' => UrgencyLevel.low,
+    _ => null,
+  };
 
   Color get color => switch (this) {
-        UrgencyLevel.critical => const Color(0xFFE05353),
-        UrgencyLevel.medium => AppColors.yellowrspwn,
-        UrgencyLevel.low => AppColors.greenrspwn,
-      };
+    UrgencyLevel.critical => const Color(0xFFE05353),
+    UrgencyLevel.medium => AppColors.yellowrspwn,
+    UrgencyLevel.low => AppColors.greenrspwn,
+  };
 }

@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -30,6 +31,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     if (_emailController.text.trim().isEmpty) {
       setState(() {
         _errorMessage = 'Please enter your email address.';
+        _isLoading = false;
+      });
+      return;
+    }
+
+    final emailError = AppValidators.email(_emailController.text);
+    if (emailError != null) {
+      setState(() {
+        _errorMessage = emailError;
         _isLoading = false;
       });
       return;
@@ -86,7 +96,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
-                    hintText: 'Enter Email Address',
+                    hintText: 'Enter Email Address *',
                     prefixIcon: Icon(Icons.email_outlined),
                   ),
                 ),

@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ResPAWnd — Pet Identification Card</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>Pet Found — ResPAWnd</title>
+    <link rel="icon" href="/favicon.png" />
     <style>
         :root {
           --background: #FBF9F4;
@@ -19,118 +20,205 @@
         * { box-sizing: border-box; }
         body {
           margin: 0;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           background: var(--background);
           color: var(--text-primary);
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+          -webkit-font-smoothing: antialiased;
+        }
+        .wrap {
+          max-width: 480px;
+          margin: 0 auto;
+          padding: 24px 20px 40px;
+          min-height: 100vh;
+        }
+        .center-screen {
+          min-height: 100vh;
           display: flex;
+          align-items: center;
           justify-content: center;
-          padding: 20px 16px 40px;
+          text-align: center;
+          padding: 24px;
         }
-        .card { width: 100%; max-width: 420px; }
-
-        .topbar { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-        .back-btn {
-          flex-shrink: 0; width: 34px; height: 34px;
-          border: 2px solid var(--text-primary); border-radius: 8px;
-          background: transparent; display: flex; align-items: center; justify-content: center;
-          font-size: 18px; font-weight: 700; color: var(--text-primary);
-          cursor: pointer; text-decoration: none;
+        h1.title {
+          text-align: center;
+          font-size: 28px;
+          font-weight: 800;
+          margin: 4px 0 18px;
         }
-        .title { text-align: center; font-size: 26px; font-weight: 800; line-height: 1.15; margin: 2px 0 0; }
-
-        .notice { font-size: 14px; line-height: 1.5; color: var(--text-primary); margin-bottom: 16px; }
-        .badge {
-            display: inline-block;
-            background: var(--yellow);
-            color: var(--text-primary);
-            font-size: 12px;
-            font-weight: 600;
-            padding: 3px 10px;
-            border-radius: 20px;
-            margin-bottom: 12px;
-         }
-
-        .photo-wrap { display: flex; justify-content: center; margin: 6px 0 18px; }
-        .photo { width: 170px; height: 170px; object-fit: cover; border-radius: 16px; background: var(--tea); }
-        .photo-fallback {
-          width: 170px; height: 170px; border-radius: 16px;
-          display: flex; align-items: center; justify-content: center;
-          background: var(--tea); font-size: 56px;
+        .photo {
+          width: 140px;
+          height: 140px;
+          border-radius: 12px;
+          background: var(--tea);
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          font-size: 44px;
         }
-
-        .pet-name { text-align: center; font-size: 26px; font-weight: 800; margin: 0 0 18px; }
-
-        .row {
-          display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
-          padding: 10px 0; border-bottom: 1px solid var(--slate); font-size: 14px;
+        .photo img { width: 100%; height: 100%; object-fit: cover; }
+        .pet-name {
+          text-align: center;
+          font-size: 22px;
+          font-weight: 800;
+          margin: 10px 0 8px;
         }
-        .row .label { font-weight: 600; }
-        .row .value { text-align: right; }
-        .row.split { gap: 24px; }
-        .row.split .pair { display: flex; gap: 6px; align-items: baseline; flex: 1; }
-        .row.split .pair .label { white-space: nowrap; }
-
-        .checklist {
-          display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
-          margin: 16px 0 4px; font-size: 14px;
+        hr.divider {
+          border: none;
+          border-top: 0.5px solid var(--text-primary);
+          opacity: 0.4;
+          margin: 8px 0;
         }
-        .checklist .item { display: flex; align-items: flex-start; gap: 8px; }
-        .checklist .dot { width: 8px; height: 8px; min-width: 8px; border-radius: 50%; background: var(--text-primary); margin-top: 6px; }
-
-        .section-title { font-size: 15px; font-weight: 800; margin: 22px 0 10px; }
-        .owner-row { font-size: 14px; padding: 8px 0; border-bottom: 1px solid var(--slate); }
-        .owner-hidden {
-          font-size: 13.5px; color: var(--text-secondary);
-          background: var(--background); border: 1px solid var(--slate);
-          border-radius: 10px; padding: 12px; line-height: 1.4;
+        p.msg {
+          text-align: center;
+          font-size: 13.5px;
+          margin: 8px 0 4px;
+          line-height: 1.4;
         }
-
-        .chat-label { font-size: 14px; font-weight: 800; margin: 20px 0 8px; }
+        p.location-label {
+          text-align: center;
+          font-size: 13.5px;
+          font-weight: 700;
+          margin: 0 0 18px;
+        }
+        .contact-row {
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 10px;
+          margin-bottom: 8px;
+        }
+        .contact-row .label {
+          font-weight: 700;
+          font-size: 14px;
+        }
+        .icon-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: var(--text-secondary);
+          font-size: 16px;
+          padding: 2px;
+        }
         .chat-box {
-          background: var(--surface); border: 1px solid var(--slate); border-radius: 12px;
-          padding: 10px; min-height: 160px; max-height: 260px; overflow-y: auto;
-          display: flex; flex-direction: column; gap: 6px;
+          height: 260px;
+          background: var(--surface);
+          border: 1px solid var(--slate);
+          border-radius: 12px;
+          padding: 10px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }
-        .chat-empty { margin: auto; color: var(--text-secondary); font-size: 13px; text-align: center; }
-        .msg {
-          max-width: 80%; padding: 8px 12px; border-radius: 14px; font-size: 13.5px; line-height: 1.35;
+        .chat-empty-state {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          color: var(--text-secondary);
+          font-size: 13px;
+          padding: 0 16px;
         }
-        .msg.finder { align-self: flex-start; background: rgba(227,224,185,0.6); }
-        .msg.owner { align-self: flex-end; background: var(--yellow); }
-        .chat-input-row { display: flex; gap: 8px; margin-top: 8px; }
-        .chat-input {
-          flex: 1; padding: 10px 14px; border-radius: 20px; border: 1px solid var(--slate);
-          background: var(--background); font-size: 14px; font-family: inherit;
+        .chat-thread {
+          flex: 1;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column-reverse;
+          gap: 6px;
         }
-        .chat-send {
-          border: none; background: var(--text-primary); color: var(--background);
-          width: 40px; height: 40px; border-radius: 50%; font-size: 16px; cursor: pointer;
+        .bubble {
+          max-width: 78%;
+          padding: 8px 12px;
+          border-radius: 14px;
+          font-size: 13.5px;
+          margin: 3px 0;
         }
-        .chat-waiting { text-align: center; color: var(--text-secondary); font-size: 13px; padding: 12px 0; }
-
-        .cta {
-          display: block; text-align: center; text-decoration: none;
-          background: var(--yellow); color: var(--text-primary); font-weight: 800;
-          padding: 15px; border-radius: 30px; margin-top: 22px; font-size: 15.5px;
+        .bubble.finder { align-self: flex-end; background: var(--yellow); }
+        .bubble.owner { align-self: flex-start; background: rgba(227, 224, 185, 0.5); }
+        .compose-row {
+          display: flex;
+          gap: 8px;
+          margin-top: 8px;
         }
-        .cta.secondary { background: transparent; border: 1px solid var(--text-primary); margin-top: 10px; }
-        .cta.disabled { opacity: 0.4; pointer-events: none; }
-
-        .state { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
-        .state .icon { font-size: 40px; margin-bottom: 10px; }
-        .footer { text-align: center; font-size: 12px; color: var(--text-secondary); margin-top: 22px; }
+        .compose-row input {
+          flex: 1;
+          border: 1px solid var(--slate);
+          border-radius: 20px;
+          padding: 10px 14px;
+          font-size: 14px;
+          background: var(--background);
+          color: var(--text-primary);
+        }
+        .compose-row button {
+          border: none;
+          background: none;
+          color: var(--text-primary);
+          font-size: 22px;
+          cursor: pointer;
+          padding: 0 6px;
+        }
+        .primary-btn {
+          display: block;
+          width: 100%;
+          padding: 16px;
+          border: none;
+          border-radius: 30px;
+          background: var(--yellow);
+          color: var(--text-primary);
+          font-weight: 800;
+          font-size: 15px;
+          cursor: pointer;
+          margin-top: 12px;
+        }
+        .spinner {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          border: 3px solid var(--slate);
+          border-top-color: var(--text-primary);
+          animation: spin 0.8s linear infinite;
+          margin: 0 auto 14px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .badge-circle {
+          width: 110px;
+          height: 110px;
+          border-radius: 50%;
+          background: var(--text-primary);
+          border: 4px solid var(--lavender);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 42px;
+          margin: 0 auto 20px;
+        }
+        .small-note {
+          font-size: 12px;
+          color: var(--text-secondary);
+          font-style: italic;
+          text-align: center;
+        }
     </style>
 </head>
 <body>
-<div class="card" id="card">
-    <div class="state" id="loading"><div class="icon">🐾</div>Loading pet ID tag…</div>
-</div>
+<div id="app" class="wrap"></div>
 
-<!-- Firebase (compat) SDKs — client-side, no auth required for finders -->
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-functions-compat.js"></script>
-<script>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getAuth, signInAnonymously, onAuthStateChanged,
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import {
+      getFirestore, doc, onSnapshot, collection, addDoc,
+      query, orderBy, serverTimestamp,
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import {
+      getFunctions, httpsCallable,
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+
+    // Same web config as lib/firebase_options.dart (DefaultFirebaseOptions.web).
     const firebaseConfig = {
       apiKey: "AIzaSyCJcdSf3qyq9C-JRByBWxxnyE6Kp37XLtE",
       appId: "1:790537497506:web:797389d4b5f5664726e0fb",
@@ -138,238 +226,278 @@
       projectId: "respawnd1-45021",
       authDomain: "respawnd1-45021.firebaseapp.com",
       storageBucket: "respawnd1-45021.firebasestorage.app",
+      measurementId: "G-6XR8KHPL1B",
     };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    // Session creation and message sending go through callables (below)
-    // instead of direct Firestore writes — this page has no signed-in
-    // user, so any direct write would need Firestore rules open to
-    // anonymous callers. Reads/listening stay direct Firestore calls.
-    const functions = firebase.functions();
-    const getOrCreateRescueSessionFn = functions.httpsCallable('getOrCreateRescueSession');
-    const sendRescueSessionMessageFn = functions.httpsCallable('sendRescueSessionMessage');
+
+    // Same key already embedded client-side in scan_tag_flow.dart — reused
+    // here rather than introducing a second exposed key.
+    const GEOCODING_API_KEY = "AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0";
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const functions = getFunctions(app);
+
+    const root = document.getElementById("app");
 
     function tagIdFromPath() {
-      const parts = window.location.pathname.split("/").filter(Boolean);
-      return parts.length >= 2 ? decodeURIComponent(parts[1]) : null;
+      const segments = window.location.pathname.split("/").filter(Boolean);
+      const i = segments.indexOf("tag");
+      if (i === -1 || i + 1 >= segments.length) return null;
+      return decodeURIComponent(segments[i + 1]);
     }
 
-    function escapeHtml(str) {
-      return String(str ?? "").replace(/[&<>"']/g, (c) => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    function renderCenter(html) {
+      root.innerHTML = `<div class="center-screen"><div>${html}</div></div>`;
+    }
+
+    function escapeHtml(s) {
+      return (s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
       }[c]));
     }
 
-    function renderState(icon, message) {
-      document.getElementById("card").innerHTML = `<div class="state"><div class="icon">${icon}</div>${message}</div>`;
-    }
-
-    let messagesUnsub = null;
-    let sessionUnsub = null;
-
-    function renderMessages(docs, chatBoxEl) {
-      if (docs.length === 0) {
-        chatBoxEl.innerHTML = `<div class="chat-empty">No messages yet. Say hello!</div>`;
-        return;
-      }
-      chatBoxEl.innerHTML = docs.map(d => {
-        const m = d.data();
-        const who = m.sender === "owner" ? "owner" : "finder";
-        return `<div class="msg ${who}">${escapeHtml(m.text)}</div>`;
-      }).join("");
-      chatBoxEl.scrollTop = chatBoxEl.scrollHeight;
-    }
-
-    function wireChat(sessionRef, sessionId) {
-      const chatBox = document.getElementById("chatBox");
-      const input = document.getElementById("chatInput");
-      const sendBtn = document.getElementById("chatSend");
-      if (!chatBox) return;
-
-      if (messagesUnsub) messagesUnsub();
-      messagesUnsub = sessionRef.collection("messages").orderBy("sentAt")
-        .onSnapshot(qs => renderMessages(qs.docs, chatBox));
-
-      if (sendBtn) {
-        sendBtn.onclick = () => {
-          const text = input.value.trim();
-          if (!text) return;
-          input.value = "";
-          sendRescueSessionMessageFn({sessionId, sender: "finder", text}).catch((e) => {
-            console.error("ResPAWnd: could not send message", e);
-            input.value = text; // let them retry instead of silently losing it
-          });
-        };
-        input.onkeydown = (e) => { if (e.key === "Enter") sendBtn.click(); };
-      }
-    }
-
-    function chatSectionHtml(session) {
-      const enabled = session.chatEnabledByOwner === true;
-      return `
-        <div class="chat-label">Live Chat with Owner</div>
-        <div class="chat-box" id="chatBox"><div class="chat-empty">Loading…</div></div>
-        ${enabled
-          ? `<div class="chat-input-row">
-               <input class="chat-input" id="chatInput" placeholder="Type a message" />
-               <button class="chat-send" id="chatSend">➤</button>
-             </div>`
-          : `<div class="chat-waiting">Waiting for the owner to enable live chat…</div>`}
-      `;
-    }
-
-    function getLocation() {
+    // Best-effort device location — never blocks the flow if denied/slow.
+    function getBrowserLocation() {
       return new Promise((resolve) => {
-        if (!navigator.geolocation) return resolve(null);
+        if (!("geolocation" in navigator)) return resolve(null);
+        const timer = setTimeout(() => resolve(null), 8000);
         navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-          () => resolve(null),
-          { timeout: 4000 }
+          (pos) => {
+            clearTimeout(timer);
+            resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          },
+          () => {
+            clearTimeout(timer);
+            resolve(null);
+          },
+          { enableHighAccuracy: false, timeout: 8000 },
         );
       });
     }
 
-    // Session creation happens server-side (see getOrCreateRescueSession in
-    // functions/index.js) instead of writing rescueSessions/collarTags
-    // directly from here — this page has no signed-in user at all, so a
-    // direct client write depends on Firestore rules allowing anonymous
-    // writes to those collections. Rather than opening that up (anyone who
-    // knows a tag ID — visible right in the QR-code URL — could otherwise
-    // write to it), the callable does this under admin privileges and
-    // hands back just the session ID. Reading/listening to that session
-    // afterward is still a plain Firestore read, unaffected by this.
-    async function getOrCreateSession(tagId, tag) {
+    async function reverseGeocode(lat, lng) {
       try {
-        const loc = await getLocation();
-        const result = await getOrCreateRescueSessionFn({
-          tagId,
-          location: loc ? {lat: loc.lat, lng: loc.lng} : null,
-        });
-        const sessionId = result && result.data && result.data.sessionId;
-        if (!sessionId) return null;
-        return db.collection("rescueSessions").doc(sessionId);
-      } catch (e) {
-        // Most likely cause here is the callable itself rejecting the
-        // request (tag not found, or qrEnabled still false) rather than a
-        // permissions issue, since this call no longer depends on
-        // Firestore security rules for writes at all.
-        console.error("ResPAWnd: could not create/reuse a rescue session via the callable.", e);
-        window.__resPawndSessionError = e;
-        return null;
-      }
+        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GEOCODING_API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.status === "OK" && data.results && data.results.length) {
+          return data.results[0].formatted_address ?? null;
+        }
+      } catch (_) {}
+      return null;
     }
 
-    function renderTag(tagId, tag, sessionRef) {
-      const photo = tag.petImageUrl
-        ? `<img class="photo" src="${escapeHtml(tag.petImageUrl)}" alt="${escapeHtml(tag.name)}" />`
-        : `<div class="photo-fallback">🐶</div>`;
+    function formatDate(ts) {
+      if (!ts) return "";
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      let h = d.getHours() % 12; if (h === 0) h = 12;
+      const ampm = d.getHours() < 12 ? "AM" : "PM";
+      const min = String(d.getMinutes()).padStart(2, "0");
+      return `${months[d.getMonth()]} ${d.getDate()}, ${h}:${min} ${ampm}`;
+    }
 
-      const allergiesLine = tag.allergies && tag.allergies.toLowerCase() !== "none"
-        ? `Allergies: ${escapeHtml(tag.allergies)}` : "No Allergies";
-      const medicalLine = tag.medicalCondition && tag.medicalCondition.toLowerCase() !== "none"
-        ? `Medical Condition: ${escapeHtml(tag.medicalCondition)}` : "No Medical Condition";
-      const spayedLine = tag.isSpayedNeutered ? "Spayed" : "Not Spayed/Neutered";
-      const vaccinatedLine = tag.isVaccinated ? "Vaccinated" : "Not Vaccinated";
+    function launchTel(number) {
+      if (number) window.location.href = `tel:${number}`;
+    }
+    function launchMail(email, petName) {
+      if (!email) return;
+      const subject = encodeURIComponent(`Found ${petName || "your pet"}`);
+      window.location.href = `mailto:${email}?subject=${subject}`;
+    }
+    function launchFacebook(link) {
+      if (!link) return;
+      const normalized = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+      window.open(normalized, "_blank", "noopener");
+    }
 
-      const isLost = tag.status === "lost";
+    let messagesUnsub = null;
 
-      const title = isLost ? "ResPAWnd - Pet Found!" : "ResPAWnd - Pet Identification Card";
-      const badge = isLost
-        ? `The owner has been notified that their pet's tag was scanned. Please
-           provide the exact location or address where the pet was found to
-           help facilitate a safe reunion.`
-        : `This is ${escapeHtml(tag.name || "this pet")}'s ID tag. You can message
-           the owner below if needed.`;
+    function renderFoundScreen({ tagId, sessionId, tagData, sessionData }) {
+      const petName = tagData?.name || "";
+      const petImageUrl = tagData?.petImageUrl || "";
+      const ownerMobile = (tagData?.ownerMobile || "").trim();
+      const ownerEmail = (tagData?.ownerEmail || "").trim();
+      const ownerFacebookLink = (tagData?.ownerFacebookLink || "").trim();
 
-      const ownerSection = isLost
-        ? `<div class="section-title">Owner Information</div>
-           <div class="owner-row">${escapeHtml(tag.ownerName || "—")}</div>
-           <div class="owner-row">${escapeHtml(tag.ownerMobile || "—")}</div>`
-        : `<div class="section-title">Owner Information</div>
-           <div class="owner-hidden">Hidden unless the owner marks this pet as lost. Use the chat below to reach them.</div>`;
+      const status = sessionData?.status || "active";
 
-      const callBtn = (isLost && tag.ownerMobile)
-        ? `<a class="cta" href="tel:${escapeHtml(tag.ownerMobile)}">Contact Owner</a>`
-        : `<div class="cta disabled">Contact Owner</div>`;
+      if (status === "resolved") {
+        root.innerHTML = `
+          <div class="wrap">
+            <div style="min-height:80vh; display:flex; flex-direction:column; justify-content:center;">
+              <h1 class="title">Rescue Completed!</h1>
+              <div class="badge-circle">🐾</div>
+              <p class="msg" style="font-weight:700;">The pet has been safely returned to its owner.</p>
+              <p class="msg" style="color:var(--text-secondary);">Thank you for making this rescue successful. Every successful reunion helps create a safer community for pets and their owners.</p>
+              <p class="small-note">This rescue session has now ended. The temporary chat has been closed.</p>
+            </div>
+          </div>`;
+        return;
+      }
 
-      document.getElementById("card").innerHTML = `
-        <div class="topbar">
-          <div class="title">${title}</div>
-        </div>
+      const chatEnabled = !!sessionData?.chatEnabledByOwner;
+      const lat = sessionData?.lat;
+      const lng = sessionData?.lng;
+      const address = sessionData?.address;
+      const createdAt = sessionData?.createdAt;
 
-        <div class="badge">${badge}</div>
+      const locationLabel = address
+        ? address
+        : (lat != null && lng != null)
+          ? `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+          : "Location not shared";
+      const timeLabel = formatDate(createdAt);
 
-        <div class="photo-wrap">${photo}</div>
-        <div class="pet-name">${escapeHtml(tag.name || "Unnamed pet")}</div>
+      root.innerHTML = `
+        <div class="wrap">
+          <h1 class="title">Pet Found!</h1>
+          <div class="photo">
+            ${petImageUrl
+              ? `<img src="${escapeHtml(petImageUrl)}" onerror="this.parentElement.textContent='🐾'" />`
+              : "🐾"}
+          </div>
+          <div class="pet-name">${escapeHtml(petName) || "—"}</div>
+          <hr class="divider" />
+          <p class="msg">Thanks for helping! We've notified ${escapeHtml(petName) || "the pet"}'s owner. Here's where you scanned the tag:</p>
+          <p class="location-label">${escapeHtml(locationLabel)}${timeLabel ? " | " + timeLabel : ""}</p>
 
-        <div class="row"><div class="label">Breed:</div><div class="value">${escapeHtml(tag.breed || "—")}</div></div>
-        <div class="row"><div class="label">Color/Markings:</div><div class="value">${escapeHtml(tag.colorMarkings || "—")}</div></div>
-        <div class="row split">
-          <div class="pair"><div class="label">Birthday:</div><div class="value">${escapeHtml(tag.birthday || "—")}</div></div>
-          <div class="pair"><div class="label">Sex:</div><div class="value">${escapeHtml(tag.sex || "—")}</div></div>
-        </div>
+          <div class="contact-row">
+            <span class="label">Enable Live-Chat</span>
+            ${ownerMobile ? `<button class="icon-btn" id="btn-call" title="Call">📞</button>` : ""}
+            ${ownerFacebookLink ? `<button class="icon-btn" id="btn-fb" title="Facebook">📘</button>` : ""}
+            ${ownerEmail ? `<button class="icon-btn" id="btn-mail" title="Email">✉️</button>` : ""}
+          </div>
 
-        <div class="checklist">
-          <div class="item"><div class="dot"></div>${spayedLine}</div>
-          <div class="item"><div class="dot"></div>${allergiesLine}</div>
-          <div class="item"><div class="dot"></div>${vaccinatedLine}</div>
-          <div class="item"><div class="dot"></div>${medicalLine}</div>
-        </div>
+          <div class="chat-box">
+            ${chatEnabled
+              ? `<div id="chat-thread" class="chat-thread"></div>`
+              : `<div class="chat-empty-state">Waiting for ${escapeHtml(petName) || "the pet"}'s owner to enable live chat…</div>`}
+          </div>
 
-        ${ownerSection}
+          ${chatEnabled ? `
+            <div class="compose-row">
+              <input id="msg-input" type="text" placeholder="Type a message" />
+              <button id="btn-send" title="Send">➤</button>
+            </div>` : ""}
+        </div>`;
 
-        ${sessionRef
-          ? chatSectionHtml({ chatEnabledByOwner: false })
-          : (window.__resPawndSessionError
-              ? `<div class="chat-waiting">Live chat couldn't be started right now. Please try again shortly.</div>`
-              : "")}
+      document.getElementById("btn-call")?.addEventListener("click", () => launchTel(ownerMobile));
+      document.getElementById("btn-fb")?.addEventListener("click", () => launchFacebook(ownerFacebookLink));
+      document.getElementById("btn-mail")?.addEventListener("click", () => launchMail(ownerEmail, petName));
 
-        ${callBtn}
-        <a class="cta secondary" href="https://play.google.com/store/apps" target="_blank" rel="noopener">Get the ResPAWnd app</a>
+      if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
 
-        <div class="footer">Powered by ResPAWnd &middot; Loved by the Gapz Animal Rescue Inc.</div>
-      `;
-
-      if (sessionRef) {
-        let lastEnabled = null;
-        if (sessionUnsub) sessionUnsub();
-        sessionUnsub = sessionRef.onSnapshot((snap) => {
-          if (!snap.exists) return;
-          const session = snap.data();
-          const enabled = session.chatEnabledByOwner === true;
-          if (enabled === lastEnabled) return; // nothing to re-render
-          lastEnabled = enabled;
-
-          const anchor = document.querySelector(".card");
-          anchor.querySelectorAll(
-            ".chat-label,.chat-box,.chat-input-row,.chat-waiting"
-          ).forEach(el => el.remove());
-
-          const ctaBtn = anchor.querySelector(".cta");
-          ctaBtn.insertAdjacentHTML("beforebegin", chatSectionHtml(session));
-          wireChat(sessionRef, sessionRef.id);
+      if (chatEnabled) {
+        const messagesQuery = query(
+          collection(db, "rescueSessions", sessionId, "messages"),
+          orderBy("sentAt"),
+        );
+        messagesUnsub = onSnapshot(messagesQuery, (snap) => {
+          const thread = document.getElementById("chat-thread");
+          if (!thread) return;
+          const docs = snap.docs.slice().reverse(); // newest first, container is column-reverse
+          thread.innerHTML = docs.map((d) => {
+            const m = d.data();
+            const who = m.sender === "finder" ? "finder" : "owner";
+            return `<div class="bubble ${who}">${escapeHtml(m.text || "")}</div>`;
+          }).join("");
         });
+
+        const sendBtn = document.getElementById("btn-send");
+        const input = document.getElementById("msg-input");
+        const send = async () => {
+          const text = (input.value || "").trim();
+          if (!text) return;
+          input.value = "";
+          try {
+            await addDoc(collection(db, "rescueSessions", sessionId, "messages"), {
+              sender: "finder",
+              text,
+              sentAt: serverTimestamp(),
+            });
+          } catch (_) {
+            alert("Could not send message. Please try again.");
+          }
+        };
+        sendBtn?.addEventListener("click", send);
+        input?.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
       }
     }
 
     async function main() {
       const tagId = tagIdFromPath();
-      if (!tagId) { renderState("❓", "No tag ID was provided in this link."); return; }
+      if (!tagId) {
+        renderCenter(`
+          <div class="photo" style="margin-bottom:16px;">🔍</div>
+          <h2>No Pet Found</h2>
+          <p class="msg" style="color:var(--text-secondary);">This link isn't linked to a registered collar tag.</p>
+        `);
+        return;
+      }
+
+      renderCenter(`<div class="spinner"></div><p class="msg">Looking up this tag…</p>`);
 
       try {
-        const doc = await db.collection("collarTags").doc(tagId).get();
-        if (!doc.exists) { renderState("🚫", "This pet ID tag doesn't exist or was removed."); return; }
+        // Anonymous auth mirrors the "finder" role the app already grants
+        // any signed-in-but-non-owner user — see resolveScannedTagId in
+        // scan_tag_flow.dart. Firestore rules must allow any authenticated
+        // user (not just non-anonymous ones) to read collarTags/{tagId},
+        // read/write rescueSessions/{sessionId}, and its messages
+        // subcollection, exactly as they already do for in-app finders.
+        await new Promise((resolve, reject) => {
+          onAuthStateChanged(auth, (user) => {
+            if (user) return resolve(user);
+          });
+          signInAnonymously(auth).catch(reject);
+        });
 
-        const tag = doc.data();
-        if (!tag.qrEnabled) {
-          renderState("⏳", "This tag's QR code hasn't been approved for public viewing yet.");
-          return;
+        const location = await getBrowserLocation();
+        let address = null;
+        if (location) {
+          address = await reverseGeocode(location.lat, location.lng);
         }
 
-        const sessionRef = await getOrCreateSession(tagId, tag);
-        renderTag(tagId, tag, sessionRef);
-      } catch (e) {
-        renderState("⚠️", "Couldn't load this tag right now. Please try again.");
+        const getOrCreateRescueSession = httpsCallable(functions, "getOrCreateRescueSession");
+        const result = await getOrCreateRescueSession({
+          tagId,
+          ...(location ? { location: { ...location, ...(address ? { address } : {}) } } : {}),
+        });
+
+        const sessionId = result.data?.sessionId;
+        if (!sessionId) throw new Error("no-session");
+
+        let tagData = null;
+        let sessionData = null;
+        const rerender = () => {
+          if (tagData && sessionData) {
+            renderFoundScreen({ tagId, sessionId, tagData, sessionData });
+          }
+        };
+
+        onSnapshot(doc(db, "collarTags", tagId), (snap) => {
+          tagData = snap.data() || {};
+          rerender();
+        });
+        onSnapshot(doc(db, "rescueSessions", sessionId), (snap) => {
+          sessionData = snap.data() || {};
+          rerender();
+        });
+      } catch (err) {
+        const code = err?.code || "";
+        if (code.includes("not-found")) {
+          renderCenter(`
+            <div class="photo" style="margin-bottom:16px;">🔍</div>
+            <h2>No Pet Found</h2>
+            <p class="msg" style="color:var(--text-secondary);">This code isn't linked to a registered collar tag. It may be damaged, unregistered, or from outside ResPAWnd.</p>
+          `);
+        } else {
+          renderCenter(`
+            <h2>Something went wrong</h2>
+            <p class="msg" style="color:var(--text-secondary);">Could not process this scan. Please check your connection and reload this page.</p>
+          `);
+        }
       }
     }
 

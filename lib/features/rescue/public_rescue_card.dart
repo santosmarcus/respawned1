@@ -7,8 +7,9 @@ import 'public_rescue_item.dart';
 
 class PublicRescueCard extends StatelessWidget {
   final PublicRescueItem item;
+  final double? distanceKm;
 
-  const PublicRescueCard({super.key, required this.item});
+  const PublicRescueCard({super.key, required this.item, this.distanceKm});
 
   String get _dateLabel {
     final d = item.createdAt;
@@ -103,6 +104,25 @@ class PublicRescueCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (distanceKm != null) ...[
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      const Icon(Icons.social_distance, size: 12, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Text(
+                        distanceKm! < 1
+                            ? '${(distanceKm! * 1000).round()} m away'
+                            : '${distanceKm!.toStringAsFixed(1)} km away',
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: distanceKm! <= 5
+                              ? AppColors.greenrspwn
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ]),
+                  ],
                   const SizedBox(height: 4),
                   if (item.animalType.isNotEmpty)
                     Row(children: [

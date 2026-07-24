@@ -54,6 +54,14 @@ class RescueCaseCard extends StatelessWidget {
         return 'Case completed.';
       case RescueStatus.cancelled:
         return 'Case cancelled.';
+      case RescueStatus.unableToLocate:
+        return 'Transporter could not find the animal at the reported location.';
+      case RescueStatus.awaitingReporterResponse:
+        return 'Awaiting your response to confirm or update the location.';
+      case RescueStatus.pickupUnsuccessful:
+        return 'Pickup attempt unsuccessful — could not reach the reporter.';
+      case RescueStatus.needsSpecializedAssistance:
+        return 'Escalated — animal needs specialized handling assistance.';
     }
   }
 
@@ -92,22 +100,22 @@ class RescueCaseCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               child: thumbnail != null
                   ? Image.network(
-                      thumbnail,
-                      width: 72,
-                      height: 72,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 72,
-                        height: 72,
-                        color: AppColors.tearspwn,
-                      ),
-                    )
+                thumbnail,
+                width: 72,
+                height: 72,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 72,
+                  height: 72,
+                  color: AppColors.tearspwn,
+                ),
+              )
                   : Container(
-                      width: 72,
-                      height: 72,
-                      color: AppColors.tearspwn,
-                      child: const Icon(Icons.pets, color: AppColors.textSecondary),
-                    ),
+                width: 72,
+                height: 72,
+                color: AppColors.tearspwn,
+                child: const Icon(Icons.pets, color: AppColors.textSecondary),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(

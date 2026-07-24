@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
@@ -14,6 +15,15 @@ import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
+
+const double _kNearbyRadiusKm = 5;
+
+const List<String> _kDismissedCaseStatuses = [
+  'dismissed',
+  'cancelled',
+  'withdrawn',
+  'rejected',
+];
 
 enum _NotifKind { rescue, adoption }
 
@@ -54,6 +64,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   final Map<String, StreamSubscription<QuerySnapshot>> _communityReportSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _checkinSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _followUpSubs = {};
+
+  // Nearby-reports feed (reports from OTHER users within _kNearbyRadiusKm) —
+  // same 5km logic as the home-screen NearbyReportBanner, but persisted as
+  // regular notification entries instead of a transient popup.
+  StreamSubscription<DocumentSnapshot>? _userDocSub;
+  StreamSubscription<QuerySnapshot>? _nearbyCasesSub;
+  final Map<String, StreamSubscription<QuerySnapshot>> _nearbyCommunityReportSubs = {};
+  double? _userLat;
+  double? _userLng;
+  bool _nearbyListenerStarted = false;
+  List<_NotifItem> _nearbyCaseItems = [];
+  final Map<String, List<_NotifItem>> _nearbyCommunityReportItemsByCase = {};
 
   List<_NotifItem> _caseStatusItems = [];
   List<_NotifItem> _adoptionStatusItems = [];
@@ -109,12 +131,129 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         .snapshots()
         .listen(_onAdoptionsUpdate);
 
+    _listenUserLocation(uid);
+
     FirebaseFirestore.instance.collection('users').doc(uid).set(
       {'lastNotificationsSeenAt': FieldValue.serverTimestamp()},
       SetOptions(merge: true),
     );
 
     if (mounted) setState(() => _ready = true);
+  }
+
+  // Listen live (instead of a one-shot get) so this picks up the user's
+  // location the moment it's saved, whichever screen ends up writing it
+  // first (ExploreReportsMap, NearbyReportBanner's own fallback, etc).
+  void _listenUserLocation(String uid) {
+    _userDocSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((userDoc) {
+      final data = userDoc.data() as Map<String, dynamic>?;
+      final lat = (data?['lastLat'] as num?)?.toDouble();
+      final lng = (data?['lastLng'] as num?)?.toDouble();
+      if (lat == null || lng == null) return;
+      _userLat = lat;
+      _userLng = lng;
+      if (!_nearbyListenerStarted) {
+        _nearbyListenerStarted = true;
+        _listenNearbyCases();
+      }
+    }, onError: (_) {});
+  }
+
+  void _listenNearbyCases() {
+    final lat = _userLat!;
+    final latDelta = _kNearbyRadiusKm / 111;
+
+    _nearbyCasesSub = FirebaseFirestore.instance
+        .collection('cases')
+        .where('lat', isGreaterThanOrEqualTo: lat - latDelta)
+        .where('lat', isLessThanOrEqualTo: lat + latDelta)
+        .snapshots()
+        .listen(_onNearbyCasesUpdate, onError: (_) {});
+  }
+
+  void _onNearbyCasesUpdate(QuerySnapshot snap) {
+    final lat = _userLat;
+    final lng = _userLng;
+    final uid = _uid;
+    if (lat == null || lng == null) return;
+
+    final items = <_NotifItem>[];
+
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['reporterId'] == uid) continue; // your own reports show above
+
+      final status = (data['status'] as String? ?? '').toLowerCase();
+      if (_kDismissedCaseStatuses.contains(status)) continue;
+
+      final caseLat = (data['lat'] as num?)?.toDouble();
+      final caseLng = (data['lng'] as num?)?.toDouble();
+      if (caseLat == null || caseLng == null) continue;
+      if (haversineDistanceKm(lat, lng, caseLat, caseLng) > _kNearbyRadiusKm) {
+        continue;
+      }
+
+      final label = '#${shortCaseId(doc.id)}';
+      final ts = data['createdAt'];
+
+      items.add(_NotifItem(
+        refLabel: label,
+        type: 'Nearby Report',
+        message: 'A new rescue report came in near you — tap to see if you can help.',
+        timestamp: ts is Timestamp ? ts.toDate() : DateTime.now(),
+        kind: _NotifKind.rescue,
+        docId: doc.id,
+      ));
+
+      if (!_nearbyCommunityReportSubs.containsKey(doc.id)) {
+        _nearbyCommunityReportSubs[doc.id] = FirebaseFirestore.instance
+            .collection('cases')
+            .doc(doc.id)
+            .collection('communityReports')
+            .snapshots()
+            .listen((crSnap) =>
+            _onNearbyCommunityReportsUpdate(doc.id, label, crSnap));
+      }
+    }
+
+    if (mounted) setState(() => _nearbyCaseItems = items);
+  }
+
+  void _onNearbyCommunityReportsUpdate(
+      String caseId, String label, QuerySnapshot snap) {
+    final uid = _uid;
+    final items = <_NotifItem>[];
+
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      // Don't notify you about your own community report on someone
+      // else's nearby case.
+      if (data['reporterId'] == uid) continue;
+
+      final ts = data['timestamp'];
+      if (ts is! Timestamp) continue;
+
+      final reporterName = data['reporterName'] as String? ?? 'Someone';
+      final typeLabel =
+          _communityReportTypeLabels[data['type'] as String?] ?? 'an update';
+
+      items.add(_NotifItem(
+        refLabel: label,
+        type: 'Nearby Update',
+        message: '$reporterName reported: $typeLabel.',
+        timestamp: ts.toDate(),
+        kind: _NotifKind.rescue,
+        docId: caseId,
+      ));
+    }
+
+    if (mounted) {
+      setState(() => _nearbyCommunityReportItemsByCase[caseId] = items);
+    }
   }
 
   void _onCasesUpdate(QuerySnapshot snap) {
@@ -383,10 +522,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   void dispose() {
     _casesSub?.cancel();
     _adoptionsSub?.cancel();
+    _userDocSub?.cancel();
+    _nearbyCasesSub?.cancel();
     for (final s in _messageSubs.values) {
       s.cancel();
     }
     for (final s in _communityReportSubs.values) {
+      s.cancel();
+    }
+    for (final s in _nearbyCommunityReportSubs.values) {
       s.cancel();
     }
     for (final s in _checkinSubs.values) {
@@ -402,8 +546,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final all = <_NotifItem>[
       ..._caseStatusItems,
       ..._adoptionStatusItems,
+      ..._nearbyCaseItems,
       for (final list in _messageItemsByCase.values) ...list,
       for (final list in _communityReportItemsByCase.values) ...list,
+      for (final list in _nearbyCommunityReportItemsByCase.values) ...list,
       for (final list in _checkinItemsByAdoption.values) ...list,
       for (final item in _dueItemsByAdoption.values)
         if (item != null) item,

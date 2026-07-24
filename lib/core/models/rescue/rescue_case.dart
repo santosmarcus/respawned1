@@ -21,9 +21,9 @@ class StatusHistoryEntry {
   }
 
   Map<String, dynamic> toMap() => {
-        'status': status,
-        'timestamp': timestamp != null ? Timestamp.fromDate(timestamp!) : Timestamp.now(),
-      };
+    'status': status,
+    'timestamp': timestamp != null ? Timestamp.fromDate(timestamp!) : Timestamp.now(),
+  };
 }
 
 /// Typed view over a `cases/{caseId}` document.
@@ -46,6 +46,7 @@ class RescueCase {
   final String? urgency; // 'Critical' | 'Medium' | 'Low', see UrgencyLevel
   final String? condition; // description
   final List<String> photoUrls;
+  final List<String> videoUrls;
   final String? address;
   final double? lat;
   final double? lng;
@@ -123,6 +124,7 @@ class RescueCase {
     this.urgency,
     this.condition,
     this.photoUrls = const [],
+    this.videoUrls = const [],
     this.address,
     this.lat,
     this.lng,
@@ -197,6 +199,7 @@ class RescueCase {
       urgency: data['urgency'] as String?,
       condition: data['condition'] as String?,
       photoUrls: List<String>.from(data['photoUrls'] ?? const []),
+      videoUrls: List<String>.from(data['videoUrls'] ?? const []),
       address: data['address'] as String?,
       lat: (data['lat'] as num?)?.toDouble(),
       lng: (data['lng'] as num?)?.toDouble(),
@@ -243,7 +246,7 @@ class RescueCase {
       deceasedAt: data['deceasedAt'] is Timestamp ? (data['deceasedAt'] as Timestamp).toDate() : null,
       causeOfDeath: data['causeOfDeath'] as String?,
       treatmentUpdatedAt:
-          data['treatmentUpdatedAt'] is Timestamp ? (data['treatmentUpdatedAt'] as Timestamp).toDate() : null,
+      data['treatmentUpdatedAt'] is Timestamp ? (data['treatmentUpdatedAt'] as Timestamp).toDate() : null,
       latestTreatmentUpdateType: data['latestTreatmentUpdateType'] as String?,
       intakeDestinationName: data['intakeDestinationName'] as String?,
       intakeDestinationAddress: data['intakeDestinationAddress'] as String?,
@@ -251,18 +254,18 @@ class RescueCase {
       intakeDestinationLat: (data['intakeDestinationLat'] as num?)?.toDouble(),
       intakeDestinationLng: (data['intakeDestinationLng'] as num?)?.toDouble(),
       intakeConfirmedAt:
-          data['intakeConfirmedAt'] is Timestamp ? (data['intakeConfirmedAt'] as Timestamp).toDate() : null,
+      data['intakeConfirmedAt'] is Timestamp ? (data['intakeConfirmedAt'] as Timestamp).toDate() : null,
       intakeReceivedAt:
-          data['intakeReceivedAt'] is Timestamp ? (data['intakeReceivedAt'] as Timestamp).toDate() : null,
+      data['intakeReceivedAt'] is Timestamp ? (data['intakeReceivedAt'] as Timestamp).toDate() : null,
       quarantineStatus: data['quarantineStatus'] as String?,
       quarantineStartedAt:
-          data['quarantineStartedAt'] is Timestamp ? (data['quarantineStartedAt'] as Timestamp).toDate() : null,
+      data['quarantineStartedAt'] is Timestamp ? (data['quarantineStartedAt'] as Timestamp).toDate() : null,
       quarantineDurationDays: (data['quarantineDurationDays'] as num?)?.toInt(),
       quarantineScheduledEndAt: data['quarantineScheduledEndAt'] is Timestamp
           ? (data['quarantineScheduledEndAt'] as Timestamp).toDate()
           : null,
       quarantineEndedAt:
-          data['quarantineEndedAt'] is Timestamp ? (data['quarantineEndedAt'] as Timestamp).toDate() : null,
+      data['quarantineEndedAt'] is Timestamp ? (data['quarantineEndedAt'] as Timestamp).toDate() : null,
       quarantineEndReason: data['quarantineEndReason'] as String?,
       raw: data,
     );

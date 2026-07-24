@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
@@ -19,8 +20,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
+import 'package:video_player/video_player.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
@@ -626,6 +629,17 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   //Media picker
+  Future<void> _previewVideo(XFile file) async {
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _VideoPreviewPage(file: File(file.path)),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
   Future<void> _pickMedia(int index) async{
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -687,6 +701,17 @@ class _RescuePageState extends State<RescuePage> {
                       fontSize: 15, color: AppColors.textPrimary)),
               onTap: () => Navigator.pop(context, 'video_gallery'),
             ),
+            if (_mediaFiles[index] != null && _mediaFiles[index]!.isVideo)
+              ListTile(
+                leading: const Icon(Icons.play_circle_outline, color: AppColors.textPrimary),
+                title: Text('Preview video',
+                    style: GoogleFonts.zain(
+                        fontSize: 15, color: AppColors.textPrimary)),
+                onTap: () {
+                  Navigator.pop(context, 'preview');
+                  _previewVideo(_mediaFiles[index]!.file);
+                },
+              ),
             if (_mediaFiles[index] != null)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -771,8 +796,10 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   // Firebase Storage upload, uploads media slots to firebase storage
-  Future<List<String>> _uploadAllMedia(String caseId) async {
-    final urls = <String>[];
+  Future<({List<String> photoUrls, List<String> videoUrls})> _uploadAllMedia(
+      String caseId) async {
+    final photoUrls = <String>[];
+    final videoUrls = <String>[];
 
     for (int i = 0; i < _mediaFiles.length; i++) {
       final item = _mediaFiles[i];
@@ -801,12 +828,16 @@ class _RescuePageState extends State<RescuePage> {
 
       await task;
       final url = await ref.getDownloadURL();
-      urls.add(url);
+      if (item.isVideo) {
+        videoUrls.add(url);
+      } else {
+        photoUrls.add(url);
+      }
 
       if (mounted) setState(() => _uploadProgress[i] = null);
     }
 
-    return urls;
+    return (photoUrls: photoUrls, videoUrls: videoUrls);
   }
 
   //NFC and QR
@@ -1605,8 +1636,11 @@ class _RescuePageState extends State<RescuePage> {
                     ),
                     if (_coordinateChoice == 'no') ...[
                       const SizedBox(height: 6),
+                      _buildLabel('Witness name', required: true),
+                      const SizedBox(height: 6),
                       TextField(
                         controller: _witnessNameController,
+                        inputFormatters: [AppInputFormatters.nameOnly],
                         decoration: InputDecoration(
                           hintText: 'Enter name of witness',
                           hintStyle: GoogleFonts.zain(
@@ -1624,10 +1658,13 @@ class _RescuePageState extends State<RescuePage> {
                         ),
                         style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
                       ),
+                      const SizedBox(height: 12),
+                      _buildLabel('Witness mobile number', required: true),
                       const SizedBox(height: 6),
                       TextField(
                         controller: _witnessNumberController,
                         keyboardType: TextInputType.phone,
+                        inputFormatters: AppInputFormatters.phoneFlexible,
                         decoration: InputDecoration(
                           hintText: 'Enter mobile number of witness',
                           hintStyle: GoogleFonts.zain(
@@ -2217,10 +2254,11 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Widget _lostPetTextField(TextEditingController controller, String hint,
-      {TextInputType? keyboardType}) {
+      {TextInputType? keyboardType, List<TextInputFormatter>? inputFormatters}) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         hintText: hint,
         hintStyle:
@@ -2244,7 +2282,8 @@ class _RescuePageState extends State<RescuePage> {
       const SizedBox(height: 20),
       _buildLabel('Pet Name', required: true),
       const SizedBox(height: 6),
-      _lostPetTextField(_petNameController, 'Enter pet name'),
+      _lostPetTextField(_petNameController, 'Enter pet name',
+          inputFormatters: [AppInputFormatters.nameOnly]),
       const SizedBox(height: 20),
       _buildLabel('Species', required: true),
       const SizedBox(height: 6),
@@ -2383,13 +2422,15 @@ class _RescuePageState extends State<RescuePage> {
       if (_offerReward) ...[
         const SizedBox(height: 6),
         _lostPetTextField(_rewardAmountController, 'Enter amount',
-            keyboardType: TextInputType.number),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [AppInputFormatters.decimal]),
       ],
       const SizedBox(height: 20),
       _buildLabel('Contact Number', required: true),
       const SizedBox(height: 6),
       _lostPetTextField(_ownerContactController, 'Mobile number',
-          keyboardType: TextInputType.phone),
+          keyboardType: TextInputType.phone,
+          inputFormatters: AppInputFormatters.phoneFlexible),
       const SizedBox(height: 6),
       Text(
         'Only revealed to a finder once you confirm a match.',
@@ -2466,7 +2507,8 @@ class _RescuePageState extends State<RescuePage> {
       _buildLabel('Contact Number', required: true),
       const SizedBox(height: 6),
       _lostPetTextField(_finderContactController, 'Mobile number',
-          keyboardType: TextInputType.phone),
+          keyboardType: TextInputType.phone,
+          inputFormatters: AppInputFormatters.phoneFlexible),
       const SizedBox(height: 6),
       Text(
         "We'll check this against open lost pet alerts nearby.",
@@ -2627,6 +2669,25 @@ class _RescuePageState extends State<RescuePage> {
       return;
     }
 
+    if (_coordinateChoice == 'no') {
+      final witnessNameError =
+      AppValidators.name(_witnessNameController.text, fieldName: 'Witness name');
+      if (witnessNameError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(witnessNameError), backgroundColor: Colors.redAccent),
+        );
+        return;
+      }
+      final witnessPhoneError =
+      AppValidators.phFlexiblePhone(_witnessNumberController.text);
+      if (witnessPhoneError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(witnessPhoneError), backgroundColor: Colors.redAccent),
+        );
+        return;
+      }
+    }
+
     setState(() => _isLoading = true);
 
     if(filledCount < 2){
@@ -2702,10 +2763,13 @@ class _RescuePageState extends State<RescuePage> {
       }
 
       final primaryCaseId = createdDocIds.first;
-      final photoUrls = await _uploadAllMedia(primaryCaseId);
-      if (photoUrls.isNotEmpty) {
+      final media = await _uploadAllMedia(primaryCaseId);
+      if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
         for (final id in createdDocIds) {
-          await casesCollection.doc(id).update({'photoUrls': photoUrls});
+          await casesCollection.doc(id).update({
+            'photoUrls': media.photoUrls,
+            'videoUrls': media.videoUrls,
+          });
         }
       }
 
@@ -2767,6 +2831,28 @@ class _RescuePageState extends State<RescuePage> {
         );
         return;
       }
+
+      final ownerPhoneError =
+      AppValidators.phFlexiblePhone(_ownerContactController.text);
+      if (ownerPhoneError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ownerPhoneError), backgroundColor: Colors.redAccent),
+        );
+        return;
+      }
+
+      if (_offerReward) {
+        final amountError = AppValidators.amount(
+          _rewardAmountController.text,
+          fieldName: 'Reward amount',
+        );
+        if (amountError != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(amountError), backgroundColor: Colors.redAccent),
+          );
+          return;
+        }
+      }
     } else {
       final hasEmptySpecies = _foundAnimals
           .any((a) => a.speciesText.isEmpty);
@@ -2780,6 +2866,15 @@ class _RescuePageState extends State<RescuePage> {
             content: Text('Please fill in all required fields.'),
             backgroundColor: Colors.redAccent,
           ),
+        );
+        return;
+      }
+
+      final finderPhoneError =
+      AppValidators.phFlexiblePhone(_finderContactController.text);
+      if (finderPhoneError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(finderPhoneError), backgroundColor: Colors.redAccent),
         );
         return;
       }
@@ -2903,10 +2998,13 @@ class _RescuePageState extends State<RescuePage> {
       }
 
       // Media is shared across the whole group (same sighting/animal(s)).
-      final photoUrls = await _uploadAllMedia('lostpet_$groupId');
-      if (photoUrls.isNotEmpty) {
+      final media = await _uploadAllMedia('lostpet_$groupId');
+      if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
         for (final id in createdDocIds) {
-          await alertsCollection.doc(id).update({'photoUrls': photoUrls});
+          await alertsCollection.doc(id).update({
+            'photoUrls': media.photoUrls,
+            'videoUrls': media.videoUrls,
+          });
         }
       }
 
@@ -3120,4 +3218,86 @@ void _showScanInfo(BuildContext context) {
       ],
     ),
   );
+}
+// Full-screen local-file video preview — lets someone actually watch a
+// video before submitting it, instead of the report form's play-icon
+// thumbnail (which never played anything; tapping it just re-opened the
+// file picker to replace that slot).
+class _VideoPreviewPage extends StatefulWidget {
+  final File file;
+  const _VideoPreviewPage({required this.file});
+
+  @override
+  State<_VideoPreviewPage> createState() => _VideoPreviewPageState();
+}
+
+class _VideoPreviewPageState extends State<_VideoPreviewPage> {
+  late final VideoPlayerController _controller;
+  bool _ready = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(widget.file)
+      ..initialize().then((_) {
+        if (!mounted) return;
+        setState(() => _ready = true);
+        _controller.play();
+      }).catchError((_) {
+        if (!mounted) return;
+        setState(() => _failed = true);
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Center(
+        child: _failed
+            ? const Text(
+          'Could not play this video.',
+          style: TextStyle(color: Colors.white),
+        )
+            : !_ready
+            ? const CircularProgressIndicator(color: Colors.white)
+            : AspectRatio(
+          aspectRatio: _controller.value.aspectRatio == 0
+              ? 16 / 9
+              : _controller.value.aspectRatio,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              VideoPlayer(_controller),
+              GestureDetector(
+                onTap: () => setState(() {
+                  _controller.value.isPlaying
+                      ? _controller.pause()
+                      : _controller.play();
+                }),
+                child: AnimatedOpacity(
+                  opacity: _controller.value.isPlaying ? 0 : 1,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(Icons.play_circle_fill,
+                      size: 64, color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

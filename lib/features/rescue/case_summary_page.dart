@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_player/video_player.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 
@@ -241,6 +242,7 @@ class CaseSummaryPage extends StatelessWidget {
     final statusHistory =
     List<Map<String, dynamic>>.from(caseData['statusHistory'] ?? []);
     final photoUrls = List<String>.from(caseData['photoUrls'] ?? []);
+    final videoUrls = List<String>.from(caseData['videoUrls'] ?? []);
     final pickupVerificationUrls =
     List<String>.from(caseData['pickupVerificationUrls'] ?? []);
     final clinicVerificationUrls =
@@ -327,7 +329,7 @@ class CaseSummaryPage extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary)),
             const SizedBox(height: 8),
-            photoUrls.isEmpty
+            (photoUrls.isEmpty && videoUrls.isEmpty)
                 ? Row(
               children: [
                 _MediaBox(),
@@ -338,18 +340,43 @@ class CaseSummaryPage extends StatelessWidget {
                 : Wrap(
               spacing: 12,
               runSpacing: 12,
-              children: photoUrls.map((url) {
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    url,
-                    width: 100,
-                    height: 100,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _MediaBox(),
-                  ),
-                );
-              }).toList(),
+              children: [
+                ...photoUrls.map((url) {
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      url,
+                      width: 100,
+                      height: 100,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _MediaBox(),
+                    ),
+                  );
+                }),
+                ...videoUrls.map((url) {
+                  return GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => _CaseMediaVideoPage(url: url),
+                        fullscreenDialog: true,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: 100,
+                        height: 100,
+                        color: Colors.black87,
+                        child: const Center(
+                          child: Icon(Icons.play_circle_outline,
+                              size: 32, color: Colors.white70),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
             ),
 
             const SizedBox(height: 16),
@@ -554,6 +581,85 @@ class _DetailRow extends StatelessWidget {
               style: GoogleFonts.zain(
                   fontSize: 13, color: AppColors.textSecondary)),
         ],
+      ),
+    );
+  }
+}
+// Full-screen network video player for a case's attached video evidence —
+// previously these urls were fed straight into Image.network alongside
+// photos and silently failed to render at all.
+class _CaseMediaVideoPage extends StatefulWidget {
+  final String url;
+  const _CaseMediaVideoPage({required this.url});
+
+  @override
+  State<_CaseMediaVideoPage> createState() => _CaseMediaVideoPageState();
+}
+
+class _CaseMediaVideoPageState extends State<_CaseMediaVideoPage> {
+  late final VideoPlayerController _controller;
+  bool _ready = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+      ..initialize().then((_) {
+        if (!mounted) return;
+        setState(() => _ready = true);
+        _controller.play();
+      }).catchError((_) {
+        if (!mounted) return;
+        setState(() => _failed = true);
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Center(
+        child: _failed
+            ? const Text('Could not play this video.',
+            style: TextStyle(color: Colors.white))
+            : !_ready
+            ? const CircularProgressIndicator(color: Colors.white)
+            : AspectRatio(
+          aspectRatio: _controller.value.aspectRatio == 0
+              ? 16 / 9
+              : _controller.value.aspectRatio,
+          child: GestureDetector(
+            onTap: () => setState(() {
+              _controller.value.isPlaying
+                  ? _controller.pause()
+                  : _controller.play();
+            }),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                VideoPlayer(_controller),
+                AnimatedOpacity(
+                  opacity: _controller.value.isPlaying ? 0 : 1,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(Icons.play_circle_fill,
+                      size: 64, color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

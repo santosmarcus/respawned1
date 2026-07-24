@@ -213,7 +213,12 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
 
-          const NearbyReportBanner(),
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: NearbyReportBanner(),
+          ),
         ],
       ),
     );

@@ -25,9 +25,9 @@ class AllExploreReportsPage extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      body: const SafeArea(
+      body: SafeArea(
         child: Padding(
-          padding: EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.only(top: 8),
           child: PublicRescueFeed(standalone: true),
         ),
       ),

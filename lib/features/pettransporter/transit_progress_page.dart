@@ -16,6 +16,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
 import 'package:respawnd1/core/constants/maps_config.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 
 
 String get _placesApiKey => MapsConfig.placesApiKey;
@@ -154,6 +155,13 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   bool _isSearchingClinic = false;
   bool _autoSearchAttempted = false;
   bool _isVerifyingArrival = false;
+  Timestamp? _lastReadAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastReadAt = Timestamp.now();
+  }
 
   // Verification images
   final List<File?> _pickupImages = [null, null];
@@ -1031,124 +1039,278 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     }
   }
 
+
+  static const _reasonNotFound = 'Animal/Reporter not Found';
+  static const _reasonReporterUnreachable = 'Reporter Unreachable';
+  static const _reasonAggressive = 'Animal is too aggressive to handle safely';
+  static const _reasonDeceased = 'Animal Deceased';
+  static const _reasonSpecializedTransport =
+      'Animal requires specialized transport that I cannot provide';
+  static const _reasonBreakdown = 'Vehicle breakdown';
+  static const _reasonOther = 'Other';
+
   Future<void> _showCloseTransitDialog() async {
     final reasons = [
-      'Animal/Reporter not found on arrival',
-      'Animal already rescued by someone else',
-      'Location inaccessible (private property, no entry granted)',
-      'Animal Deceased',
-      'Other',
+      _reasonNotFound,
+      _reasonReporterUnreachable,
+      _reasonAggressive,
+      _reasonDeceased,
+      _reasonSpecializedTransport,
+      _reasonBreakdown,
+      _reasonOther,
     ];
-    final selected = <String>{};
+    String? selectedReason;
     String? other;
+    bool searchedTenMinutes = false;
+    final notesCtrl = TextEditingController();
+    bool submitting = false;
 
     await showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => Dialog(
-          backgroundColor: AppColors.background,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Center(
-                      child: Text('Close Transit',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 18, color: AppColors.textPrimary)),
-                    ),
-                    Positioned(
-                      right: 0,
-                      child: GestureDetector(
-                        onTap: () => Navigator.pop(ctx),
-                        child: const Icon(Icons.close,
-                            size: 20, color: AppColors.textSecondary),
+        builder: (ctx, setDlg) {
+          final needsSearchConfirm = selectedReason == _reasonNotFound;
+          final needsNotes = selectedReason == _reasonNotFound ||
+              selectedReason == _reasonReporterUnreachable ||
+              selectedReason == _reasonAggressive;
+          final canConfirm = !submitting &&
+              selectedReason != null &&
+              (!needsSearchConfirm || searchedTenMinutes);
+
+          return Dialog(
+            backgroundColor: AppColors.background,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Center(
+                        child: Text('End Reason',
+                            style: GoogleFonts.tiltWarp(
+                                fontSize: 18, color: AppColors.textPrimary)),
+                      ),
+                      Positioned(
+                        right: 0,
+                        child: GestureDetector(
+                          onTap: () => Navigator.pop(ctx),
+                          child: const Icon(Icons.close,
+                              size: 20, color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  ...reasons.map((r) => RadioListTile<String>(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    value: r,
+                    groupValue: selectedReason,
+                    activeColor: AppColors.textPrimary,
+                    title: Text(r,
+                        style: GoogleFonts.zain(
+                            fontSize: 14, color: AppColors.textPrimary)),
+                    onChanged: (v) => setDlg(() => selectedReason = v),
+                  )),
+                  if (selectedReason == _reasonOther) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      onChanged: (v) => other = v,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary),
+                      decoration: InputDecoration(
+                        hintText: 'Describe reason…',
+                        hintStyle: GoogleFonts.zain(
+                            fontSize: 13, color: AppColors.textSecondary),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.slaterspwn),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.textPrimary),
+                        ),
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                ...reasons.map((r) => CheckboxListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  value: selected.contains(r),
-                  activeColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  title: Text(r,
+                  if (needsSearchConfirm) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.yellowrspwn.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: searchedTenMinutes,
+                        activeColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.textPrimary),
+                        title: Text(
+                          'I waited and searched the immediate area for at '
+                              'least 10 minutes and could not locate the animal.',
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: AppColors.textPrimary),
+                        ),
+                        onChanged: (v) =>
+                            setDlg(() => searchedTenMinutes = v ?? false),
+                      ),
+                    ),
+                  ],
+                  if (needsNotes) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      selectedReason == _reasonAggressive
+                          ? 'Describe the animal\'s behavior'
+                          : 'Notes (what did you observe?)',
                       style: GoogleFonts.zain(
-                          fontSize: 14, color: AppColors.textPrimary)),
-                  onChanged: (v) => setDlg(() {
-                    if (v == true) {
-                      selected.add(r);
-                    } else {
-                      selected.remove(r);
-                    }
-                  }),
-                )),
-                if (selected.contains('Other')) ...[
-                  const SizedBox(height: 8),
-                  TextField(
-                    onChanged: (v) => other = v,
-                    style: GoogleFonts.zain(
-                        fontSize: 14, color: AppColors.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: 'Describe reason…',
-                      hintStyle: GoogleFonts.zain(
-                          fontSize: 13, color: AppColors.textSecondary),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: AppColors.slaterspwn),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: notesCtrl,
+                      maxLines: 3,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary),
+                      decoration: InputDecoration(
+                        hintText: selectedReason == _reasonAggressive
+                            ? 'e.g. "Lunging and growling, could not be safely restrained."'
+                            : 'e.g. "Neighbors said the dog left 30 minutes ago."',
+                        hintStyle: GoogleFonts.zain(
+                            fontSize: 12, color: AppColors.textSecondary),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.slaterspwn),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.textPrimary),
+                        ),
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: AppColors.textPrimary),
-                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: !canConfirm
+                          ? null
+                          : () async {
+                        setDlg(() => submitting = true);
+                        final reasonSnapshot = selectedReason!;
+                        final otherSnapshot = other;
+                        final notesSnapshot = notesCtrl.text.trim();
+                        Navigator.pop(ctx);
+                        await _resolveEndReason(
+                          selectedReason: reasonSnapshot,
+                          otherText: otherSnapshot,
+                          notes: notesSnapshot,
+                        );
+                      },
+                      child: submitting
+                          ? const SizedBox(
+                          height: 18, width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                          : Text('Confirm',
+                          style: GoogleFonts.zain(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: canConfirm
+                                  ? Colors.redAccent
+                                  : AppColors.textSecondary)),
                     ),
                   ),
                 ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: TextButton(
-                    onPressed: selected.isEmpty
-                        ? null
-                        : () async {
-                      Navigator.pop(ctx);
-                      final reasonStr = [
-                        ...selected.where((r) => r != 'Other'),
-                        if (selected.contains('Other') &&
-                            other != null &&
-                            other!.isNotEmpty)
-                          other!,
-                      ].join(', ');
-                      await _setStatus('ended', 'Transit closed: $reasonStr');
-                      _positionSub?.cancel();
-                      if (mounted) Navigator.pop(context);
-                    },
-                    child: Text('Confirm',
-                        style: GoogleFonts.zain(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: selected.isEmpty
-                                ? AppColors.textSecondary
-                                : Colors.redAccent)),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
+  }
+
+  Future<void> _resolveEndReason({
+    required String selectedReason,
+    required String? otherText,
+    required String notes,
+  }) async {
+    setState(() => _isActing = true);
+    try {
+      final reasonStr = selectedReason == _reasonOther
+          ? (otherText != null && otherText.isNotEmpty ? otherText : _reasonOther)
+          : selectedReason;
+
+      String status;
+      String statusLabel;
+      switch (selectedReason) {
+        case _reasonAggressive:
+        // Escalate — not a failure, not counted against the transporter.
+          status = RescueStatus.needsSpecializedAssistance.firestoreValue;
+          statusLabel =
+          'Pickup postponed — animal could not be safely handled. '
+              'Escalated for specialized assistance.';
+          break;
+        case _reasonNotFound:
+          status = RescueStatus.unableToLocate.firestoreValue;
+          statusLabel = 'Animal not found at reported location. Awaiting reporter response.';
+          break;
+        case _reasonReporterUnreachable:
+          status = RescueStatus.pickupUnsuccessful.firestoreValue;
+          statusLabel = 'Pickup attempt unsuccessful — reporter unreachable.';
+          break;
+        default:
+          status = 'ended';
+          statusLabel = 'Transit closed: $reasonStr';
+      }
+
+      final notFound = selectedReason == _reasonNotFound;
+      final unreachable = selectedReason == _reasonReporterUnreachable;
+      final aggressive = selectedReason == _reasonAggressive;
+
+      final extra = <String, dynamic>{
+        'endReason': reasonStr,
+        if (notes.isNotEmpty) 'endReasonNotes': notes,
+        if (notFound || unreachable)
+          'awaitingReporterSince': FieldValue.serverTimestamp(),
+        if (aggressive) 'transporterFaultVerified': false,
+      };
+
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .update({
+        'status': status,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': statusLabel, 'timestamp': Timestamp.now()}
+        ]),
+        ...extra,
+      });
+
+      _positionSub?.cancel();
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
   }
 
   Future<String?> _showTreatmentRejectDialog() async {
@@ -1273,6 +1435,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 
   void _openMessageSheet() {
+    setState(() => _lastReadAt = Timestamp.now());
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1327,7 +1490,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           ),
         );
       },
-    );
+    ).then((_) {
+      if (mounted) setState(() => _lastReadAt = Timestamp.now());
+    });
   }
 
   Future<void> _sendMessage() async {
@@ -1473,28 +1638,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                               ),
                             ),
 
-                            Positioned(
-                              right: -2,
-                              top: -2,
-                              child: Container(
-                                width: 18,
-                                height: 18,
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Center(
-                                  child: Text(
-                                    '2',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
+                        // NEW
+                        _UnreadBadge(caseId: widget.caseId, lastReadAt: _lastReadAt),
                           ],
                         ),
                       ),
@@ -1771,12 +1916,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           children: [
             const SizedBox(height: 16),
 
-            // Swipe button
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              child: _buildSwipeButton(status),
-            ),
-
             if (status == 'assigned' || status == 'accepted') ...[
               const SizedBox(height: 4),
               Padding(
@@ -1809,7 +1948,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
             const SizedBox(height: 10),
 
-            // Address card
             _AddressCard(
               pickup: data['address'] ?? '',
               dropoff: _clinicAddressFrom(data).isEmpty
@@ -1819,7 +1957,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
             const SizedBox(height: 12),
 
-            // Reporter/witness and organization contact rows
             ..._buildContactRows(data),
 
             const SizedBox(height: 8),
@@ -1832,9 +1969,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           ],
         ),
       ),
-
     );
-
   }
 
   // Builds the tappable Reporter/Witness and Organization contact rows.
@@ -1983,7 +2118,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 10),
 
             // Address below images
             Row(
@@ -2033,25 +2168,29 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               ),
             ),
 
-            // End button (only at pickup)
+            const SizedBox(height: 8),
+
             if (onEnd != null) ...[
-              const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton(
+                child: ElevatedButton(
                   onPressed: onEnd,
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.slaterspwn,
+                    foregroundColor: AppColors.textPrimary,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30)),
                   ),
-                  child: Text('Close Transit',
+                  child: Text('Close',
                       style: GoogleFonts.tiltWarp(
                           fontSize: 14, color: AppColors.textPrimary)),
                 ),
               ),
+              const SizedBox(height: 14),
             ],
+
           ],
         ),
       ),
@@ -2098,6 +2237,63 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 }
 
+
+class _UnreadBadge extends StatelessWidget {
+  final String caseId;
+  final Timestamp? lastReadAt;
+  const _UnreadBadge({required this.caseId, required this.lastReadAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('cases')
+          .doc(caseId)
+          .collection('messages')
+          .orderBy('timestamp')
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) return const SizedBox.shrink();
+
+        final unread = snap.data!.docs.where((doc) {
+          final d = doc.data() as Map<String, dynamic>;
+          final senderId = d['senderId'] as String?;
+          if (senderId == uid) return false; // don't count your own messages
+          final ts = d['timestamp'] as Timestamp?;
+          if (ts == null) return true; // not yet committed server-side
+          if (lastReadAt == null) return true;
+          return ts.compareTo(lastReadAt!) > 0;
+        }).length;
+
+        if (unread == 0) return const SizedBox.shrink();
+
+        return Positioned(
+          right: -2,
+          top: -2,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+            decoration: const BoxDecoration(
+              color: Colors.red,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                unread > 9 ? '9+' : '$unread',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 // Swipe button
 class _SwipeButton extends StatefulWidget {
   final String label;
@@ -2718,9 +2914,7 @@ class _TrackingMapState extends State<_TrackingMap> {
               polylines: polylines,
             ),
 
-            // Persistent ETA banner (Google Maps Directions duration) —
-            // shown for every en-route leg (pickup, clinic, shelter), not
-            // just as a tap-to-reveal marker info window.
+
             if (_route != null && widget.destination != null)
               Positioned(
                 bottom: 90,
