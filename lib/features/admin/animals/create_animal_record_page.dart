@@ -77,7 +77,20 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
   // Basic info
   final _nameController = TextEditingController();
-  final _ageController = TextEditingController();
+  // Age is still stored as a single `age` string field on AnimalRecord
+  // (e.g. "2 years") — every existing reader (cards, detail pages) keeps
+  // working unchanged. Only this form's input changed, from a freeform
+  // text field to a constrained amount+unit pair, normalized into that
+  // same string format on save. amount options cover 1-30, generous enough
+  // for any realistic shelter animal age in weeks, months, or years.
+  static const _ageAmountOptions = [
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
+    '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
+    '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+  ];
+  static const _ageUnitOptions = ['weeks', 'months', 'years'];
+  String? _ageAmount;
+  String? _ageUnit;
   final _descriptionController = TextEditingController();
   final _tagsController = TextEditingController();
   String? _selectedSpecies;
@@ -119,15 +132,12 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     'Knows commands': false,
   };
 
-  // Rescue Background — 'Rescued' is auto-checked (not manually required)
+  // Rescue Background — single-select (Rescued / Transferred / Surrendered
+  // describe how the animal came to the org in the first place, which is
+  // one fact, not several that can be true at once). Auto-set to 'Rescued'
   // whenever this record comes from the rescue workflow (linkedCaseId set).
-  // Checkboxes (not a single choice) so a later transfer can be recorded
-  // alongside the original Rescued source rather than replacing it.
-  final Map<String, bool> _rescueBackground = {
-    'Rescued': false,
-    'Transferred': false,
-    'Surrendered': false,
-  };
+  static const _rescueBackgroundOptions = ['Rescued', 'Transferred', 'Surrendered'];
+  String? _rescueBackground;
 
   String get _saveButtonLabel {
     if (widget.isEditing) return 'Save Changes';
@@ -155,13 +165,29 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     }
   }
 
+  /// Parses a saved `age` string like "2 years" (or legacy free-text like
+  /// "2 years, 6 months old") back into an amount+unit pair for the
+  /// dropdowns to initialize from. Only ever matches the FIRST amount+unit
+  /// it finds — a compound legacy value has no single amount+unit
+  /// representation in this constrained selector, and normalizes down to
+  /// just that first part once saved again (the intended effect of
+  /// replacing freeform age entry with a structured one).
+  void _parseAge(String raw) {
+    final match = RegExp(r'(\d+)\s*(week|month|year)s?', caseSensitive: false).firstMatch(raw);
+    if (match == null) return;
+    final amount = int.tryParse(match.group(1)!);
+    if (amount == null || amount < 1 || amount > 30) return;
+    _ageAmount = '$amount';
+    _ageUnit = '${match.group(2)!.toLowerCase()}s';
+  }
+
   /// Edit mode — every field starts from the record's own saved values
   /// (never the original report; that prefill only applies to brand-new
   /// records).
   void _prefillFromExisting() {
     final d = widget.existingData!;
     _nameController.text = d['name'] as String? ?? '';
-    _ageController.text = d['age'] as String? ?? '';
+    _parseAge(d['age'] as String? ?? '');
     _descriptionController.text = d['description'] as String? ?? '';
     _tagsController.text = List<String>.from(d['tags'] ?? const []).join(', ');
     _selectedSpecies = (d['species'] as String?)?.isNotEmpty == true ? d['species'] as String : null;
@@ -186,9 +212,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     }
 
     final background = List<String>.from(d['rescueBackground'] ?? const []);
-    for (final key in _rescueBackground.keys) {
-      if (background.contains(key)) _rescueBackground[key] = true;
-    }
+    _rescueBackground = _rescueBackgroundOptions.cast<String?>().firstWhere(
+          (key) => background.contains(key),
+          orElse: () => null,
+        );
   }
 
   /// Prefills whatever the source rescue report/case already captured.
@@ -236,14 +263,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     // This record came from the rescue workflow — "Rescued" is implied,
     // not something the org has to remember to tick.
     if (widget.linkedCaseId != null) {
-      _rescueBackground['Rescued'] = true;
+      _rescueBackground = 'Rescued';
     }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _ageController.dispose();
     _descriptionController.dispose();
     _tagsController.dispose();
     super.dispose();
@@ -305,10 +331,24 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
   Future<void> _createRecord() async {
     if (_isLoading) return; // guards against a duplicate Finish/Save tap
-    if (_nameController.text.trim().isEmpty || _selectedSpecies == null) {
+    // Required fields — breed is deliberately not checked here: this form
+    // has no editable breed input at all (see the field's own comment
+    // above), only ever set from an intake report's prefill, so there is
+    // nothing to validate against when creating a record from scratch.
+    final missing = <String>[
+      if (_nameController.text.trim().isEmpty) 'Name',
+      if (_selectedSpecies == null) 'Species',
+      if (_selectedSex == null) 'Gender',
+      if (_ageAmount == null || _ageUnit == null) 'Age',
+      if (_selectedSize == null) 'Size',
+      if (_selectedCoatLength == null) 'Coat Length',
+      if (_rescueBackground == null) 'Rescue Background',
+      if (_descriptionController.text.trim().isEmpty) 'Description',
+    ];
+    if (missing.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in name and species.'),
+        SnackBar(
+          content: Text('Please fill in: ${missing.join(', ')}.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -406,10 +446,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         ..._training.entries.where((e) => e.value).map((e) => e.key),
       ];
 
-      final selectedBackground = _rescueBackground.entries
-          .where((e) => e.value)
-          .map((e) => e.key)
-          .toList();
+      // Still written as a list (matching AnimalRecord.rescueBackground's
+      // existing List<String> field/every reader of it) — just 0 or 1
+      // entries now that selection is single-choice.
+      final selectedBackground = _rescueBackground == null ? <String>[] : [_rescueBackground!];
 
       final tags = _tagsController.text
           .split(',')
@@ -424,7 +464,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
       final sharedFields = {
         'name': _nameController.text.trim(),
-        'age': _ageController.text.trim(),
+        'age': '$_ageAmount $_ageUnit',
         'species': _selectedSpecies,
         'breed': _selectedBreed ?? '',
         'sex': _selectedSex ?? '',
@@ -601,7 +641,28 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             const SizedBox(height: 16),
 
             _FieldLabel('Age'),
-            _UnderlineField(controller: _ageController, hint: 'e.g. 2 years, 6 months'),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: _DropdownField(
+                    value: _ageAmount,
+                    hint: 'Amount',
+                    items: _ageAmountOptions,
+                    onChanged: (v) => setState(() => _ageAmount = v),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _DropdownField(
+                    value: _ageUnit,
+                    hint: 'Unit',
+                    items: _ageUnitOptions,
+                    onChanged: (v) => setState(() => _ageUnit = v),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 16),
 
             _FieldLabel('Species'),
@@ -742,16 +803,18 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             const SizedBox(height: 20),
 
-            // ---- Rescue Background ----------------------------------------
+            // ---- Rescue Background (single-select) -------------------------
             _FieldLabel('Rescue Background'),
             const SizedBox(height: 8),
             Wrap(
-              spacing: 12, runSpacing: 8,
-              children: _rescueBackground.keys
-                  .map((key) => _CheckboxField(
-                        label: key,
-                        value: _rescueBackground[key]!,
-                        onChanged: (v) => setState(() => _rescueBackground[key] = v!),
+              spacing: 12,
+              runSpacing: 8,
+              children: _rescueBackgroundOptions
+                  .map((key) => ChoiceChip(
+                        label: Text(key),
+                        selected: _rescueBackground == key,
+                        selectedColor: AppColors.yellowrspwn,
+                        onSelected: (_) => setState(() => _rescueBackground = key),
                       ))
                   .toList(),
             ),

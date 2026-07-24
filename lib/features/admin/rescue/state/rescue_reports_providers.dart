@@ -47,8 +47,10 @@ final savedClinicsRepositoryProvider = Provider<SavedClinicsRepository>((ref) {
 
 /// The signed-in staff/admin user's membership in their organization.
 /// Null while unresolved, while signed out, or if they aren't a member of
-/// any organization yet.
-final currentOrgMembershipProvider = StreamProvider<OrgMembership?>((ref) {
+/// any organization yet. autoDispose so a stale uid's listener doesn't keep
+/// running after logout — it's also explicitly invalidated by AdminDrawer's
+/// sign-out flow as a belt-and-suspenders measure.
+final currentOrgMembershipProvider = StreamProvider.autoDispose<OrgMembership?>((ref) {
   final uid = FirebaseAuth.instance.currentUser?.uid;
   if (uid == null) return Stream.value(null);
   return ref.watch(orgMembershipServiceProvider).streamMembership(uid);
@@ -56,8 +58,11 @@ final currentOrgMembershipProvider = StreamProvider<OrgMembership?>((ref) {
 
 // ---- Case list / detail streams ---------------------------------------
 
+// autoDispose so a listener is torn down once nothing is watching it anymore
+// (e.g. leaving Rescue Reports) instead of staying subscribed to Firestore
+// for the rest of the app session.
 final casesByStatusesProvider =
-    StreamProvider.family<List<RescueCase>, List<RescueStatus>>((ref, statuses) {
+    StreamProvider.family.autoDispose<List<RescueCase>, List<RescueStatus>>((ref, statuses) {
   return ref.watch(rescueCaseRepositoryProvider).streamCasesByStatuses(statuses);
 });
 
@@ -159,12 +164,22 @@ enum RescuePipelineTab {
         RescuePipelineTab.intake => 'Intake',
       };
 
+  // Deliberately `const` — casesByStatusesProvider is a StreamProvider.family
+  // keyed by this List, and Dart's List uses identity equality (no built-in
+  // structural ==). A non-const list literal here would return a distinct
+  // object on every call, so every rebuild of a widget calling `.statuses`
+  // (e.g. the pipeline-tab badges, one per tab, rebuilt on every frame) would
+  // register as a brand-new family key: a brand-new Firestore listener that
+  // never gets torn down, endlessly duplicating (and re-erroring) the same
+  // query. `const` literals with equal contents are canonicalized by Dart —
+  // every call for the same tab returns the exact same object — so the
+  // family provider correctly resolves to one stable, reused instance.
   List<RescueStatus> get statuses => switch (this) {
-        RescuePipelineTab.review => [RescueStatus.pendingReview],
-        RescuePipelineTab.assign => [RescueStatus.awaitingAssignment],
-        RescuePipelineTab.ongoing => [RescueStatus.ongoing],
-        RescuePipelineTab.treatment => [RescueStatus.treatment],
-        RescuePipelineTab.intake => [RescueStatus.intake],
+        RescuePipelineTab.review => const [RescueStatus.pendingReview],
+        RescuePipelineTab.assign => const [RescueStatus.awaitingAssignment],
+        RescuePipelineTab.ongoing => const [RescueStatus.ongoing],
+        RescuePipelineTab.treatment => const [RescueStatus.treatment],
+        RescuePipelineTab.intake => const [RescueStatus.intake],
       };
 }
 
@@ -326,7 +341,12 @@ final effectiveStatusesProvider = Provider<List<RescueStatus>>((ref) {
 
 /// Cases for the effective status selection, with all client-side filters
 /// from [rescueFilterProvider] applied.
-final filteredCasesProvider = Provider<AsyncValue<List<RescueCase>>>((ref) {
+///
+/// autoDispose to match [casesByStatusesProvider] — otherwise, as a
+/// permanently-alive Provider watching an autoDispose family member, it
+/// would itself hold that family instance's listen count above zero
+/// forever, defeating the point of the family being autoDispose.
+final filteredCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((ref) {
   final statuses = ref.watch(effectiveStatusesProvider);
   final casesAsync = ref.watch(casesByStatusesProvider(statuses));
   final filters = ref.watch(rescueFilterProvider);

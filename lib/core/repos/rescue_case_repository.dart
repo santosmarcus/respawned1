@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
@@ -67,6 +69,15 @@ class RescueCaseRepository {
   Stream<List<RescueCase>> streamCasesByStatuses(List<RescueStatus> statuses) {
     final values = statuses.expand((s) => s.queryValues).toSet().toList();
     if (values.isEmpty) return Stream.value(const []);
+    // Diagnostic for the PERMISSION_DENIED investigation — deployed rules
+    // are wide open (allow any authenticated user), so a denial here means
+    // either this app isn't actually pointed at the project the rules were
+    // deployed to, or the request isn't reaching Firestore as authenticated
+    // at all (e.g. server-side App Check enforcement rejecting requests
+    // before rules ever evaluate). Confirm both values below against the
+    // Firebase console project you deployed rules to.
+    debugPrint('[RescueCaseRepository] projectId=${Firebase.app().options.projectId} '
+        'uid=${FirebaseAuth.instance.currentUser?.uid} statuses=$values');
     // Animal-record admissions (see createAdmissionCase) skip the Rescue
     // Review stage by construction — they're never written with status
     // pendingReview/awaitingAssignment's own review intent in mind, just

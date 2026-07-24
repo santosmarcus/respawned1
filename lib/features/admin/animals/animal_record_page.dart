@@ -74,6 +74,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   }
 
   int get _sheetActiveFilterCount =>
+      (_speciesFilter != 'All' ? 1 : 0) +
       (_statusFilter != 'All' ? 1 : 0) +
       (_adoptableOnly == true ? 1 : 0) +
       (_inTreatmentOnly == true ? 1 : 0) +
@@ -191,6 +192,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                       Text('Filter & Sort', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
                       TextButton(
                         onPressed: () => setSheetState(() {
+                          _speciesFilter = 'All';
                           _statusFilter = 'All';
                           _adoptableOnly = null;
                           _inTreatmentOnly = null;
@@ -217,6 +219,25 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                                     selected: _sort == s,
                                     selectedColor: AppColors.yellowrspwn,
                                     onSelected: (_) => setSheetState(() => _sort = s),
+                                  ))
+                              .toList(),
+                        ),
+                        const SizedBox(height: 16),
+                        // Species — used to be two standalone Dogs/Cats
+                        // chips sitting above the list outside this sheet;
+                        // folded in here with the rest of Filter & Sort so
+                        // there's one filtering surface, not two.
+                        Text('Species', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: ['All', 'Dogs', 'Cats']
+                              .map((s) => ChoiceChip(
+                                    label: Text(s),
+                                    selected: _speciesFilter == s,
+                                    selectedColor: AppColors.yellowrspwn,
+                                    onSelected: (_) => setSheetState(() => _speciesFilter = s),
                                   ))
                               .toList(),
                         ),
@@ -313,9 +334,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: Text('Animal Records',
-            style: GoogleFonts.tiltWarp(
-                fontSize: 18, color: AppColors.background)),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined,
@@ -326,37 +344,50 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       ),
       body: Column(
         children: [
-          const SizedBox(height: 12),
+          const SizedBox(height: 20),
 
-          // Search bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text('Animal Records',
+                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Search + filter — same styling as Rescue Reports (white
+          // background, slate border, rounded 24) instead of the old solid
+          // yellow box.
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
                 Expanded(
                   child: Container(
-                    height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.yellowrspwn,
-                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: AppColors.slaterspwn),
                     ),
-                    child: TextField(
-                      controller: _searchController,
-                      onChanged: (v) => setState(() => _searchQuery = v),
-                      style: GoogleFonts.zain(
-                          fontSize: 14, color: AppColors.textPrimary),
-                      decoration: InputDecoration(
-                        hintText: 'Search name, species, breed, tag, case ID…',
-                        hintStyle: GoogleFonts.zain(
-                            fontSize: 13,
-                            color: AppColors.textPrimary
-                                .withValues(alpha: 0.6)),
-                        prefixIcon: const Icon(Icons.search,
-                            color: AppColors.textPrimary, size: 20),
-                        border: InputBorder.none,
-                        contentPadding:
-                        const EdgeInsets.symmetric(vertical: 12),
-                      ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.search, size: 18, color: AppColors.textSecondary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            onChanged: (v) => setState(() => _searchQuery = v),
+                            decoration: InputDecoration(
+                              hintText: 'Search name, species, breed, tag, case ID…',
+                              hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -367,11 +398,12 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                     clipBehavior: Clip.none,
                     children: [
                       Container(
-                        width: 44,
-                        height: 44,
+                        width: 40,
+                        height: 40,
                         decoration: BoxDecoration(
-                          color: AppColors.yellowrspwn,
+                          color: _sheetActiveFilterCount > 0 ? AppColors.yellowrspwn : Colors.white,
                           borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.slaterspwn),
                         ),
                         child: const Icon(Icons.tune,
                             color: AppColors.textPrimary, size: 20),
@@ -393,36 +425,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                         ),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Species quick chips — the standalone status dropdown that used
-          // to sit here was removed; status is now one of the Filter & Sort
-          // sheet's own options (see _openFilterSheet), with the badge
-          // above showing how many sheet filters (including status) are
-          // active.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                _FilterChip(
-                  label: 'Dogs',
-                  selected: _speciesFilter == 'Dogs',
-                  onTap: () => setState(() =>
-                  _speciesFilter =
-                  _speciesFilter == 'Dogs' ? 'All' : 'Dogs'),
-                ),
-                const SizedBox(width: 8),
-                _FilterChip(
-                  label: 'Cats',
-                  selected: _speciesFilter == 'Cats',
-                  onTap: () => setState(() =>
-                  _speciesFilter =
-                  _speciesFilter == 'Cats' ? 'All' : 'Cats'),
                 ),
               ],
             ),
@@ -516,37 +518,3 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding:
-        const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.greenrspwn
-              : AppColors.lavenderrspwn,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(label,
-            style: GoogleFonts.zain(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary)),
-      ),
-    );
-  }
-}

@@ -48,7 +48,7 @@ class _AnimalImageGalleryState extends State<AnimalImageGallery> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => _FullscreenGallery(photoUrls: widget.photoUrls, initialIndex: initialIndex),
+        builder: (_) => FullscreenImageGallery(photoUrls: widget.photoUrls, initialIndex: initialIndex),
         fullscreenDialog: true,
       ),
     );
@@ -116,16 +116,16 @@ class _AnimalImageGalleryState extends State<AnimalImageGallery> {
   }
 }
 
-class _FullscreenGallery extends StatefulWidget {
+class FullscreenImageGallery extends StatefulWidget {
   final List<String> photoUrls;
   final int initialIndex;
-  const _FullscreenGallery({required this.photoUrls, required this.initialIndex});
+  const FullscreenImageGallery({super.key, required this.photoUrls, required this.initialIndex});
 
   @override
-  State<_FullscreenGallery> createState() => _FullscreenGalleryState();
+  State<FullscreenImageGallery> createState() => FullscreenImageGalleryState();
 }
 
-class _FullscreenGalleryState extends State<_FullscreenGallery> {
+class FullscreenImageGalleryState extends State<FullscreenImageGallery> {
   late final PageController _controller = PageController(initialPage: widget.initialIndex);
   late int _page = widget.initialIndex;
 

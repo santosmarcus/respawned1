@@ -19,12 +19,27 @@ enum AnimalCategory { dog, cat }
 
 class Animal {
   final int id;
+  // The real `animals/{id}` Firestore document id, when this Animal was
+  // built from a live AnimalRecord (see animalRecordToCard below) — empty
+  // for anything built without one (e.g. a favorites snapshot). `id` above
+  // is a one-way stableIntIdFor hash of this, kept only to satisfy the
+  // legacy int-keyed pipeline (AnimalPage/AdoptionProcess/favorites); it
+  // cannot be reversed back into this string, which is why adoption
+  // submissions need this field written separately (see adoption_process.dart).
+  final String animalRecordId;
   final String name;
+  final String species;
   final String breed;
   final String age;
   final String description;
   final List<String> healthTags;
   final AnimalGender gender;
+  // Raw sex string ('Male'/'Female'/'Unknown'/''), kept alongside the
+  // binary `gender` enum above (unchanged — other readers, e.g.
+  // favorite_screen.dart, still depend on it) so AnimalPage's gender icon
+  // can correctly hide itself for Unknown/unset instead of guessing Male,
+  // the same behavior genderIconFor gives AnimalRecordCard.
+  final String sex;
   final AnimalCategory category;
   final Color cardColor;
   final String? badge;
@@ -53,12 +68,15 @@ class Animal {
 
   Animal({
     required this.id,
+    this.animalRecordId = '',
     required this.name,
+    this.species = '',
     required this.breed,
     required this.age,
     required this.description,
     required this.healthTags,
     required this.gender,
+    this.sex = '',
     required this.category,
     required this.cardColor,
     this.badge,
@@ -144,12 +162,15 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
 
   return Animal(
     id: stableIntIdFor(r.id),
+    animalRecordId: r.id,
     name: r.name.isNotEmpty ? r.name : r.species,
+    species: r.species,
     breed: r.breed,
     age: r.age,
     description: r.description,
     healthTags: healthTags,
     gender: sexLower == 'female' ? AnimalGender.female : AnimalGender.male,
+    sex: r.sex,
     category: speciesLower == 'cat' ? AnimalCategory.cat : AnimalCategory.dog,
     cardColor: _cardColorRotation[index % _cardColorRotation.length],
     size: r.size,

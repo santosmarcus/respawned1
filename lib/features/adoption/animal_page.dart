@@ -3,8 +3,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../app_theme.dart';
+import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
 import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
+import 'package:respawnd1/core/widgets/animal_record_card.dart' show genderIconFor;
 import 'adoption_page.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
@@ -15,7 +17,6 @@ import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 // static catalog). AnimalRecord has no date-of-birth field at all, so this
 // honestly shows "Unknown" for every animal instead of inventing one.
 class _AnimalDetail {
-  final String dateOfBirth;
   final String size;
   final String coatLength;
   final List<String> health;
@@ -26,7 +27,6 @@ class _AnimalDetail {
   final String orgSubtitle;
 
   const _AnimalDetail({
-    required this.dateOfBirth,
     required this.size,
     required this.coatLength,
     required this.health,
@@ -59,7 +59,6 @@ class _AnimalPageState extends State<AnimalPage> {
   _AnimalDetail get _detail {
     final animal = widget.animal;
     return _AnimalDetail(
-      dateOfBirth: 'Unknown',
       size: animal.size,
       coatLength: animal.coatLength,
       health: animal.healthTags,
@@ -87,16 +86,39 @@ class _AnimalPageState extends State<AnimalPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
     try {
-      final snap = await FirebaseFirestore.instance
+      // Checked by both keys — personal.animalId was previously compared
+      // against the raw int animal.id while the field is actually stored
+      // as a string (adoption_process.dart writes '${animal.id}'), so this
+      // never matched anything; fixed to compare like-for-like. Also
+      // checks personal.animalRecordId (the real animal doc id) so
+      // applications submitted after that field was added are found too —
+      // neither key alone covers every application for this animal.
+      final legacySnap = await FirebaseFirestore.instance
           .collection('adoptions')
-          .where('personal.animalId', isEqualTo: animal.id)
+          .where('personal.animalId', isEqualTo: '${animal.id}')
           .get();
+      final byRecordIdSnap = animal.animalRecordId.isEmpty
+          ? null
+          : await FirebaseFirestore.instance
+              .collection('adoptions')
+              .where('personal.animalRecordId', isEqualTo: animal.animalRecordId)
+              .get();
+
+      final docsById = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+      for (final d in legacySnap.docs) {
+        docsById[d.id] = d;
+      }
+      if (byRecordIdSnap != null) {
+        for (final d in byRecordIdSnap.docs) {
+          docsById[d.id] = d;
+        }
+      }
 
       QueryDocumentSnapshot? blockingDoc;
       QueryDocumentSnapshot? myActiveDoc;
       QueryDocumentSnapshot? myCompletedDoc;
 
-      for (final doc in snap.docs) {
+      for (final doc in docsById.values) {
         final data = doc.data() as Map<String, dynamic>;
         final status = data['status'] as String? ?? '';
         if (status == 'rejected') continue; // doesn't block re-adoption
@@ -261,9 +283,14 @@ class _AnimalPageState extends State<AnimalPage> {
                           color: AppColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.male,
-                          size: 22, color: AppColors.textPrimary),
+                      // Reflects the animal's actual sex, hidden entirely
+                      // (not defaulted to Male) when Unknown/unset — same
+                      // genderIconFor rule the shared AnimalRecordCard and
+                      // the admin detail header use.
+                      if (genderIconFor(animal.sex) != null) ...[
+                        const SizedBox(width: 8),
+                        Icon(genderIconFor(animal.sex), size: 22, color: AppColors.textPrimary),
+                      ],
                     ],
                   ),
 
@@ -271,14 +298,18 @@ class _AnimalPageState extends State<AnimalPage> {
 
                   // Animal Information — gender lives next to the name
                   // above (icon only); it's deliberately not repeated here.
+                  // Species/Age/Size, Breed/Coat Length/Color-Markings — the
+                  // same six-field structure and order as the admin Profile
+                  // tab (animal_profile_tab.dart).
                   _SectionHeader(label: 'Animal Information'),
                   const SizedBox(height: 10),
                   AnimalBasicInfoRow(fields: [
-                    InfoField('Breed', animal.breed.isNotEmpty ? animal.breed : 'Not provided'),
+                    InfoField('Species', animal.species.isNotEmpty ? animal.species : 'Not provided'),
                     InfoField('Age', animal.age.isNotEmpty ? animal.age : 'Not provided'),
-                    InfoField('Date of Birth', detail.dateOfBirth),
                     InfoField('Size', detail.size),
+                    InfoField('Breed', animal.breed.isNotEmpty ? animal.breed : 'Not provided'),
                     InfoField('Coat Length', detail.coatLength),
+                    const InfoField('Color / Markings', 'Not provided'),
                   ]),
 
                   const SizedBox(height: 20),
@@ -294,31 +325,32 @@ class _AnimalPageState extends State<AnimalPage> {
 
                   const SizedBox(height: 20),
 
-                  // Key Characteristics
-                  _SectionHeader(label: 'Key Characteristics'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: detail.keyCharacteristics
-                        .map((t) => _YellowTag(label: t))
-                        .toList(),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Rescue background tag
-                  _SectionHeader(label: 'Rescue Background'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: detail.rescueBackground
-                        .map((t) => _YellowTag(label: t))
-                        .toList(),
-                  ),
-
-                  const SizedBox(height: 20),
+                  // Temperament / Compatibility / Training / Rescue
+                  // Background — same categorization + data mapping as the
+                  // admin Profile tab (animal_profile_tab.dart), which
+                  // partitions the same flat keyCharacteristics array via
+                  // the shared kTemperamentValues/kCompatibilityValues/
+                  // kTrainingValues lists (animal_characteristics.dart).
+                  // Presentation (chip size/padding, spacing) stays this
+                  // page's own _YellowTag/_SectionHeader, unchanged — only
+                  // the grouping logic is reused, not the admin's styling.
+                  // Empty categories are skipped rather than shown blank.
+                  for (final group in [
+                    ('Temperament', detail.keyCharacteristics.where(kTemperamentValues.contains).toList()),
+                    ('Compatibility', detail.keyCharacteristics.where(kCompatibilityValues.contains).toList()),
+                    ('Training', detail.keyCharacteristics.where(kTrainingValues.contains).toList()),
+                    ('Rescue Background', detail.rescueBackground),
+                  ])
+                    if (group.$2.isNotEmpty) ...[
+                      _SectionHeader(label: group.$1),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: group.$2.map((t) => _YellowTag(label: t)).toList(),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
 
                   // Description
                   _SectionHeader(label: 'Description'),
@@ -375,36 +407,17 @@ class _AnimalPageState extends State<AnimalPage> {
 
                   const SizedBox(height: 28),
 
-                  // Adopt me button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _checkingAdoption
-                          ? null
-                          : () => _handleAdoptTap(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      child: Text(
-                        _checkingAdoption ? 'Checking...' : 'Adopt Me',
-                        style: GoogleFonts.tiltWarp(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
+                  // Adopt Me / View Status — one button, not two: both used
+                  // to lead to the exact same place (AdoptionProcess /
+                  // PostAdoptionMonitoringPage), so a user who'd already
+                  // applied saw a redundant "Adopt Me" sitting right above
+                  // "View Status". The label now reflects which action is
+                  // actually about to happen.
+                  _AdoptOrViewStatusButton(
+                    animal: animal,
+                    checking: _checkingAdoption,
+                    onAdoptTap: _handleAdoptTap,
                   ),
-
-                  const SizedBox(height: 8),
-
-                  _ViewStatusButton(animal: animal),
                 ],
               ),
             ),
@@ -415,24 +428,48 @@ class _AnimalPageState extends State<AnimalPage> {
   }
 }
 
-class _ViewStatusButton extends StatelessWidget {
+class _AdoptOrViewStatusButton extends StatelessWidget {
   final Animal animal;
-  const _ViewStatusButton({required this.animal});
+  final bool checking;
+  final VoidCallback onAdoptTap;
+  const _AdoptOrViewStatusButton({required this.animal, required this.checking, required this.onAdoptTap});
+
+  Widget _button({required String label, required VoidCallback? onTap}) => SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: ElevatedButton(
+          onPressed: onTap,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.yellowrspwn,
+            foregroundColor: AppColors.textPrimary,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          child: Text(label, style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
+    if (uid == null) return _button(label: 'Adopt Me', onTap: checking ? null : onAdoptTap);
 
+    // Prefers the real animalRecordId join key (reliable for every
+    // application submitted after it was added); previously compared the
+    // raw int animal.id against the stored string field, which never
+    // matched anything. Falls back to the corrected legacy string compare
+    // only if this Animal has no animalRecordId at all.
+    final hasRecordId = animal.animalRecordId.isNotEmpty;
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('adoptions')
-          .where('personal.animalId', isEqualTo: animal.id)
+          .where(hasRecordId ? 'personal.animalRecordId' : 'personal.animalId',
+              isEqualTo: hasRecordId ? animal.animalRecordId : '${animal.id}')
           .where('personal.adopterId', isEqualTo: uid)
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const SizedBox.shrink();
+          return _button(label: checking ? 'Checking...' : 'Adopt Me', onTap: checking ? null : onAdoptTap);
         }
 
         QueryDocumentSnapshot? activeDoc;
@@ -451,44 +488,26 @@ class _ViewStatusButton extends StatelessWidget {
         }
 
         final targetDoc = completedDoc ?? activeDoc;
-        if (targetDoc == null) return const SizedBox.shrink();
+        // No open/completed application after all (e.g. every match was
+        // rejected/withdrawn) — back to a normal Adopt Me.
+        if (targetDoc == null) return _button(label: checking ? 'Checking...' : 'Adopt Me', onTap: checking ? null : onAdoptTap);
         final isCompleted = completedDoc != null;
 
-        return Padding(
-          padding: const EdgeInsets.only(top: 10),
-          child: SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => isCompleted
-                        ? PostAdoptionMonitoringPage(adoptionId: targetDoc.id)
-                        : AdoptionProcess(
-                      animal: animal,
-                      existingAdoptionId: targetDoc.id,
-                    ),
-                  ),
-                );
-              },
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.greenrspwn, width: 1.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
+        // Both used to lead to the exact same place as Adopt Me itself
+        // (_handleAdoptTap resolves this same target) — the label now says
+        // what actually happens instead of implying a fresh application.
+        return _button(
+          label: 'View Status',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => isCompleted
+                    ? PostAdoptionMonitoringPage(adoptionId: targetDoc.id)
+                    : AdoptionProcess(animal: animal, existingAdoptionId: targetDoc.id),
               ),
-              child: Text(
-                'View Status',
-                style: GoogleFonts.tiltWarp(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
