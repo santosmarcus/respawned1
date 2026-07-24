@@ -155,13 +155,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   bool _isSearchingClinic = false;
   bool _autoSearchAttempted = false;
   bool _isVerifyingArrival = false;
-  Timestamp? _lastReadAt;
-
-  @override
-  void initState() {
-    super.initState();
-    _lastReadAt = Timestamp.now();
-  }
 
   // Verification images
   final List<File?> _pickupImages = [null, null];
@@ -215,7 +208,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       'Personal unavailability (emergency, off-duty)',
       'Other',
     ];
-    final selected = <String>{};
+    String? selectedReason;
     String? other;
 
     return showDialog<String>(
@@ -250,24 +243,18 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                ...reasons.map((r) => CheckboxListTile(
+                ...reasons.map((r) => RadioListTile<String>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  value: selected.contains(r),
+                  value: r,
+                  groupValue: selectedReason,
                   activeColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
                   title: Text(r,
                       style: GoogleFonts.zain(
                           fontSize: 14, color: AppColors.textPrimary)),
-                  onChanged: (v) => setDlg(() {
-                    if (v == true) {
-                      selected.add(r);
-                    } else {
-                      selected.remove(r);
-                    }
-                  }),
+                  onChanged: (v) => setDlg(() => selectedReason = v),
                 )),
-                if (selected.contains('Other')) ...[
+                if (selectedReason == 'Other') ...[
                   const SizedBox(height: 8),
                   TextField(
                     onChanged: (v) => other = v,
@@ -295,23 +282,19 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                 SizedBox(
                   width: double.infinity,
                   child: TextButton(
-                    onPressed: selected.isEmpty
+                    onPressed: selectedReason == null
                         ? null
                         : () {
-                      final reasonStr = [
-                        ...selected.where((r) => r != 'Other'),
-                        if (selected.contains('Other') &&
-                            other != null &&
-                            other!.isNotEmpty)
-                          other!,
-                      ].join(', ');
+                      final reasonStr = selectedReason == 'Other'
+                          ? (other != null && other!.isNotEmpty ? other! : 'Other')
+                          : selectedReason!;
                       Navigator.pop(ctx, reasonStr);
                     },
                     child: Text('Confirm',
                         style: GoogleFonts.zain(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            color: selected.isEmpty
+                            color: selectedReason == null
                                 ? AppColors.textSecondary
                                 : Colors.redAccent)),
                   ),
@@ -973,49 +956,18 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         ]),
       });
       _positionSub?.cancel();
-      if (mounted) await _showTransitCompletedBanner();
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (_) => const TransitResultPage(completed: true)),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
   }
 
-  Future<void> _showTransitCompletedBanner() async {
-    ScaffoldMessenger.of(context).clearMaterialBanners();
-    ScaffoldMessenger.of(context).showMaterialBanner(
-      MaterialBanner(
-        backgroundColor: AppColors.greenrspwn,
-        contentTextStyle:
-        GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-        leading: const Icon(Icons.check_circle,
-            color: AppColors.textPrimary),
-        content: Text(
-          'Transit has been completed. Routing you to the home screen…',
-          style: GoogleFonts.zain(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
-              if (mounted) Navigator.pop(context);
-            },
-            child: Text('OK',
-                style: GoogleFonts.zain(
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
-          ),
-        ],
-      ),
-    );
-
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
-      Navigator.pop(context);
-    }
-  }
 
   Future<List<String>> _uploadVerificationImages(
       List<File?> images, String type) async {
@@ -1117,6 +1069,30 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                             fontSize: 14, color: AppColors.textPrimary)),
                     onChanged: (v) => setDlg(() => selectedReason = v),
                   )),
+                  if (selectedReason == _reasonSpecializedTransport) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      onChanged: (v) => other = v,
+                      style: GoogleFonts.zain(
+                          fontSize: 14, color: AppColors.textPrimary),
+                      decoration: InputDecoration(
+                        hintText: 'Describe reason...',
+                        hintStyle: GoogleFonts.zain(
+                            fontSize: 13, color: AppColors.textSecondary),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.slaterspwn),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ),
+                  ],
                   if (selectedReason == _reasonOther) ...[
                     const SizedBox(height: 8),
                     TextField(
@@ -1243,6 +1219,19 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     );
   }
 
+  // Decides the resulting case status from the selected End Reason and
+  // writes it, along with any supporting notes, to the case doc.
+  //
+  // - Not Found / Reporter Unreachable: the case is NOT closed as failed —
+  //   it moves to a reporter-facing "awaiting response" status so the
+  //   reporter can supply a new location or confirm they're reachable.
+  //   expireStaleReporterResponses (functions/index.js) auto-closes it if
+  //   they never respond.
+  // - Aggressive: escalates to needsSpecializedAssistance instead of ending
+  //   the case as a failure — "the original rescue report remains active"
+  //   and the transporter is explicitly not penalized for this outcome.
+  // - Deceased / Vehicle breakdown / Specialized transport / Other: these
+  //   remain a straightforward transit-ended outcome, same as before.
   Future<void> _resolveEndReason({
     required String selectedReason,
     required String? otherText,
@@ -1284,8 +1273,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       final extra = <String, dynamic>{
         'endReason': reasonStr,
         if (notes.isNotEmpty) 'endReasonNotes': notes,
+        // Consumed by expireStaleReporterResponses; cleared automatically
+        // once the reporter replies (see TrackCasePage's reporter-response
+        // handling) or the case is manually resolved by staff.
         if (notFound || unreachable)
           'awaitingReporterSince': FieldValue.serverTimestamp(),
+        // So a future reliability-score feature can exclude this pickup
+        // from counting against the transporter — verified here as an
+        // animal-safety escalation, not a no-show or missed job.
         if (aggressive) 'transporterFaultVerified': false,
       };
 
@@ -1301,7 +1296,27 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       });
 
       _positionSub?.cancel();
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        if (status == 'ended') {
+          // A genuine terminal cancellation (Deceased, Vehicle breakdown,
+          // Specialized transport needed, Other) — show the same result
+          // screen used for a successful completion, just with the
+          // cancelled variant + reason.
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  TransitResultPage(completed: false, reason: reasonStr),
+            ),
+          );
+        } else {
+          // Not Found / Reporter Unreachable / Aggressive don't end the
+          // case — it's still active (awaiting the reporter, or
+          // escalated) — so just return the transporter to where they
+          // came from instead of showing a "Cancelled" screen.
+          Navigator.pop(context);
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1322,7 +1337,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       'No Veterinarian/Specialist Available',
       'Other',
     ];
-    final selected = <String>{};
+    String? selectedReason;
     String? other;
 
     return showDialog<String>(
@@ -1358,24 +1373,18 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                ...reasons.map((r) => CheckboxListTile(
+                ...reasons.map((r) => RadioListTile<String>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  value: selected.contains(r),
+                  value: r,
+                  groupValue: selectedReason,
                   activeColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
                   title: Text(r,
                       style: GoogleFonts.zain(
                           fontSize: 14, color: AppColors.textPrimary)),
-                  onChanged: (v) => setDlg(() {
-                    if (v == true) {
-                      selected.add(r);
-                    } else {
-                      selected.remove(r);
-                    }
-                  }),
+                  onChanged: (v) => setDlg(() => selectedReason = v),
                 )),
-                if (selected.contains('Other')) ...[
+                if (selectedReason == 'Other') ...[
                   const SizedBox(height: 8),
                   TextField(
                     onChanged: (v) => other = v,
@@ -1405,23 +1414,19 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                 SizedBox(
                   width: double.infinity,
                   child: TextButton(
-                    onPressed: selected.isEmpty
+                    onPressed: selectedReason == null
                         ? null
                         : () {
-                      final reasonStr = [
-                        ...selected.where((r) => r != 'Other'),
-                        if (selected.contains('Other') &&
-                            other != null &&
-                            other!.isNotEmpty)
-                          other!,
-                      ].join(', ');
+                      final reasonStr = selectedReason == 'Other'
+                          ? (other != null && other!.isNotEmpty ? other! : 'Other')
+                          : selectedReason!;
                       Navigator.pop(ctx, reasonStr);
                     },
                     child: Text('Confirm',
                         style: GoogleFonts.zain(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            color: selected.isEmpty
+                            color: selectedReason == null
                                 ? AppColors.textSecondary
                                 : Colors.redAccent)),
                   ),
@@ -1435,7 +1440,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 
   void _openMessageSheet() {
-    setState(() => _lastReadAt = Timestamp.now());
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1490,9 +1494,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           ),
         );
       },
-    ).then((_) {
-      if (mounted) setState(() => _lastReadAt = Timestamp.now());
-    });
+    );
   }
 
   Future<void> _sendMessage() async {
@@ -1638,8 +1640,28 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                               ),
                             ),
 
-                        // NEW
-                        _UnreadBadge(caseId: widget.caseId, lastReadAt: _lastReadAt),
+                            Positioned(
+                              right: -2,
+                              top: -2,
+                              child: Container(
+                                width: 18,
+                                height: 18,
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    '2',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -1663,9 +1685,12 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   Widget _buildBottomPanel(String status, Map<String, dynamic> data) {
     // Arrived at pickup — verification
     if (status == 'arrived') {
+      final clinicAddress = _clinicAddressFrom(data);
       return _buildVerificationPanel(
         title: 'Arrived at pick up location',
         address: data['address'] ?? '',
+        destinationAddress:
+        clinicAddress.isEmpty ? 'Clinic not yet assigned' : clinicAddress,
         images: _pickupImages,
         onImageTap: (i) => _pickImage(_pickupImages, i),
         onConfirm: _submitPickupVerification,
@@ -1916,6 +1941,40 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           children: [
             const SizedBox(height: 16),
 
+
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Ongoing Request',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 15, color: AppColors.textPrimary)),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // Address card
+            _AddressCard(
+              pickup: data['address'] ?? '',
+              dropoff: _clinicAddressFrom(data).isEmpty
+                  ? 'Clinic not yet assigned'
+                  : _clinicAddressFrom(data),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Reporter/witness and organization contact rows
+            ..._buildContactRows(data),
+
+            const SizedBox(height: 8),
+
+            // Swipe button
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: _buildSwipeButton(status),
+            ),
+
             if (status == 'assigned' || status == 'accepted') ...[
               const SizedBox(height: 4),
               Padding(
@@ -1936,40 +1995,12 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               ),
             ],
 
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Ongoing Request',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 15, color: AppColors.textPrimary)),
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            _AddressCard(
-              pickup: data['address'] ?? '',
-              dropoff: _clinicAddressFrom(data).isEmpty
-                  ? 'Clinic not yet assigned'
-                  : _clinicAddressFrom(data),
-            ),
-
-            const SizedBox(height: 12),
-
-            ..._buildContactRows(data),
-
-            const SizedBox(height: 8),
-
-            // Swipe button
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              child: _buildSwipeButton(status),
-            ),
           ],
         ),
       ),
+
     );
+
   }
 
   // Builds the tappable Reporter/Witness and Organization contact rows.
@@ -2044,7 +2075,15 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     VoidCallback? onEnd,
     Map<String, dynamic>? data,
     bool showContacts = false,
+    // Where the animal is headed next (e.g. the assigned clinic) — shown
+    // in the address row below the image grid. Defaults to [address]
+    // itself for panels that only ever have one relevant location (the
+    // final shelter drop-off), but the pickup-verification panel passes
+    // the clinic address here so it isn't just a second copy of the
+    // pickup address above it.
+    String? destinationAddress,
   }) {
+    final bottomAddress = destinationAddress ?? address;
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.background,
@@ -2120,14 +2159,15 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
             const SizedBox(height: 10),
 
-            // Address below images
+            // Address below images — the NEXT destination, not a repeat
+            // of the pickup address above.
             Row(
               children: [
                 const Icon(Icons.location_on_outlined,
                     size: 14, color: AppColors.textSecondary),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: Text(address,
+                  child: Text(bottomAddress,
                       style: GoogleFonts.zain(
                           fontSize: 12, color: AppColors.textSecondary)),
                 ),
@@ -2167,8 +2207,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                         fontSize: 14, color: AppColors.background)),
               ),
             ),
-
-            const SizedBox(height: 8),
+            const SizedBox(height: 14),
 
             if (onEnd != null) ...[
               SizedBox(
@@ -2183,7 +2222,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30)),
                   ),
-                  child: Text('Close',
+                  child: Text('Close Transit',
                       style: GoogleFonts.tiltWarp(
                           fontSize: 14, color: AppColors.textPrimary)),
                 ),
@@ -2237,63 +2276,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 }
 
-
-class _UnreadBadge extends StatelessWidget {
-  final String caseId;
-  final Timestamp? lastReadAt;
-  const _UnreadBadge({required this.caseId, required this.lastReadAt});
-
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('cases')
-          .doc(caseId)
-          .collection('messages')
-          .orderBy('timestamp')
-          .snapshots(),
-      builder: (context, snap) {
-        if (!snap.hasData) return const SizedBox.shrink();
-
-        final unread = snap.data!.docs.where((doc) {
-          final d = doc.data() as Map<String, dynamic>;
-          final senderId = d['senderId'] as String?;
-          if (senderId == uid) return false; // don't count your own messages
-          final ts = d['timestamp'] as Timestamp?;
-          if (ts == null) return true; // not yet committed server-side
-          if (lastReadAt == null) return true;
-          return ts.compareTo(lastReadAt!) > 0;
-        }).length;
-
-        if (unread == 0) return const SizedBox.shrink();
-
-        return Positioned(
-          right: -2,
-          top: -2,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-            decoration: const BoxDecoration(
-              color: Colors.red,
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                unread > 9 ? '9+' : '$unread',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
 // Swipe button
 class _SwipeButton extends StatefulWidget {
   final String label;
@@ -2914,7 +2896,9 @@ class _TrackingMapState extends State<_TrackingMap> {
               polylines: polylines,
             ),
 
-
+            // Persistent ETA banner (Google Maps Directions duration) —
+            // shown for every en-route leg (pickup, clinic, shelter), not
+            // just as a tap-to-reveal marker info window.
             if (_route != null && widget.destination != null)
               Positioned(
                 bottom: 90,
@@ -2954,6 +2938,80 @@ class _TrackingMapState extends State<_TrackingMap> {
           ],
         );
       },
+    );
+  }
+}
+// Shown after a transit reaches a terminal outcome — either delivered to
+// the shelter (completed) or ended via the End Reason flow (cancelled,
+// with the chosen reason). Replaces the old MaterialBanner-on-completion /
+// silent-pop-on-cancellation behavior with one consistent result screen
+// for both outcomes.
+class TransitResultPage extends StatelessWidget {
+  final bool completed;
+  final String? reason;
+
+  const TransitResultPage({super.key, required this.completed, this.reason});
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: AppTheme.rescuerTheme,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: AppColors.background,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.chevron_left,
+                color: AppColors.textPrimary, size: 28),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: Text(
+            'Pet Transporter Requirements',
+            style: GoogleFonts.tiltWarp(
+                fontSize: 15, color: AppColors.textSecondary),
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: const BoxDecoration(
+                    color: AppColors.textPrimary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.check, color: Colors.white, size: 36),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  completed ? 'Transit Completed' : 'Transit Canceled',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary),
+                ),
+                if (!completed) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'This transit has been cancelled.'
+                        '${(reason != null && reason!.isNotEmpty) ? '\nReason: $reason' : ''}',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(
+                        fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
