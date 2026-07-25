@@ -10,13 +10,22 @@ enum TransportAssignmentStatus {
   accepted,
   rejected,
   cancelled,
-  completed;
+  completed,
+  expired;
 
   static TransportAssignmentStatus fromName(String? name) => values.firstWhere(
         (v) => v.name == name,
         orElse: () => TransportAssignmentStatus.pending,
       );
 }
+
+/// How long a pending offer stays actionable before it's treated as stale.
+/// There is no server-side (Cloud Functions) expiry job — expiry is enforced
+/// lazily, inside the same transactions that would otherwise accept/reject/
+/// resurrect a pending offer, and opportunistically whenever a screen reads
+/// the latest assignment for a case (see RescueCaseRepository.
+/// reconcileStaleOffer). Purely a client-computed cutoff against [offeredAt].
+const Duration kTransportOfferTtl = Duration(minutes: 20);
 
 /// A single doc under `cases/{caseId}/transportAssignments/{assignmentId}`.
 /// One rider offer per doc — rejecting never deletes the doc, it just moves
@@ -29,6 +38,7 @@ class TransportAssignment {
   final String riderType;
   final TransportAssignmentStatus status;
   final DateTime? offeredAt;
+  final DateTime? expiresAt;
   final DateTime? respondedAt;
   final DateTime? acceptedAt;
   final DateTime? rejectedAt;
@@ -48,6 +58,7 @@ class TransportAssignment {
     required this.riderType,
     required this.status,
     this.offeredAt,
+    this.expiresAt,
     this.respondedAt,
     this.acceptedAt,
     this.rejectedAt,
@@ -78,6 +89,7 @@ class TransportAssignment {
       riderType: data['riderType'] as String? ?? 'Pet Transporter',
       status: TransportAssignmentStatus.fromName(data['status'] as String?),
       offeredAt: ts('offeredAt'),
+      expiresAt: ts('expiresAt'),
       respondedAt: ts('respondedAt'),
       acceptedAt: ts('acceptedAt'),
       rejectedAt: ts('rejectedAt'),
@@ -93,6 +105,29 @@ class TransportAssignment {
 
   bool get isActive =>
       status == TransportAssignmentStatus.pending || status == TransportAssignmentStatus.accepted;
+
+  /// True only for a still-pending offer whose [expiresAt] has passed. An
+  /// accepted/rejected/cancelled/completed/already-expired offer is never
+  /// "expired" in this sense — that word only describes a pending offer that
+  /// timed out unanswered.
+  bool get isStalePending =>
+      status == TransportAssignmentStatus.pending && expiresAt != null && DateTime.now().isAfter(expiresAt!);
+}
+
+/// Thrown by [RescueCaseRepository.acceptAssignment] / [rejectAssignment]
+/// when the response no longer applies: the offer was already resolved by
+/// someone else, the case's `currentAssignmentId` has moved on to a newer
+/// offer (this one was superseded), or the offer's TTL has elapsed. Callers
+/// must not treat a caught instance of this as success — in particular
+/// real-transporter flows must not navigate into a trip they were not
+/// actually granted. A background/demo responder may safely swallow this
+/// silently, since "ignore the response" is exactly the desired behavior.
+class OfferNoLongerAvailableException implements Exception {
+  final String reason;
+  const OfferNoLongerAvailableException(this.reason);
+
+  @override
+  String toString() => 'This offer is no longer available ($reason).';
 }
 
 /// Thrown by [RescueCaseRepository.createAssignmentOffer] (inside its

@@ -148,6 +148,139 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   GoogleMapController? _mapController;
   bool _hasFitCamera = false;
 
+  /// Guards reconcileStaleOffer against being fired again on every rebuild
+  /// while its own write is still in flight (the write itself is already
+  /// idempotent — this just avoids redundant calls).
+  final Set<String> _reconcilingAssignmentIds = {};
+  bool _cancellingOffer = false;
+
+  void _reconcileIfStale(TransportAssignment assignment) {
+    if (!assignment.isStalePending) return;
+    if (_reconcilingAssignmentIds.contains(assignment.id)) return;
+    _reconcilingAssignmentIds.add(assignment.id);
+    ref.read(rescueCaseRepositoryProvider).reconcileStaleOffer(
+          caseId: widget.caseId,
+          assignmentId: assignment.id,
+        );
+  }
+
+  Future<void> _cancelExistingOffer(TransportAssignment assignment) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Cancel this offer?',
+            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        content: Text(
+          'The pending offer to ${assignment.riderName} will be cancelled, and you can select another transporter.',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Keep Waiting',
+                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE05353),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _cancellingOffer = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
+            caseId: widget.caseId,
+            assignmentId: assignment.id,
+            reason: 'Cancelled by organization while waiting',
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not cancel this offer: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cancellingOffer = false);
+    }
+  }
+
+  /// Awaiting-response panel shown in place of the map/rider-list/Next
+  /// whenever the case already has a valid, unexpired pending offer (spec
+  /// §4/§5) — an admin should never be able to pick a second transporter
+  /// while one is still outstanding.
+  Widget _pendingOfferPanel(TransportAssignment assignment) {
+    final offeredAt = assignment.offeredAt;
+    final pendingFor = offeredAt == null
+        ? ''
+        : DateTime.now().difference(offeredAt).inMinutes < 1
+            ? 'Pending for ${DateTime.now().difference(offeredAt).inSeconds}s'
+            : 'Pending for ${DateTime.now().difference(offeredAt).inMinutes}m';
+    return Expanded(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.hourglass_top, size: 36, color: AppColors.textSecondary),
+              const SizedBox(height: 12),
+              Text('Awaiting transporter response',
+                  style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              Text('Offered to: ${assignment.riderName}',
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              if (pendingFor.isNotEmpty)
+                Text(pendingFor, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton(
+                    onPressed: _cancellingOffer ? null : () => _cancelExistingOffer(assignment),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFE05353),
+                      side: const BorderSide(color: Color(0xFFE05353)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    child: _cancellingOffer
+                        ? const SizedBox(
+                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => AdminTrackCasePage(
+                            caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode))),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   LatLng? _caseLocationFrom(Map<String, dynamic> data) {
     final lat = (data['lat'] as num?)?.toDouble();
     final lng = (data['lng'] as num?)?.toDouble();
@@ -407,6 +540,22 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
     final riders = _buildRiderVms(riderCenter, transporters, activeByRider);
 
+    // Startup / reopen resolution (spec §4): this case may already have a
+    // valid pending offer outstanding (e.g. the admin backgrounded the app
+    // mid-offer and is reopening this case from the Assign queue). Never
+    // let the rider list/Next button be reachable while that's true — only
+    // View Pending / Cancel Offer are available until it resolves.
+    final currentAssignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
+    final blockingOffer =
+        currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.pending
+            ? currentAssignment
+            : null;
+    if (blockingOffer != null) {
+      if (blockingOffer.isStalePending) {
+        _reconcileIfStale(blockingOffer);
+      }
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -503,74 +652,78 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
           const SizedBox(height: 16),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Transporters',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 16, color: AppColors.textPrimary)),
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          // Transporter list — fixed order (see _buildRiderVms): demo
-          // transporters pinned above the real-Available group only while
-          // they're Available themselves, then real transporters grouped
-          // available -> pending -> busy, each by distance. Pending/busy
-          // transporters stay visible, just not selectable.
-          Expanded(
-            child: ListView.separated(
+          if (blockingOffer != null)
+            _pendingOfferPanel(blockingOffer)
+          else ...[
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: riders.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final rider = riders[index];
-                final isSelected = _selectedRiderUid == rider.uid;
-                return _RiderCard(
-                  rider: rider,
-                  isSelected: isSelected,
-                  onSelect: () => _selectRider(rider),
-                );
-              },
-            ),
-          ),
-
-          // Fixed bottom action — always visible; "Next" is simply disabled
-          // until an available transporter is selected. No Back button
-          // here — the app-bar back arrow is the only way to leave this page.
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              border: Border(top: BorderSide(color: AppColors.slaterspwn)),
-            ),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(riders),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: _isAssigning
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                    : Text('Next',
-                        style: GoogleFonts.tiltWarp(
-                            fontSize: 15,
-                            color: _selectedRiderUid == null
-                                ? AppColors.textSecondary
-                                : AppColors.textPrimary)),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Transporters',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 16, color: AppColors.textPrimary)),
               ),
             ),
-          ),
+
+            const SizedBox(height: 8),
+
+            // Transporter list — fixed order (see _buildRiderVms): demo
+            // transporters pinned above the real-Available group only while
+            // they're Available themselves, then real transporters grouped
+            // available -> pending -> busy, each by distance. Pending/busy
+            // transporters stay visible, just not selectable.
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: riders.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  final rider = riders[index];
+                  final isSelected = _selectedRiderUid == rider.uid;
+                  return _RiderCard(
+                    rider: rider,
+                    isSelected: isSelected,
+                    onSelect: () => _selectRider(rider),
+                  );
+                },
+              ),
+            ),
+
+            // Fixed bottom action — always visible; "Next" is simply disabled
+            // until an available transporter is selected. No Back button
+            // here — the app-bar back arrow is the only way to leave this page.
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                border: Border(top: BorderSide(color: AppColors.slaterspwn)),
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(riders),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    disabledBackgroundColor: AppColors.slaterspwn,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: _isAssigning
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                      : Text('Next',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 15,
+                              color: _selectedRiderUid == null
+                                  ? AppColors.textSecondary
+                                  : AppColors.textPrimary)),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

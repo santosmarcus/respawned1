@@ -70,6 +70,16 @@ class TreatmentLogEntry {
   final DateTime? treatmentDate;
   final bool isLegacy;
 
+  /// Which of the case's `animals[]` entries (by list index — see
+  /// RescueCase.animals doc comment; there is no other stable per-animal
+  /// id) this update applies to. Null or empty means "All Animals" — the
+  /// same value every log written before this field existed implicitly
+  /// has, so old entries keep showing in every animal's filtered timeline
+  /// with zero migration. A single index means one animal; multiple
+  /// indexes mean "applies to these specific animals" (spec's "Multiple
+  /// animals" option) without duplicating the log document per animal.
+  final List<int>? animalIndexes;
+
   const TreatmentLogEntry({
     required this.id,
     required this.caseId,
@@ -94,7 +104,15 @@ class TreatmentLogEntry {
     this.timestamp,
     this.treatmentDate,
     this.isLegacy = false,
+    this.animalIndexes,
   });
+
+  /// True for "All Animals" (null/empty), or when [animalIndex] is one of
+  /// [animalIndexes].
+  bool appliesToAnimal(int animalIndex) =>
+      animalIndexes == null || animalIndexes!.isEmpty || animalIndexes!.contains(animalIndex);
+
+  bool get appliesToAllAnimals => animalIndexes == null || animalIndexes!.isEmpty;
 
   factory TreatmentLogEntry.fromFirestore(
     DocumentSnapshot<Map<String, dynamic>> doc,
@@ -156,6 +174,7 @@ class TreatmentLogEntry {
       timestamp: ts('timestamp'),
       treatmentDate: ts('treatmentDate'),
       isLegacy: isLegacy,
+      animalIndexes: (data['animalIndexes'] as List?)?.map((e) => (e as num).toInt()).toList(),
     );
   }
 
@@ -189,5 +208,6 @@ class TreatmentLogEntry {
         // Server-stamped audit/order time — deliberately never the
         // caller-selected treatmentDate, which is saved separately above.
         'timestamp': FieldValue.serverTimestamp(),
+        if (animalIndexes != null && animalIndexes!.isNotEmpty) 'animalIndexes': animalIndexes,
       };
 }

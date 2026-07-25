@@ -993,13 +993,15 @@ class RescueCaseRepository {
         // rejected / cancelled / completed: nothing to do here, the
         // pointer overwrite below is the reconciliation.
       }
+      final offeredAt = Timestamp.now();
       tx.set(newRef, {
         'caseId': caseId,
         'riderId': riderId,
         'riderName': riderName,
         'riderType': riderType,
         'status': 'pending',
-        'offeredAt': Timestamp.now(),
+        'offeredAt': offeredAt,
+        'expiresAt': Timestamp.fromDate(offeredAt.toDate().add(kTransportOfferTtl)),
         'respondedAt': null,
         'acceptedAt': null,
         'rejectedAt': null,
@@ -1032,29 +1034,68 @@ class RescueCaseRepository {
     final caseRef = _caseDoc(caseId);
     final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
 
-    await _db.runTransaction((tx) async {
-      final snap = await tx.get(assignmentRef);
-      if (!snap.exists || snap.data()?['status'] != 'pending') return;
-      final now = Timestamp.now();
-      tx.update(assignmentRef, {
-        'status': 'accepted',
-        'respondedAt': now,
-        'acceptedAt': now,
-        'vehicle': riderVehicle,
-        'plate': riderPlate,
+    try {
+      await _db.runTransaction((tx) async {
+        // All reads before any writes — a transaction that interleaves a
+        // read after a write (as this method used to for the case doc, and
+        // as cancelAssignment used to as well) throws on every run and the
+        // write silently never commits. See cancelAssignment's doc comment
+        // for the full incident this class of bug caused.
+        final snap = await tx.get(assignmentRef);
+        final caseSnap = await tx.get(caseRef);
+
+        if (!snap.exists) {
+          throw const OfferNoLongerAvailableException('assignment no longer exists');
+        }
+        final data = snap.data()!;
+        if (data['status'] != 'pending') {
+          throw OfferNoLongerAvailableException('status is ${data['status']}, not pending');
+        }
+        if (caseSnap.data()?['currentAssignmentId'] != assignmentId) {
+          // The case has moved on to a newer offer (or none) since this one
+          // was created — a stale/superseded offer trying to resurrect
+          // itself. Ignore rather than accept.
+          throw const OfferNoLongerAvailableException('a newer offer has superseded this one');
+        }
+        final expiresAt = data['expiresAt'];
+        final now = Timestamp.now();
+        if (expiresAt is Timestamp && now.compareTo(expiresAt) > 0) {
+          // Clean up in place instead of accepting a stale offer.
+          tx.update(assignmentRef, {'status': 'expired', 'respondedAt': now});
+          tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
+          throw const OfferNoLongerAvailableException('offer expired');
+        }
+
+        tx.update(assignmentRef, {
+          'status': 'accepted',
+          'respondedAt': now,
+          'acceptedAt': now,
+          'vehicle': riderVehicle,
+          'plate': riderPlate,
+        });
+        tx.update(caseRef, {
+          'status': 'assigned',
+          'riderId': riderId,
+          'assignedVolunteerId': riderId,
+          'assignedVolunteerName': riderName,
+          'assignedVehicle': riderVehicle,
+          'assignedPlate': riderPlate,
+          'statusHistory': FieldValue.arrayUnion([
+            {'status': 'Pet transporter assigned: $riderName.', 'timestamp': now},
+          ]),
+        });
       });
-      tx.update(caseRef, {
-        'status': 'assigned',
-        'riderId': riderId,
-        'assignedVolunteerId': riderId,
-        'assignedVolunteerName': riderName,
-        'assignedVehicle': riderVehicle,
-        'assignedPlate': riderPlate,
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Pet transporter assigned: $riderName.', 'timestamp': now},
-        ]),
-      });
-    });
+    } on FirebaseException catch (error, stackTrace) {
+      _logAssignmentFailure(
+        operation: 'acceptAssignment',
+        caseId: caseId,
+        assignmentId: assignmentId,
+        riderId: riderId,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   /// Marks an offer rejected with [reason]. Deliberately never changes the
@@ -1068,18 +1109,46 @@ class RescueCaseRepository {
     required String assignmentId,
     required String reason,
   }) async {
+    final caseRef = _caseDoc(caseId);
     final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
-    await _db.runTransaction((tx) async {
-      final snap = await tx.get(assignmentRef);
-      if (!snap.exists || snap.data()?['status'] != 'pending') return;
-      final now = Timestamp.now();
-      tx.update(assignmentRef, {
-        'status': 'rejected',
-        'respondedAt': now,
-        'rejectedAt': now,
-        'rejectionReason': reason,
+    try {
+      await _db.runTransaction((tx) async {
+        final snap = await tx.get(assignmentRef);
+        final caseSnap = await tx.get(caseRef);
+        if (!snap.exists) {
+          throw const OfferNoLongerAvailableException('assignment no longer exists');
+        }
+        final data = snap.data()!;
+        if (data['status'] != 'pending') {
+          throw OfferNoLongerAvailableException('status is ${data['status']}, not pending');
+        }
+        final expiresAt = data['expiresAt'];
+        final now = Timestamp.now();
+        if (expiresAt is Timestamp && now.compareTo(expiresAt) > 0) {
+          tx.update(assignmentRef, {'status': 'expired', 'respondedAt': now});
+          if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
+            tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
+          }
+          throw const OfferNoLongerAvailableException('offer expired');
+        }
+        tx.update(assignmentRef, {
+          'status': 'rejected',
+          'respondedAt': now,
+          'rejectedAt': now,
+          'rejectionReason': reason,
+        });
       });
-    });
+    } on FirebaseException catch (error, stackTrace) {
+      _logAssignmentFailure(
+        operation: 'rejectAssignment',
+        caseId: caseId,
+        assignmentId: assignmentId,
+        riderId: null,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   /// Organization-initiated cancellation of a still-pending offer — the
@@ -1092,6 +1161,18 @@ class RescueCaseRepository {
   /// where a newer offer was already created by the time this resolves).
   /// A no-op if the offer is no longer pending, guarding against
   /// double-cancellation.
+  ///
+  /// IMPORTANT: both `tx.get()` calls must happen before either `tx.update()`
+  /// call — Firestore transactions require every read to precede every write
+  /// in the same transaction, or the transaction throws on every attempt and
+  /// silently never commits. An earlier version of this method read the
+  /// assignment, wrote to it, and only then read the case doc — which meant
+  /// cancellation *always* failed (surfacing as "Could not cancel this
+  /// offer.") while leaving the assignment doc's status as 'pending' in
+  /// Firestore. That, combined with the demo-response timer in
+  /// assign_rider_page.dart re-reading the doc fresh a few seconds later and
+  /// finding it still 'pending', is what let a "cancelled" demo transporter
+  /// become "accepted" after the fact. Do not reorder these calls.
   Future<void> cancelAssignment({
     required String caseId,
     required String assignmentId,
@@ -1099,21 +1180,82 @@ class RescueCaseRepository {
   }) async {
     final caseRef = _caseDoc(caseId);
     final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
+    try {
+      await _db.runTransaction((tx) async {
+        final snap = await tx.get(assignmentRef);
+        final caseSnap = await tx.get(caseRef);
+        if (!snap.exists || snap.data()?['status'] != 'pending') return;
+        final now = Timestamp.now();
+        tx.update(assignmentRef, {
+          'status': 'cancelled',
+          'respondedAt': now,
+          'cancelledAt': now,
+          if (reason != null && reason.isNotEmpty) 'cancellationReason': reason,
+        });
+        if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
+          tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
+        }
+      });
+    } on FirebaseException catch (error, stackTrace) {
+      _logAssignmentFailure(
+        operation: 'cancelAssignment',
+        caseId: caseId,
+        assignmentId: assignmentId,
+        riderId: null,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
+  }
+
+  /// Opportunistic cleanup for a pending offer whose TTL has elapsed,
+  /// without an accept/reject/cancel ever having been attempted on it.
+  /// Called from screens that read the latest assignment for a case (spec
+  /// §4's startup-resolution behavior), never on a timer of its own — there
+  /// is no server-side expiry job. Safe to call redundantly; a no-op unless
+  /// the offer is still 'pending' and past its `expiresAt`.
+  Future<void> reconcileStaleOffer({
+    required String caseId,
+    required String assignmentId,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
     await _db.runTransaction((tx) async {
       final snap = await tx.get(assignmentRef);
-      if (!snap.exists || snap.data()?['status'] != 'pending') return;
-      final now = Timestamp.now();
-      tx.update(assignmentRef, {
-        'status': 'cancelled',
-        'respondedAt': now,
-        'cancelledAt': now,
-        if (reason != null && reason.isNotEmpty) 'cancellationReason': reason,
-      });
       final caseSnap = await tx.get(caseRef);
+      if (!snap.exists) return;
+      final data = snap.data()!;
+      if (data['status'] != 'pending') return;
+      final expiresAt = data['expiresAt'];
+      if (expiresAt is! Timestamp) return;
+      if (Timestamp.now().compareTo(expiresAt) <= 0) return;
+      tx.update(assignmentRef, {'status': 'expired', 'respondedAt': Timestamp.now()});
       if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
         tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
       }
     });
+  }
+
+  /// Development diagnostics only (spec §6) — never surfaced in production
+  /// UI copy, which stays a plain user-facing message at the call site.
+  void _logAssignmentFailure({
+    required String operation,
+    required String caseId,
+    required String assignmentId,
+    required String? riderId,
+    required FirebaseException error,
+    required StackTrace stackTrace,
+  }) {
+    if (!kDebugMode) return;
+    debugPrint('Transporter assignment operation failed: $operation');
+    debugPrint('caseId: $caseId');
+    debugPrint('assignmentId: $assignmentId');
+    if (riderId != null) debugPrint('riderId: $riderId');
+    debugPrint('code: ${error.code}');
+    debugPrint('message: ${error.message}');
+    debugPrint('plugin: ${error.plugin}');
+    debugPrintStack(stackTrace: stackTrace);
   }
 
   /// Closes out an accepted assignment once the animal has reached

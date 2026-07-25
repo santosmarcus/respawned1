@@ -209,6 +209,90 @@ class OrganizationRepository {
     }, SetOptions(merge: true));
   }
 
+  /// Temporary standalone-admin bootstrap (spec §7) — lets an existing admin
+  /// account with no `organizationId` and no pending invitation create a
+  /// minimal organization directly from Organization Profile, until full
+  /// Organization signup/verification is the only path. Deliberately skips
+  /// [createOrUpdateDraft]'s verification pipeline entirely (no
+  /// `verificationStatus`, and — unlike that method — never touches
+  /// `users/{uid}.role`, so a standalone admin stays routed into the normal
+  /// admin shell rather than being redirected into the separate
+  /// organization-role flow). Reuses the exact same `organizations/{orgId}`
+  /// collection and [OrgMembershipService] membership model as every other
+  /// organization entry point — this is not a second organization system.
+  ///
+  /// Idempotent against repeated taps: re-checks [currentOrganizationFor]
+  /// inside the same transaction that creates the document, so two rapid
+  /// calls for the same uid can never both create a document — the second
+  /// one always resolves to the first one's id instead.
+  Future<String> createBootstrapOrganization({
+    required String uid,
+    required String name,
+    required String location,
+    String? description,
+    String? email,
+    String? phone,
+    String? facebookUrl,
+    String? website,
+    List<ServiceArea> serviceAreas = const [],
+    required List<String> acceptedSpecies,
+    String? avatarUrl,
+  }) async {
+    final existing = await currentOrganizationFor(uid);
+    if (existing != null) return existing.id;
+
+    final orgRef = _organizations.doc();
+    try {
+      await _db.runTransaction((tx) async {
+        final userSnap = await tx.get(_users.doc(uid));
+        final alreadyLinked = userSnap.data()?['organizationId'] as String?;
+        if (alreadyLinked != null && alreadyLinked.isNotEmpty) {
+          throw StateError('already-linked');
+        }
+        tx.set(orgRef, {
+          'name': name,
+          'normalizedName': normalizeForMatch(name),
+          'description': description,
+          'location': location,
+          'normalizedAddress': normalizeForMatch(location),
+          if (email != null && email.isNotEmpty) 'email': email,
+          if (phone != null && phone.isNotEmpty) ...{
+            'phone': phone,
+            'contactNumber': phone,
+            'normalizedPhone': normalizePhoneForMatch(phone),
+          },
+          if (facebookUrl != null && facebookUrl.isNotEmpty) 'facebookUrl': facebookUrl,
+          if (website != null && website.isNotEmpty) 'website': website,
+          if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatarUrl': avatarUrl,
+          'serviceAreas': serviceAreas.map((s) => s.toMap()).toList(),
+          'acceptedSpecies': acceptedSpecies,
+          'ownerId': uid,
+          // Marks this org as created via the temporary bootstrap path
+          // rather than the full signup/verification pipeline — purely
+          // informational (e.g. for a future admin audit), never read by
+          // any gating logic today.
+          'bootstrapped': true,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        tx.set(_users.doc(uid), {'organizationId': orgRef.id}, SetOptions(merge: true));
+        tx.set(orgRef.collection('members').doc(uid), {
+          'role': OrgRole.admin.name,
+          'status': 'active',
+          'joinedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      });
+    } on StateError {
+      // Lost a race against a second in-flight tap (or the account was
+      // linked by some other flow in the meantime) — resolve to whichever
+      // organization actually won rather than erroring the UI.
+      final afterRace = await currentOrganizationFor(uid);
+      if (afterRace != null) return afterRace.id;
+      rethrow;
+    }
+    return orgRef.id;
+  }
+
   /// Profile-management fields only — deliberately never touches
   /// `verification`/`verificationStatus`/`verification*At` so editing the
   /// public profile can never silently invalidate an existing approval.

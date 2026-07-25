@@ -4,21 +4,35 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 
 /// Add or edit a single expense record. Returns true if a write actually
 /// happened (caller can rely on the live `expensesProvider` stream to
 /// reflect it — this is just for e.g. showing a confirmation snackbar).
+///
+/// [animalOptions] — the case's animals, for the "Applies to" selector
+/// (One animal / Multiple animals / Shared case expense); pass an empty or
+/// single-entry list to skip it entirely for a single-animal case, where
+/// every expense is implicitly case-wide. [initialAnimalIndexes] pre-selects
+/// the currently-viewed animal when opened from a specific-animal context.
 Future<bool> showAddEditExpenseSheet(
   BuildContext context, {
   required String caseId,
   Expense? existing,
+  List<CaseAnimalOption> animalOptions = const [],
+  Set<int> initialAnimalIndexes = const {},
 }) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.background,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (_) => _AddEditExpenseSheetBody(caseId: caseId, existing: existing),
+    builder: (_) => _AddEditExpenseSheetBody(
+      caseId: caseId,
+      existing: existing,
+      animalOptions: animalOptions,
+      initialAnimalIndexes: initialAnimalIndexes,
+    ),
   );
   return result ?? false;
 }
@@ -26,7 +40,14 @@ Future<bool> showAddEditExpenseSheet(
 class _AddEditExpenseSheetBody extends ConsumerStatefulWidget {
   final String caseId;
   final Expense? existing;
-  const _AddEditExpenseSheetBody({required this.caseId, this.existing});
+  final List<CaseAnimalOption> animalOptions;
+  final Set<int> initialAnimalIndexes;
+  const _AddEditExpenseSheetBody({
+    required this.caseId,
+    this.existing,
+    this.animalOptions = const [],
+    this.initialAnimalIndexes = const {},
+  });
 
   @override
   ConsumerState<_AddEditExpenseSheetBody> createState() => _AddEditExpenseSheetBodyState();
@@ -44,6 +65,8 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   ExpenseCategory? _category;
   FundingSource? _fundingSource;
   late DateTime _incurredAt = widget.existing?.incurredAt ?? DateTime.now();
+  late Set<int> _animalIndexes =
+      (widget.existing?.animalIndexes?.toSet()) ?? widget.initialAnimalIndexes.toSet();
 
   // Field-level errors — shown directly under each field, not only as one
   // generic message. _errorMessage is reserved for the actual write
@@ -104,6 +127,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       incurredAt: _incurredAt,
       createdBy: widget.existing?.createdBy ?? 'Admin Staff',
+      animalIndexes: _animalIndexes.isEmpty ? null : _animalIndexes.toList(),
     );
 
     try {
@@ -160,6 +184,16 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
             ),
             if (_titleError != null) _FieldError(_titleError!),
             const SizedBox(height: 14),
+
+            if (widget.animalOptions.length > 1) ...[
+              _Label('Applies to'),
+              CaseAnimalMultiSelectBar(
+                options: widget.animalOptions,
+                selected: _animalIndexes,
+                onChanged: (next) => setState(() => _animalIndexes = next),
+              ),
+              const SizedBox(height: 14),
+            ],
 
             _Label('Category', required: true),
             _EnumDropdown<ExpenseCategory>(

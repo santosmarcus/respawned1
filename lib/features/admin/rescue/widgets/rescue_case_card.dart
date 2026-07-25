@@ -6,20 +6,34 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 
-/// Rescue list card: photo, case ID (header) + species summary + urgency,
-/// short location, reporter, time submitted, status, and a "View Details"
-/// action. Always exactly one card per case document — a multi-animal
-/// report's animals only ever affect the species-summary line below the
-/// header, never the number of cards shown.
+/// Compact rescue list card — image, case ID, species summary, priority,
+/// short location, reported date/time, current phase/status, and a "View
+/// Details" action, sized consistently with AnimalRecordCard/adoption cards
+/// (12px padding, 16 radius, 80x80 image). Always exactly one card per case
+/// document — a multi-animal report's animals only ever affect the
+/// species-summary line, never the number of cards shown. Deliberately
+/// drops reporter name and the multi-line status-history preview that used
+/// to make this card substantially taller than every other admin list card
+/// — that detail still lives on Rescue Details, one tap away.
 ///
-/// [showStatusChip] is on by default for anything outside the five main
-/// pipeline tabs (where the tab itself already communicates the status) —
-/// pass it explicitly to control this from the caller instead.
+/// [showStatusChip] additionally renders a colored status pill (used
+/// outside the five main pipeline tabs, where the tab itself doesn't
+/// already communicate status) — the plain-text phase label from
+/// [RescueStatus.label] is shown either way, per the compact-card spec's
+/// "Current phase/status" field.
+///
+/// [pendingOfferNote] (Assign-tab only, spec §5) — when the case already
+/// has a valid pending transporter offer, replaces the location/date line
+/// with "Awaiting transporter response · Offered to: X" so the card never
+/// reads as completely unassigned. Passed in by the caller (which watches
+/// the assignment stream), not computed here — this card stays a plain
+/// StatelessWidget with no Firestore dependency of its own.
 class RescueCaseCard extends StatelessWidget {
   final RescueCase rescueCase;
   final VoidCallback onTap;
   final bool showStatusChip;
   final bool highlightBorder;
+  final String? pendingOfferNote;
 
   const RescueCaseCard({
     super.key,
@@ -27,43 +41,8 @@ class RescueCaseCard extends StatelessWidget {
     required this.onTap,
     this.showStatusChip = false,
     this.highlightBorder = false,
+    this.pendingOfferNote,
   });
-
-  String _previewText(RescueCase c) {
-    switch (c.status) {
-      case RescueStatus.pendingReview:
-        return c.condition ?? '';
-      case RescueStatus.accepted:
-      case RescueStatus.awaitingAssignment:
-        return 'Searching for Pet Transporter...';
-      case RescueStatus.ongoing:
-        return c.statusHistory.isNotEmpty ? c.statusHistory.last.status : 'In progress';
-      case RescueStatus.treatment:
-        return 'The animal has reached the clinic. Animal is now in treatment.';
-      case RescueStatus.intake:
-        return 'Animal marked ready for Intake.';
-      case RescueStatus.rejected:
-        return 'Rejected: ${c.rejectionReasonOther ?? c.rejectionReason?.label ?? '-'}';
-      case RescueStatus.referred:
-        return c.statusHistory.isNotEmpty ? c.statusHistory.last.status : 'Referred.';
-      case RescueStatus.possibleDuplicate:
-        return 'Flagged as a possible duplicate report.';
-      case RescueStatus.merged:
-        return 'Merged into another case.';
-      case RescueStatus.completed:
-        return 'Case completed.';
-      case RescueStatus.cancelled:
-        return 'Case cancelled.';
-      case RescueStatus.unableToLocate:
-        return 'Transporter could not find the animal at the reported location.';
-      case RescueStatus.awaitingReporterResponse:
-        return 'Awaiting your response to confirm or update the location.';
-      case RescueStatus.pickupUnsuccessful:
-        return 'Pickup attempt unsuccessful — could not reach the reporter.';
-      case RescueStatus.needsSpecializedAssistance:
-        return 'Escalated — animal needs specialized handling assistance.';
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -74,10 +53,11 @@ class RescueCaseCard extends StatelessWidget {
         : '';
     final dateStr = ts != null ? '${ts.month}/${ts.day}/${ts.year}' : '';
     final thumbnail = c.photoUrls.isNotEmpty ? c.photoUrls.first : null;
-    // Treatment-stage cards show clinic + days in treatment instead of the
-    // generic status preview/address/timestamp lines — same shared card,
-    // just a stage-aware body, per the Treatment card hierarchy.
+    // Treatment-stage cards show the clinic name instead of the reported
+    // address — still exactly one line, same compact shape.
     final isTreatmentStage = c.status == RescueStatus.treatment;
+    final locationLine = isTreatmentStage ? (c.vetClinicName ?? '') : (c.address ?? '');
+    final dateTimeLine = ts != null ? '$dateStr  $timeStr' : '';
 
     return GestureDetector(
       onTap: onTap,
@@ -100,22 +80,13 @@ class RescueCaseCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               child: thumbnail != null
                   ? Image.network(
-                thumbnail,
-                width: 72,
-                height: 72,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 72,
-                  height: 72,
-                  color: AppColors.tearspwn,
-                ),
-              )
-                  : Container(
-                width: 72,
-                height: 72,
-                color: AppColors.tearspwn,
-                child: const Icon(Icons.pets, color: AppColors.textSecondary),
-              ),
+                      thumbnail,
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _placeholder(),
+                    )
+                  : _placeholder(),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -128,7 +99,7 @@ class RescueCaseCard extends StatelessWidget {
                       Expanded(
                         child: Text(
                           '#${c.shortCaseId}',
-                          style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                          style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -149,53 +120,37 @@ class RescueCaseCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
-                  if (isTreatmentStage) ...[
-                    if ((c.vetClinicName ?? '').isNotEmpty)
-                      Text(
-                        c.vetClinicName!,
-                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                  const SizedBox(height: 3),
+                  if (pendingOfferNote != null)
                     Text(
-                      '${c.daysInTreatment} day${c.daysInTreatment == 1 ? '' : 's'} in treatment',
-                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-                    ),
-                  ] else ...[
-                    Text(
-                      _previewText(c),
-                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                      maxLines: 2,
+                      pendingOfferNote!,
+                      style: GoogleFonts.zain(
+                          fontSize: 11, fontWeight: FontWeight.w600, color: const Color(0xFF9C6B10)),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 6),
+                    )
+                  else if (locationLine.isNotEmpty)
                     Text(
-                      c.address ?? '',
+                      locationLine,
                       style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (ts != null)
-                      Text(
-                        '$timeStr  $dateStr',
-                        style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
-                      ),
-                  ],
-                  const SizedBox(height: 4),
-                  Text(
-                    'Reported by: ${c.reporterName ?? '-'}',
-                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-                  ),
+                  if (dateTimeLine.isNotEmpty)
+                    Text(dateTimeLine, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Case ID already headlines the card above — this
-                      // row is just the status chip now (when shown), not
-                      // a second copy of the ID.
                       Expanded(
-                        child: showStatusChip ? RescueStatusChip(status: c.status) : const SizedBox.shrink(),
+                        child: showStatusChip
+                            ? RescueStatusChip(status: c.status)
+                            : Text(
+                                c.status.label,
+                                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                       ),
                       ElevatedButton(
                         onPressed: onTap,
@@ -225,4 +180,11 @@ class RescueCaseCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _placeholder() => Container(
+        width: 80,
+        height: 80,
+        color: AppColors.tearspwn,
+        child: const Icon(Icons.pets, color: AppColors.textSecondary),
+      );
 }

@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 
@@ -25,7 +26,33 @@ class StaffMembersPage extends StatefulWidget {
 class _StaffMembersPageState extends State<StaffMembersPage> {
   final _repo = OrganizationInvitationRepository();
 
+  /// Spec's invitation-creation restriction: only an authenticated
+  /// organization Admin (checked against *this* organization specifically,
+  /// via the existing OrgMembershipService — never a second membership
+  /// lookup) may invite another account. A Member who somehow reaches this
+  /// page (or an unrelated account) sees Staff Members read-only, with no
+  /// Add Member action — enforced here at the UI level; see this session's
+  /// final report for why this is not yet a server-side security rule.
+  bool _isOrgAdmin = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadIsOrgAdmin();
+  }
+
+  Future<void> _loadIsOrgAdmin() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final membership = await OrgMembershipService().getMembership(uid);
+    if (mounted) {
+      setState(() => _isOrgAdmin =
+          membership != null && membership.organizationId == widget.organizationId && membership.role == OrgRole.admin);
+    }
+  }
+
   Future<void> _openAddMemberSheet() async {
+    if (!_isOrgAdmin) return;
     final emailController = TextEditingController();
     OrgRole role = OrgRole.staff;
     final result = await showModalBottomSheet<bool>(
@@ -98,6 +125,10 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
   }
 
   Future<void> _submitInvite(String email, OrgRole role) async {
+    if (!_isOrgAdmin) {
+      _snack('Only an organization Admin can invite new members.', error: true);
+      return;
+    }
     try {
       if (await _repo.isAlreadyActiveMember(organizationId: widget.organizationId, email: email)) {
         _snack('This email is already an active member of this organization.', error: true);
@@ -197,7 +228,10 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
         backgroundColor: AppColors.textPrimary,
         leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.background), onPressed: () => Navigator.pop(context)),
         title: Text('Staff Members', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
-        actions: [IconButton(icon: const Icon(Icons.person_add_alt_outlined, color: AppColors.background), onPressed: _openAddMemberSheet)],
+        actions: [
+          if (_isOrgAdmin)
+            IconButton(icon: const Icon(Icons.person_add_alt_outlined, color: AppColors.background), onPressed: _openAddMemberSheet),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

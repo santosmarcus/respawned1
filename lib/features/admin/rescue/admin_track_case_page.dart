@@ -441,7 +441,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     // matters for the edge case of reopening the case (e.g. after an app
     // restart) while an offer is still outstanding.
     if (assignment != null && assignment.status == TransportAssignmentStatus.pending) {
-      return _PendingAssignmentBanner(assignment: assignment, caseData: data);
+      return _PendingAssignmentBanner(caseId: widget.caseId, assignment: assignment, caseData: data);
     }
     if (assignment != null && assignment.status == TransportAssignmentStatus.rejected) {
       return _DeclinedAssignmentBanner(
@@ -1465,16 +1465,109 @@ class _CompactTransporterRow extends ConsumerWidget {
   }
 }
 
-class _PendingAssignmentBanner extends StatelessWidget {
+/// Reached whenever this page opens (or reopens — e.g. after an app
+/// restart) while an offer is still outstanding (spec §4/§5). Shows how
+/// long the offer has been waiting and a Cancel Offer action, so the admin
+/// is never stuck watching an indefinite spinner with no way to move a case
+/// off a transporter who isn't responding.
+class _PendingAssignmentBanner extends ConsumerStatefulWidget {
+  final String caseId;
   final TransportAssignment assignment;
   final Map<String, dynamic> caseData;
-  const _PendingAssignmentBanner({required this.assignment, required this.caseData});
+  const _PendingAssignmentBanner({required this.caseId, required this.assignment, required this.caseData});
+
+  @override
+  ConsumerState<_PendingAssignmentBanner> createState() => _PendingAssignmentBannerState();
+}
+
+class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBanner> {
+  bool _cancelling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Startup resolution (spec §4): a pending offer whose TTL already
+    // elapsed before this page was even opened is cleaned up in place
+    // rather than shown as if still actionable — currentAssignmentProvider
+    // then reflects the clean, assignable state with no further action
+    // here. A no-op if it hasn't actually expired.
+    if (widget.assignment.isStalePending) {
+      ref.read(rescueCaseRepositoryProvider).reconcileStaleOffer(
+            caseId: widget.caseId,
+            assignmentId: widget.assignment.id,
+          );
+    }
+  }
+
+  String _pendingDuration() {
+    final offeredAt = widget.assignment.offeredAt;
+    if (offeredAt == null) return '';
+    final elapsed = DateTime.now().difference(offeredAt);
+    if (elapsed.inMinutes < 1) return 'Pending for ${elapsed.inSeconds}s';
+    return 'Pending for ${elapsed.inMinutes}m';
+  }
+
+  Future<void> _cancelOffer() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Cancel this offer?',
+            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        content: Text(
+          'The pending offer to ${widget.assignment.riderName} will be cancelled, and you can select another transporter.',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Keep Waiting',
+                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE05353),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _cancelling = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
+            caseId: widget.caseId,
+            assignmentId: widget.assignment.id,
+            reason: 'Cancelled by organization while waiting',
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Offer cancelled. You may select another transporter.')),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not cancel this offer: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cancelling = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final clinicName = caseData['vetClinicName'] as String?;
+    final clinicName = widget.caseData['vetClinicName'] as String?;
+    final duration = _pendingDuration();
     return Container(
-      height: 180,
       color: AppColors.slaterspwn,
       padding: const EdgeInsets.all(16),
       child: Center(
@@ -1484,15 +1577,32 @@ class _PendingAssignmentBanner extends StatelessWidget {
             const SizedBox(
                 width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3)),
             const SizedBox(height: 10),
-            Text(assignment.riderName,
-                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text('Awaiting transporter response',
+                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 2),
+            Text('Offered to: ${widget.assignment.riderName}',
+                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+            if (duration.isNotEmpty)
+              Text(duration, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
             const SizedBox(height: 2),
             Text(
-              clinicName != null && clinicName.isNotEmpty
-                  ? 'Waiting for the transporter to respond… · $clinicName'
-                  : 'Waiting for the transporter to respond…',
+              clinicName != null && clinicName.isNotEmpty ? 'Selected clinic: $clinicName' : '',
               textAlign: TextAlign.center,
-              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton(
+              onPressed: _cancelling ? null : _cancelOffer,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFE05353),
+                side: const BorderSide(color: Color(0xFFE05353)),
+                minimumSize: const Size(0, 32),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              child: _cancelling
+                  ? const SizedBox(
+                      width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
           ],
         ),

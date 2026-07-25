@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -339,11 +340,34 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final c = cases[index];
-                    return RescueCaseCard(
-                      rescueCase: c,
-                      showStatusChip: filters.statusOverride != null,
-                      highlightBorder: c.status == RescueStatus.pendingReview,
-                      onTap: () => _navigateToDetail(context, c),
+                    final canHavePendingOffer =
+                        c.status == RescueStatus.accepted || c.status == RescueStatus.awaitingAssignment;
+                    if (!canHavePendingOffer) {
+                      return RescueCaseCard(
+                        rescueCase: c,
+                        showStatusChip: filters.statusOverride != null,
+                        highlightBorder: c.status == RescueStatus.pendingReview,
+                        onTap: () => _navigateToDetail(context, c),
+                      );
+                    }
+                    // Assign-tab cases only: watch the current offer so the
+                    // card never reads as completely unassigned while one
+                    // is outstanding (spec §5). Scoped to this branch so
+                    // every other tab avoids the extra per-card listener.
+                    return Consumer(
+                      builder: (context, ref, _) {
+                        final assignment = ref.watch(currentAssignmentProvider(c.id)).asData?.value;
+                        final pendingNote =
+                            assignment != null && assignment.status == TransportAssignmentStatus.pending
+                                ? 'Awaiting transporter response · Offered to: ${assignment.riderName}'
+                                : null;
+                        return RescueCaseCard(
+                          rescueCase: c,
+                          showStatusChip: filters.statusOverride != null,
+                          pendingOfferNote: pendingNote,
+                          onTap: () => _navigateToDetail(context, c),
+                        );
+                      },
                     );
                   },
                 );

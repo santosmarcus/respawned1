@@ -7,14 +7,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/create_fundraiser_draft_page.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/release_animal_sheet.dart';
@@ -50,6 +53,19 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   bool _isSaving = false;
   bool _isActingOnNextStep = false;
   bool _closingCase = false;
+
+  /// Shared by Treatment Logs and Cost Tracking (spec §1) — both sections
+  /// live in this one page/State, so a single field naturally preserves the
+  /// selection when scrolling between them. Null = All Animals (default).
+  /// Keyed by the case's `animals[]` list index — see CaseAnimalOption's
+  /// doc comment for why that's the only stable identifier available.
+  int? _selectedAnimalIndex;
+
+  /// "Applies to" selection for the update form currently being filled in
+  /// — separate from [_selectedAnimalIndex] (the page-level filter) since
+  /// the admin can still choose "All Animals" for a log while viewing one
+  /// animal's filtered timeline, or vice versa. Empty set = All Animals.
+  Set<int> _updateAnimalIndexes = {};
 
   String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   String get _actorName {
@@ -260,6 +276,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       mediaTypes: mediaTypes,
       storagePaths: storagePaths,
       createdBy: 'Admin Staff',
+      animalIndexes: _updateAnimalIndexes.isEmpty ? null : _updateAnimalIndexes.toList(),
     );
 
     try {
@@ -283,6 +300,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _postTreatmentInstructionsController.clear();
           _pickedMedia.clear();
           _mediaError = null;
+          _updateAnimalIndexes = {};
         });
       }
     } catch (e) {
@@ -355,7 +373,35 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final data = c.raw.isNotEmpty ? c.raw : widget.data;
 
     final logsAsync = ref.watch(treatmentLogsProvider(widget.caseId));
-    final logs = (logsAsync.asData?.value ?? const <TreatmentLogEntry>[]).reversed.toList();
+    final allLogs = (logsAsync.asData?.value ?? const <TreatmentLogEntry>[]).reversed.toList();
+
+    // Most cases reach Treatment with no AnimalRecord created yet (that
+    // normally happens at Intake) — namesByAnimalIndex is empty for those,
+    // and every option falls back to a species-ordinal label ("Dog 1").
+    final linkedRecords = ref.watch(recordsForCaseProvider(widget.caseId)).asData?.value ?? const [];
+    final namesByAnimalIndex = <int, String>{
+      for (final r in linkedRecords)
+        if (r.sourceAnimalIndex != null && r.name.isNotEmpty) r.sourceAnimalIndex!: r.name,
+    };
+    final animalOptions = buildCaseAnimalOptions(c, namesByAnimalIndex: namesByAnimalIndex);
+    final selectedAnimalIndex = _selectedAnimalIndex != null && _selectedAnimalIndex! < animalOptions.length
+        ? _selectedAnimalIndex
+        : null;
+
+    final logs = selectedAnimalIndex == null
+        ? allLogs
+        : allLogs.where((l) => l.appliesToAnimal(selectedAnimalIndex)).toList();
+
+    String? logAnimalLabel(TreatmentLogEntry log) {
+      if (animalOptions.length <= 1) return null;
+      if (log.appliesToAllAnimals) return 'All animals';
+      final labels = <String>[];
+      for (final i in log.animalIndexes!) {
+        final match = animalOptions.where((o) => o.index == i);
+        labels.add(match.isNotEmpty ? match.first.label : 'Animal ${i + 1}');
+      }
+      return labels.join(' and ');
+    }
 
     final expensesAsync = ref.watch(expensesProvider(widget.caseId));
     final expenses = expensesAsync.asData?.value ?? const [];
@@ -435,6 +481,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               ],
             ),
 
+            if (animalOptions.length > 1) ...[
+              const SizedBox(height: 16),
+              CaseAnimalSelectorBar(
+                options: animalOptions,
+                selected: selectedAnimalIndex,
+                onChanged: (v) => setState(() {
+                  _selectedAnimalIndex = v;
+                  _showAllLogs = false;
+                }),
+              ),
+            ],
+
             const SizedBox(height: 16),
 
             // Treatment Logs
@@ -448,10 +506,14 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (logs.isEmpty)
-              Text('No treatment logs yet.',
+              Text(
+                  selectedAnimalIndex == null
+                      ? 'No treatment logs yet.'
+                      : 'No treatment logs for this animal yet.',
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
             else ...[
-              ...(_showAllLogs ? logs : logs.take(2).toList()).map((log) => TreatmentLogCard(log: log)),
+              ...(_showAllLogs ? logs : logs.take(2).toList())
+                  .map((log) => TreatmentLogCard(log: log, animalLabel: logAnimalLabel(log))),
               if (logs.length > 2)
                 Center(
                   child: GestureDetector(
@@ -480,7 +542,16 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
-                    onPressed: () => setState(() => _showUpdateForm = !_showUpdateForm),
+                    onPressed: () => setState(() {
+                      _showUpdateForm = !_showUpdateForm;
+                      // Defaults the new update's "Applies to" to whatever
+                      // animal is currently in view, so filling out a form
+                      // while viewing one animal's timeline doesn't
+                      // silently default to All Animals underneath it.
+                      if (_showUpdateForm) {
+                        _updateAnimalIndexes = selectedAnimalIndex != null ? {selectedAnimalIndex} : {};
+                      }
+                    }),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.textPrimary),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
@@ -492,7 +563,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 ),
                 if (_showUpdateForm) ...[
                   const SizedBox(height: 16),
-                  _buildUpdateForm(),
+                  _buildUpdateForm(animalOptions),
                 ],
               ],
               const SizedBox(height: 24),
@@ -501,9 +572,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             _CostTrackingSection(
               caseId: widget.caseId,
               rescueCase: c,
+              allExpenses: expenses,
               totalExpenses: totalExpenses,
               fundedAmount: fundedAmount,
               outstandingBalance: outstandingBalance,
+              animalOptions: animalOptions,
+              selectedAnimalIndex: selectedAnimalIndex,
             ),
 
             const SizedBox(height: 32),
@@ -574,13 +648,28 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         _ => 'Choose Next Step',
       };
 
-  Widget _buildUpdateForm() {
+  Widget _buildUpdateForm(List<CaseAnimalOption> animalOptions) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Enter Treatment Update',
             style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
         const SizedBox(height: 16),
+
+        // Required per spec: One animal / Multiple animals / All animals.
+        // Only shown for a multi-animal case — a single-animal case has
+        // nothing to choose between, so this stays hidden and every log
+        // implicitly applies to that one animal (animalIndexes left null).
+        if (animalOptions.length > 1) ...[
+          _FieldLabel('Applies to', required: true),
+          const SizedBox(height: 4),
+          CaseAnimalMultiSelectBar(
+            options: animalOptions,
+            selected: _updateAnimalIndexes,
+            onChanged: (next) => setState(() => _updateAnimalIndexes = next),
+          ),
+          const SizedBox(height: 16),
+        ],
 
         // Date only — defaults to today when the form opens (see initState /
         // _addUpdate's reset), never a time picker. Only a manual change
@@ -876,20 +965,49 @@ class _NextStepDropdown extends StatelessWidget {
 class _CostTrackingSection extends StatelessWidget {
   final String caseId;
   final RescueCase rescueCase;
+  final List<Expense> allExpenses;
   final double totalExpenses;
   final double fundedAmount;
   final double outstandingBalance;
+  final List<CaseAnimalOption> animalOptions;
+  final int? selectedAnimalIndex;
 
   const _CostTrackingSection({
     required this.caseId,
     required this.rescueCase,
+    required this.allExpenses,
     required this.totalExpenses,
     required this.fundedAmount,
     required this.outstandingBalance,
+    required this.animalOptions,
+    required this.selectedAnimalIndex,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Total/Funded/Outstanding always reflect the whole case (never
+    // filtered by animal — Close Case's own financial summary and every
+    // other reader of these totals expects the case-wide figure). The
+    // per-animal breakdown below is purely additional, computed from the
+    // same list, and never sums to more than totalExpenses since a shared
+    // expense is counted once here, not once per animal.
+    final breakdown = <String, double>{};
+    if (animalOptions.length > 1) {
+      var shared = 0.0;
+      for (final e in allExpenses) {
+        if (e.isSharedCaseExpense) {
+          shared += e.amount;
+        } else {
+          for (final i in e.animalIndexes!) {
+            final match = animalOptions.where((o) => o.index == i);
+            final label = match.isNotEmpty ? match.first.label : 'Animal ${i + 1}';
+            breakdown[label] = (breakdown[label] ?? 0) + e.amount;
+          }
+        }
+      }
+      if (shared > 0) breakdown['Shared Expenses'] = shared;
+    }
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -903,17 +1021,29 @@ class _CostTrackingSection extends StatelessWidget {
           Text('Cost Tracking',
               style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
           const SizedBox(height: 10),
-          _CostRow('Total Expenses', totalExpenses),
+          _CostRow('Total Case Cost', totalExpenses),
           _CostRow('Funded Amount', fundedAmount),
           _CostRow('Outstanding Balance', outstandingBalance, emphasize: true),
+          if (breakdown.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Divider(height: 1, color: AppColors.slaterspwn),
+            const SizedBox(height: 8),
+            for (final entry in breakdown.entries) _CostRow(entry.key, entry.value),
+          ],
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               OutlinedButton(
-                onPressed: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => ExpenseListPage(caseId: caseId))),
+                onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => ExpenseListPage(
+                              caseId: caseId,
+                              animalOptions: animalOptions,
+                              initialAnimalIndex: selectedAnimalIndex,
+                            ))),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.textPrimary),
@@ -922,7 +1052,12 @@ class _CostTrackingSection extends StatelessWidget {
                 child: Text('View Expenses', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
               ),
               ElevatedButton(
-                onPressed: () => showAddEditExpenseSheet(context, caseId: caseId),
+                onPressed: () => showAddEditExpenseSheet(
+                  context,
+                  caseId: caseId,
+                  animalOptions: animalOptions,
+                  initialAnimalIndexes: selectedAnimalIndex != null ? {selectedAnimalIndex!} : const {},
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
                   // Explicit foreground — without it this falls back to the

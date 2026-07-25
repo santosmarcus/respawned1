@@ -45,7 +45,16 @@ void showFullTreatmentImage(BuildContext context, String url) {
 /// Compact preview card — tap opens [TreatmentLogDetailSheet].
 class TreatmentLogCard extends StatelessWidget {
   final TreatmentLogEntry log;
-  const TreatmentLogCard({super.key, required this.log});
+
+  /// Which animal(s) this entry applies to, as a display string (e.g.
+  /// "Luna", "Luna and Max", or "All animals") — resolved by the caller
+  /// from log.animalIndexes since this widget has no access to the case's
+  /// animal list/names on its own. Null on callers that already show
+  /// exactly one animal's own logs (e.g. the Animal Record Medical tab),
+  /// where repeating that animal's name on every card would be redundant.
+  final String? animalLabel;
+
+  const TreatmentLogCard({super.key, required this.log, this.animalLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -120,6 +129,9 @@ class TreatmentLogCard extends StatelessWidget {
                 children: [
                   Text(log.type,
                       style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  if (animalLabel != null)
+                    Text(animalLabel!,
+                        style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
                   if (log.notes.isNotEmpty)
                     Text(log.notes,
                         maxLines: 2,

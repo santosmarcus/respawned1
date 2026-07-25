@@ -34,25 +34,22 @@ void _openModule(BuildContext context, WidgetBuilder builder) {
 /// Resolves the current admin's organization (via the existing
 /// OrgMembershipService — never a second lookup) and pushes Organization
 /// Profile — a settings-style page, so this uses a normal push (back
-/// returns to wherever the admin was), not [_openModule]. Accounts with no
-/// organization membership yet (pre-organization-signup admin/testing
-/// accounts, see OrgMembershipService's own TODO on why these still exist)
-/// get a clear message instead of a crash.
+/// returns to wherever the admin was), not [_openModule]. An account with
+/// no organization membership yet is never left at a dead end: it's still
+/// pushed into the same page with `organizationId: null`, which handles
+/// checking for a pending invitation and the temporary standalone-admin
+/// bootstrap flow itself (spec §7-9) — no separate page, no broken screen,
+/// no silent no-op.
 Future<void> _openOrganizationProfile(BuildContext context) async {
   final uid = FirebaseAuth.instance.currentUser?.uid;
   Navigator.pop(context); // close the drawer
   if (uid == null) return;
   final membership = await OrgMembershipService().getMembership(uid);
-  if (membership == null) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This account is not linked to an organization yet.'), backgroundColor: Colors.redAccent),
-      );
-    }
-    return;
-  }
   if (context.mounted) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership.organizationId)));
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership?.organizationId)),
+    );
   }
 }
 

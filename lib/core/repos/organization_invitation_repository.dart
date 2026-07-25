@@ -80,6 +80,7 @@ class OrganizationInvitationRepository {
 
   CollectionReference<Map<String, dynamic>> get _invitations => _db.collection('organizationInvitations');
   CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
+  CollectionReference<Map<String, dynamic>> get _organizations => _db.collection('organizations');
 
   String _generateToken() => List.generate(32, (_) => _rng.nextInt(36).toRadixString(36)).join();
 
@@ -87,6 +88,21 @@ class OrganizationInvitationRepository {
     return _invitations
         .where('organizationId', isEqualTo: organizationId)
         .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(OrganizationInvitation.fromFirestore).toList());
+  }
+
+  /// Every pending invitation addressed to [normalizedEmail], across every
+  /// organization — used by Organization Profile for an unlinked account
+  /// (spec's invitation-lookup addition), which by definition doesn't know
+  /// an organizationId yet to scope by. Callers should still filter out
+  /// `isExpired` entries themselves (kept out of this query since Firestore
+  /// can't combine an equality filter on `status` with a range filter on
+  /// `expiresAt` without a composite index this collection doesn't have).
+  Stream<List<OrganizationInvitation>> streamInvitationsForEmail(String normalizedEmail) {
+    return _invitations
+        .where('normalizedEmail', isEqualTo: normalizedEmail)
+        .where('status', isEqualTo: InvitationStatus.pending.name)
         .snapshots()
         .map((snap) => snap.docs.map(OrganizationInvitation.fromFirestore).toList());
   }
@@ -180,13 +196,22 @@ class OrganizationInvitationRepository {
   /// Development-only acceptance path (spec §12's explicit allowance when no
   /// email/deep-link backend exists): the signed-in account's email must
   /// match the invitation's email, the invitation must still be pending and
-  /// unexpired, and the whole grant is wrapped in a transaction so a
-  /// double-tap/duplicate call can't accept the same invitation twice or
-  /// leave a half-applied membership.
+  /// unexpired, the target organization must still exist, the account must
+  /// not already be linked to a *different* organization, and the whole
+  /// grant is wrapped in a transaction so a double-tap/duplicate call can't
+  /// accept the same invitation twice or leave a half-applied membership.
+  ///
+  /// [preserveAccountRole] — when true, never overwrites `users/{uid}.role`.
+  /// Set this for an account that already has a real app role (e.g. an
+  /// admin joining an organization through Organization Profile's
+  /// invitation flow) so acceptance never re-routes them out of their
+  /// existing role's UI. Left false for the original organization-signup
+  /// acceptance path, which intentionally sets `role: 'organization'`.
   Future<void> acceptInvitation({
     required String invitationId,
     required String uid,
     required String signedInEmail,
+    bool preserveAccountRole = false,
   }) async {
     final ref = _invitations.doc(invitationId);
     late OrgRole grantedRole;
@@ -194,6 +219,7 @@ class OrganizationInvitationRepository {
 
     await _db.runTransaction((tx) async {
       final snap = await tx.get(ref);
+      final userSnap = await tx.get(_users.doc(uid));
       if (!snap.exists) throw StateError('This invitation no longer exists.');
       final data = snap.data()!;
       final status = InvitationStatus.fromName(data['status'] as String?);
@@ -210,10 +236,18 @@ class OrganizationInvitationRepository {
       }
 
       organizationId = data['organizationId'] as String? ?? '';
+      final orgSnap = await tx.get(_organizations.doc(organizationId));
+      if (!orgSnap.exists) throw StateError('This organization no longer exists.');
+
+      final existingOrgId = userSnap.data()?['organizationId'] as String?;
+      if (existingOrgId != null && existingOrgId.isNotEmpty && existingOrgId != organizationId) {
+        throw StateError('This account is already linked to a different organization.');
+      }
+
       grantedRole = OrgRole.fromName(data['role'] as String?);
 
       tx.update(ref, {'status': InvitationStatus.accepted.name, 'acceptedAt': FieldValue.serverTimestamp(), 'acceptedBy': uid});
-      final memberRef = _db.collection('organizations').doc(organizationId).collection('members').doc(uid);
+      final memberRef = _organizations.doc(organizationId).collection('members').doc(uid);
       tx.set(memberRef, {
         'role': grantedRole.name,
         'email': signedInEmail.trim().toLowerCase(),
@@ -221,7 +255,10 @@ class OrganizationInvitationRepository {
         'joinedAt': FieldValue.serverTimestamp(),
         'invitedBy': data['invitedBy'],
       });
-      tx.set(_users.doc(uid), {'organizationId': organizationId, 'role': 'organization'}, SetOptions(merge: true));
+      tx.set(_users.doc(uid), {
+        'organizationId': organizationId,
+        if (!preserveAccountRole) 'role': 'organization',
+      }, SetOptions(merge: true));
     });
   }
 
