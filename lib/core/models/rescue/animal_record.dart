@@ -48,14 +48,14 @@ class AnimalHealthDetails {
   }
 
   Map<String, dynamic> toMap() => {
-        if (allergies != null) 'allergies': allergies,
-        if (chronicConditions != null) 'chronicConditions': chronicConditions,
-        if (currentMedications != null) 'currentMedications': currentMedications,
-        if (lastVetCheckup != null) 'lastVetCheckup': Timestamp.fromDate(lastVetCheckup!),
-        if (weightKg != null) 'weightKg': weightKg,
-        if (bodyCondition != null) 'bodyCondition': bodyCondition,
-        if (microchipStatus != null) 'microchipStatus': microchipStatus,
-      };
+    if (allergies != null) 'allergies': allergies,
+    if (chronicConditions != null) 'chronicConditions': chronicConditions,
+    if (currentMedications != null) 'currentMedications': currentMedications,
+    if (lastVetCheckup != null) 'lastVetCheckup': Timestamp.fromDate(lastVetCheckup!),
+    if (weightKg != null) 'weightKg': weightKg,
+    if (bodyCondition != null) 'bodyCondition': bodyCondition,
+    if (microchipStatus != null) 'microchipStatus': microchipStatus,
+  };
 }
 
 /// True for a real Firebase Storage download URL — false for a local
@@ -111,6 +111,7 @@ class AnimalRecord {
   final bool vaccinated;
   final bool spayedNeutered;
   final bool dewormed;
+  final bool specialNeeds;
   final List<String> keyCharacteristics;
   final List<String> rescueBackground;
   final List<String> tags;
@@ -164,6 +165,7 @@ class AnimalRecord {
     required this.vaccinated,
     required this.spayedNeutered,
     required this.dewormed,
+    required this.specialNeeds,
     required this.keyCharacteristics,
     required this.rescueBackground,
     required this.tags,
@@ -227,6 +229,7 @@ class AnimalRecord {
         vaccinated: false,
         spayedNeutered: false,
         dewormed: false,
+        specialNeeds: false,
         keyCharacteristics: const [],
         rescueBackground: const [],
         tags: const [],
@@ -280,6 +283,7 @@ class AnimalRecord {
       vaccinated: parseBool(data['vaccinated']),
       spayedNeutered: parseBool(data['spayedNeutered']),
       dewormed: parseBool(data['dewormed']),
+      specialNeeds: parseBool(data['specialNeeds']),
       keyCharacteristics: parseStringList(data['keyCharacteristics']),
       rescueBackground: parseStringList(data['rescueBackground']),
       tags: parseStringList(data['tags']),

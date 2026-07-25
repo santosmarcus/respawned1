@@ -108,7 +108,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   bool _canAffordEmergencyCare = false;
   bool _canAffordGrooming = false;
   bool _canAffordCareSupplies= false;
-  String? _monthlyBudget;
   final _reasonCtrl = TextEditingController();
 
   //Required Uploads
@@ -502,7 +501,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             canAfford['emergencyMedicalCare'] as bool? ?? false;
         _canAffordGrooming = canAfford['grooming'] as bool? ?? false;
         _canAffordCareSupplies = canAfford['careSupplies'] as bool? ?? false;
-        _monthlyBudget = lifestyle['monthlyBudget'] as String?;
         _reasonCtrl.text = agreement['reason'] as String? ?? '';
 
         // Required Uploads (already uploaded — keep the saved URLs)
@@ -572,7 +570,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       if (_hoursAlone == null) 'hours animal will be left alone',
       if (_primaryCaregiver == null) 'Primary Caregiver',
       if (_petStayLocation == null) 'where pet will stay',
-      if (_monthlyBudget == null) 'Monthly Pet Budget',
     ];
     if (missingAnswers.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -757,15 +754,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             'careSupplies':  _canAffordCareSupplies,
 
           },
-          'monthlyBudget': _monthlyBudget,
+
         },
         'uploads': {
           'governmentId': _governmentIdUrl,
           'proofOfAddress': _proofOfAddressUrl,
-          //'digitalSignature': _digitalSignatureUrl,
-          // A list, not a single URL — every uploaded home photo is kept,
-          // never overwritten by only the most recent one. The admin
-          // Required Documents reader already accepts either shape.
           'homePhotos': homePhotoUrls,
         },
         'agreement': {
@@ -873,7 +866,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _canAffordEmergencyCare = false;
     _canAffordGrooming = false;
     _canAffordCareSupplies = false;
-    _monthlyBudget = null;
     _reasonCtrl.clear();
 
     _governmentIdFile = null;
@@ -1440,19 +1432,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 onChanged: (v) =>
                     setState(() => _canAffordCareSupplies = v!),
               ),
-              const SizedBox(height: 12),
-              _RadioGroup<String>(
-                label: 'Monthly Pet Budget',
-                value: _monthlyBudget,
-                required: true,
-                options: const [
-                  'Under P1,000',
-                  'P1,000-P3,000',
-                  'P3,000-P5,000',
-                  'Above P5,000'
-                ],
-                onChanged: (v) => setState(() => _monthlyBudget = v),
-              ),
+
               const SizedBox(height: 12),
               _FormField(
                 controller: _reasonCtrl,
@@ -3140,11 +3120,6 @@ class _CounterButton extends StatelessWidget {
   }
 }
 
-/// Multi-image Home Photos picker — thumbnails in a wrapping grid, an "add"
-/// tile that always adds to the existing selection (never replaces it),
-/// and a remove button on every thumbnail. Mirrors the existing
-/// existing/newly-picked split `CreateAnimalRecordPage` already uses for
-/// its own multi-image picker, so this isn't a second pattern.
 class _HomePhotosPicker extends StatelessWidget {
   final List<String> existingUrls;
   final List<File> newFiles;
@@ -3171,6 +3146,17 @@ class _HomePhotosPicker extends StatelessWidget {
           children: [
             Text('Home Photos', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
             const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+            const SizedBox(width: 4),
+            const _InfoTooltip(
+              message:
+              'Upload clear photos of where your pet will live and spend most of its time.\n\n'
+                  'Please include:\n'
+                  '• The room or area where the pet will sleep/stay\n'
+                  '• Any yard, balcony, or outdoor space it can access\n'
+                  '• Fencing, gates, or enclosures (if any)\n'
+                  '• General home layout so we can check it\'s pet-safe\n\n'
+                  'This helps us confirm your home is a safe, suitable environment before approving the adoption.',
+            ),
           ],
         ),
         const SizedBox(height: 6),

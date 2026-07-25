@@ -17,6 +17,7 @@ import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
 import 'package:respawnd1/core/constants/maps_config.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 
 
 String get _placesApiKey => MapsConfig.placesApiKey;
@@ -155,6 +156,13 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   bool _isSearchingClinic = false;
   bool _autoSearchAttempted = false;
   bool _isVerifyingArrival = false;
+  Timestamp? _lastReadAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastReadAt = Timestamp.now();
+  }
 
   // Verification images
   final List<File?> _pickupImages = [null, null];
@@ -197,158 +205,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       _mapController
           ?.animateCamera(CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
     });
-  }
-
-  Future<String?> _showDeclineAssignmentDialog() async {
-    final reasons = [
-      'Outside my service area / too far to respond in time',
-      'Already committed to another active case',
-      "Vehicle/carrier not suited to this animal",
-      "Safety concern I'm not equipped to handle",
-      'Personal unavailability (emergency, off-duty)',
-      'Other',
-    ];
-    String? selectedReason;
-    String? other;
-
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => Dialog(
-          backgroundColor: AppColors.background,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Center(
-                      child: Text('Decline Assignment',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 18, color: AppColors.textPrimary)),
-                    ),
-                    Positioned(
-                      right: 0,
-                      child: GestureDetector(
-                        onTap: () => Navigator.pop(ctx),
-                        child: const Icon(Icons.close,
-                            size: 20, color: AppColors.textSecondary),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                ...reasons.map((r) => RadioListTile<String>(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  value: r,
-                  groupValue: selectedReason,
-                  activeColor: AppColors.textPrimary,
-                  title: Text(r,
-                      style: GoogleFonts.zain(
-                          fontSize: 14, color: AppColors.textPrimary)),
-                  onChanged: (v) => setDlg(() => selectedReason = v),
-                )),
-                if (selectedReason == 'Other') ...[
-                  const SizedBox(height: 8),
-                  TextField(
-                    onChanged: (v) => other = v,
-                    style: GoogleFonts.zain(
-                        fontSize: 14, color: AppColors.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: 'Describe reason…',
-                      hintStyle: GoogleFonts.zain(
-                          fontSize: 13, color: AppColors.textSecondary),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: AppColors.slaterspwn),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: AppColors.textPrimary),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: TextButton(
-                    onPressed: selectedReason == null
-                        ? null
-                        : () {
-                      final reasonStr = selectedReason == 'Other'
-                          ? (other != null && other!.isNotEmpty ? other! : 'Other')
-                          : selectedReason!;
-                      Navigator.pop(ctx, reasonStr);
-                    },
-                    child: Text('Confirm',
-                        style: GoogleFonts.zain(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: selectedReason == null
-                                ? AppColors.textSecondary
-                                : Colors.redAccent)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _declineAssignment() async {
-    final reason = await _showDeclineAssignmentDialog();
-    if (reason == null) return; // dismissed via X / back
-
-    setState(() => _isActing = true);
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .update({
-        'status': 'pending',
-        'riderId': null,
-        'assignedVolunteerId': null,
-        'riderLastLat': null,
-        'riderLastLng': null,
-        'declinedBy': FieldValue.arrayUnion([uid]),
-        'declineLog': FieldValue.arrayUnion([
-          {
-            'riderId': uid,
-            'reason': reason,
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Transporter declined the assignment — awaiting reassignment.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
-      _positionSub?.cancel();
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isActing = false);
-    }
   }
 
   // Status transitions
@@ -698,12 +554,26 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           .get())
           .data() as Map<String, dynamic>? ??
           {};
+
+      // The case never had its own shelter destination — resolve the
+      // assigned organization's registered shelter location (same source
+      // the Intake flow uses) and snapshot it onto the case now, so the
+      // in-transit-to-shelter panel/map/arrival-check all have a real
+      // destination instead of falling back to placeholder text with no
+      // coordinates at all.
+      final shelter = await OrganizationDirectoryRepository()
+          .resolveShelterLocation(data['organizationId'] as String?);
+
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
           .update({
         'status': 'in_transit_shelter',
         'clinicVerificationUrls': urls,
+        if (shelter != null) 'shelterName': shelter.name,
+        if (shelter?.address != null) 'shelterAddress': shelter!.address,
+        if (shelter?.lat != null) 'shelterLat': shelter!.lat,
+        if (shelter?.lng != null) 'shelterLng': shelter!.lng,
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Treatment accepted. On the way to shelter.',
@@ -1023,6 +893,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlg) {
           final needsSearchConfirm = selectedReason == _reasonNotFound;
+          // Only the fully free-text reason needs its own describe-box —
+          // Specialized Transport is self-explanatory like Deceased/
+          // Breakdown and previously had an erroneous duplicate of this
+          // block that captured text nothing ever read back out.
+          final needsOtherText = selectedReason == _reasonOther;
           final needsNotes = selectedReason == _reasonNotFound ||
               selectedReason == _reasonReporterUnreachable ||
               selectedReason == _reasonAggressive;
@@ -1069,31 +944,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                             fontSize: 14, color: AppColors.textPrimary)),
                     onChanged: (v) => setDlg(() => selectedReason = v),
                   )),
-                  if (selectedReason == _reasonSpecializedTransport) ...[
-                    const SizedBox(height: 8),
-                    TextField(
-                      onChanged: (v) => other = v,
-                      style: GoogleFonts.zain(
-                          fontSize: 14, color: AppColors.textPrimary),
-                      decoration: InputDecoration(
-                        hintText: 'Describe reason...',
-                        hintStyle: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textSecondary),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: AppColors.slaterspwn),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: AppColors.textPrimary),
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (selectedReason == _reasonOther) ...[
+                  if (needsOtherText) ...[
                     const SizedBox(height: 8),
                     TextField(
                       onChanged: (v) => other = v,
@@ -1440,6 +1291,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 
   void _openMessageSheet() {
+    setState(() => _lastReadAt = Timestamp.now());
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1494,7 +1346,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           ),
         );
       },
-    );
+    ).then((_) {
+      if (mounted) setState(() => _lastReadAt = Timestamp.now());
+    });
   }
 
   Future<void> _sendMessage() async {
@@ -1640,28 +1494,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                               ),
                             ),
 
-                            Positioned(
-                              right: -2,
-                              top: -2,
-                              child: Container(
-                                width: 18,
-                                height: 18,
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Center(
-                                  child: Text(
-                                    '2',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
+                            _UnreadBadge(
+                                caseId: widget.caseId,
+                                lastReadAt: _lastReadAt),
                           ],
                         ),
                       ),
@@ -1714,9 +1549,12 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
     // Treatment accepted — final leg to the shelter
     if (status == 'in_transit_shelter') {
+      final shelterAddress = (data['shelterAddress'] as String?)?.isNotEmpty == true
+          ? data['shelterAddress'] as String
+          : (data['shelterName'] as String?) ?? 'Shelter address not available';
       return _buildVerificationPanel(
         title: 'In transit to shelter',
-        address: data['shelterAddress'] ?? 'Shelter Address',
+        address: shelterAddress,
         images: _shelterImages,
         onImageTap: (i) => _pickImage(_shelterImages, i),
         onConfirm: _completeShelterDropoff,
@@ -1975,26 +1813,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               child: _buildSwipeButton(status),
             ),
 
-            if (status == 'assigned' || status == 'accepted') ...[
-              const SizedBox(height: 4),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: _isActing ? null : _declineAssignment,
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.redAccent),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
-                    child: Text('Decline Assignment',
-                        style: GoogleFonts.tiltWarp(fontSize: 14, color: Colors.redAccent)),
-                  ),
-                ),
-              ),
-            ],
-
           ],
         ),
       ),
@@ -2182,30 +2000,13 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
             const SizedBox(height: 20),
 
-            // Confirm button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: isActing ? null : onConfirm,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.textPrimary,
-                  foregroundColor: AppColors.background,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  elevation: 0,
-                ),
-                child: isActing
-                    ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.background),
-                )
-                    : Text(confirmLabel,
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 14, color: AppColors.background)),
-              ),
+            // Confirm button — swipeable, matching every other
+            // progression action in this flow (On the way / Arrived /
+            // Treatment Accepted-Rejected all use _SwipeButton; this one
+            // shouldn't be the lone plain tap button).
+            _SwipeButton(
+              label: confirmLabel,
+              onSwiped: isActing ? null : onConfirm,
             ),
             const SizedBox(height: 14),
 
@@ -2222,7 +2023,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30)),
                   ),
-                  child: Text('Close Transit',
+                  child: Text('Close',
                       style: GoogleFonts.tiltWarp(
                           fontSize: 14, color: AppColors.textPrimary)),
                 ),
@@ -2276,6 +2077,63 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 }
 
+class _UnreadBadge extends StatelessWidget {
+  final String caseId;
+  final Timestamp? lastReadAt;
+  const _UnreadBadge({required this.caseId, required this.lastReadAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('cases')
+          .doc(caseId)
+          .collection('messages')
+          .orderBy('timestamp')
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) return const SizedBox.shrink();
+
+        final unread = snap.data!.docs.where((doc) {
+          final d = doc.data() as Map<String, dynamic>;
+          final senderId = d['senderId'] as String?;
+          if (senderId == uid) return false; // don't count your own messages
+          final ts = d['timestamp'] as Timestamp?;
+          if (ts == null) return true; // not yet committed server-side
+          if (lastReadAt == null) return true;
+          return ts.compareTo(lastReadAt!) > 0;
+        }).length;
+
+        if (unread == 0) return const SizedBox.shrink();
+
+        return Positioned(
+          right: -2,
+          top: -2,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+            decoration: const BoxDecoration(
+              color: Colors.red,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                unread > 9 ? '9+' : '$unread',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 // Swipe button
 class _SwipeButton extends StatefulWidget {
   final String label;
@@ -2300,17 +2158,15 @@ class _SwipeButtonState extends State<_SwipeButton> {
       final trackWidth = constraints.maxWidth;
       final maxDrag = trackWidth - _thumbSize - 8;
       final fraction = (_dragX / maxDrag).clamp(0.0, 1.0);
-      final trackColor = Color.lerp(
-        Colors.grey.shade400,
-        AppColors.textPrimary,
-        fraction,
-      )!;
-      final fillColor =
+      // Track is solid dark the whole way through (matches the mockup —
+      // no light-grey base with a small dark "fill" nub), thumb is a
+      // plain white circle that slides across it.
+      final trackColor =
       disabled ? Colors.grey.shade400 : AppColors.textPrimary;
-      final thumbColor =
-      disabled ? Colors.grey.shade600 : AppColors.textPrimary;
       final labelColor =
       disabled ? Colors.grey.shade100 : AppColors.background;
+      final thumbIconColor =
+      disabled ? Colors.grey.shade400 : AppColors.textPrimary;
 
       return GestureDetector(
         onHorizontalDragUpdate: disabled
@@ -2328,23 +2184,12 @@ class _SwipeButtonState extends State<_SwipeButton> {
         child: Container(
           height: 56,
           decoration: BoxDecoration(
-            color: disabled ? Colors.grey.shade300 : AppColors.slaterspwn,
+            color: trackColor,
             borderRadius: BorderRadius.circular(30),
           ),
           child: Stack(
             alignment: Alignment.centerLeft,
             children: [
-              // Track fill
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 50),
-                width: _thumbSize + _dragX + 4,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: fillColor,
-                  borderRadius: BorderRadius.circular(30),
-                ),
-              ),
-
               // Label
               Center(
                 child: Text(
@@ -2361,14 +2206,12 @@ class _SwipeButtonState extends State<_SwipeButton> {
                 child: Container(
                   width: _thumbSize,
                   height: _thumbSize,
-                  decoration: BoxDecoration(
-                    color: thumbColor,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(Icons.chevron_right,
-                      color: disabled
-                          ? Colors.grey.shade300
-                          : AppColors.yellowrspwn,
+                      color: thumbIconColor,
                       size: 25),
                 ),
               ),
@@ -2896,9 +2739,6 @@ class _TrackingMapState extends State<_TrackingMap> {
               polylines: polylines,
             ),
 
-            // Persistent ETA banner (Google Maps Directions duration) —
-            // shown for every en-route leg (pickup, clinic, shelter), not
-            // just as a tap-to-reveal marker info window.
             if (_route != null && widget.destination != null)
               Positioned(
                 bottom: 90,

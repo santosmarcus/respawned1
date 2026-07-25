@@ -8,6 +8,9 @@ import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
 import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
 import 'package:respawnd1/features/generalhome/history_screen.dart';
+import 'package:respawnd1/features/generalhome/profile/profile_edit_page.dart';
+import 'package:respawnd1/features/generalhome/profile/location_sharing_page.dart';
+import 'package:respawnd1/features/generalhome/profile/communications_setting_page.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -23,6 +26,7 @@ class _UserProfileState extends State<UserProfile> {
 
   String _displayName = '';
   String _phone = '';
+  String? _photoUrl;
   bool _loading = true;
 
   @override
@@ -45,10 +49,12 @@ class _UserProfileState extends State<UserProfile> {
       if (data == null) return;
 
       setState(() {
-        _displayName =
-            '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
+        _displayName = (data['displayName'] as String?)?.isNotEmpty == true
+            ? data['displayName'] as String
+            : '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
         _phone =
             data['phone'] ?? '';
+        _photoUrl = data['photoUrl'] as String?;
       });
     }catch (e){
       setState(() {
@@ -153,8 +159,15 @@ class _UserProfileState extends State<UserProfile> {
                   Container(
                     width: 80,
                     height: 80,
-                    decoration: BoxDecoration(color: AppColors.slaterspwn, shape: BoxShape.circle,),
-                    child: const Icon(Icons.person, size: 44, color: AppColors.textSecondary,),
+                    decoration: const BoxDecoration(color: AppColors.slaterspwn, shape: BoxShape.circle,),
+                    clipBehavior: Clip.antiAlias,
+                    child: _photoUrl != null
+                        ? Image.network(_photoUrl!, fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(
+                            Icons.person,
+                            size: 44,
+                            color: AppColors.textSecondary))
+                        : const Icon(Icons.person, size: 44, color: AppColors.textSecondary,),
                   ),
                   const SizedBox(height: 10),
                   Text(_displayName,
@@ -195,7 +208,7 @@ class _UserProfileState extends State<UserProfile> {
                   ),
                   _ProfileTile(
                     icon: Icons.sell,
-                    label: 'Pet Collar Tag',
+                    label: 'Create Pet Collar Tag',
                     onTap: (){
                       Navigator.push(context,
                         MaterialPageRoute(builder: (_) => const CollarTagHomeScreen()),);
@@ -216,7 +229,11 @@ class _UserProfileState extends State<UserProfile> {
                   _SectionLabel(label: 'My Account'),
                   _ProfileTile(
                     label: 'Edit account',
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const ProfileEditPage()))
+                          .then((_) => _loadUserData());
+                    },
                   ),
                   _ProfileTile(
                     label: 'Payment methods',
@@ -226,11 +243,17 @@ class _UserProfileState extends State<UserProfile> {
                   _SectionLabel(label: 'Privacy'),
                   _ProfileTile(
                     label: 'Location Sharing',
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const LocationSharingPage()));
+                    },
                   ),
                   _ProfileTile(
                     label: 'Communications',
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const CommunicationsSettingsPage()));
+                    },
                   ),
                 ],
               ),
