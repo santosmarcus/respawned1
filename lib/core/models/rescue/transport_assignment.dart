@@ -130,6 +130,17 @@ class OfferNoLongerAvailableException implements Exception {
   String toString() => 'This offer is no longer available ($reason).';
 }
 
+/// Thrown by [RescueCaseRepository.createAssignmentOffer] when the target
+/// (real, non-demo) transporter is no longer online/available — revalidated
+/// inside the transaction itself since the admin's rider list may be
+/// stale by the time they tap Confirm.
+class TransporterNoLongerOnlineException implements Exception {
+  const TransporterNoLongerOnlineException();
+
+  @override
+  String toString() => 'This transporter is no longer online. Please select another.';
+}
+
 /// Thrown by [RescueCaseRepository.createAssignmentOffer] (inside its
 /// transaction) when the case's `currentAssignmentId` pointer resolves to a
 /// genuinely active (pending/accepted) assignment — carries enough of that

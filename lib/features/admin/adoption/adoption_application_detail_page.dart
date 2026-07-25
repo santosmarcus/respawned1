@@ -11,7 +11,6 @@ import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
 import 'package:respawnd1/core/services/adoption_fit_assessment_service.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/core/widgets/photo_thumbnail_strip.dart';
-import 'package:respawnd1/features/adoption/interview_scheduling.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/adoption_rejection_sheet.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/interview_reschedule_sheet.dart';
@@ -64,15 +63,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<void> _confirmInterview(AdoptionApplication app) async {
-    final confirmed = await showConfirmActionDialog(context,
-        title: 'Confirm Interview?',
-        message: 'This moves the application from Pending to Interview and locks in the applicant\'s booked slot.',
-        confirmLabel: 'Confirm Interview');
-    if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).confirmInterview(applicationId: app.id, actorName: _actorName));
   }
 
   Future<void> _completeInterview(AdoptionApplication app) async {
@@ -257,7 +247,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                   _AppointmentSection(
                     app: app,
                     busy: _busy,
-                    onConfirmInterview: () => _confirmInterview(app),
                     onCompleteInterview: () => _completeInterview(app),
                     onNoShow: () => _markNoShow(app),
                     onReschedule: () => _reschedule(app),
@@ -485,7 +474,9 @@ class _AssessmentSummary extends StatelessWidget {
         const SizedBox(height: 4),
         Text('Assessment completeness: ${assessment.completeness}%', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
         const SizedBox(height: 6),
-        Text('This assessment is a guide based on form responses. The organization should review the full application and interview.',
+        Text(
+            'This assessment is a guide based on application and animal information. The organization must make '
+            'the final decision after reviewing the full application, documents, and interview.',
             style: GoogleFonts.zain(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.textSecondary)),
         if (expanded) ...[
           const SizedBox(height: 14),
@@ -822,14 +813,12 @@ class _DocumentRow extends StatelessWidget {
 class _AppointmentSection extends StatelessWidget {
   final AdoptionApplication app;
   final bool busy;
-  final VoidCallback onConfirmInterview;
   final VoidCallback onCompleteInterview;
   final VoidCallback onNoShow;
   final VoidCallback onReschedule;
   const _AppointmentSection({
     required this.app,
     required this.busy,
-    required this.onConfirmInterview,
     required this.onCompleteInterview,
     required this.onNoShow,
     required this.onReschedule,
@@ -845,14 +834,6 @@ class _AppointmentSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasAppointment = app.appointmentDate != null;
-    // A booked appointment stays Pending until the admin explicitly
-    // confirms it (adoption_process.dart's own booking step no longer
-    // advances status itself) — Complete Interview / Mark as No-show only
-    // make sense once that confirmation has happened.
-    final isPending = app.status == AdoptionStatus.pending;
-    final isConfirmed = app.status == AdoptionStatus.interview;
-    final interviewTimeArrived = hasAppointment &&
-        !DateTime.now().isBefore(combineInterviewDateTime(app.appointmentDate!, app.appointmentTime));
 
     return _SectionCard(
       title: 'Appointment Details',
@@ -872,9 +853,7 @@ class _AppointmentSection extends StatelessWidget {
                       ? 'Completed'
                       : (app.noShowAt != null
                           ? 'No-show'
-                          : (isConfirmed
-                              ? 'Scheduled'
-                              : (hasAppointment ? 'Awaiting confirmation' : 'Not scheduled')))),
+                          : (hasAppointment ? 'Scheduled' : 'Not scheduled'))),
             ),
           ]),
           if (app.interviewCompletedAt != null)
@@ -882,10 +861,14 @@ class _AppointmentSection extends StatelessWidget {
           if (app.noShowAt != null) _InfoItem('No-show recorded', _fmtDateTime(app.noShowAt)),
           const SizedBox(height: 8),
           // Once adopted (release completed), the interview loop is over —
-          // Confirm/Complete/Reschedule/No-show no longer make sense and
-          // are removed from the active action area entirely, not just
+          // Complete/Reschedule/No-show no longer make sense and are
+          // removed from the active action area entirely, not just
           // disabled. The Date/Time/Type/Status fields above stay visible
-          // as read-only history.
+          // as read-only history. There is no separate "Confirm Interview"
+          // step anymore — booking the appointment itself is what makes
+          // these actions available (see adoption_process.dart's
+          // _saveAppointment), and Complete Interview no longer waits for
+          // the scheduled time to actually arrive.
           if (hasAppointment &&
               app.status != AdoptionStatus.rejected &&
               app.status != AdoptionStatus.withdrawn &&
@@ -894,19 +877,10 @@ class _AppointmentSection extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (isPending)
+                if (app.interviewCompletedAt == null && app.noShowAt == null) ...[
                   ElevatedButton(
-                    onPressed: busy ? null : onConfirmInterview,
+                    onPressed: busy ? null : onCompleteInterview,
                     style: _yellowButton(),
-                    child: const Text('Confirm Interview'),
-                  ),
-                if (isConfirmed && app.interviewCompletedAt == null) ...[
-                  ElevatedButton(
-                    // Grayed out until the scheduled interview time has
-                    // actually arrived — can't complete an interview that
-                    // hasn't happened yet.
-                    onPressed: (busy || !interviewTimeArrived) ? null : onCompleteInterview,
-                    style: _yellowButton(enabled: interviewTimeArrived),
                     child: const Text('Complete Interview'),
                   ),
                   ElevatedButton(

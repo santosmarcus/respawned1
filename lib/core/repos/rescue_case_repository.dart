@@ -214,6 +214,22 @@ class RescueCaseRepository {
       actorName: actorName,
       details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'returnRequestId': returnRequestId},
     );
+    // Same medicalEpisodes + currentCaseId linkage AnimalRecordRepository.
+    // admitAnimal already writes for its own sourceAnimalRecordId flow —
+    // without this, the existing record's Medical tab (_EpisodesSection)
+    // has no way to know this new intake case exists at all, since it
+    // reads sourceCaseIds from that subcollection, not from this case's own
+    // sourceAnimalRecordId pointer.
+    await _animals.doc(sourceAnimalRecordId).collection('medicalEpisodes').add({
+      'animalId': sourceAnimalRecordId,
+      'sourceCaseId': ref.id,
+      'sourceType': 'adoptionReturn',
+      'reason': 'other',
+      'notes': 'Adoption return intake${returnExplanation != null && returnExplanation.isNotEmpty ? ': $returnExplanation' : ''}',
+      'createdAt': FieldValue.serverTimestamp(),
+      if (actorName.isNotEmpty) 'createdBy': actorName,
+    });
+    await _animals.doc(sourceAnimalRecordId).update({'currentCaseId': ref.id, 'updatedAt': FieldValue.serverTimestamp()});
     return ref.id;
   }
 
@@ -959,6 +975,22 @@ class RescueCaseRepository {
 
     await _db.runTransaction((tx) async {
       final caseSnap = await tx.get(caseRef);
+      // Revalidate presence here, not just in the UI's rider list — that
+      // list may already be stale by the time the admin taps Confirm (the
+      // transporter could have gone offline moments ago). Demo riders have
+      // no real presence data and are exempt.
+      if (!isDemo) {
+        final riderSnap = await tx.get(_users.doc(riderId));
+        final riderData = riderSnap.data();
+        final online = riderData?['online'] as bool? ?? false;
+        final lastSeen = riderData?['lastSeenAt'];
+        final lastSeenAt = lastSeen is Timestamp ? lastSeen.toDate() : null;
+        final stillOnline =
+            online && lastSeenAt != null && DateTime.now().difference(lastSeenAt) <= kTransporterPresenceThreshold;
+        if (!stillOnline) {
+          throw const TransporterNoLongerOnlineException();
+        }
+      }
       final currentId = caseSnap.data()?['currentAssignmentId'] as String?;
       if (currentId != null) {
         final currentSnap = await tx.get(assignmentsCol.doc(currentId));
@@ -1572,26 +1604,54 @@ class RescueCaseRepository {
     });
   }
 
+  /// [targetType] is one of 'organization' | 'clinic' | 'volunteer' — the
+  /// spec's three required destination types (never one untyped free-text
+  /// destination). Type-specific identity (targetOrganizationId for a real
+  /// OrgReferralCandidate, targetClinicPlaceId/lat/lng for a real Places
+  /// result) is stored alongside the common fields every type shares
+  /// (targetName/targetContact/targetAddress/reason/date/notes) — a
+  /// Volunteer destination has no queryable directory in this app yet, so
+  /// it only ever fills the common fields (see transfer_animal_sheet.dart).
   Future<void> transferAnimal({
     required String caseId,
-    required String targetOrganizationId,
-    required String targetOrganizationName,
+    required String targetType,
+    required String targetName,
+    String? targetContact,
+    String? targetAddress,
+    String? targetOrganizationId,
+    String? targetClinicPlaceId,
+    double? targetLat,
+    double? targetLng,
+    required String reason,
+    DateTime? transferDate,
     String? notes,
     required String actorUid,
     required String actorName,
   }) async {
+    final now = Timestamp.now();
     await _caseDoc(caseId).update({
       'status': RescueStatus.completed.firestoreValue,
-      'targetOrganizationId': targetOrganizationId,
-      'targetOrganizationName': targetOrganizationName,
+      'transferType': targetType,
+      'targetName': targetName,
+      // Legacy field names, kept so any existing reader of a
+      // pre-this-round transfer keeps working unmodified.
+      if (targetType == 'organization') 'targetOrganizationName': targetName,
+      if (targetContact != null && targetContact.isNotEmpty) 'targetContact': targetContact,
+      if (targetAddress != null && targetAddress.isNotEmpty) 'targetAddress': targetAddress,
+      if (targetOrganizationId != null) 'targetOrganizationId': targetOrganizationId,
+      if (targetClinicPlaceId != null) 'targetClinicPlaceId': targetClinicPlaceId,
+      if (targetLat != null) 'targetLat': targetLat,
+      if (targetLng != null) 'targetLng': targetLng,
+      'transferReason': reason,
+      'transferDate': transferDate != null ? Timestamp.fromDate(transferDate) : now,
       'transferNotes': notes,
-      'transferRequestedAt': Timestamp.now(),
+      'transferRequestedAt': now,
       // TODO(transfer): this is a simplified, one-way record — there is no
-      // receiving-organization acceptance workflow yet. 'pending' here just
-      // means "handed off, not yet acknowledged by the receiving org."
+      // receiving-organization/clinic/volunteer acceptance workflow yet.
+      // 'pending' here just means "handed off, not yet acknowledged."
       'transferStatus': 'pending',
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Animal transferred to $targetOrganizationName.', 'timestamp': Timestamp.now()}
+        {'status': 'Animal transferred to $targetName ($targetType).', 'timestamp': now}
       ]),
     });
     await addActivityLog(
@@ -1599,7 +1659,7 @@ class RescueCaseRepository {
       action: 'transferred_animal',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'targetOrganizationId': targetOrganizationId, 'targetOrganizationName': targetOrganizationName},
+      details: {'targetType': targetType, 'targetName': targetName, if (targetOrganizationId != null) 'targetOrganizationId': targetOrganizationId},
     );
   }
 

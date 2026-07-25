@@ -6,6 +6,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_records_flow_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
@@ -330,8 +331,18 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       defaultName = c.assignedVolunteerName ?? 'Unnamed Transporter';
     }
 
-    final completedIndexes = ref.watch(completedAnimalRecordIndexesProvider(widget.caseId)).asData?.value ?? <int>{};
+    // A case admitted from an existing Animal Record (medical re-admission
+    // or an adoption return — see RescueCaseRepository.createAdmissionCase/
+    // createReturnIntakeCase) reuses that record instead of creating a new
+    // one, so there is nothing new for streamCompletedAnimalRecordIndexes
+    // (which only counts records CREATED FROM this case) to ever find.
+    // Treat every animal as already having its record in that case, both
+    // for the UI below and for intake auto-completion.
+    final sourceAnimalRecordId = c.raw['sourceAnimalRecordId'] as String?;
     final totalAnimals = c.animalCount;
+    final completedIndexes = sourceAnimalRecordId != null
+        ? Set<int>.from(List.generate(totalAnimals, (i) => i))
+        : (ref.watch(completedAnimalRecordIndexesProvider(widget.caseId)).asData?.value ?? <int>{});
 
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _checkIntakeAutoComplete(c, completedCount: completedIndexes.length, totalAnimals: totalAnimals),
@@ -563,6 +574,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 totalAnimals: totalAnimals,
                 completedCount: completedIndexes.length,
                 received: c.intakeReceivedAt != null,
+                sourceAnimalRecordId: sourceAnimalRecordId,
               ),
             ],
 
@@ -944,16 +956,60 @@ class _AnimalRecordsSection extends StatelessWidget {
   final int completedCount;
   final bool received;
 
+  /// Set when this case was admitted from an animal that already has an
+  /// Animal Record (RescueCase.raw['sourceAnimalRecordId'] — written by
+  /// RescueCaseRepository.createAdmissionCase/createReturnIntakeCase). The
+  /// existing record is reused, never duplicated — this section becomes
+  /// "View Animal Record" instead of Create/Continue. Per-animal mixed
+  /// handling (some animals in a multi-animal case already have records,
+  /// others don't) isn't representable yet: sourceAnimalRecordId is a
+  /// single case-level id, and both origin flows that set it are
+  /// single-animal only today.
+  final String? sourceAnimalRecordId;
+
   const _AnimalRecordsSection({
     required this.caseId,
     required this.data,
     required this.totalAnimals,
     required this.completedCount,
     required this.received,
+    this.sourceAnimalRecordId,
   });
 
   @override
   Widget build(BuildContext context) {
+    final recordId = sourceAnimalRecordId;
+    if (recordId != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionHeader('Animal Records'),
+          Text(
+            'This case was admitted from an existing Animal Record — no new record is created.',
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => AnimalRecordDetailPage(animalId: recordId, data: const {})),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: Text('View Animal Record', style: GoogleFonts.tiltWarp(fontSize: 15)),
+            ),
+          ),
+        ],
+      );
+    }
+
     final allDone = completedCount >= totalAnimals;
     final buttonLabel = allDone ? 'View Animal Records' : (completedCount == 0 ? 'Create Animal Records' : 'Continue Animal Records');
 

@@ -815,11 +815,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         'appointmentType': _appointmentType,
         'appointmentDate': Timestamp.fromDate(_appointmentDate!),
         'appointmentTime': _appointmentTime,
-        // Deliberately NOT writing 'status' here — the application stays
-        // Pending (whatever it already was) until the admin's Confirm
-        // Interview action moves it into Interview. This used to jump
-        // straight to 'interview' the moment the applicant booked a slot,
-        // skipping the admin confirmation step entirely.
+        // Moves the application into Interview as soon as a slot is
+        // booked — there is no separate admin "Confirm Interview" step
+        // anymore (removed; Accept still requires the interview to be
+        // explicitly marked Complete first, so this alone can't fast-track
+        // approval).
+        'status': 'interview',
         'statusHistory': FieldValue.arrayUnion([{
           'status': 'Appointment booked.',
           'timestamp': Timestamp.now(),

@@ -96,9 +96,15 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                     .toList();
 
                 final now = DateTime.now();
+                // A due date is a deadline, not an unlock time — the FIRST
+                // incomplete follow-up in sequence is submittable right
+                // away; it does not wait for `scheduledDate` to arrive.
+                // `schedule` is already ordered by sequenceNumber (the
+                // Firestore query above), so the first match here is
+                // exactly "the next one in line."
                 FollowUpRecord? currentDue;
                 for (final f in schedule) {
-                  if (!f.isTerminal && f.submittedAt == null && !f.scheduledDate.isAfter(now)) {
+                  if (!f.isTerminal && f.submittedAt == null) {
                     currentDue = f;
                     break;
                   }

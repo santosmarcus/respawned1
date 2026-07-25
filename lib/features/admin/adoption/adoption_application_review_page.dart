@@ -912,11 +912,15 @@ class _ApplicationCard extends ConsumerWidget {
     final dateStr = application.createdAt != null
         ? '${application.createdAt!.month}/${application.createdAt!.day}/${application.createdAt!.year}'
         : '-';
-    // Compact, neutral-styled label from the computed Fit Assessment —
+    // Compact, neutral-styled chip from the computed Fit Assessment —
     // separate from the manual admin-decision chip below (application.
-    // fitAssessment) and never colored like an approve/reject status.
+    // fitAssessment), never colored like an approve/reject status, and
+    // always the same shared calculateFitAssessment() the detail page
+    // uses — never a second/different score for the same application.
     final computedAssessment = animal == null ? null : calculateFitAssessment(application: application, animal: animal);
-    final computedLabel = computedAssessment == null || computedAssessment.insufficientData ? 'Not yet assessed' : computedAssessment.band.label;
+    final computedLabel = (computedAssessment == null || computedAssessment.insufficientData)
+        ? 'Not assessed'
+        : '${computedAssessment.score} · ${computedAssessment.band.label}';
 
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdoptionApplicationDetailPage(applicationId: application.id))),
@@ -962,12 +966,22 @@ class _ApplicationCard extends ConsumerWidget {
                         'Interview: ${application.appointmentDate!.month}/${application.appointmentDate!.day}/${application.appointmentDate!.year}'
                         '${application.appointmentTime != null ? ' · ${application.appointmentTime}' : ''}',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                  Row(
-                    children: [
-                      const Icon(Icons.insights_outlined, size: 11, color: AppColors.textSecondary),
-                      const SizedBox(width: 3),
-                      Text(computedLabel, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                    ],
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.tearspwn.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.insights_outlined, size: 11, color: AppColors.textSecondary),
+                        const SizedBox(width: 3),
+                        Text('Fit: $computedLabel',
+                            style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary)),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Row(

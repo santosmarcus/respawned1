@@ -310,12 +310,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// grouped Available -> Pending -> Busy (a demo transporter that goes
   /// Pending/Busy — e.g. right after declining — joins those same groups
   /// instead of staying pinned to the top). Each group sorted by distance.
-  /// Pending/busy transporters are never hidden.
+  /// Pending/busy transporters are never hidden — only OFFLINE real
+  /// transporters are (spec: only online + available transporters are
+  /// assignable; pending/busy real transporters are still online, just not
+  /// selectable right now). Demo transporters are dev-only and never shown
+  /// outside kDebugMode, regardless of any online concept (they don't have
+  /// real presence data at all).
   List<_RiderVm> _buildRiderVms(
     LatLng center,
     List<PetTransporter> transporters,
     Map<String, TransportAssignmentStatus> activeByRider,
   ) {
+    final onlineTransporters = transporters.where((t) => t.isOnline).toList();
     double distanceFor(LatLng pos) =>
         haversineDistanceKm(center.latitude, center.longitude, pos.latitude, pos.longitude);
 
@@ -340,20 +346,26 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       );
     }
 
-    final demoA = demoRider(
-      uid: _demoAcceptingRiderUid,
-      name: _demoAcceptingRiderName,
-      vehicle: _demoAcceptingRiderVehicle,
-      plate: _demoAcceptingRiderPlate,
-    );
-    final demoB = demoRider(
-      uid: _demoRejectingRiderUid,
-      name: _demoRejectingRiderName,
-      vehicle: _demoRejectingRiderVehicle,
-      plate: _demoRejectingRiderPlate,
-    );
+    // Demo transporters have no real presence data at all — never shown
+    // outside a debug build, regardless of any online concept.
+    final demoA = kDebugMode
+        ? demoRider(
+            uid: _demoAcceptingRiderUid,
+            name: _demoAcceptingRiderName,
+            vehicle: _demoAcceptingRiderVehicle,
+            plate: _demoAcceptingRiderPlate,
+          )
+        : null;
+    final demoB = kDebugMode
+        ? demoRider(
+            uid: _demoRejectingRiderUid,
+            name: _demoRejectingRiderName,
+            vehicle: _demoRejectingRiderVehicle,
+            plate: _demoRejectingRiderPlate,
+          )
+        : null;
 
-    final realRiders = transporters.map((t) {
+    final realRiders = onlineTransporters.map((t) {
       final pos = _positionFor(center, t.uid);
       return _RiderVm(
         uid: t.uid,
@@ -377,11 +389,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // distance-sorted Pending/Busy bucket as everyone else instead of
     // staying artificially glued to the top — that's what actually moves
     // a just-declined transporter down and out of easy re-selection.
-    final allRiders = [demoA, demoB, ...realRiders];
+    final demoRiders = [if (demoA != null) demoA, if (demoB != null) demoB];
+    final allRiders = [...demoRiders, ...realRiders];
 
-    final demoAvailable = [demoA, demoB]
-        .where((r) => r.availability == _RiderAvailability.available)
-        .toList()
+    final demoAvailable = demoRiders.where((r) => r.availability == _RiderAvailability.available).toList()
       ..sort(byDistance);
     final available = realRiders.where((r) => r.availability == _RiderAvailability.available).toList()
       ..sort(byDistance);
@@ -673,20 +684,31 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             // available -> pending -> busy, each by distance. Pending/busy
             // transporters stay visible, just not selectable.
             Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: riders.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final rider = riders[index];
-                  final isSelected = _selectedRiderUid == rider.uid;
-                  return _RiderCard(
-                    rider: rider,
-                    isSelected: isSelected,
-                    onSelect: () => _selectRider(rider),
-                  );
-                },
-              ),
+              child: riders.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'No online transporters are currently available.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: riders.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final rider = riders[index];
+                        final isSelected = _selectedRiderUid == rider.uid;
+                        return _RiderCard(
+                          rider: rider,
+                          isSelected: isSelected,
+                          onSelect: () => _selectRider(rider),
+                        );
+                      },
+                    ),
             ),
 
             // Fixed bottom action — always visible; "Next" is simply disabled
