@@ -41,18 +41,42 @@ class OrgDuplicateMatch {
   const OrgDuplicateMatch({required this.organizationId, required this.name, required this.exact});
 }
 
-/// One city/service-area entry — kept as {name, normalizedName} per the
-/// spec's own suggested shape rather than a bare string, so display casing
-/// is preserved while de-duplication still compares normalized values.
+/// One city/service-area entry — {name, normalizedName} per the spec's own
+/// suggested shape, so display casing is preserved while de-duplication
+/// still compares normalized values. [placeId]/[administrativeArea]/
+/// [countryCode] are additive (nullable, default empty) so legacy entries
+/// saved before location-service validation existed (free-text, no place
+/// data) still parse and render — they just can't be deduplicated by
+/// [placeId] against a newly-added area the way two validated entries can.
 class ServiceArea {
   final String name;
   final String normalizedName;
-  const ServiceArea({required this.name, required this.normalizedName});
+  final String? placeId;
+  final String? administrativeArea;
+  final String? countryCode;
+  const ServiceArea({
+    required this.name,
+    required this.normalizedName,
+    this.placeId,
+    this.administrativeArea,
+    this.countryCode,
+  });
 
-  factory ServiceArea.fromMap(Map<String, dynamic> map) =>
-      ServiceArea(name: map['name'] as String? ?? '', normalizedName: map['normalizedName'] as String? ?? '');
+  factory ServiceArea.fromMap(Map<String, dynamic> map) => ServiceArea(
+        name: map['name'] as String? ?? '',
+        normalizedName: map['normalizedName'] as String? ?? '',
+        placeId: map['placeId'] as String?,
+        administrativeArea: map['administrativeArea'] as String?,
+        countryCode: map['countryCode'] as String?,
+      );
 
-  Map<String, dynamic> toMap() => {'name': name, 'normalizedName': normalizedName};
+  Map<String, dynamic> toMap() => {
+        'name': name,
+        'normalizedName': normalizedName,
+        if (placeId != null) 'placeId': placeId,
+        if (administrativeArea != null) 'administrativeArea': administrativeArea,
+        if (countryCode != null) 'countryCode': countryCode,
+      };
 }
 
 /// Everything an "Organization" account needs beyond the existing public

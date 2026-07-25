@@ -146,7 +146,9 @@ class RescueCaseCard extends StatelessWidget {
                         child: showStatusChip
                             ? RescueStatusChip(status: c.status)
                             : Text(
-                                c.status.label,
+                                c.status == RescueStatus.accepted
+                                    ? 'Accepted · Clinic selection required'
+                                    : c.status.label,
                                 style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,

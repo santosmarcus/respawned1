@@ -50,7 +50,11 @@ enum _PageTab {
   String get label => switch (this) {
         _PageTab.pending => 'Pending',
         _PageTab.interview => 'Interview',
-        _PageTab.approved => 'Approved',
+        // Label only — the underlying AdoptionStatus.approved value/query is
+        // unchanged (see queryStatus below); applications in this tab are
+        // approved and awaiting release/handover, which "Release" names
+        // more accurately than "Approved" did.
+        _PageTab.approved => 'Release',
         _PageTab.adopted => 'Adopted',
         _PageTab.returns_ => 'Returns',
         _PageTab.rejected => 'Rejected',
@@ -70,7 +74,7 @@ enum _PageTab {
   String get emptyMessage => switch (this) {
         _PageTab.pending => 'No pending applications',
         _PageTab.interview => 'No scheduled interviews',
-        _PageTab.approved => 'No approved applications',
+        _PageTab.approved => 'No applications awaiting release',
         _PageTab.adopted => 'No completed adoptions',
         _PageTab.returns_ => 'No return requests',
         _PageTab.rejected => 'No rejected applications',
@@ -984,27 +988,21 @@ class _ApplicationCard extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: application.fitAssessment == FitAssessmentValue.notReviewed
-                              ? AppColors.slaterspwn
-                              : AppColors.yellowrspwn,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(application.fitAssessment.label,
-                            style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: _statusColor(application.status), borderRadius: BorderRadius.circular(20)),
-                        child: Text(application.status.label,
-                            style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-                      ),
-                    ],
+                  // The manual admin-decision chip (Good Candidate / Needs
+                  // Review / Not Recommended / Not Reviewed) used to sit
+                  // here too — removed from the card entirely (most cards
+                  // just showed "Not Reviewed" clutter); that value is
+                  // still visible/settable on Adoption Details and
+                  // filterable via Sort & Filter's "Review state" section,
+                  // never deleted from the data.
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: _statusColor(application.status), borderRadius: BorderRadius.circular(20)),
+                      child: Text(application.status.label,
+                          style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                    ),
                   ),
                 ],
               ),

@@ -8,6 +8,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/locality_result.dart';
+import 'package:respawnd1/core/repos/clinic_search_repository.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/core/utils/validators.dart';
@@ -42,6 +44,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   final _repo = OrganizationRepository();
   final _invitationRepo = OrganizationInvitationRepository();
   final _picker = ImagePicker();
+  final _clinicSearchRepo = ClinicSearchRepository(); // reused for its general Places search (searchLocalities)
 
   /// Resolved once known — either passed in directly (already-linked admin)
   /// or set after a successful Join/Create in the unlinked flow below.
@@ -71,6 +74,12 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
 
   List<ServiceArea> _serviceAreas = [];
   final Set<String> _acceptedSpecies = {};
+
+  // Service-area search (spec §13) — results are only ever validated
+  // Places localities; there is no path that lets typed text become a
+  // ServiceArea without the admin picking one of these results.
+  List<LocalityResult> _serviceAreaResults = const [];
+  bool _searchingServiceAreas = false;
 
   bool get _isBootstrapping => _organizationId == null;
 
@@ -199,9 +208,24 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   Future<void> _editLocation() async {
     final orgId = _organizationId;
     if (orgId == null) return; // no org yet during bootstrap — see the plain text field used instead
+    // Read the currently-saved structured location first so the picker can
+    // show it as already-selected on the map, instead of opening blank
+    // every time (spec §12: "Show the current saved location on the map").
+    final currentDoc = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
+    final currentData = currentDoc.data() ?? const <String, dynamic>{};
+    if (!mounted) return;
     final saved = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(builder: (_) => ShelterLocationPickerPage(organizationId: orgId)),
+      MaterialPageRoute(
+        builder: (_) => ShelterLocationPickerPage(
+          organizationId: orgId,
+          initialName: currentData['shelterName'] as String?,
+          initialAddress: currentData['shelterAddress'] as String?,
+          initialPlaceId: currentData['shelterPlaceId'] as String?,
+          initialLat: (currentData['shelterLat'] as num?)?.toDouble(),
+          initialLng: (currentData['shelterLng'] as num?)?.toDouble(),
+        ),
+      ),
     );
     if (saved == true) {
       final doc = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
@@ -212,19 +236,59 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     }
   }
 
-  void _addServiceArea() {
-    final raw = _serviceAreaController.text.trim();
-    if (raw.isEmpty) return;
-    final normalized = normalizeForMatch(raw);
-    if (_serviceAreas.any((s) => s.normalizedName == normalized)) {
+  Future<void> _searchServiceAreas(String query) async {
+    if (query.trim().isEmpty) {
+      setState(() => _serviceAreaResults = const []);
+      return;
+    }
+    setState(() => _searchingServiceAreas = true);
+    try {
+      final results = await _clinicSearchRepo.searchLocalities(query: query);
+      if (!mounted) return;
+      setState(() {
+        _serviceAreaResults = results;
+        _searchingServiceAreas = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _searchingServiceAreas = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not search localities: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  /// Only ever called with a [LocalityResult] the admin actually picked
+  /// from search results — never raw typed text (spec §13's core
+  /// requirement). Deduplicates by placeId first (so "Manila", "City of
+  /// Manila", and "manila" — three different search queries that all
+  /// resolve to the same real place — collapse to one entry regardless of
+  /// how the admin searched) and falls back to normalizedName for legacy
+  /// entries that predate placeId being stored.
+  void _addServiceArea(LocalityResult locality) {
+    final normalized = normalizeForMatch(locality.name);
+    final alreadyAdded = _serviceAreas.any((s) =>
+        (s.placeId != null && s.placeId == locality.placeId) || s.normalizedName == normalized);
+    if (alreadyAdded) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('That service area is already added.'), backgroundColor: Colors.redAccent),
       );
       return;
     }
     setState(() {
-      _serviceAreas = [..._serviceAreas, ServiceArea(name: raw, normalizedName: normalized)];
+      _serviceAreas = [
+        ..._serviceAreas,
+        ServiceArea(
+          name: locality.name,
+          normalizedName: normalized,
+          placeId: locality.placeId,
+          administrativeArea: locality.administrativeArea,
+          countryCode: locality.countryCode,
+        ),
+      ];
       _serviceAreaController.clear();
+      _serviceAreaResults = const [];
     });
   }
 
@@ -533,18 +597,51 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   ],
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _serviceAreaController,
-                        decoration: const InputDecoration(hintText: 'Add a city, e.g. Quezon City'),
-                        onSubmitted: (_) => _addServiceArea(),
-                      ),
-                    ),
-                    IconButton(onPressed: _addServiceArea, icon: const Icon(Icons.add_circle_outline, color: AppColors.greenrspwn)),
-                  ],
+                // Search-only — a service area can only be added by picking
+                // one of these validated results, never by submitting typed
+                // text directly (spec §13: reject free text/fragments like
+                // "mani" that were never selected from a real place).
+                TextField(
+                  controller: _serviceAreaController,
+                  decoration: InputDecoration(
+                    hintText: 'Search a city or locality…',
+                    suffixIcon: _searchingServiceAreas
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                                width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                          )
+                        : null,
+                  ),
+                  onChanged: _searchServiceAreas,
                 ),
+                if (_serviceAreaResults.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(color: AppColors.slaterspwn),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final result in _serviceAreaResults)
+                          ListTile(
+                            dense: true,
+                            title: Text(result.name),
+                            subtitle: result.administrativeArea != null ? Text(result.administrativeArea!) : null,
+                            onTap: () => _addServiceArea(result),
+                          ),
+                      ],
+                    ),
+                  )
+                else if (_serviceAreaController.text.trim().isNotEmpty && !_searchingServiceAreas)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('No matching cities found.',
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  ),
                 const SizedBox(height: 16),
                 _label('Accepted Species'),
                 Wrap(

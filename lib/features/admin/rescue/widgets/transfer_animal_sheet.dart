@@ -7,7 +7,9 @@ import 'package:respawnd1/core/models/rescue/clinic_search_result.dart';
 import 'package:respawnd1/core/models/rescue/org_referral_candidate.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/clinic_picker_body.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/organization_picker_list.dart';
 
 enum _TransferDestinationType { organization, clinic, volunteer }
 
@@ -28,16 +30,19 @@ extension on _TransferDestinationType {
 /// types (spec: never one untyped free-text destination). Deliberately not
 /// called "Refer": a referral happens before a case is ever accepted; this
 /// happens after treatment, once the animal is ready for its next step.
-/// Reuses the same organization-search UI as "Refer to Another
-/// Organization" (refer_to_organization_sheet.dart) for the Organization
-/// branch, and the same Places search layer the clinic-selection sheet
-/// itself uses (ClinicSearchRepository, not the whole sheet — that sheet
-/// writes straight onto the case's own vetClinic* "currently treating"
-/// fields, which a transfer destination must not touch) for the Clinic
-/// branch. Volunteer has no queryable directory anywhere in this app yet
-/// (confirmed: no volunteers collection/model exists) — matching
-/// transfer_animal_record_sheet.dart's own precedent, it's a controlled
-/// manual name/contact entry, never an automatic transporter classification.
+///
+/// Organization branch reuses [OrganizationPickerList] — the exact same
+/// search/result-card widget refer_to_organization_sheet.dart uses — so
+/// this doesn't maintain a second organization-search implementation.
+/// Clinic branch opens [showClinicPickerSheet], the same map/search/
+/// Saved+Nearby/availability-warning picker select_clinic_sheet.dart uses,
+/// via the shared [ClinicPickerBody] widget — just without that sheet's own
+/// save step, since a transfer destination clinic must never overwrite the
+/// case's own "currently treating" vetClinic* fields. Volunteer has no
+/// queryable directory anywhere in this app (confirmed: no volunteers
+/// collection/model exists — see Volunteers page investigation) — rather
+/// than a manual-entry workaround, this shows a controlled empty state and
+/// blocks submission entirely, never a fabricated volunteer list.
 ///
 /// TODO(transfer): this only records a one-way "handed off" state
 /// (`transferStatus: 'pending'`). There is no receiving-party accept/
@@ -67,20 +72,10 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
   _TransferDestinationType _type = _TransferDestinationType.organization;
 
   // Organization branch
-  final _orgSearchController = TextEditingController();
-  List<OrgReferralCandidate> _orgResults = const [];
   OrgReferralCandidate? _selectedOrg;
-  bool _orgLoading = true;
 
   // Clinic branch
-  final _clinicSearchController = TextEditingController();
-  List<ClinicSearchResult> _clinicResults = const [];
   ClinicSearchResult? _selectedClinic;
-  bool _clinicLoading = false;
-
-  // Volunteer branch
-  final _volunteerNameController = TextEditingController();
-  final _volunteerContactController = TextEditingController();
 
   // Common fields
   final _reasonController = TextEditingController();
@@ -90,59 +85,40 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
   bool _sending = false;
 
   @override
-  void initState() {
-    super.initState();
-    _searchOrgs('');
-  }
-
-  @override
   void dispose() {
-    _orgSearchController.dispose();
-    _clinicSearchController.dispose();
-    _volunteerNameController.dispose();
-    _volunteerContactController.dispose();
     _reasonController.dispose();
     _notesController.dispose();
     super.dispose();
   }
 
-  Future<void> _searchOrgs(String query) async {
-    setState(() => _orgLoading = true);
-    final results = await ref.read(organizationDirectoryRepositoryProvider).search(
-          nameQuery: query,
-          species: widget.rescueCase.animalType,
-        );
-    if (!mounted) return;
-    setState(() {
-      _orgResults = results;
-      _orgLoading = false;
-    });
-  }
-
-  Future<void> _searchClinics(String query) async {
-    setState(() => _clinicLoading = true);
-    final results = await ref.read(clinicSearchRepositoryProvider).textSearch(
-          query: query,
-          lat: widget.rescueCase.lat,
-          lng: widget.rescueCase.lng,
-        );
-    if (!mounted) return;
-    setState(() {
-      _clinicResults = results;
-      _clinicLoading = false;
-    });
+  Future<void> _pickClinic() async {
+    final source = widget.rescueCase;
+    final picked = await showClinicPickerSheet(
+      context,
+      repository: ref.read(clinicSearchRepositoryProvider),
+      savedClinicsRepository: ref.read(savedClinicsRepositoryProvider),
+      actorUid: 'admin',
+      centerLat: source.lat,
+      centerLng: source.lng,
+      title: 'Select Transfer Clinic',
+      confirmLabel: 'Select Clinic',
+      initialClinic: _selectedClinic,
+    );
+    if (picked != null && mounted) setState(() => _selectedClinic = picked);
   }
 
   bool get _hasDestination => switch (_type) {
         _TransferDestinationType.organization => _selectedOrg != null,
         _TransferDestinationType.clinic => _selectedClinic != null,
-        _TransferDestinationType.volunteer => _volunteerNameController.text.trim().isNotEmpty,
+        // No volunteer directory exists yet (spec §5) — never selectable,
+        // so this destination type can never be submitted.
+        _TransferDestinationType.volunteer => false,
       };
 
   String get _destinationName => switch (_type) {
         _TransferDestinationType.organization => _selectedOrg?.name ?? '',
         _TransferDestinationType.clinic => _selectedClinic?.name ?? '',
-        _TransferDestinationType.volunteer => _volunteerNameController.text.trim(),
+        _TransferDestinationType.volunteer => '',
       };
 
   bool get _canSubmit => _hasDestination && _reasonController.text.trim().isNotEmpty && !_sending;
@@ -164,9 +140,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
             caseId: widget.rescueCase.id,
             targetType: _type.firestoreValue,
             targetName: _destinationName,
-            targetContact: _type == _TransferDestinationType.volunteer
-                ? (_volunteerContactController.text.trim().isEmpty ? null : _volunteerContactController.text.trim())
-                : (_selectedClinic?.phone),
+            targetContact: _selectedClinic?.phone,
             targetAddress: _type == _TransferDestinationType.clinic ? _selectedClinic?.address : null,
             targetOrganizationId: _type == _TransferDestinationType.organization ? _selectedOrg?.id : null,
             targetClinicPlaceId: _type == _TransferDestinationType.clinic ? _selectedClinic?.placeId : null,
@@ -336,125 +310,68 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
   }
 
   Widget _organizationBranch(RescueCase source) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(
-          controller: _orgSearchController,
-          onChanged: _searchOrgs,
-          decoration: InputDecoration(
-            hintText: 'Search organizations…',
-            hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
-            prefixIcon: const Icon(Icons.search, size: 20),
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(24),
-              borderSide: const BorderSide(color: AppColors.slaterspwn),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (_orgLoading)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()))
-        else if (_orgResults.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text('No organizations found.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-          )
-        else
-          Column(
-            children: [
-              for (final org in _orgResults)
-                _DestinationCard(
-                  title: org.name,
-                  subtitle: [
-                    if (source.lat != null && source.lng != null && org.distanceKmFrom(source.lat!, source.lng!) != null)
-                      '${org.distanceKmFrom(source.lat!, source.lng!)!.toStringAsFixed(1)} km away',
-                    if (org.acceptedSpecies.isNotEmpty) 'Accepts: ${org.acceptedSpecies.join(', ')}',
-                  ].join(' · '),
-                  selected: _selectedOrg?.id == org.id,
-                  onTap: () => setState(() => _selectedOrg = org),
-                ),
-            ],
-          ),
-      ],
+    return OrganizationPickerList(
+      directory: ref.read(organizationDirectoryRepositoryProvider),
+      sourceLat: source.lat,
+      sourceLng: source.lng,
+      species: source.animalType,
+      selectedOrgId: _selectedOrg?.id,
+      shrinkWrap: true,
+      onSelect: (org) => setState(() => _selectedOrg = org),
     );
   }
 
   Widget _clinicBranch() {
+    final clinic = _selectedClinic;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
-          controller: _clinicSearchController,
-          onChanged: _searchClinics,
-          decoration: InputDecoration(
-            hintText: 'Search clinics…',
-            hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
-            prefixIcon: const Icon(Icons.search, size: 20),
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(24),
-              borderSide: const BorderSide(color: AppColors.slaterspwn),
+        if (clinic != null)
+          _DestinationCard(
+            title: clinic.name,
+            subtitle: clinic.address,
+            trailingBadge: clinic.openNow == false ? 'Closed' : null,
+            selected: true,
+            onTap: _pickClinic,
+          ),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _pickClinic,
+            icon: const Icon(Icons.local_hospital_outlined, size: 18),
+            label: Text(clinic == null ? 'Choose Clinic' : 'Change Clinic'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.textPrimary,
+              side: const BorderSide(color: AppColors.slaterspwn),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
             ),
           ),
         ),
-        const SizedBox(height: 10),
-        if (_clinicLoading)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()))
-        else if (_clinicResults.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text('Search for a clinic by name.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-          )
-        else
-          Column(
-            children: [
-              for (final clinic in _clinicResults)
-                _DestinationCard(
-                  title: clinic.name,
-                  subtitle: clinic.address,
-                  // Availability warning only — never fabricated, and
-                  // never blocks selection (same rule as the clinic
-                  // reselection sheet used during tracking).
-                  trailingBadge: clinic.openNow == false ? 'Closed' : null,
-                  selected: _selectedClinic?.placeId == clinic.placeId,
-                  onTap: () => setState(() => _selectedClinic = clinic),
-                ),
-            ],
-          ),
       ],
     );
   }
 
   Widget _volunteerBranch() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'No registered-volunteer directory exists yet — enter contact details manually.',
-          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
-        ),
-        const SizedBox(height: 10),
-        Text('Volunteer Name', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: _volunteerNameController,
-          onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(hintText: 'Volunteer name'),
-        ),
-        const SizedBox(height: 12),
-        Text('Volunteer Contact', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: _volunteerContactController,
-          decoration: const InputDecoration(hintText: 'Phone number or other contact'),
-        ),
-      ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.volunteer_activism_outlined, color: AppColors.textSecondary, size: 28),
+          const SizedBox(height: 8),
+          Text(
+            'No eligible volunteers are available for transfer yet.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          ),
+        ],
+      ),
     );
   }
 }

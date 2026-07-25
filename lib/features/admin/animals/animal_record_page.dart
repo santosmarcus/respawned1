@@ -10,8 +10,10 @@ import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'animal_record_detail_page.dart';
 import 'create_animal_record_page.dart';
 
+// 'Recently Updated' removed — it overlapped with 'Newest Intake' (both
+// ultimately read createdAt for most records, since updatedAt is only set
+// on later edits) and added a confusing second "newest-first" option.
 enum _SortOption {
-  recentlyUpdated,
   nameAsc,
   nameDesc,
   newestIntake,
@@ -23,7 +25,6 @@ enum _SortOption {
 
 extension on _SortOption {
   String get label => switch (this) {
-        _SortOption.recentlyUpdated => 'Recently Updated',
         _SortOption.nameAsc => 'Name A–Z',
         _SortOption.nameDesc => 'Name Z–A',
         _SortOption.newestIntake => 'Newest Intake',
@@ -46,7 +47,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   String _statusFilter = 'All';
   String _searchQuery = '';
   final _searchController = TextEditingController();
-  _SortOption _sort = _SortOption.recentlyUpdated;
+  _SortOption _sort = _SortOption.newestIntake;
 
   // Extra filters — surfaced inside the Filter & Sort sheet, along with
   // _statusFilter (the old standalone "All ▾" dropdown next to the species
@@ -162,9 +163,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     final list = [...records];
     int byDateDesc(DateTime? a, DateTime? b) => (b ?? DateTime(0)).compareTo(a ?? DateTime(0));
     switch (_sort) {
-      case _SortOption.recentlyUpdated:
-        list.sort((a, b) => byDateDesc(a.updatedAt ?? a.createdAt, b.updatedAt ?? b.createdAt));
-        break;
       case _SortOption.nameAsc:
         list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         break;
@@ -172,6 +170,12 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
         list.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
         break;
       case _SortOption.newestIntake:
+        // AnimalRecord has no field distinct from createdAt for "when this
+        // animal actually entered the shelter" (see AnimalRecord.fromMap's
+        // own doc comment: a legacy 'intakeDate' field is folded into
+        // createdAt on parse for older docs) — createdAt is the real intake
+        // signal for every current writer, not merely a fallback. Records
+        // missing it (byDateDesc's `?? DateTime(0)`) sort last, never crash.
         list.sort((a, b) => byDateDesc(a.createdAt, b.createdAt));
         break;
       case _SortOption.oldestIntake:

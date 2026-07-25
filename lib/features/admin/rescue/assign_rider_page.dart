@@ -14,6 +14,8 @@ import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 
@@ -439,6 +441,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       return;
     }
 
+    final caseData = _currentCaseData();
+    final caseBiteRisk = caseData['biteRisk'] as String?;
+    final caseEscapeRisk = caseData['escapeRisk'] as String?;
+    if (hasHighRescueRisk(biteRisk: caseBiteRisk, escapeRisk: caseEscapeRisk)) {
+      final acknowledged = await confirmHighRiskAcknowledgment(
+        context,
+        biteRisk: caseBiteRisk,
+        escapeRisk: caseEscapeRisk,
+      );
+      if (!acknowledged || !mounted) return;
+    }
+
     setState(() => _isAssigning = true);
 
     // A single modal instance carries the admin through
@@ -592,7 +606,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         children: [
           // Case header
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -624,6 +638,15 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                           color: Colors.white)),
                 ),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: RescueRiskBanner(
+              biteRisk: d['biteRisk'] as String?,
+              escapeRisk: d['escapeRisk'] as String?,
+              safetyIndicators: List<String>.from(d['safetyIndicators'] ?? const []),
+              handlingNotes: d['handlingNotes'] as String?,
             ),
           ),
 
@@ -868,17 +891,12 @@ class _RiderCard extends StatelessWidget {
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Message removed — redundant with the shared case-level
+                // Messages thread on Track Case (spec: only Call stays on
+                // a transporter card).
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    GestureDetector(
-                      onTap: () {},
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        child: const Icon(Icons.chat_outlined,
-                            size: 20, color: AppColors.textPrimary),
-                      ),
-                    ),
                     GestureDetector(
                       onTap: () {},
                       child: Container(

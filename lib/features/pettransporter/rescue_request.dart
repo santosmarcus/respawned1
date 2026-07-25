@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 
 class RescueRequest extends StatefulWidget {
@@ -32,6 +34,7 @@ class RescueRequest extends StatefulWidget {
 class _RescueRequestState extends State<RescueRequest> {
   bool _isAccepting = false;
   bool _isDeclining = false;
+  bool _riskAcknowledged = false;
 
   // Statuses that count as "still my active job" — mirrors the set
   // transporter_profile.dart's _StatsRow uses to count "Ongoing", so a
@@ -425,6 +428,9 @@ class _RescueRequestState extends State<RescueRequest> {
     final condition = d['condition'] ?? '';
     final animalType = d['animalType'] ?? '';
     final photoUrls = List<String>.from(d['photoUrls'] ?? []);
+    final biteRisk = d['biteRisk'] as String?;
+    final escapeRisk = d['escapeRisk'] as String?;
+    final isHighRisk = hasHighRescueRisk(biteRisk: biteRisk, escapeRisk: escapeRisk);
     // A pending admin offer (widget.assignmentId != null) leaves the
     // case's own raw status at 'accepted' while awaiting THIS rider's
     // response — that must never read as "already accepted" here.
@@ -533,6 +539,12 @@ class _RescueRequestState extends State<RescueRequest> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  RescueRiskBanner(
+                    biteRisk: biteRisk,
+                    escapeRisk: escapeRisk,
+                    safetyIndicators: List<String>.from(d['safetyIndicators'] ?? const []),
+                    handlingNotes: d['handlingNotes'] as String?,
+                  ),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -660,10 +672,42 @@ class _RescueRequestState extends State<RescueRequest> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
             child: Column(
               children: [
+                if (isHighRisk && !alreadyAccepted)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _riskAcknowledged = !_riskAcknowledged),
+                      behavior: HitTestBehavior.opaque,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Checkbox(
+                            value: _riskAcknowledged,
+                            side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                            activeColor: AppColors.textPrimary,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            onChanged: (v) => setState(() => _riskAcknowledged = v ?? false),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Text(
+                                'I understand this animal is flagged as high risk and have the equipment/precautions needed.',
+                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: alreadyAccepted || _isAccepting || _isDeclining
+                    onPressed: alreadyAccepted ||
+                            _isAccepting ||
+                            _isDeclining ||
+                            (isHighRisk && !_riskAcknowledged)
                         ? null
                         : _startNow,
                     style: ElevatedButton.styleFrom(

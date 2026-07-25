@@ -60,10 +60,13 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     // drop-in for all of their existing logic.
     switch (c.status) {
       case RescueStatus.pendingReview:
+      case RescueStatus.accepted:
+        // accepted means "accepted, no clinic saved yet" — stays on Rescue
+        // Details, which renders its own Select Clinic action for this
+        // status (see rescue_detail_page.dart).
         Navigator.push(context, MaterialPageRoute(
             builder: (_) => RescueDetailPage(caseId: c.id, data: c.raw)));
         break;
-      case RescueStatus.accepted:
       case RescueStatus.awaitingAssignment:
         Navigator.push(context, MaterialPageRoute(
             builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)));
@@ -340,8 +343,11 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final c = cases[index];
-                    final canHavePendingOffer =
-                        c.status == RescueStatus.accepted || c.status == RescueStatus.awaitingAssignment;
+                    // accepted (no clinic saved yet) can never have a
+                    // transporter offer — offers only start from
+                    // AssignRiderPage, reached once status is
+                    // awaitingAssignment.
+                    final canHavePendingOffer = c.status == RescueStatus.awaitingAssignment;
                     if (!canHavePendingOffer) {
                       return RescueCaseCard(
                         rescueCase: c,

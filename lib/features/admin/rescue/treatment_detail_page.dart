@@ -10,6 +10,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
@@ -117,6 +118,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   final _medicationNameController = TextEditingController();
   final _medicationDoseController = TextEditingController();
   final _procedureController = TextEditingController();
+  // Vaccine is chip-selected from the existing species vaccine list where
+  // possible (spec) — _vaccineNameController only holds the free-text name
+  // when "Other" is chosen, mirroring add_vaccine_record_sheet.dart's own
+  // template/Other split exactly rather than reinventing it.
+  VaccineTemplate? _selectedVaccineTemplate;
   final _vaccineNameController = TextEditingController();
   final _vaccineDoseController = TextEditingController();
   DateTime? _nextVaccineSchedule;
@@ -161,13 +167,29 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   bool get _isDeathReport => _selectedType == TreatmentUpdateType.deathReport;
   bool get _isDischarge => _selectedType == TreatmentUpdateType.discharge;
 
+  String get _effectiveVaccineName => _selectedVaccineTemplate?.name ?? _vaccineNameController.text.trim();
+
+  /// Required fields depend on the selected update type (spec) — a
+  /// Vaccination/Procedure/Medication no longer needs generic Notes filled
+  /// in just to satisfy this check, and Discharge no longer double-requires
+  /// both Discharge Notes and generic Notes.
   bool _canSubmit() {
     if (_selectedType == null || _treatmentDate == null) return false;
-    if (_isDeathReport) return _selectedCauseOfDeath != null;
-    if (_isDischarge) {
-      return _finalCondition != null && _dischargeNotesController.text.trim().isNotEmpty;
-    }
-    return _selectedCondition != null && _notesController.text.trim().isNotEmpty;
+    return switch (_selectedType!) {
+      TreatmentUpdateType.deathReport => _selectedCauseOfDeath != null,
+      // Discharge Notes is optional now — Final Condition (discharge
+      // condition) is the one thing that actually gates completion, same
+      // as Post-Treatment Instructions already being optional.
+      TreatmentUpdateType.discharge => _finalCondition != null,
+      TreatmentUpdateType.vaccination =>
+        _effectiveVaccineName.isNotEmpty && _vaccineDoseController.text.trim().isNotEmpty,
+      TreatmentUpdateType.procedure => _procedureController.text.trim().isNotEmpty,
+      TreatmentUpdateType.medication =>
+        _medicationNameController.text.trim().isNotEmpty && _medicationDoseController.text.trim().isNotEmpty,
+      TreatmentUpdateType.assessment ||
+      TreatmentUpdateType.followUpCheck =>
+        _selectedCondition != null && _notesController.text.trim().isNotEmpty,
+    };
   }
 
   Future<void> _pickFromGallery() async {
@@ -262,7 +284,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _selectedType == TreatmentUpdateType.medication ? _medicationDoseController.text.trim() : null,
       procedurePerformed:
           _selectedType == TreatmentUpdateType.procedure ? _procedureController.text.trim() : null,
-      vaccineName: _selectedType == TreatmentUpdateType.vaccination ? _vaccineNameController.text.trim() : null,
+      vaccineName: _selectedType == TreatmentUpdateType.vaccination ? _effectiveVaccineName : null,
       vaccineDose: _selectedType == TreatmentUpdateType.vaccination ? _vaccineDoseController.text.trim() : null,
       nextScheduleAt: _selectedType == TreatmentUpdateType.vaccination ? _nextVaccineSchedule : null,
       dischargeNotes: _isDischarge ? _dischargeNotesController.text.trim() : null,
@@ -294,6 +316,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _medicationNameController.clear();
           _medicationDoseController.clear();
           _procedureController.clear();
+          _selectedVaccineTemplate = null;
           _vaccineNameController.clear();
           _vaccineDoseController.clear();
           _dischargeNotesController.clear();
@@ -719,28 +742,56 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         ),
         const SizedBox(height: 16),
 
-        // Fields shown/hidden by update type, per spec.
+        // Fields shown/hidden by update type, per spec — required
+        // asterisks now match _canSubmit()'s actual rules exactly.
         if (_selectedType == TreatmentUpdateType.medication) ...[
-          _FieldLabel('Medication Name'),
+          _FieldLabel('Medication Name', required: true),
           _TextInput(controller: _medicationNameController, hint: 'e.g. Amoxicillin'),
           const SizedBox(height: 12),
-          _FieldLabel('Dose'),
+          _FieldLabel('Dose', required: true),
           _TextInput(controller: _medicationDoseController, hint: 'e.g. 250mg twice daily'),
           const SizedBox(height: 16),
         ],
         if (_selectedType == TreatmentUpdateType.procedure) ...[
-          _FieldLabel('Procedure Performed'),
+          _FieldLabel('Procedure Performed', required: true),
           _TextInput(controller: _procedureController, hint: 'e.g. Wound cleaning and suturing'),
           const SizedBox(height: 16),
         ],
         if (_selectedType == TreatmentUpdateType.vaccination) ...[
-          _FieldLabel('Vaccine'),
-          _TextInput(controller: _vaccineNameController, hint: 'e.g. Anti-rabies'),
+          _FieldLabel('Vaccine', required: true),
+          const SizedBox(height: 4),
+          // Reuses the exact same species vaccine list/Other-chip pattern
+          // already established in add_vaccine_record_sheet.dart — not a
+          // second vaccine list. Falls back to the dog list for a mixed/
+          // unrecognized case species, same as that sheet's own fallback.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final t in VaccineTemplate.forSpecies(widget.data['animalType'] as String?))
+                ChoiceChip(
+                  label: Text(t.name),
+                  selected: _selectedVaccineTemplate?.name == t.name,
+                  selectedColor: AppColors.yellowrspwn,
+                  onSelected: (_) => setState(() => _selectedVaccineTemplate = t),
+                ),
+              ChoiceChip(
+                label: const Text('Other'),
+                selected: _selectedVaccineTemplate == null,
+                selectedColor: AppColors.yellowrspwn,
+                onSelected: (_) => setState(() => _selectedVaccineTemplate = null),
+              ),
+            ],
+          ),
+          if (_selectedVaccineTemplate == null) ...[
+            const SizedBox(height: 8),
+            _TextInput(controller: _vaccineNameController, hint: 'Vaccine name'),
+          ],
           const SizedBox(height: 12),
-          _FieldLabel('Dose'),
+          _FieldLabel('Dose', required: true),
           _TextInput(controller: _vaccineDoseController, hint: 'e.g. 1ml'),
           const SizedBox(height: 12),
-          _FieldLabel('Next Schedule (optional)'),
+          _FieldLabel('Next Due Date (optional)'),
           GestureDetector(
             onTap: () async {
               final picked = await showDatePicker(
@@ -773,10 +824,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           const SizedBox(height: 16),
         ],
         if (_isDischarge) ...[
-          _FieldLabel('Discharge Notes', required: true),
-          _TextInput(controller: _dischargeNotesController, hint: 'Enter discharge notes'),
-          const SizedBox(height: 12),
-          _FieldLabel('Final Condition', required: true),
+          // Final Condition is the field that actually gates discharge
+          // completion now — Discharge Notes is optional, and the generic
+          // Notes field below is hidden entirely for this type (spec: don't
+          // keep both a generic Notes and a separate Discharge Notes field).
+          _FieldLabel('Final Condition (discharge condition)', required: true),
           _Dropdown<String>(
             value: _finalCondition,
             hint: 'Select',
@@ -788,6 +840,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _FieldLabel('Post-Treatment Instructions'),
           _TextInput(
               controller: _postTreatmentInstructionsController, hint: 'e.g. Keep wound dry for 5 days'),
+          const SizedBox(height: 12),
+          _FieldLabel('Discharge Notes'),
+          _TextInput(controller: _dischargeNotesController, hint: 'Optional additional notes'),
           const SizedBox(height: 16),
         ],
         if (_isDeathReport) ...[
@@ -801,7 +856,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           ),
           const SizedBox(height: 16),
         ],
-        if (!_isDischarge && !_isDeathReport) ...[
+        // Overall Condition only actually applies to (and is only required
+        // for) Assessment/Follow-up Check — it used to render for every
+        // non-discharge/non-death type (including Vaccination/Procedure/
+        // Medication) with a "required" label that _canSubmit() never
+        // actually enforced there. Shown+required only where it's real.
+        if (_selectedType == TreatmentUpdateType.assessment || _selectedType == TreatmentUpdateType.followUpCheck) ...[
           _FieldLabel('Overall Condition', required: true),
           _Dropdown<String>(
             value: _selectedCondition,
@@ -813,8 +873,17 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           const SizedBox(height: 16),
         ],
 
-        _FieldLabel('Notes', required: true),
-        _TextInput(controller: _notesController, hint: 'Enter notes'),
+        // Generic Notes: required for Assessment/Follow-up Check (no other
+        // structured field captures what happened), optional for
+        // Vaccination/Procedure/Medication/Death Report, and hidden
+        // entirely for Discharge (Discharge Notes above covers it — never
+        // both).
+        if (!_isDischarge) ...[
+          _FieldLabel('Notes',
+              required: _selectedType == TreatmentUpdateType.assessment ||
+                  _selectedType == TreatmentUpdateType.followUpCheck),
+          _TextInput(controller: _notesController, hint: 'Enter notes'),
+        ],
 
         const SizedBox(height: 16),
         _FieldLabel('Include images'),

@@ -46,14 +46,23 @@ class PetTransporter {
   bool get isOnline =>
       online && lastSeenAt != null && DateTime.now().difference(lastSeenAt!) <= kTransporterPresenceThreshold;
 
-  factory PetTransporter.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+  /// [unnamedLabel] — 'Unnamed Transporter' by default, but this same model
+  /// also backs the Volunteers directory (rescue_volunteer accounts share
+  /// this exact users/{uid} field shape — see
+  /// RescueCaseRepository.streamRescueVolunteers), which passes
+  /// 'Unnamed Volunteer' instead so an unnamed entry never misdescribes a
+  /// volunteer as a transporter.
+  factory PetTransporter.fromFirestore(
+    DocumentSnapshot<Map<String, dynamic>> doc, {
+    String unnamedLabel = 'Unnamed Transporter',
+  }) {
     final data = doc.data() ?? <String, dynamic>{};
     final verification = data['transporterVerification'] as Map<String, dynamic>?;
     final name = (data['name'] as String?)?.trim();
     final lastSeen = data['lastSeenAt'];
     return PetTransporter(
       uid: doc.id,
-      name: (name != null && name.isNotEmpty) ? name : 'Unnamed Transporter',
+      name: (name != null && name.isNotEmpty) ? name : unnamedLabel,
       phone: data['phone'] as String?,
       photoUrl: verification?['portraitUrl'] as String?,
       vehicleType: verification?['vehicleType'] as String?,

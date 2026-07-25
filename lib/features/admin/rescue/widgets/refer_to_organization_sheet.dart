@@ -7,6 +7,7 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/organization_picker_list.dart';
 
 /// Refer to Another Organization modal: search organizations by name, see
 /// distance/accepted species/service area/intake availability, add a note,
@@ -57,37 +58,14 @@ class _ReferToOrganizationSheetBody extends StatefulWidget {
 }
 
 class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheetBody> {
-  final _searchController = TextEditingController();
   final _noteController = TextEditingController();
-  List<OrgReferralCandidate> _results = const [];
   OrgReferralCandidate? _selected;
-  bool _loading = true;
   bool _sending = false;
 
   @override
-  void initState() {
-    super.initState();
-    _search('');
-  }
-
-  @override
   void dispose() {
-    _searchController.dispose();
     _noteController.dispose();
     super.dispose();
-  }
-
-  Future<void> _search(String query) async {
-    setState(() => _loading = true);
-    final results = await widget.directory.search(
-      nameQuery: query,
-      species: widget.rescueCase.animalType,
-    );
-    if (!mounted) return;
-    setState(() {
-      _results = results;
-      _loading = false;
-    });
   }
 
   Future<void> _send() async {
@@ -154,103 +132,16 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
             Text('Refer to Another Organization',
                 style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
             const SizedBox(height: 12),
-            TextField(
-              controller: _searchController,
-              onChanged: _search,
-              decoration: InputDecoration(
-                hintText: 'Search organizations…',
-                hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
-                prefixIcon: const Icon(Icons.search, size: 20),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: const BorderSide(color: AppColors.slaterspwn),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
             Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _results.isEmpty
-                      ? Center(
-                          child: Text('No organizations found.',
-                              style:
-                                  GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                        )
-                      : ListView.separated(
-                          controller: scrollController,
-                          itemCount: _results.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 10),
-                          itemBuilder: (context, i) {
-                            final org = _results[i];
-                            final isSelected = _selected?.id == org.id;
-                            final distance = (source.lat != null && source.lng != null)
-                                ? org.distanceKmFrom(source.lat!, source.lng!)
-                                : null;
-                            return GestureDetector(
-                              onTap: () => setState(() => _selected = org),
-                              child: Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: isSelected ? AppColors.textPrimary : AppColors.slaterspwn,
-                                    width: isSelected ? 1.5 : 1,
-                                  ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(org.name,
-                                              style: GoogleFonts.tiltWarp(
-                                                  fontSize: 14, color: AppColors.textPrimary)),
-                                        ),
-                                        if (isSelected)
-                                          const Icon(Icons.check_circle,
-                                              color: AppColors.greenrspwn, size: 18),
-                                      ],
-                                    ),
-                                    if (distance != null)
-                                      Text('${distance.toStringAsFixed(1)} km away',
-                                          style: GoogleFonts.zain(
-                                              fontSize: 11, color: AppColors.textSecondary)),
-                                    if (org.serviceArea != null && org.serviceArea!.isNotEmpty)
-                                      Text('Service area: ${org.serviceArea}',
-                                          style: GoogleFonts.zain(
-                                              fontSize: 11, color: AppColors.textSecondary)),
-                                    if (org.acceptedSpecies.isNotEmpty)
-                                      Text('Accepts: ${org.acceptedSpecies.join(', ')}',
-                                          style: GoogleFonts.zain(
-                                              fontSize: 11, color: AppColors.textSecondary)),
-                                    const SizedBox(height: 4),
-                                    Container(
-                                      padding:
-                                          const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: org.intakeAvailable
-                                            ? AppColors.greenrspwn
-                                            : AppColors.slaterspwn,
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      child: Text(
-                                        org.intakeAvailable ? 'Intake available' : 'At capacity',
-                                        style: GoogleFonts.zain(
-                                            fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+              child: OrganizationPickerList(
+                directory: widget.directory,
+                sourceLat: source.lat,
+                sourceLng: source.lng,
+                species: source.animalType,
+                selectedOrgId: _selected?.id,
+                scrollController: scrollController,
+                onSelect: (org) => setState(() => _selected = org),
+              ),
             ),
             const SizedBox(height: 10),
             TextField(

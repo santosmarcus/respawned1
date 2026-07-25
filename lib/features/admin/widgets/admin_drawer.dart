@@ -12,6 +12,7 @@ import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
 
 /// The full set of admin root modules the drawer can open, in the required
@@ -144,11 +145,10 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             // Menu items — order matches the project's required admin menu
             // order: Dashboard, Rescue, Adoptions, Donations, Records,
             // Events, Volunteers, Transporters, Shelter Resources, Collar
-            // Tags. "Volunteer" and "Rescue Volunteers" used to be two
-            // separate no-op placeholders — consolidated into one
-            // Volunteers entry to match. Events, Volunteers, Transporters,
-            // and Shelter Resources have no admin screen built yet, so they
-            // stay no-op placeholders, same as before.
+            // Tags. Volunteers now opens VolunteersPage (role ==
+            // 'rescue_volunteer' directory). Events, Transporters, and
+            // Shelter Resources still have no admin screen built yet, so
+            // they stay no-op placeholders.
             _DrawerItem(
               label: 'Dashboard',
               selected: widget.active == AdminModule.dashboard,
@@ -187,7 +187,11 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
               onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
             ),
             _DrawerItem(label: 'Events', selected: widget.active == AdminModule.events, onTap: () {}),
-            _DrawerItem(label: 'Volunteers', selected: widget.active == AdminModule.volunteers, onTap: () {}),
+            _DrawerItem(
+              label: 'Volunteers',
+              selected: widget.active == AdminModule.volunteers,
+              onTap: () => _openModule(context, (_) => const VolunteersPage()),
+            ),
             _DrawerItem(label: 'Transporters', selected: widget.active == AdminModule.transporters, onTap: () {}),
             _DrawerItem(
                 label: 'Shelter Resources', selected: widget.active == AdminModule.shelterResources, onTap: () {}),

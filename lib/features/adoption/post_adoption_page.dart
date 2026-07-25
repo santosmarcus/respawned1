@@ -205,7 +205,9 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                         child: Text(
                                           isReturnApproved
                                               ? 'Your return request has been approved. Tap to view pick-up details.'
-                                              : 'A return request has been submitted and is awaiting processing.',
+                                              : returnRequest.isOrgInitiated
+                                                  ? 'The organization has initiated a return. It is awaiting processing.'
+                                                  : 'A return request has been submitted and is awaiting processing.',
                                           style: GoogleFonts.zain(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w600,
@@ -223,6 +225,8 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                               ),
                               const SizedBox(height: 10),
                             ],
+
+                            _PostAdoptionWarningsBanner(adoptionId: adoptionId),
 
                             const SizedBox(height: 8),
 
@@ -877,6 +881,91 @@ class _DialogOptionButton extends StatelessWidget {
           ),
           alignment: Alignment.centerLeft,
         ),
+      ),
+    );
+  }
+}
+
+/// Unresolved organization warnings (spec §4) — reads the SAME
+/// `adoptions/{id}/warnings` subcollection AdoptionApplicationRepository.
+/// sendWarning writes, so a sent warning is always visible here directly,
+/// not only through the generic notifications feed. Resolved warnings are
+/// hidden here — the adopter doesn't need to keep seeing a closed concern.
+class _PostAdoptionWarningsBanner extends StatelessWidget {
+  final String adoptionId;
+  const _PostAdoptionWarningsBanner({required this.adoptionId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(adoptionId)
+          .collection('warnings')
+          .where('resolved', isEqualTo: false)
+          .snapshots(),
+      builder: (context, snap) {
+        final docs = snap.data?.docs ?? const [];
+        if (docs.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final doc in docs) _WarningTile(data: doc.data() as Map<String, dynamic>),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WarningTile extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _WarningTile({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final deadline = data['responseDeadline'];
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE0A353).withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE0A353)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFF9C6B10)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(data['category'] as String? ?? 'Notice',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(data['message'] as String? ?? '', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+                if ((data['requiredAction'] as String?)?.isNotEmpty ?? false)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('Please: ${data['requiredAction']}',
+                        style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  ),
+                if (deadline is Timestamp)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text('Please respond by ${_formatDate(deadline.toDate())}',
+                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

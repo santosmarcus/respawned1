@@ -24,14 +24,12 @@ class TransporterDetailsCard extends ConsumerWidget {
   final TransportAssignment assignment;
   final double? distanceKm;
   final Duration? etaDuration;
-  final VoidCallback? onMessage;
 
   const TransporterDetailsCard({
     super.key,
     required this.assignment,
     this.distanceKm,
     this.etaDuration,
-    this.onMessage,
   });
 
   // Reuses the exact tel: launch pattern already established in
@@ -141,51 +139,33 @@ class TransporterDetailsCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: Tooltip(
-                  message: onMessage != null ? 'Message ${profile.name}' : 'Messaging unavailable',
-                  child: OutlinedButton.icon(
-                    onPressed: onMessage,
-                    icon: const Icon(Icons.chat_outlined, size: 16),
-                    label: Text('Message', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      disabledForegroundColor: AppColors.textSecondary,
-                      side: BorderSide(color: onMessage != null ? AppColors.textPrimary : AppColors.slaterspwn),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    ),
-                  ),
+          // Message removed — redundant with the shared case-level Messages
+          // thread on this same Track Case page (the "Tracking Detail" tab);
+          // only Call stays on the card itself.
+          SizedBox(
+            width: double.infinity,
+            child: Tooltip(
+              message: (profile.phone == null || profile.phone!.isEmpty)
+                  ? 'No phone number on file'
+                  : 'Call ${profile.name}',
+              child: OutlinedButton.icon(
+                onPressed: (profile.phone == null || profile.phone!.isEmpty)
+                    ? null
+                    : () => _launchCall(context, profile.phone),
+                icon: const Icon(Icons.phone_outlined, size: 16),
+                label: Text('Call', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textPrimary,
+                  disabledForegroundColor: AppColors.textSecondary,
+                  side: BorderSide(
+                      color: (profile.phone == null || profile.phone!.isEmpty)
+                          ? AppColors.slaterspwn
+                          : AppColors.textPrimary),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Tooltip(
-                  message: (profile.phone == null || profile.phone!.isEmpty)
-                      ? 'No phone number on file'
-                      : 'Call ${profile.name}',
-                  child: OutlinedButton.icon(
-                    onPressed: (profile.phone == null || profile.phone!.isEmpty)
-                        ? null
-                        : () => _launchCall(context, profile.phone),
-                    icon: const Icon(Icons.phone_outlined, size: 16),
-                    label: Text('Call', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      disabledForegroundColor: AppColors.textSecondary,
-                      side: BorderSide(
-                          color: (profile.phone == null || profile.phone!.isEmpty)
-                              ? AppColors.slaterspwn
-                              : AppColors.textPrimary),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),

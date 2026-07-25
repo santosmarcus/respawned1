@@ -14,6 +14,7 @@ import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
@@ -756,7 +757,6 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                               assignment: assignment,
                               collapsed: _transporterCollapsed,
                               onToggle: _toggleTransporterCard,
-                              onMessage: () => setState(() => _tabIndex = 0),
                             ),
                           ),
 
@@ -802,6 +802,16 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                         ),
 
                         const SizedBox(height: 8),
+
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: RescueRiskBanner(
+                            biteRisk: data['biteRisk'] as String?,
+                            escapeRisk: data['escapeRisk'] as String?,
+                            safetyIndicators: List<String>.from(data['safetyIndicators'] ?? const []),
+                            handlingNotes: data['handlingNotes'] as String?,
+                          ),
+                        ),
 
                         (widget.mode == TrackingMode.intakeTransfer || _tabIndex == 0)
                             ? _AdminTrackingTab(
@@ -1348,13 +1358,11 @@ class _CollapsibleTransporterCard extends StatelessWidget {
   final TransportAssignment assignment;
   final bool collapsed;
   final VoidCallback onToggle;
-  final VoidCallback? onMessage;
 
   const _CollapsibleTransporterCard({
     required this.assignment,
     required this.collapsed,
     required this.onToggle,
-    this.onMessage,
   });
 
   @override
@@ -1367,7 +1375,7 @@ class _CollapsibleTransporterCard extends StatelessWidget {
           ? _CompactTransporterRow(assignment: assignment, onTap: onToggle)
           : Column(
               children: [
-                TransporterDetailsCard(assignment: assignment, onMessage: onMessage),
+                TransporterDetailsCard(assignment: assignment),
                 GestureDetector(
                   onTap: onToggle,
                   behavior: HitTestBehavior.opaque,

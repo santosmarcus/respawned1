@@ -335,6 +335,22 @@ class RescueCaseRepository {
         );
   }
 
+  /// Every account with role == 'rescue_volunteer' — the other real
+  /// signup role from onboard_screen.dart / role_screen.dart, currently
+  /// routed to the same ServiceScreen as pet_transporter (see main.dart's
+  /// AuthWrapper), so it writes the exact same users/{uid} shape
+  /// (name/phone/online/lastSeenAt/transporterVerification) that
+  /// [PetTransporter] already models — reused as-is rather than a second
+  /// near-identical model, since the Volunteers directory (spec §7) needs
+  /// the same fields (name, online/availability, contact).
+  Stream<List<PetTransporter>> streamRescueVolunteers() {
+    return _users.where('role', isEqualTo: 'rescue_volunteer').snapshots().map(
+          (snap) => snap.docs
+              .map((doc) => PetTransporter.fromFirestore(doc, unnamedLabel: 'Unnamed Volunteer'))
+              .toList(),
+        );
+  }
+
   /// Resolves display-ready transporter details (vehicle/plate/photo/phone)
   /// for the Intake Details default-transporter display and the shared
   /// TransporterDetailsCard on Track Case — an accepted transportAssignment
@@ -439,6 +455,7 @@ class RescueCaseRepository {
     }
     final activeStatuses = [
       RescueStatus.pendingReview,
+      RescueStatus.accepted,
       RescueStatus.awaitingAssignment,
       RescueStatus.ongoing,
     ].expand((s) => s.queryValues).toSet().toList();
@@ -449,9 +466,19 @@ class RescueCaseRepository {
         .limit(50)
         .get();
 
+    // Pairs the admin already explicitly reviewed and dismissed via "Keep
+    // Separate" (see keepSeparate) are never re-suggested — unless the
+    // source case's own location/species changed since (a coarse "did
+    // meaningful data change" signal: this whole method already re-derives
+    // candidates from the CURRENT source.animalType/lat/lng every call, so
+    // a source that moved or was re-typed naturally produces a different
+    // candidate set anyway; the dismissed-id list itself is never
+    // invalidated automatically beyond that).
+    final dismissed = (source.raw['dismissedDuplicateCaseIds'] as List?)?.cast<String>().toSet() ?? const {};
+
     final candidates = snap.docs
         .map(RescueCase.fromFirestore)
-        .where((c) => c.id != source.id && c.lat != null && c.lng != null)
+        .where((c) => c.id != source.id && c.lat != null && c.lng != null && !dismissed.contains(c.id))
         .toList();
 
     candidates.sort((a, b) {
@@ -496,7 +523,11 @@ class RescueCaseRepository {
     bool openForTransfer = false,
   }) async {
     await _caseDoc(caseId).update({
-      'status': RescueStatus.awaitingAssignment.firestoreValue,
+      // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
+      // jumping straight to awaitingAssignment — the case stays visible
+      // under Rescue Review until assignClinic actually saves a clinic and
+      // advances it. See rescue_status.dart's firestoreValue doc comment.
+      'status': RescueStatus.accepted.firestoreValue,
       'openForTransfer': openForTransfer,
       'statusHistory': FieldValue.arrayUnion([
         {
@@ -568,14 +599,22 @@ class RescueCaseRepository {
 
   /// Reverts a possibleDuplicate case back to normal triage after the org
   /// decides the two reports are NOT the same incident.
+  ///
+  /// [dismissedCandidateIds] — the candidate case id(s) actually shown and
+  /// dismissed (from possible_duplicate_sheet.dart) — recorded onto
+  /// `dismissedDuplicateCaseIds` so findPossibleDuplicates never
+  /// re-suggests this exact pair to this case again.
   Future<void> keepSeparate({
     required String caseId,
     required String actorUid,
     required String actorName,
+    List<String> dismissedCandidateIds = const [],
   }) async {
     await _caseDoc(caseId).update({
       'status': RescueStatus.pendingReview.firestoreValue,
       'possibleDuplicateOfCaseId': FieldValue.delete(),
+      if (dismissedCandidateIds.isNotEmpty)
+        'dismissedDuplicateCaseIds': FieldValue.arrayUnion(dismissedCandidateIds),
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Confirmed as a separate, unrelated report.', 'timestamp': Timestamp.now()}
       ]),
@@ -865,6 +904,16 @@ class RescueCaseRepository {
         'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
         'clinicClosedWarningAcknowledgedBy': actorUid,
       },
+      // assignClinic is only ever called for a case's FIRST clinic (see
+      // select_clinic_sheet.dart's assignClinic-vs-changeClinic branch on
+      // previousClinicName), so the case is always still at
+      // RescueStatus.accepted (from Rescue Review) or already at
+      // RescueStatus.awaitingAssignment (animal-record admissions, which
+      // start there directly — see createAdmissionCase) when this runs.
+      // Writing awaitingAssignment here is a no-op for the latter and is
+      // exactly the "clinic saved -> ready to assign" transition for the
+      // former.
+      'status': RescueStatus.awaitingAssignment.firestoreValue,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Assigned to clinic: $clinicName.', 'timestamp': Timestamp.now()}
       ]),
@@ -1572,11 +1621,47 @@ class RescueCaseRepository {
   /// `readyForDischarge == true`, no further treatment update of any kind
   /// can be added — a disabled button alone wouldn't stop a direct
   /// repository call, so this is the actual source of truth for the rule.
+  /// Required fields depend on [entry.type] — matches
+  /// treatment_detail_page.dart's own _canSubmit() exactly, so a malformed
+  /// direct call (or a future second UI) can't skip validation the admin
+  /// form otherwise enforces.
+  void _validateTreatmentLogEntry(TreatmentLogEntry entry) {
+    final type = TreatmentUpdateType.fromLabel(entry.type);
+    switch (type) {
+      case TreatmentUpdateType.vaccination:
+        if ((entry.vaccineName ?? '').trim().isEmpty) throw ArgumentError('Vaccine is required.');
+        if ((entry.vaccineDose ?? '').trim().isEmpty) throw ArgumentError('Vaccine dose is required.');
+        break;
+      case TreatmentUpdateType.procedure:
+        if ((entry.procedurePerformed ?? '').trim().isEmpty) {
+          throw ArgumentError('Procedure performed is required.');
+        }
+        break;
+      case TreatmentUpdateType.medication:
+        if ((entry.medicationName ?? '').trim().isEmpty) throw ArgumentError('Medication name is required.');
+        if ((entry.medicationDose ?? '').trim().isEmpty) throw ArgumentError('Medication dose is required.');
+        break;
+      case TreatmentUpdateType.discharge:
+        if ((entry.finalCondition ?? '').trim().isEmpty) throw ArgumentError('Final condition is required.');
+        break;
+      case TreatmentUpdateType.deathReport:
+        if ((entry.causeOfDeath ?? '').trim().isEmpty) throw ArgumentError('Cause of death is required.');
+        break;
+      case TreatmentUpdateType.assessment:
+      case TreatmentUpdateType.followUpCheck:
+      case null:
+        if ((entry.condition ?? '').trim().isEmpty) throw ArgumentError('Overall condition is required.');
+        if (entry.notes.trim().isEmpty) throw ArgumentError('Notes are required for this update type.');
+        break;
+    }
+  }
+
   Future<void> addTreatmentLog({
     required String caseId,
     required TreatmentLogEntry entry,
     String? logId,
   }) async {
+    _validateTreatmentLogEntry(entry);
     final caseSnap = await _caseDoc(caseId).get();
     if (caseSnap.data()?['readyForDischarge'] == true) {
       throw StateError('No further treatment updates can be added after discharge.');
@@ -1588,13 +1673,24 @@ class RescueCaseRepository {
     final now = Timestamp.now();
     final isDischarge = entry.type == TreatmentUpdateType.discharge.label;
     final isDeath = entry.type == TreatmentUpdateType.deathReport.label;
+    // Falls back to a per-type summary when Notes is empty (now legitimate
+    // for Vaccination/Procedure/Medication/Discharge/Death Report) instead
+    // of ever writing a trailing-blank "Type: " history line.
+    final summary = entry.notes.trim().isNotEmpty
+        ? entry.notes
+        : entry.vaccineName ??
+            entry.procedurePerformed ??
+            entry.medicationName ??
+            entry.finalCondition ??
+            entry.causeOfDeath ??
+            entry.type;
 
     await _caseDoc(caseId).update({
       if (entry.condition != null) 'currentCondition': entry.condition,
       'latestTreatmentUpdateType': entry.type,
       'treatmentUpdatedAt': now,
       'statusHistory': FieldValue.arrayUnion([
-        {'status': '${entry.type}: ${entry.notes}', 'timestamp': now},
+        {'status': '${entry.type}: $summary', 'timestamp': now},
       ]),
       if (isDischarge) 'readyForDischarge': true,
       if (isDischarge) 'dischargedAt': now,
@@ -1922,6 +2018,13 @@ class RescueCaseRepository {
     }
     if (expense.amount <= 0) {
       throw ArgumentError('Expense amount must be greater than zero.');
+    }
+    // Every NEW expense requires a receipt (spec) — enforced here too, not
+    // just in the UI, so a malformed direct call can't skip it. Existing
+    // (legacy) expenses are never retroactively blocked — see updateExpense,
+    // which deliberately does not repeat this check.
+    if (expense.receiptUrl == null || expense.receiptUrl!.trim().isEmpty) {
+      throw ArgumentError('A receipt is required for this expense.');
     }
     await _expensesOf(caseId).add({
       ...expense.toFirestore(),

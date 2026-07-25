@@ -26,8 +26,26 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 class ShelterLocationPickerPage extends ConsumerStatefulWidget {
   final String? organizationId;
   final String? userId;
-  const ShelterLocationPickerPage({super.key, this.organizationId, this.userId})
-      : assert(organizationId != null || userId != null,
+  // Whatever is already saved (organizations/{orgId}.shelter* or
+  // users/{uid}.temporaryShelter*) — pre-selects it on open so reopening
+  // the picker shows the current location on the map instead of a blank
+  // search, matching select_clinic_sheet.dart's own restore-on-open
+  // pattern.
+  final String? initialName;
+  final String? initialAddress;
+  final String? initialPlaceId;
+  final double? initialLat;
+  final double? initialLng;
+  const ShelterLocationPickerPage({
+    super.key,
+    this.organizationId,
+    this.userId,
+    this.initialName,
+    this.initialAddress,
+    this.initialPlaceId,
+    this.initialLat,
+    this.initialLng,
+  }) : assert(organizationId != null || userId != null,
             'ShelterLocationPickerPage needs either an organizationId or a userId to save to.');
 
   @override
@@ -41,6 +59,24 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
   bool _searching = false;
   bool _saving = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    final name = widget.initialName;
+    final placeId = widget.initialPlaceId;
+    final lat = widget.initialLat;
+    final lng = widget.initialLng;
+    if (name != null && name.isNotEmpty && placeId != null && lat != null && lng != null) {
+      _selected = ClinicSearchResult(
+        placeId: placeId,
+        name: name,
+        address: widget.initialAddress ?? '',
+        lat: lat,
+        lng: lng,
+      );
+    }
+  }
 
   @override
   void dispose() {

@@ -1,6 +1,10 @@
+import 'dart:io';
+
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
@@ -68,6 +72,18 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   late Set<int> _animalIndexes =
       (widget.existing?.animalIndexes?.toSet()) ?? widget.initialAnimalIndexes.toSet();
 
+  // Receipt — uploaded immediately on pick (not deferred to Save) so
+  // "replacing before saving" is just picking again, and so a failed
+  // upload surfaces its own retry affordance right where it happened
+  // rather than only at Save time.
+  final _picker = ImagePicker();
+  String? _receiptUrl; // existing (edit) or freshly-uploaded url
+  bool _uploadingReceipt = false;
+  String? _receiptError;
+  // A legacy expense that already existed with no receipt — never forced
+  // to retroactively add one, only labeled, per spec.
+  bool get _isLegacyWithoutReceipt => _isEditing && (widget.existing!.receiptUrl == null || widget.existing!.receiptUrl!.isEmpty);
+
   // Field-level errors — shown directly under each field, not only as one
   // generic message. _errorMessage is reserved for the actual write
   // failing (network/Firestore error), which isn't a "which field" problem.
@@ -85,6 +101,39 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
     super.initState();
     _category = widget.existing?.category;
     _fundingSource = widget.existing?.fundingSource;
+    _receiptUrl = widget.existing?.receiptUrl;
+  }
+
+  Future<void> _pickReceipt() async {
+    final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return;
+    setState(() {
+      _uploadingReceipt = true;
+      _receiptError = null;
+    });
+    try {
+      final ext = picked.path.contains('.') ? picked.path.split('.').last : 'jpg';
+      // Independent of the eventual expense doc id (none exists yet for a
+      // new expense) — timestamp-keyed, same convention already used
+      // elsewhere in this module for pre-doc-id uploads.
+      final path = 'cases/${widget.caseId}/expenseReceipts/${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putFile(File(picked.path));
+      final url = await ref.getDownloadURL();
+      if (mounted) {
+        setState(() {
+          _receiptUrl = url;
+          _uploadingReceipt = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _uploadingReceipt = false;
+          _receiptError = 'Could not upload receipt: $e';
+        });
+      }
+    }
   }
 
   @override
@@ -96,8 +145,14 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   }
 
   Future<void> _save() async {
+    if (_uploadingReceipt) return;
     final title = _titleController.text.trim();
     final amount = double.tryParse(_amountController.text.trim());
+    // A legacy expense (already existed with no receipt) is never forced
+    // to retroactively add one just because it's being edited — every
+    // other case (new expense, or an existing expense that already had a
+    // receipt) requires one.
+    final receiptRequired = !_isLegacyWithoutReceipt;
 
     // Every required field is checked at once (not short-circuited on the
     // first failure) so every problem is visible in one pass.
@@ -106,9 +161,16 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       _categoryError = _category == null ? 'Select a category.' : null;
       _amountError = (amount == null || amount <= 0) ? 'Enter an amount greater than zero.' : null;
       _fundingSourceError = _fundingSource == null ? 'Select a funding source.' : null;
+      _receiptError = (receiptRequired && (_receiptUrl == null || _receiptUrl!.isEmpty))
+          ? 'Attach a receipt before saving.'
+          : null;
     });
 
-    if (_titleError != null || _categoryError != null || _amountError != null || _fundingSourceError != null) {
+    if (_titleError != null ||
+        _categoryError != null ||
+        _amountError != null ||
+        _fundingSourceError != null ||
+        _receiptError != null) {
       return;
     }
 
@@ -124,6 +186,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       category: _category!,
       amount: amount!,
       fundingSource: _fundingSource!,
+      receiptUrl: _receiptUrl,
       notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       incurredAt: _incurredAt,
       createdBy: widget.existing?.createdBy ?? 'Admin Staff',
@@ -271,19 +334,51 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
             ),
             const SizedBox(height: 14),
 
-            _Label('Receipt'),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.slaterspwn),
-                borderRadius: BorderRadius.circular(10),
+            _Label('Receipt', required: !_isLegacyWithoutReceipt),
+            if (_isLegacyWithoutReceipt)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text('Legacy expense — no receipt on file. You may add one, but it is not required to save.',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
               ),
-              child: Center(
-                child: Text('Attach receipt (optional)',
-                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            GestureDetector(
+              onTap: _uploadingReceipt ? null : _pickReceipt,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  border: Border.all(color: _receiptError != null ? Colors.redAccent : AppColors.slaterspwn),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: _uploadingReceipt
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                      )
+                    : (_receiptUrl != null && _receiptUrl!.isNotEmpty)
+                        ? Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(_receiptUrl!,
+                                    width: 48, height: 48, fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                        width: 48, height: 48, color: AppColors.tearspwn, child: const Icon(Icons.receipt_long_outlined))),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text('Receipt attached — tap to replace',
+                                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+                              ),
+                              const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 18),
+                            ],
+                          )
+                        : Center(
+                            child: Text('Attach receipt', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                          ),
               ),
             ),
+            if (_receiptError != null) _FieldError(_receiptError!),
             const SizedBox(height: 14),
 
             _Label('Notes'),

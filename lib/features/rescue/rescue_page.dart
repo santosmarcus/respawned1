@@ -20,6 +20,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
@@ -89,9 +90,17 @@ class _FoundAnimalEntry {
   String? sex;
   String? size;
 
+  // Per-animal safety risk (spec §1) — never applied across other animals
+  // in the same multi-animal report; each entry owns its own values.
+  String? biteRisk;
+  String? escapeRisk;
+  final Set<String> safetyIndicators = {};
+  final TextEditingController handlingNotesController = TextEditingController();
+
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
+    handlingNotesController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -2636,6 +2645,71 @@ class _RescuePageState extends State<RescuePage> {
           ),
           const SizedBox(height: 10),
           _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: entry.biteRisk,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Bite risk',
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  items: [
+                    for (final level in kBiteRiskLevels)
+                      DropdownMenuItem(value: level, child: Text(level)),
+                  ],
+                  onChanged: (v) => setState(() => entry.biteRisk = v),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: entry.escapeRisk,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Escape risk',
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  items: [
+                    for (final level in kEscapeRiskLevels)
+                      DropdownMenuItem(value: level, child: Text(level)),
+                  ],
+                  onChanged: (v) => setState(() => entry.escapeRisk = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text('Additional safety indicators (optional)',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final indicator in kSafetyIndicatorOptions)
+                FilterChip(
+                  label: Text(indicator, style: GoogleFonts.zain(fontSize: 12)),
+                  selected: entry.safetyIndicators.contains(indicator),
+                  selectedColor: AppColors.yellowrspwn,
+                  onSelected: (selected) => setState(() {
+                    if (selected) {
+                      entry.safetyIndicators.add(indicator);
+                    } else {
+                      entry.safetyIndicators.remove(indicator);
+                    }
+                  }),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _lostPetTextField(entry.handlingNotesController, 'Handling notes (optional)'),
         ],
       ),
     );
@@ -2724,6 +2798,10 @@ class _RescuePageState extends State<RescuePage> {
           'sex': animal.sex,
           'size': animal.size,
           'colorMarkings': animal.colorController.text.trim(),
+          'biteRisk': animal.biteRisk,
+          'escapeRisk': animal.escapeRisk,
+          'safetyIndicators': animal.safetyIndicators.toList(),
+          'handlingNotes': animal.handlingNotesController.text.trim(),
           'rescueType': _selectedRescueType,
           'condition': condition,
           'urgency': _selectedUrgency,

@@ -13,6 +13,7 @@ import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
@@ -465,6 +466,13 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
               ],
             ),
+            const SizedBox(height: 12),
+            RescueRiskBanner(
+              biteRisk: c.biteRisk,
+              escapeRisk: c.escapeRisk,
+              safetyIndicators: c.safetyIndicators,
+              handlingNotes: c.handlingNotes,
+            ),
 
             if (c.openForTransfer) ...[
               const SizedBox(height: 8),
@@ -782,11 +790,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                 ),
               ),
-            ] else if (c.status == RescueStatus.awaitingAssignment) ...[
+            ] else if (c.status == RescueStatus.accepted || c.status == RescueStatus.awaitingAssignment) ...[
               // Accepted. Primary action is derived from saved case data —
               // not local widget state — so reopening this screen always
               // shows the right button: no clinic yet means Select Clinic,
               // a saved clinic means Assign Transporter is unblocked.
+              // status == accepted specifically means "no clinic yet" (see
+              // acceptCase/assignClinic) — !c.hasSavedClinic covers it, but
+              // is kept as the single source of truth here rather than
+              // branching on status a second time, so this still behaves
+              // correctly for animal-record admissions which start at
+              // awaitingAssignment with no clinic (see createAdmissionCase).
               if (!c.hasSavedClinic)
                 SizedBox(
                   width: double.infinity,
