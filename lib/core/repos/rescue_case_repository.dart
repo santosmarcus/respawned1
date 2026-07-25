@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
@@ -652,6 +653,53 @@ class RescueCaseRepository {
     });
   }
 
+  // ---- Ownership (spec §1) --------------------------------------------
+
+  /// Records what's known about a possible/confirmed owner (lost animal,
+  /// suspected neglect/abandonment, owner present at pickup, ...) —
+  /// deliberately additive `raw`-only fields (`ownershipStatus`/
+  /// `ownedAnimalCategory`/`ownerName`/`ownerContact`/`ownershipNotes`/
+  /// `ownerConfirmedAt`), following this model's existing convention for
+  /// fields that don't need to be part of every read path (see [RescueCase.
+  /// raw]'s own doc comment) — never a second case-like collection. Never
+  /// changes `status`/closes the case on its own — an owner being
+  /// identified is information the admin acts on deliberately via a
+  /// separate next action (Continue rescue / Contact owner / Close Case),
+  /// never an automatic closure.
+  Future<void> updateOwnershipInfo({
+    required String caseId,
+    required String ownershipStatus, // 'Unknown' | 'No known owner' | 'Possible owner' | 'Owner identified'
+    String? ownedAnimalCategory, // 'Lost animal' | 'Neglect concern' | 'Abandonment concern' | 'Other'
+    String? ownerName,
+    String? ownerContact,
+    String? ownershipNotes,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'ownershipStatus': ownershipStatus,
+      if (ownedAnimalCategory != null) 'ownedAnimalCategory': ownedAnimalCategory,
+      if (ownerName != null) 'ownerName': ownerName,
+      if (ownerContact != null) 'ownerContact': ownerContact,
+      if (ownershipNotes != null) 'ownershipNotes': ownershipNotes,
+      if (ownershipStatus == 'Owner identified') 'ownerConfirmedAt': Timestamp.now(),
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Ownership status updated: $ownershipStatus.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'updated_ownership_info',
+      actorUid: actorUid,
+      actorName: actorName,
+      // Owner contact details are never written to the activity log's own
+      // details map — that log is broadly readable by staff, and contact
+      // info should only live on the case doc's own ownership fields,
+      // never duplicated somewhere with wider/different visibility.
+      details: {'ownershipStatus': ownershipStatus, 'ownedAnimalCategory': ownedAnimalCategory},
+    );
+  }
+
   Future<String> referToOrganization({
     required String caseId,
     required String targetOrgId,
@@ -777,6 +825,13 @@ class RescueCaseRepository {
     String? clinicPhone,
     required String actorUid,
     required String actorName,
+    // Clinic-availability warning (spec §6) — 'open'/'closed'/'unavailable'
+    // from the Places result's own openNow field, never fabricated when
+    // Places has no reliable hours data (openNow == null -> 'unavailable').
+    // Acknowledgment fields are only set when the admin actually confirmed
+    // "Proceed Anyway" on a closed clinic.
+    String? availabilityStatus,
+    bool closedWarningAcknowledged = false,
   }) async {
     await _caseDoc(caseId).update({
       'vetClinicName': clinicName,
@@ -786,6 +841,14 @@ class RescueCaseRepository {
       'vetClinicLng': clinicLng,
       'vetClinicPhone': clinicPhone,
       'vetClinicSelectedAt': Timestamp.now(),
+      if (availabilityStatus != null) ...{
+        'clinicAvailabilityStatus': availabilityStatus,
+        'clinicAvailabilityCheckedAt': Timestamp.now(),
+      },
+      if (closedWarningAcknowledged) ...{
+        'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
+        'clinicClosedWarningAcknowledgedBy': actorUid,
+      },
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Assigned to clinic: $clinicName.', 'timestamp': Timestamp.now()}
       ]),
@@ -796,6 +859,63 @@ class RescueCaseRepository {
       actorUid: actorUid,
       actorName: actorName,
       details: {'clinicPlaceId': clinicPlaceId, 'clinicName': clinicName},
+    );
+  }
+
+  /// Clinic reselection during tracking (spec §7) — same fields/write
+  /// pattern as [assignClinic] (never a new assignment/case, never marks
+  /// the transporter assignment completed), just a more specific
+  /// statusHistory message naming both clinics, and its own activity-log
+  /// action so "changed" is distinguishable from the initial "assigned".
+  /// The old clinic is never erased from history — every prior
+  /// `assigned_clinic`/`changed_clinic` activity-log entry and every past
+  /// `statusHistory` line naming it stays exactly as written.
+  Future<void> changeClinic({
+    required String caseId,
+    required String previousClinicName,
+    required String clinicName,
+    String? clinicAddress,
+    String? clinicPlaceId,
+    double? clinicLat,
+    double? clinicLng,
+    String? clinicPhone,
+    required String actorUid,
+    required String actorName,
+    String? availabilityStatus,
+    bool closedWarningAcknowledged = false,
+  }) async {
+    await _caseDoc(caseId).update({
+      'vetClinicName': clinicName,
+      'vetClinicAddress': clinicAddress,
+      'vetClinicPlaceId': clinicPlaceId,
+      'vetClinicLat': clinicLat,
+      'vetClinicLng': clinicLng,
+      'vetClinicPhone': clinicPhone,
+      'vetClinicSelectedAt': Timestamp.now(),
+      if (availabilityStatus != null) ...{
+        'clinicAvailabilityStatus': availabilityStatus,
+        'clinicAvailabilityCheckedAt': Timestamp.now(),
+      },
+      if (closedWarningAcknowledged) ...{
+        'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
+        'clinicClosedWarningAcknowledgedBy': actorUid,
+      },
+      // Clears any stale route/ETA computed for the old clinic — the
+      // tracking map recalculates (or falls back to a straight line) once
+      // it sees a new vetClinicLat/Lng with no matching cached route.
+      'cachedRoutePolyline': FieldValue.delete(),
+      'cachedRouteDistanceKm': FieldValue.delete(),
+      'cachedRouteEtaMinutes': FieldValue.delete(),
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Clinic changed from $previousClinicName to $clinicName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'changed_clinic',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'previousClinicName': previousClinicName, 'clinicPlaceId': clinicPlaceId, 'clinicName': clinicName},
     );
   }
 
@@ -1007,6 +1127,252 @@ class RescueCaseRepository {
       'status': 'completed',
       'completedAt': Timestamp.now(),
     });
+  }
+
+  // ---- Aggressive-animal / safety report response (spec §3) -----------
+
+  /// "Retry with a different transporter" after a transporter's safety
+  /// report (needsSpecializedAssistance, set by the real transporter app's
+  /// own End Reason flow in transit_progress_page.dart — see
+  /// [RescueStatus.needsSpecializedAssistance]'s own doc comment). Returns
+  /// the case to [RescueStatus.awaitingAssignment] so Assign Transporter
+  /// is reachable again, WITHOUT touching `endReason`/`endReasonNotes` —
+  /// the original transporter's report is never erased, it just stops
+  /// being the case's *current* blocking state. Does not itself pick or
+  /// assign anyone; the caller still navigates to Assign Transporter and
+  /// the admin manually selects someone.
+  Future<void> resumeAssignmentAfterSafetyReport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.awaitingAssignment.firestoreValue,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Case returned to Assign after a transporter safety report — a different transporter may now be selected.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'resumed_after_safety_report',
+      actorUid: actorUid,
+      actorName: actorName,
+    );
+  }
+
+  /// "Keep current transporter and provide instructions" — records the
+  /// admin's guidance without changing status (the case stays
+  /// needsSpecializedAssistance until the admin explicitly resolves it some
+  /// other way) or touching the original report.
+  Future<void> addSafetyResponseNote({
+    required String caseId,
+    required String note,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Instructions provided to transporter: $note', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'safety_response_instructions',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'note': note},
+    );
+  }
+
+  // ---- Per-animal death outcome (spec §4) ------------------------------
+
+  /// Smallest backward-compatible per-animal outcome structure: [RescueCase.
+  /// animals] entries (`{species, breed, sex, size, colorMarkings}`) gain
+  /// optional `outcome`/`deceasedAt`/`deceasedReason`/`deceasedConfirmedBy`/
+  /// `deceasedNotes`/`deceasedPhotoUrl` keys — every existing reader that
+  /// only looks at `species`/`breed`/etc. is unaffected (it already reads
+  /// each animal as a loose `Map<String, dynamic>`, not a fixed-shape
+  /// model). This is read-modify-write (Firestore has no per-array-element
+  /// update), so it always re-reads the array fresh, never assumes the
+  /// caller's copy is current.
+  ///
+  /// Deliberately never changes case-level `status`/closes the case, even
+  /// when this is the last remaining animal — per spec §4, closing only
+  /// happens when *every* animal is deceased AND the admin explicitly
+  /// chooses to close (via the shared Close Case flow), never
+  /// automatically here.
+  Future<void> reportAnimalDeath({
+    required String caseId,
+    required int animalIndex,
+    required String reason,
+    required String confirmedBy,
+    String? notes,
+    String? photoUrl,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      final animals = List<Map<String, dynamic>>.from(
+        (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      );
+      if (animalIndex < 0 || animalIndex >= animals.length) return;
+      animals[animalIndex] = {
+        ...animals[animalIndex],
+        'outcome': 'deceased',
+        'deceasedAt': Timestamp.now(),
+        'deceasedReason': reason,
+        'deceasedConfirmedBy': confirmedBy,
+        if (notes != null) 'deceasedNotes': notes,
+        if (photoUrl != null) 'deceasedPhotoUrl': photoUrl,
+      };
+      final animalLabel = (animals[animalIndex]['species'] as String?) ?? 'Animal';
+      tx.update(caseRef, {
+        'animals': animals,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Animal death reported during rescue: $animalLabel.', 'timestamp': Timestamp.now()}
+        ]),
+      });
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'animal_death_reported',
+      actorName: confirmedBy,
+      details: {'animalIndex': animalIndex, 'reason': reason},
+    );
+  }
+
+  // ---- Animal moved / could not be located (spec §5) -------------------
+
+  /// "Retry search" — keeps the case open, updates the rescue location,
+  /// and preserves the original reported location under `previousLocations`
+  /// (never overwritten/lost) so every prior location this case was
+  /// reported/searched at stays in history. Never creates a new case.
+  /// Transporter/clinic distances are computed live from `lat`/`lng`
+  /// wherever they're shown (Assign Transporter's rider list, clinic
+  /// search's `centerLat`/`centerLng`) — updating these fields here is
+  /// what makes those already-live computations reflect the new location
+  /// the next time each screen reads it, without a separate recompute step.
+  Future<void> updateCaseLocation({
+    required String caseId,
+    required double lat,
+    required double lng,
+    String? address,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      final previous = List<Map<String, dynamic>>.from(data['previousLocations'] as List? ?? const []);
+      previous.add({
+        'address': data['address'],
+        'lat': data['lat'],
+        'lng': data['lng'],
+        'replacedAt': Timestamp.now(),
+      });
+      tx.update(caseRef, {
+        'lat': lat,
+        'lng': lng,
+        if (address != null) 'address': address,
+        'previousLocations': previous,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Rescue location updated.', 'timestamp': Timestamp.now()}
+        ]),
+      });
+    });
+    await addActivityLog(caseId: caseId, action: 'location_updated', actorUid: actorUid, actorName: actorName);
+  }
+
+  // ---- Close Case (spec §2) ------------------------------------------
+
+  /// Shared "Close Case" flow — reused by every exception path (owner
+  /// found, aggressive animal, died during rescue, animal moved, clinic
+  /// unavailable, duplicate, resolved without transport, other) instead of
+  /// each one inventing its own terminal status. Reuses [RescueStatus.
+  /// cancelled], which already exists in the enum, is already excluded
+  /// from every active RescuePipelineTab's `.statuses` list (Review/
+  /// Assign/Ongoing/Treatment/Intake), and is already reachable through
+  /// the existing filter sheet's `statusOverride`/`kSecondaryStatuses` —
+  /// so closing a case already removes it from every active queue and
+  /// already has a place to view it, with no new queue-filtering code
+  /// needed. [RescueStatus.completed] (legacy alias `'closed'`) is
+  /// deliberately left alone — it already means "successfully finished"
+  /// (transferAnimal/releaseToReporter/completed intake), a different
+  /// concept from "closed due to an exception".
+  ///
+  /// A no-op if the case is already in a terminal status — guards both
+  /// double-tap and a case that was closed by a different admin
+  /// concurrently. Any pending/accepted transporter assignment is safely
+  /// cancelled first (never left dangling), which also frees that
+  /// transporter back to Available.
+  Future<void> closeCase({
+    required String caseId,
+    required ClosureReason reason,
+    required String details,
+    required String actorUid,
+    required String actorName,
+    String? lastKnownLocation,
+    String? clinicUnavailableDetails,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final preSnap = await caseRef.get();
+    final preData = preSnap.data();
+    if (preData == null) throw StateError('This case no longer exists.');
+    if (RescueStatus.fromFirestoreValue(preData['status'] as String?).isTerminal) return;
+
+    final currentAssignmentId = preData['currentAssignmentId'] as String?;
+    if (currentAssignmentId != null) {
+      final assignmentRef = _transportAssignmentsOf(caseId).doc(currentAssignmentId);
+      final assignmentSnap = await assignmentRef.get();
+      final assignmentStatus = assignmentSnap.data()?['status'] as String?;
+      if (assignmentStatus == 'pending') {
+        await cancelAssignment(caseId: caseId, assignmentId: currentAssignmentId, reason: 'Case closed: ${reason.label}');
+      } else if (assignmentStatus == 'accepted') {
+        // Same effect as cancelAssignment (frees the transporter, keeps
+        // full history) — completeAssignment doesn't fit here, that means
+        // "the transport finished successfully", not "the case closed".
+        await assignmentRef.update({
+          'status': 'cancelled',
+          'respondedAt': Timestamp.now(),
+          'cancelledAt': Timestamp.now(),
+          'cancellationReason': 'Case closed: ${reason.label}',
+        });
+      }
+    }
+
+    final closedFromStatus = preData['status'] as String? ?? '';
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      if (RescueStatus.fromFirestoreValue(data['status'] as String?).isTerminal) return;
+      tx.update(caseRef, {
+        'status': RescueStatus.cancelled.firestoreValue,
+        'closureReason': reason.name,
+        'closureDetails': details,
+        'closedAt': Timestamp.now(),
+        'closedBy': actorUid,
+        'closedByName': actorName,
+        'closedFromStatus': closedFromStatus,
+        if (lastKnownLocation != null) 'closureLastKnownLocation': lastKnownLocation,
+        if (clinicUnavailableDetails != null) 'closureClinicDetails': clinicUnavailableDetails,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Case closed: ${reason.label}.', 'timestamp': Timestamp.now()}
+        ]),
+      });
+    });
+
+    await addActivityLog(
+      caseId: caseId,
+      action: 'case_closed',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'reason': reason.name, 'closedFromStatus': closedFromStatus},
+    );
   }
 
   // ---- Treatment ----------------------------------------------------

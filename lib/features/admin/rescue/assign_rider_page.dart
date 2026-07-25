@@ -783,7 +783,7 @@ class _Avatar extends StatelessWidget {
 /// Track Case, which already renders the right pending/accepted view.
 enum _DialogOutcome { cancelled, accepted, declined, offerCancelled, viewExisting }
 
-enum _ModalPhase { confirmation, creating, pending, accepted, declined, cancelled, error, conflict }
+enum _ModalPhase { confirmation, creating, cancelling, pending, accepted, declined, cancelled, error, conflict }
 
 /// The single dialog instance that carries the admin from "Confirm
 /// Transporter Assignment" through Pending and into Accepted/Declined/Error
@@ -878,6 +878,21 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
           _conflict = e;
         });
       }
+    } on FirebaseException catch (error, stackTrace) {
+      _hasCreatedOffer = false; // let Retry actually attempt again
+      // Diagnostics for development — never shown to the admin, whose
+      // dialog only ever gets the generic message below.
+      debugPrint('Assign transporter failed');
+      debugPrint('code: ${error.code}');
+      debugPrint('message: ${error.message}');
+      debugPrint('plugin: ${error.plugin}');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        setState(() {
+          _phase = _ModalPhase.error;
+          _errorMessage = 'Could not assign this transporter. The previous offer may not have been cleared. Please retry.';
+        });
+      }
     } catch (e) {
       _hasCreatedOffer = false; // let Retry actually attempt again
       if (mounted) {
@@ -936,12 +951,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       case 'accepted':
         if (_phase == _ModalPhase.accepted) return;
         _elapsedTimer?.cancel();
+        // Shows the success state and stays open — the admin closes this
+        // (and only then does the caller navigate to Track Case) by
+        // pressing "View Transport Tracking" below, never automatically.
         setState(() => _phase = _ModalPhase.accepted);
-        // Brief success state, then close and let the caller navigate to
-        // Track Case — never navigates from inside the dialog itself.
-        Future.delayed(const Duration(milliseconds: 900), () {
-          if (mounted) Navigator.of(context).pop(_DialogOutcome.accepted);
-        });
         break;
       case 'rejected':
         if (_phase == _ModalPhase.declined) return;
@@ -953,13 +966,11 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         break;
       case 'cancelled':
         // Normally only reached via our own _back() — handled defensively
-        // in case the offer is ever cancelled by some other path.
+        // in case the offer is ever cancelled by some other path. Stays
+        // open until the admin presses OK below — never auto-closes.
         if (_phase == _ModalPhase.cancelled) return;
         _elapsedTimer?.cancel();
         setState(() => _phase = _ModalPhase.cancelled);
-        Future.delayed(const Duration(milliseconds: 700), () {
-          if (mounted) Navigator.of(context).pop(_DialogOutcome.offerCancelled);
-        });
         break;
       case 'pending':
         // Nothing to do — already showing the pending UI (or about to).
@@ -1018,36 +1029,47 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
 
     _elapsedTimer?.cancel();
     _assignmentSub?.cancel();
-    setState(() => _phase = _ModalPhase.cancelled);
+    setState(() => _phase = _ModalPhase.cancelling);
     try {
       await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
             caseId: widget.caseId,
             assignmentId: _assignmentId!,
             reason: 'Cancelled by organization while waiting',
           );
-    } catch (_) {
-      // Best-effort — the admin explicitly asked to stop waiting, so leave
-      // the modal regardless; a failed cancellation write just means the
-      // offer stays pending in Firestore (still visible/actionable via
-      // Retry from a freshly opened dialog later), never silently lost.
-    }
-    if (mounted) {
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) Navigator.of(context).pop(_DialogOutcome.offerCancelled);
-      });
+      // Cancellation is confirmed written — show the cancelled state and
+      // wait for the admin to press OK (below) before closing. Never
+      // auto-closes, and never leaves the modal in a loading state.
+      if (mounted) setState(() => _phase = _ModalPhase.cancelled);
+    } catch (e) {
+      // The write actually failed — surface it with Retry rather than
+      // silently pretending the offer was cancelled (that would leave it
+      // still 'pending' in Firestore while the admin believes it's clear
+      // to pick another transporter).
+      if (mounted) {
+        setState(() {
+          _phase = _ModalPhase.error;
+          _errorMessage = 'Could not cancel this offer. The previous offer may not have been cleared. Please retry.';
+        });
+      }
     }
   }
+
+  /// Guards against a double-tap firing two concurrent retries — the
+  /// button is disabled while this is true (see _actions()).
+  bool _isRetrying = false;
 
   /// "Retry" — never creates a second offer. If one already exists, re-reads
   /// it fresh and re-attaches the listener; only attempts creation if no
   /// offer exists yet at all (i.e. Retry from the [creating]-failure error
   /// state, where [_confirm] never actually succeeded).
   Future<void> _retry() async {
+    if (_isRetrying) return;
     if (_assignmentId == null) {
       await _confirm();
       return;
     }
     setState(() {
+      _isRetrying = true;
       _phase = _ModalPhase.pending;
       _errorMessage = null;
     });
@@ -1082,6 +1104,8 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
           _errorMessage = 'Could not check transporter response: $e';
         });
       }
+    } finally {
+      if (mounted) setState(() => _isRetrying = false);
     }
   }
 
@@ -1090,6 +1114,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         _ModalPhase.creating ||
         _ModalPhase.pending =>
           'Confirm Transporter Assignment',
+        _ModalPhase.cancelling => 'Cancelling Offer',
         _ModalPhase.accepted => 'Assignment Accepted',
         _ModalPhase.declined => 'Assignment Declined',
         _ModalPhase.cancelled => 'Offer Cancelled',
@@ -1100,6 +1125,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   Widget _content(BuildContext context) => switch (_phase) {
         _ModalPhase.confirmation => _confirmationContent(),
         _ModalPhase.creating => _loadingContent('Creating assignment…'),
+        _ModalPhase.cancelling => _loadingContent('Cancelling the pending offer…'),
         _ModalPhase.pending => _pendingContent(),
         _ModalPhase.accepted => _acceptedContent(),
         _ModalPhase.declined => _declinedContent(),
@@ -1291,15 +1317,38 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
               child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
           ],
-        // No dismiss affordance while the initial write is in flight or the
-        // dialog is about to auto-close on its own — this is what "disable
-        // dismissal while the assignment write is being created" means in
-        // practice, alongside barrierDismissible:false at the call site.
-        // Once an offer actually exists and is Pending, though, the org is
-        // never trapped: Back and Retry are always available (this is the
-        // fix for real transporters — who have no accept/reject UI of
-        // their own yet — otherwise leaving Pending stuck forever).
-        _ModalPhase.creating || _ModalPhase.accepted || _ModalPhase.cancelled => const [],
+        // No dismiss affordance while a write is actually in flight — this
+        // is what "disable dismissal while the assignment write is being
+        // created" means in practice, alongside barrierDismissible:false
+        // at the call site.
+        _ModalPhase.creating || _ModalPhase.cancelling => const [],
+        // Accepted/cancelled never auto-close (see _applyAssignmentStatus/
+        // _back) — the admin closes them explicitly here, which is also
+        // the one moment the caller is allowed to navigate to Track Case.
+        _ModalPhase.accepted => [
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              child: Text('View Transport Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        _ModalPhase.cancelled => [
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(_DialogOutcome.offerCancelled),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              child: Text('OK', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+            ),
+          ],
         _ModalPhase.pending => [
             OutlinedButton(
               onPressed: _back,
@@ -1311,9 +1360,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
               child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
             ElevatedButton(
-              onPressed: _retry,
+              onPressed: _isRetrying ? null : _retry,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
+                disabledBackgroundColor: AppColors.slaterspwn,
                 foregroundColor: AppColors.textPrimary,
                 elevation: 0,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -1344,9 +1394,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
               child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
             ElevatedButton(
-              onPressed: _retry,
+              onPressed: _isRetrying ? null : _retry,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
+                disabledBackgroundColor: AppColors.slaterspwn,
                 foregroundColor: AppColors.textPrimary,
                 elevation: 0,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

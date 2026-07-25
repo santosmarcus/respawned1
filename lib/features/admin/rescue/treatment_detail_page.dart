@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,7 @@ import 'package:respawnd1/features/admin/rescue/expenses/create_fundraiser_draft
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/release_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transfer_animal_sheet.dart';
@@ -47,6 +49,45 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   bool _showUpdateForm = false;
   bool _isSaving = false;
   bool _isActingOnNextStep = false;
+  bool _closingCase = false;
+
+  String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _actorName {
+    final n = FirebaseAuth.instance.currentUser?.displayName;
+    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
+
+  /// General Close Case (spec §2) — separate from [_closeDeceasedCase]
+  /// below, which stays exactly as-is for its own specific
+  /// deceased-with-financial-summary flow. This is for every other
+  /// exception reason while a case is still in Treatment.
+  Future<void> _closeCase(RescueCase c) async {
+    if (_closingCase) return;
+    final result = await showCloseCaseSheet(context, rescueCase: c);
+    if (result == null || !mounted) return;
+    setState(() => _closingCase = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).closeCase(
+            caseId: c.id,
+            reason: result.reason,
+            details: result.details,
+            actorUid: _actorUid,
+            actorName: _actorName,
+            lastKnownLocation: result.lastKnownLocation,
+            clinicUnavailableDetails: result.clinicUnavailableDetails,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not close case: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _closingCase = false);
+    }
+  }
 
   // Update form state
   TreatmentUpdateType? _selectedType;
@@ -341,6 +382,15 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
             onPressed: () {},
           ),
+          if (!c.isDeceased)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppColors.background),
+              enabled: !_closingCase,
+              onSelected: (_) => _closeCase(c),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'close_case', child: Text('Close Case')),
+              ],
+            ),
         ],
       ),
       body: SingleChildScrollView(

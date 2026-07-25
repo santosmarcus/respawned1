@@ -581,6 +581,18 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
               ),
             ],
+            const SizedBox(height: 8),
+            Center(
+              child: RichText(
+                text: TextSpan(
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  children: const [
+                    TextSpan(text: '* ', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                    TextSpan(text: 'Required fields'),
+                  ],
+                ),
+              ),
+            ),
 
             const SizedBox(height: 20),
 
@@ -636,11 +648,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             _FieldLabel('Basic Information'),
             const SizedBox(height: 8),
 
-            _FieldLabel('Name'),
+            _FieldLabel('Name', required: true),
             _UnderlineField(controller: _nameController, hint: 'Enter'),
             const SizedBox(height: 16),
 
-            _FieldLabel('Age'),
+            _FieldLabel('Age', required: true),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -665,7 +677,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             ),
             const SizedBox(height: 16),
 
-            _FieldLabel('Species'),
+            _FieldLabel('Species', required: true),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -690,7 +702,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _FieldLabel('Sex'),
+                      _FieldLabel('Sex', required: true),
                       _DropdownField(
                         value: _selectedSex,
                         hint: 'Select',
@@ -705,7 +717,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _FieldLabel('Size'),
+                      _FieldLabel('Size', required: true),
                       _DropdownField(
                         value: _selectedSize,
                         hint: 'Select',
@@ -719,7 +731,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             ),
             const SizedBox(height: 16),
 
-            _FieldLabel('Coat Length'),
+            _FieldLabel('Coat Length', required: true),
             _DropdownField(
               value: _selectedCoatLength,
               hint: 'Select',
@@ -804,25 +816,34 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             const SizedBox(height: 20),
 
             // ---- Rescue Background (single-select) -------------------------
-            _FieldLabel('Rescue Background'),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: _rescueBackgroundOptions
-                  .map((key) => ChoiceChip(
-                        label: Text(key),
-                        selected: _rescueBackground == key,
-                        selectedColor: AppColors.yellowrspwn,
-                        onSelected: (_) => setState(() => _rescueBackground = key),
-                      ))
-                  .toList(),
+            // Fixed-position checkbox rows, not ChoiceChips — chips reflow/
+            // resize on selection (the chip that's checked can grow, and the
+            // Wrap can reorder as widths change), which reads as the whole
+            // control "moving" every time you pick an option. Rows in a
+            // Column never resize or reorder; only their checkmark changes.
+            // Still single-select — checking one clears the other two.
+            _FieldLabel('Rescue Background', required: true),
+            const SizedBox(height: 4),
+            Column(
+              children: [
+                for (final key in _rescueBackgroundOptions)
+                  CheckboxListTile(
+                    key: ValueKey(key),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    dense: true,
+                    activeColor: AppColors.greenrspwn,
+                    title: Text(key, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    value: _rescueBackground == key,
+                    onChanged: (checked) => setState(() => _rescueBackground = (checked ?? false) ? key : null),
+                  ),
+              ],
             ),
 
             const SizedBox(height: 20),
 
             // ---- Remaining fields -------------------------------------
-            _FieldLabel('Description'),
+            _FieldLabel('Description', required: true),
             _UnderlineField(controller: _descriptionController, hint: 'Enter'),
             const SizedBox(height: 16),
 
@@ -931,7 +952,12 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 // Reusable widgets
 class _FieldLabel extends StatelessWidget {
   final String label;
-  const _FieldLabel(this.label);
+  // One shared label widget for every field on this form, rather than
+  // hand-styling an asterisk per label — [required] must stay in sync with
+  // the actual `missing` check in _createRecord() (see the field list
+  // there), never marked just because a field "feels" mandatory.
+  final bool required;
+  const _FieldLabel(this.label, {this.required = false});
 
   @override
   Widget build(BuildContext context) => Row(
@@ -941,6 +967,8 @@ class _FieldLabel extends StatelessWidget {
               fontSize: 14,
               fontWeight: FontWeight.w600,
               color: AppColors.textPrimary)),
+      if (required)
+        const Text(' *', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.redAccent)),
     ],
   );
 }

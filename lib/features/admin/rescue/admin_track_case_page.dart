@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
@@ -14,7 +16,9 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 
 // Raw case-doc status values written by the pet-transporter app's own
@@ -70,11 +74,95 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   final ScrollController _scrollController = ScrollController();
   bool _transporterCollapsed = false;
   static const _collapseThreshold = 24.0;
+  bool _closing = false;
+
+  String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _actorName {
+    final n = FirebaseAuth.instance.currentUser?.displayName;
+    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScroll);
+  }
+
+  /// "Change Clinic" (spec §7) — reuses the exact same Select Clinic sheet
+  /// as the initial pick, just with `previousClinicName` set so the sheet
+  /// calls RescueCaseRepository.changeClinic instead of assignClinic (see
+  /// select_clinic_sheet.dart). Never creates a new case/assignment, never
+  /// marks the transport assignment completed.
+  Future<void> _changeClinic(RescueCase c) async {
+    if (c.vetClinicName == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Change Clinic?'),
+        content: const Text('Changing the clinic will update the transporter\'s destination and route. Continue?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // Never auto-opens anything else once the sheet resolves — the admin
+    // stays on this same tracking page either way.
+    await showSelectClinicSheet(
+      context,
+      repository: ref.read(clinicSearchRepositoryProvider),
+      caseRepository: ref.read(rescueCaseRepositoryProvider),
+      savedClinicsRepository: ref.read(savedClinicsRepositoryProvider),
+      caseId: c.id,
+      actorUid: _actorUid,
+      actorName: _actorName,
+      centerLat: c.lat,
+      centerLng: c.lng,
+      currentClinicName: c.vetClinicName,
+      currentClinicAddress: c.vetClinicAddress,
+      currentClinicPlaceId: c.vetClinicPlaceId,
+      currentClinicLat: c.vetClinicLat,
+      currentClinicLng: c.vetClinicLng,
+      currentClinicPhone: c.vetClinicPhone,
+      offerAssignRider: false,
+      previousClinicName: c.vetClinicName,
+    );
+  }
+
+  Future<void> _closeCase(RescueCase c) async {
+    if (_closing) return;
+    final result = await showCloseCaseSheet(context, rescueCase: c);
+    if (result == null || !mounted) return;
+    setState(() => _closing = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).closeCase(
+            caseId: c.id,
+            reason: result.reason,
+            details: result.details,
+            actorUid: _actorUid,
+            actorName: _actorName,
+            lastKnownLocation: result.lastKnownLocation,
+            clinicUnavailableDetails: result.clinicUnavailableDetails,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not close case: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _closing = false);
+    }
   }
 
   void _handleScroll() {
@@ -618,6 +706,23 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 icon: const Icon(Icons.notifications_outlined,
                     color: AppColors.background),
                 onPressed: () {},
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: AppColors.background),
+                enabled: !_closing,
+                onSelected: (value) {
+                  final c = RescueCase.fromMap(widget.caseId, data);
+                  if (value == 'change_clinic') {
+                    _changeClinic(c);
+                  } else if (value == 'close_case') {
+                    _closeCase(c);
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (data['vetClinicName'] != null)
+                    const PopupMenuItem(value: 'change_clinic', child: Text('Change Clinic')),
+                  const PopupMenuItem(value: 'close_case', child: Text('Close Case')),
+                ],
               ),
             ],
           ),

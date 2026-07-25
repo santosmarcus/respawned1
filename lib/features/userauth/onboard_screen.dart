@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
@@ -51,6 +52,13 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       description:
       'Registered responder who can take on rescue cases when partner organizations are unavailable.',
       color: AppColors.greenrspwn,
+    ),
+    _UserTypeOption(
+      role: 'organization',
+      title: 'Organization',
+      description:
+      'Manage rescues, animal records, adoptions, volunteers, transporters, and shelter operations for your organization.',
+      color: AppColors.yellowrspwn,
     ),
   ];
 
@@ -114,6 +122,12 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
           return;
         } else if (_selectedRole == 'rescue_volunteer') {
           nextPage = const ServiceScreen();
+        } else if (_selectedRole == 'organization') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const OrganizationAboutScreen()),
+          );
+          return;
         } else {
           nextPage = const HomeScreen();
         }

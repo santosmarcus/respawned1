@@ -19,7 +19,7 @@ class AdminAdoptionPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      drawer: const AdminDrawer(),
+      drawer: AdminDrawer(active: showDonations ? AdminModule.donations : AdminModule.adoptions),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
         leading: Builder(

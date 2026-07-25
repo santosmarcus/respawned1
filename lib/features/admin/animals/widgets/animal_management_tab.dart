@@ -42,11 +42,11 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     final animal = widget.animal;
     final confirmed = await showConfirmActionDialog(
       context,
-      title: animal.archived ? 'Unarchive this record?' : 'Archive this record?',
+      title: animal.archived ? 'Restore this record?' : 'Archive this record?',
       message: animal.archived
-          ? 'This animal will reappear in normal active lists.'
-          : 'This hides the animal from normal active lists without deleting anything — it can be unarchived later.',
-      confirmLabel: animal.archived ? 'Unarchive' : 'Archive',
+          ? 'This animal will reappear in normal active lists. Its rescue, treatment, adoption, return, and intake history is preserved.'
+          : 'This hides the animal from normal active lists without deleting anything — it can be restored later.',
+      confirmLabel: animal.archived ? 'Restore Record' : 'Archive',
     );
     if (!confirmed) return;
     await _run(() => ref.read(animalRecordRepositoryProvider).setArchived(animalId: animal.id, archived: !animal.archived));
@@ -116,7 +116,7 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
         children: [
           _ActionTile(
             icon: animal.archived ? Icons.unarchive_outlined : Icons.archive_outlined,
-            label: animal.archived ? 'Unarchive' : 'Archive',
+            label: animal.archived ? 'Restore Record' : 'Archive',
             enabled: !_busy,
             onTap: _toggleArchive,
           ),

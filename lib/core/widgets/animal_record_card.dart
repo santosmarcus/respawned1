@@ -44,6 +44,21 @@ class AnimalRecordCard extends StatelessWidget {
   /// ...); the user side passes health tags (Vaccinated, Dewormed, ...).
   final List<CardChip> extraChips;
 
+  /// Admin-only: hides the description line and the entire chip row so the
+  /// list card shows only what's needed to scan/identify a record (image,
+  /// name+gender, species/breed, age). The user-facing adoption list never
+  /// sets this — its description and public-status/health chips stay.
+  final bool compact;
+
+  /// Admin-only: enters/toggles the Animal Records list's long-press
+  /// multi-select mode. Null on the user-facing adoption list.
+  final VoidCallback? onLongPress;
+
+  /// True while this card is part of the active selection — draws the
+  /// same selected-state border the app already uses for chosen tabs/
+  /// chips, rather than a one-off style.
+  final bool selected;
+
   const AnimalRecordCard({
     super.key,
     required this.animal,
@@ -52,6 +67,9 @@ class AnimalRecordCard extends StatelessWidget {
     this.favorited = false,
     this.publicStatusLabel,
     this.extraChips = const [],
+    this.compact = false,
+    this.onLongPress,
+    this.selected = false,
   });
 
   @override
@@ -88,11 +106,13 @@ class AnimalRecordCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
+          border: selected ? Border.all(color: AppColors.yellowrspwn, width: 2) : null,
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
         ),
         child: Row(
@@ -150,23 +170,25 @@ class AnimalRecordCard extends StatelessWidget {
                     Text(subtitle, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                   if (animal.age.isNotEmpty)
                     Text(animal.age, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                  if (animal.description.isNotEmpty)
+                  if (!compact && animal.description.isNotEmpty)
                     Text(
                       animal.description,
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      if (publicStatusLabel != null)
-                        _chip(publicStatusLabel!, _publicStatusColor(publicStatusLabel!)),
-                      for (final c in extraChips) _chip(c.label, c.color),
-                    ],
-                  ),
+                  if (!compact && (publicStatusLabel != null || extraChips.isNotEmpty)) ...[
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        if (publicStatusLabel != null)
+                          _chip(publicStatusLabel!, _publicStatusColor(publicStatusLabel!)),
+                        for (final c in extraChips) _chip(c.label, c.color),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -194,5 +216,112 @@ class AnimalRecordCard extends StatelessWidget {
         height: 80,
         decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
         child: const Icon(Icons.pets, size: 32, color: AppColors.textSecondary),
+      );
+}
+
+/// Admin Animal Records grid-view card — the vertical counterpart to
+/// [AnimalRecordCard]'s (horizontal) list layout, showing the exact same
+/// compact field set (image, name+gender, species/breed, age; never a
+/// description or chip row) and the same long-press multi-select contract
+/// (stable doc id, `selected` border), so switching list/grid never changes
+/// what information is shown or how selection behaves.
+class AnimalRecordGridTile extends StatelessWidget {
+  final AnimalRecord animal;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final bool selected;
+
+  const AnimalRecordGridTile({
+    super.key,
+    required this.animal,
+    required this.onTap,
+    this.onLongPress,
+    this.selected = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (animal.isMalformed) {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.slaterspwn),
+        ),
+        child: Center(
+          child: Text('Could not display this record.',
+              textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+        ),
+      );
+    }
+
+    final displayName = animal.name.isNotEmpty ? animal.name : animal.species;
+    final genderIcon = genderIconFor(animal.sex);
+    final subtitle = [
+      if (animal.species.isNotEmpty) animal.species,
+      if (animal.breed.isNotEmpty) animal.breed,
+    ].join(' · ');
+
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: selected ? Border.all(color: AppColors.yellowrspwn, width: 2) : null,
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 1,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: animal.photoUrls.isNotEmpty
+                    ? Image.network(
+                        animal.photoUrls.first,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _gridPlaceholder(),
+                      )
+                    : _gridPlaceholder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Name + gender in one Row, never a separate top-right trailing
+            // icon — same rule as the list card.
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    displayName,
+                    style: GoogleFonts.tiltWarp(fontSize: 13, color: AppColors.textPrimary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (genderIcon != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(genderIcon, size: 14, color: AppColors.textSecondary),
+                ],
+              ],
+            ),
+            if (subtitle.isNotEmpty)
+              Text(subtitle,
+                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (animal.age.isNotEmpty)
+              Text(animal.age, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _gridPlaceholder() => Container(
+        color: AppColors.tearspwn,
+        child: const Center(child: Icon(Icons.pets, size: 28, color: AppColors.textSecondary)),
       );
 }

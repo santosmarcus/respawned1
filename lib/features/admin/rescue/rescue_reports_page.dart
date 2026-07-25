@@ -96,7 +96,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      drawer: const AdminDrawer(),
+      drawer: const AdminDrawer(active: AdminModule.rescue),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
         leading: Builder(
@@ -106,8 +106,6 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: Text('Rescue Reports',
-            style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
@@ -115,14 +113,16 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
           ),
         ],
       ),
+      // Centered module heading in the content area, same as Adoptions/
+      // Animal Records — never a second title in the AppBar too.
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 20),
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Rescue Process',
+            child: Text('Rescue Reports',
+                textAlign: TextAlign.center,
                 style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
           ),
 
@@ -130,10 +130,14 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
 
           // Filter tabs
           SizedBox(
-            height: 80,
+            height: 86,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              clipBehavior: Clip.none,
+              // Extra top padding so the badge's negative top offset below
+              // has room to render instead of being sliced off by the
+              // ListView's own viewport edge.
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
               itemCount: RescuePipelineTab.values.length,
               separatorBuilder: (_, __) => const SizedBox(width: 16),
               itemBuilder: (context, index) {
@@ -169,9 +173,12 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                             Positioned(
                               top: -6,
                               right: -6,
+                              // Grows horizontally for 2-/3-digit counts
+                              // instead of a fixed 18x18 box that would
+                              // squeeze "100" unreadable.
                               child: Container(
-                                width: 18,
-                                height: 18,
+                                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
                                 decoration: const BoxDecoration(
                                   color: Colors.orange,
                                   shape: BoxShape.circle,
@@ -179,6 +186,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                                 child: Center(
                                   child: Text(
                                     '$badgeCount',
+                                    textAlign: TextAlign.center,
                                     style: const TextStyle(
                                         fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
                                   ),

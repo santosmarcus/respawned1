@@ -67,6 +67,11 @@ Future<ClinicSheetOutcome> showSelectClinicSheet(
   double? currentClinicLng,
   String? currentClinicPhone,
   bool offerAssignRider = true,
+  // Set when this sheet is opened as a mid-tracking reselection (spec §7)
+  // rather than the initial pick — makes the confirm step call
+  // RescueCaseRepository.changeClinic (which names both clinics in the
+  // timeline entry) instead of assignClinic.
+  String? previousClinicName,
 }) async {
   final outcome = await showModalBottomSheet<ClinicSheetOutcome>(
     context: context,
@@ -91,6 +96,7 @@ Future<ClinicSheetOutcome> showSelectClinicSheet(
       currentClinicLng: currentClinicLng,
       currentClinicPhone: currentClinicPhone,
       offerAssignRider: offerAssignRider,
+      previousClinicName: previousClinicName,
     ),
   );
   // showModalBottomSheet returns null for every dismissal path (back
@@ -115,6 +121,7 @@ class _SelectClinicSheetBody extends StatefulWidget {
   final double? currentClinicLng;
   final String? currentClinicPhone;
   final bool offerAssignRider;
+  final String? previousClinicName;
 
   const _SelectClinicSheetBody({
     required this.repository,
@@ -132,6 +139,7 @@ class _SelectClinicSheetBody extends StatefulWidget {
     this.currentClinicLng,
     this.currentClinicPhone,
     required this.offerAssignRider,
+    this.previousClinicName,
   });
 
   @override
@@ -501,28 +509,92 @@ class _SelectClinicSheetBodyState extends State<_SelectClinicSheetBody> {
     setState(() {
       _selected = clinic;
       _saveError = null;
+      _closedWarningAcknowledged = false;
     });
+  }
+
+  /// True once the admin has explicitly confirmed "Proceed Anyway" on the
+  /// closed-clinic warning below for the currently-selected clinic —
+  /// re-selecting a different clinic resets this, so switching clinics
+  /// always re-checks availability rather than carrying an old
+  /// acknowledgment over to a new selection.
+  bool _closedWarningAcknowledged = false;
+
+  /// Clinic-availability warning (spec §6) — gated strictly on the real
+  /// `openNow` field already parsed from the Places result
+  /// (ClinicSearchResult), never a fabricated status. `openNow == null`
+  /// (Places had no reliable hours data) shows no warning at all — proceed
+  /// silently, same as before this feature.
+  Future<bool> _confirmAvailability(ClinicSearchResult clinic) async {
+    if (clinic.openNow != false || _closedWarningAcknowledged) return true;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('This clinic appears to be closed.'),
+        content: const Text('You may continue, but confirm that the clinic can receive the animal.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, 'cancel'), child: const Text('Cancel')),
+          OutlinedButton(onPressed: () => Navigator.pop(ctx, 'choose_another'), child: const Text('Choose Another Clinic')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, 'proceed'),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE0A353), foregroundColor: Colors.white),
+            child: const Text('Proceed Anyway'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'proceed') {
+      setState(() => _closedWarningAcknowledged = true);
+      return true;
+    }
+    // 'choose_another'/'cancel'/dismissed: stay on the sheet either way —
+    // the selected clinic is preserved so a re-tap of Confirm re-shows this
+    // same warning rather than silently saving.
+    return false;
   }
 
   Future<void> _confirm({required bool asAssignRider}) async {
     final clinic = _selected;
     if (clinic == null || _saving) return; // guards double-taps
+    if (!await _confirmAvailability(clinic)) return;
     setState(() {
       _saving = true;
       _saveError = null;
     });
+    final availabilityStatus = clinic.openNow == null ? null : (clinic.openNow! ? 'open' : 'closed');
     try {
-      await widget.caseRepository.assignClinic(
-        caseId: widget.caseId,
-        clinicName: clinic.name,
-        clinicAddress: clinic.address,
-        clinicPlaceId: clinic.placeId,
-        clinicLat: clinic.lat,
-        clinicLng: clinic.lng,
-        clinicPhone: clinic.phone,
-        actorUid: widget.actorUid,
-        actorName: widget.actorName,
-      );
+      if (widget.previousClinicName != null) {
+        await widget.caseRepository.changeClinic(
+          caseId: widget.caseId,
+          previousClinicName: widget.previousClinicName!,
+          clinicName: clinic.name,
+          clinicAddress: clinic.address,
+          clinicPlaceId: clinic.placeId,
+          clinicLat: clinic.lat,
+          clinicLng: clinic.lng,
+          clinicPhone: clinic.phone,
+          actorUid: widget.actorUid,
+          actorName: widget.actorName,
+          availabilityStatus: availabilityStatus,
+          closedWarningAcknowledged: _closedWarningAcknowledged,
+        );
+      } else {
+        await widget.caseRepository.assignClinic(
+          caseId: widget.caseId,
+          clinicName: clinic.name,
+          clinicAddress: clinic.address,
+          clinicPlaceId: clinic.placeId,
+          clinicLat: clinic.lat,
+          clinicLng: clinic.lng,
+          clinicPhone: clinic.phone,
+          actorUid: widget.actorUid,
+          actorName: widget.actorName,
+          availabilityStatus: availabilityStatus,
+          closedWarningAcknowledged: _closedWarningAcknowledged,
+        );
+      }
       if (mounted) {
         Navigator.pop(
           context,

@@ -106,10 +106,12 @@ class _AnimalRecordDetailPageState extends ConsumerState<AnimalRecordDetailPage>
                   break;
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit Profile')),
-              PopupMenuItem(value: 'share', child: Text('Share')),
-              PopupMenuItem(value: 'logs', child: Text('View Logs')),
+            // Archived records are read-only by default — editing is only
+            // available again after Restore Record (Management tab).
+            itemBuilder: (context) => [
+              if (!animal.archived) const PopupMenuItem(value: 'edit', child: Text('Edit Profile')),
+              const PopupMenuItem(value: 'share', child: Text('Share')),
+              const PopupMenuItem(value: 'logs', child: Text('View Logs')),
             ],
           ),
         ],
@@ -185,7 +187,23 @@ class _AnimalRecordHeader extends StatelessWidget {
                   ],
                 );
               }),
-              Text(_statusText, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              if (animal.archived)
+                Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(20)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.archive_outlined, size: 13, color: AppColors.textPrimary),
+                      const SizedBox(width: 4),
+                      Text('Archived · Read-only',
+                          style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    ],
+                  ),
+                )
+              else
+                Text(_statusText, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
               const SizedBox(height: 14),
               Container(
                 decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(50)),

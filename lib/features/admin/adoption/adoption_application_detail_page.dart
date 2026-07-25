@@ -6,7 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/core/models/adoption/adoption_fit_assessment.dart';
 import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
+import 'package:respawnd1/core/services/adoption_fit_assessment_service.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/core/widgets/photo_thumbnail_strip.dart';
 import 'package:respawnd1/features/adoption/interview_scheduling.dart';
@@ -34,6 +36,7 @@ class AdoptionApplicationDetailPage extends ConsumerStatefulWidget {
 class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicationDetailPage> {
   bool _responsesExpanded = false;
   bool _historyExpanded = false;
+  bool _fitAssessmentExpanded = false;
   bool _busy = false;
   final _noteController = TextEditingController();
 
@@ -226,14 +229,19 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                   )),
 
                   const SizedBox(height: 12),
+                  _FitAssessmentCard(
+                    app: app,
+                    onSelect: (v) => _setFitAssessment(app, v),
+                    expanded: _fitAssessmentExpanded,
+                    onToggle: () => setState(() => _fitAssessmentExpanded = !_fitAssessmentExpanded),
+                  ),
+
+                  const SizedBox(height: 12),
                   _ApplicantHistorySection(
                     app: app,
                     expanded: _historyExpanded,
                     onToggle: () => setState(() => _historyExpanded = !_historyExpanded),
                   ),
-
-                  const SizedBox(height: 12),
-                  _FitAssessmentCard(app: app, onSelect: (v) => _setFitAssessment(app, v)),
 
                   const SizedBox(height: 12),
                   _ResponsesSection(
@@ -364,23 +372,55 @@ class _InfoItem extends StatelessWidget {
 
 // ---- Fit Assessment -----------------------------------------------------
 
-class _FitAssessmentCard extends StatelessWidget {
+class _FitAssessmentCard extends ConsumerWidget {
   final AdoptionApplication app;
   final ValueChanged<FitAssessmentValue> onSelect;
-  const _FitAssessmentCard({required this.app, required this.onSelect});
+  final bool expanded;
+  final VoidCallback onToggle;
+  const _FitAssessmentCard({required this.app, required this.onSelect, required this.expanded, required this.onToggle});
+
+  Color _bandColor(FitAssessmentBand band) => switch (band) {
+        FitAssessmentBand.strong => AppColors.greenrspwn,
+        FitAssessmentBand.moderate => AppColors.yellowrspwn,
+        FitAssessmentBand.needsReview => const Color(0xFFE0A353),
+        FitAssessmentBand.significantConcerns => const Color(0xFFE05353),
+      };
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // app.animalId is the legacy join key, never a real doc id.
+    final animalRecordId = app.animalRecordId;
+    final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
+    final assessment = animal == null ? null : calculateFitAssessment(application: app, animal: animal);
+
     return _SectionCard(
       title: 'Fit Assessment',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Automated fit scoring is not configured yet.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          // TODO(fit-assessment): replace this manual-only selector with a
-          // transparent, documented scoring rubric once one is designed —
-          // never a hardcoded/implied percentage before that exists.
-          const SizedBox(height: 8),
+          if (assessment == null)
+            Text(
+              animalRecordId == null
+                  ? 'Fit assessment unavailable — this application predates linked animal records.'
+                  : 'Loading fit assessment…',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+            )
+          else if (assessment.insufficientData)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Fit assessment unavailable', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text('Not enough application or animal information was provided.',
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            )
+          else
+            _AssessmentSummary(assessment: assessment, expanded: expanded, onToggle: onToggle, bandColor: _bandColor(assessment.band)),
+
+          const Divider(height: 24),
+          Text('Admin Decision', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
           Text('Manual assessment: ${app.fitAssessment.label}',
               style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           if (app.fitAssessedBy != null)
@@ -400,6 +440,95 @@ class _FitAssessmentCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The computed side of the Fit Assessment card — collapsed shows just the
+/// score/band/completeness; expanded adds the category breakdown and
+/// plain-language strengths/concerns/not-assessed lists. Never shown with
+/// approval/rejection styling — [bandColor] uses the same neutral palette
+/// as other informational chips in this app, not a green-means-approved /
+/// red-means-rejected scheme.
+class _AssessmentSummary extends StatelessWidget {
+  final AdoptionFitAssessment assessment;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final Color bandColor;
+  const _AssessmentSummary({required this.assessment, required this.expanded, required this.onToggle, required this.bandColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: onToggle,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text('${assessment.score} / 100', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(20)),
+                    child: Text(assessment.band.label, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  ),
+                ],
+              ),
+              Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textSecondary),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text('Assessment completeness: ${assessment.completeness}%', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+        const SizedBox(height: 6),
+        Text('This assessment is a guide based on form responses. The organization should review the full application and interview.',
+            style: GoogleFonts.zain(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.textSecondary)),
+        if (expanded) ...[
+          const SizedBox(height: 14),
+          for (final c in assessment.categoryScores)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(c.label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                  Text('${c.score} / ${c.maxScore}', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                ],
+              ),
+            ),
+          if (assessment.strengths.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text('Positive indicators', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.greenrspwn)),
+            for (final s in assessment.strengths)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('•  $s', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+              ),
+          ],
+          if (assessment.concerns.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text('Concerns to discuss', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFFE05353))),
+            for (final c in assessment.concerns)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('•  $c', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+              ),
+          ],
+          if (assessment.unassessedItems.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text('Not assessed', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+            for (final u in assessment.unassessedItems)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('•  $u', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              ),
+          ],
+        ],
+      ],
     );
   }
 }
