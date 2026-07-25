@@ -2,8 +2,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/features/donation/donation_summary.dart' as ds;
+import 'package:respawnd1/features/donation/sponsorship_summary.dart' as ss;
+import 'package:respawnd1/features/donation/models.dart';
+import 'package:respawnd1/features/donation/donation_summary_inkind.dart' as ik;
+import 'package:respawnd1/features/generalhome/history_provider.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 
@@ -105,7 +111,7 @@ class _RescueHistoryTab extends StatelessWidget {
         return ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
             final doc = docs[i];
             return _RescueHistoryCard(caseId: doc.id, data: doc.data());
@@ -195,7 +201,7 @@ class _RescueHistoryCard extends StatelessWidget {
                 width: 64,
                 height: 64,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _placeholderThumb(),
+                errorBuilder: (_, _, _) => _placeholderThumb(),
               )
                   : _placeholderThumb(),
             ),
@@ -205,7 +211,7 @@ class _RescueHistoryCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '#${shortCaseId(caseId)}',
+                    '#${caseId.substring(0, 7).toUpperCase()}',
                     style: GoogleFonts.tiltWarp(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
@@ -361,7 +367,7 @@ class _AdoptionWithdrawnTab extends StatelessWidget {
         return ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
             final data = docs[i].data();
             final personal = (data['personal'] as Map?) ?? {};
@@ -381,82 +387,236 @@ class _AdoptionWithdrawnTab extends StatelessWidget {
 
 
 // Donation — participated donations.
-class _DonationHistoryTab extends StatelessWidget {
+class _DonationHistoryTab extends ConsumerWidget {
   const _DonationHistoryTab();
 
   @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(historyProvider);
+    final donationHistory = history.where((item) => 
+      item.type == HistoryType.donation || 
+      item.type == HistoryType.inKindDonation || 
+      item.type == HistoryType.sponsorship
+    ).toList();
+
+    if (donationHistory.isEmpty) {
       return Center(
-        child: Text('Please log in to view your donation history.',
-            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('No donations yet.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+        ),
       );
     }
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('donations')
-          .where('donorId', isEqualTo: uid)
-          .snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: CircularProgressIndicator(color: AppColors.greenrspwn));
-        }
-        if (snap.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                'Could not load donation history — this page assumes a '
-                    '"donations" collection with a "donorId" field; update '
-                    'it if your schema is named differently.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: donationHistory.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (context, i) {
+        return _DonationHistoryCard(item: donationHistory[i]);
+      },
+    );
+  }
+}
+
+class _DonationHistoryCard extends ConsumerWidget {
+  final HistoryItem item;
+  const _DonationHistoryCard({required this.item});
+
+  String _truncate(String? text) {
+    if (text == null) return '';
+    if (text.length <= 25) return text;
+    return '${text.substring(0, 25)}...';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    String title = '';
+    String subTitle = '';
+    
+    switch (item.type) {
+      case HistoryType.donation:
+        title = 'Donation';
+        subTitle = _truncate(item.campaignName ?? item.itemDescription ?? item.organizer);
+        break;
+      case HistoryType.inKindDonation:
+        title = 'In-Kind Donation';
+        subTitle = _truncate(item.campaignName ?? item.itemDescription ?? item.organizer);
+        break;
+      case HistoryType.sponsorship:
+        title = 'Sponsorship';
+        subTitle = _truncate(item.pet?.name ?? item.campaignName ?? item.organizer);
+        break;
+    }
+
+    return GestureDetector(
+      onTap: () {
+        if (item.type == HistoryType.sponsorship) {
+           Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ss.DonationSummaryScreen(
+                params: ss.DonationSummaryParams(
+                  charityName: item.organizer,
+                  donationMethod: item.donationMethod ?? 'Sponsorship',
+                  item: DonationItem(description: item.itemDescription ?? 'Sponsorship', amount: item.amount ?? 0),
+                  referenceNumber: item.refNumber,
+                  timestamp: item.dateTime,
+                  historyItem: item,
+                ),
+              ),
+            ),
+          );
+        } else if (item.type == HistoryType.inKindDonation) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ik.InKindDonationSummaryScreen(
+                params: ik.InKindDonationSummaryParams(
+                  charityName: item.organizer,
+                  category: item.category ?? 'General',
+                  clarification: item.clarification ?? item.itemDescription ?? '',
+                  isAnonymous: item.isAnonymous ?? false,
+                  referenceNumber: item.refNumber,
+                  timestamp: item.dateTime,
+                  address: item.address ?? 'Rescue Center',
+                  status: item.status,
+                ),
+                onCancel: () {
+                  ref.read(historyProvider.notifier).cancelInKindDonation(item.id);
+                },
+              ),
+            ),
+          );
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ds.DonationSummaryScreen(
+                params: ds.DonationSummaryParams(
+                  charityName: item.organizer,
+                  donationMethod: item.donationMethod ?? 'Monetary',
+                  item: DonationItem(
+                    description: item.itemDescription ?? 'Donation', 
+                    amount: item.amount ?? 0
+                  ),
+                  referenceNumber: item.refNumber,
+                  timestamp: item.dateTime,
+                  historyItem: item,
+                ),
               ),
             ),
           );
         }
-
-        final docs = List.of(snap.data?.docs ?? const []);
-        docs.sort((a, b) {
-          final ta = a.data()['createdAt'] as Timestamp?;
-          final tb = b.data()['createdAt'] as Timestamp?;
-          return (tb ?? Timestamp(0, 0)).compareTo(ta ?? Timestamp(0, 0));
-        });
-
-        if (docs.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text('No donations yet.',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (context, i) {
-            final data = docs[i].data();
-            final ts = data['createdAt'] as Timestamp?;
-            final amount = data['amount'];
-            final cause = (data['campaignName'] as String?) ??
-                (data['organizationName'] as String?) ??
-                'Donation';
-            return _SimpleHistoryCard(
-              title: cause,
-              dateLabel: _formatTimestamp(ts),
-              statusLabel: amount != null ? '₱$amount' : (data['status'] as String? ?? 'Completed'),
-              icon: Icons.volunteer_activism_outlined,
-            );
-          },
-        );
       },
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFFDFCF4), // Light off-white from image
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${DateFormat('MM/dd/yyyy').format(item.dateTime)} at ${DateFormat('HH:mm:ss').format(item.dateTime)}',
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                  Text(
+                    title,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF4A4512), // Dark olive from image
+                    ),
+                  ),
+                  Text(
+                    subTitle,
+                    style: GoogleFonts.zain(
+                      fontSize: 16,
+                      color: const Color(0xFF4A4512).withOpacity(0.8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _buildStatusBadge(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge() {
+    if (item.type == HistoryType.inKindDonation && item.status != null) {
+      Color bgColor;
+      String label;
+      switch (item.status!) {
+        case InKindStatus.complete:
+          bgColor = const Color(0xFF4CAF50);
+          label = 'Complete';
+          break;
+        case InKindStatus.inProgress:
+          bgColor = const Color(0xFFFFA726);
+          label = 'In Progress';
+          break;
+        case InKindStatus.cancelled:
+          bgColor = const Color(0xFFF44336);
+          label = 'Cancelled';
+          break;
+      }
+      return _badge(label, bgColor);
+    } else if (item.type == HistoryType.sponsorship && item.sponsorshipStatus != null) {
+      Color bgColor;
+      String label;
+      switch (item.sponsorshipStatus!) {
+        case 'active':
+          bgColor = const Color(0xFF4CAF50);
+          label = 'Active';
+          break;
+        case 'cancelled':
+          bgColor = const Color(0xFFFFA726);
+          label = 'Cancelled';
+          break;
+        case 'inactive':
+          bgColor = const Color(0xFFF44336);
+          label = 'Inactive';
+          break;
+        default:
+          return const SizedBox.shrink();
+      }
+      return _badge(label, bgColor);
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _badge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.tiltWarp(
+          fontSize: 12,
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
@@ -522,7 +682,7 @@ class _VolunteerHistoryTab extends StatelessWidget {
         return ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
             final data = docs[i].data();
             final ts = data['createdAt'] as Timestamp?;
