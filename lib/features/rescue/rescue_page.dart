@@ -98,9 +98,22 @@ class _FoundAnimalEntry {
   String? biteRisk;
   String? escapeRisk;
 
+  // Community Adoption Details — information that may be needed later if
+  // an organization determines this animal is healthy/low-urgency and
+  // eligible for Community Adoption (see
+  // core/utils/community_adoption_eligibility.dart). All optional at
+  // report time — a name left blank gets a stable generated label
+  // ("Dog 1", "Cat 2", ...) at submission (see _generatedAnimalName),
+  // never a single shared "Unnamed" for every animal in the report.
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController descriptionController = TextEditingController();
+  final List<XFile> adoptionPhotos = [];
+
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
+    nameController.dispose();
+    descriptionController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -2227,11 +2240,12 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Widget _lostPetTextField(TextEditingController controller, String hint,
-      {TextInputType? keyboardType, List<TextInputFormatter>? inputFormatters}) {
+      {TextInputType? keyboardType, List<TextInputFormatter>? inputFormatters, int maxLines = 1}) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
+      maxLines: maxLines,
       decoration: InputDecoration(
         hintText: hint,
         hintStyle:
@@ -2611,9 +2625,94 @@ class _RescuePageState extends State<RescuePage> {
           _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
           const SizedBox(height: 10),
           _buildRiskFieldsRow(entry),
+          const SizedBox(height: 14),
+          _buildCommunityAdoptionDetails(entry, index),
         ],
       ),
     );
+  }
+
+  /// Community Adoption Details (optional at report time) — reused later
+  /// if an organization determines this animal is healthy/low-urgency and
+  /// transitions it into Community Adoption. Never blocks submission of an
+  /// emergency rescue report over adoption-profile information.
+  Widget _buildCommunityAdoptionDetails(_FoundAnimalEntry entry, int index) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.slaterspwn.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Community Adoption Details',
+              style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(height: 6),
+          _lostPetTextField(entry.nameController, 'Animal name or temporary name'),
+          const SizedBox(height: 10),
+          _lostPetTextField(entry.descriptionController, 'Short description for potential adopters',
+              maxLines: 2),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var i = 0; i < entry.adoptionPhotos.length; i++)
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(File(entry.adoptionPhotos[i].path), width: 64, height: 64, fit: BoxFit.cover),
+                    ),
+                    Positioned(
+                      top: -6,
+                      right: -6,
+                      child: GestureDetector(
+                        onTap: () => setState(() => entry.adoptionPhotos.removeAt(i)),
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                          child: const Icon(Icons.close, size: 12, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              GestureDetector(
+                onTap: () => _pickAdoptionPhotos(entry),
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.greenrspwn, width: 1.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.add_photo_alternate_outlined, size: 22, color: AppColors.greenrspwn),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static const _maxAdoptionPhotosPerAnimal = 4;
+
+  Future<void> _pickAdoptionPhotos(_FoundAnimalEntry entry) async {
+    final picked = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1280);
+    if (picked.isEmpty || !mounted) return;
+    final room = _maxAdoptionPhotosPerAnimal - entry.adoptionPhotos.length;
+    if (room <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('You can add at most $_maxAdoptionPhotosPerAnimal photos per animal.')),
+      );
+      return;
+    }
+    setState(() => entry.adoptionPhotos.addAll(picked.take(room)));
   }
 
   /// Bite risk / Escape risk side by side when there's enough width for
@@ -2772,17 +2871,37 @@ class _RescuePageState extends State<RescuePage> {
       // write-side change needed to keep every animal attached through the
       // whole workflow instead of losing all but one to a since-removed
       // per-animal-doc split.
+      // A blank name never becomes a single shared "Unnamed" for every
+      // animal — each gets its own species-ordinal label ("Dog 1", "Dog
+      // 2", "Cat 1") so a multi-animal case stays distinguishable even
+      // with no reporter-entered name at all (Community Adoption Details,
+      // spec).
+      final speciesOrdinal = <String, int>{};
       final animalsArray = [
         for (final animal in validAnimals)
-          {
-            'species': animal.speciesText,
-            'breed': animal.breedText,
-            'sex': animal.sex,
-            'size': animal.size,
-            'colorMarkings': animal.colorController.text.trim(),
-            'biteRisk': animal.biteRisk,
-            'escapeRisk': animal.escapeRisk,
-          },
+          () {
+            final key = animal.speciesText.isEmpty ? 'Animal' : animal.speciesText;
+            final ordinal = (speciesOrdinal[key] ?? 0) + 1;
+            speciesOrdinal[key] = ordinal;
+            final enteredName = animal.nameController.text.trim();
+            final description = animal.descriptionController.text.trim();
+            return {
+              'species': animal.speciesText,
+              'breed': animal.breedText,
+              'sex': animal.sex,
+              'size': animal.size,
+              'colorMarkings': animal.colorController.text.trim(),
+              'biteRisk': animal.biteRisk,
+              'escapeRisk': animal.escapeRisk,
+              // Community Adoption Details (optional at report time) —
+              // reused later if this animal is transitioned into
+              // Community Adoption (see
+              // core/utils/community_adoption_eligibility.dart).
+              'name': enteredName.isNotEmpty ? enteredName : '$key $ordinal',
+              if (description.isNotEmpty) 'description': description,
+              'photoUrls': const <String>[],
+            };
+          }(),
       ];
 
       final docRef = await casesCollection.add({
@@ -2837,6 +2956,28 @@ class _RescuePageState extends State<RescuePage> {
           'photoUrls': media.photoUrls,
           'videoUrls': media.videoUrls,
         });
+      }
+
+      // Per-animal Community Adoption photos — uploaded after the case doc
+      // exists (mirrors the case-level media upload above) so Storage
+      // paths can be scoped under this case's own id. Never copies case
+      // photos onto every animal, and never applies one animal's photos to
+      // another.
+      final hasAnyAdoptionPhotos = validAnimals.any((a) => a.adoptionPhotos.isNotEmpty);
+      if (hasAnyAdoptionPhotos) {
+        final updatedAnimals = List<Map<String, dynamic>>.from(animalsArray);
+        for (var i = 0; i < validAnimals.length; i++) {
+          final photos = validAnimals[i].adoptionPhotos;
+          if (photos.isEmpty) continue;
+          final urls = <String>[];
+          for (var j = 0; j < photos.length; j++) {
+            final ref = FirebaseStorage.instance.ref().child('cases/$primaryCaseId/animals/$i/adoption_$j.jpg');
+            await ref.putFile(File(photos[j].path), SettableMetadata(contentType: 'image/jpeg'));
+            urls.add(await ref.getDownloadURL());
+          }
+          updatedAnimals[i] = {...updatedAnimals[i], 'photoUrls': urls};
+        }
+        await casesCollection.doc(primaryCaseId).update({'animals': updatedAnimals});
       }
 
       if (mounted) {
