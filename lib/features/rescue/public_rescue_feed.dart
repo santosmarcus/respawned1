@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/core/utils/public_case_visibility.dart';
 import 'public_rescue_card.dart';
 import 'public_rescue_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -28,13 +29,6 @@ class PublicRescueFeed extends StatefulWidget {
 }
 
 class _PublicRescueFeedState extends State<PublicRescueFeed> {
-  static const _dismissedStatuses = {
-    'dismissed',
-    'cancelled',
-    'withdrawn',
-    'rejected',
-  };
-
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userDocSub;
   double? _userLat;
   double? _userLng;
@@ -108,20 +102,17 @@ class _PublicRescueFeedState extends State<PublicRescueFeed> {
 
         for (final doc in docs) {
           final data = doc.data();
-          final status = (data['status'] as String? ?? '').toLowerCase();
-          if (data['reporterId'] == currentUserId) continue;
-          if (_dismissedStatuses.contains(status)) continue;
-          // Once a case is done — 'completed', 'closed', or any variant
-          // like 'Rescue Ended'/'rescue_completed' — it no longer belongs
-          // in the public feed
-          final isFinalStatus = status == 'closed' ||
-              status.contains('completed') ||
-              status.contains('ended');
-          if (isFinalStatus) continue;
-          if (data['hiddenFromExplore'] == true) continue;
-
-          final groupId = data['groupId'] as String?;
-          if (groupId != null && groupId != doc.id) continue;
+          final isPublic = isCasePublic(
+            reporterId: data['reporterId'] as String?,
+            viewerId: currentUserId,
+            status: data['status'] as String?,
+            rejectionReason: data['rejectionReason'] as String?,
+            rescueType: data['rescueType'] as String?,
+            hiddenFromExplore: data['hiddenFromExplore'] == true,
+            groupId: data['groupId'] as String?,
+            docId: doc.id,
+          );
+          if (!isPublic) continue;
 
           items.add(PublicRescueItem.fromDoc(doc));
         }
