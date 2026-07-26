@@ -71,7 +71,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // newly picked images are uploaded and appended alongside whatever
   // remains of this list on Save.
   late List<String> _existingPhotoUrls =
-      List<String>.from(widget.existingData?['photoUrls'] ?? const []);
+  List<String>.from(widget.existingData?['photoUrls'] ?? const []);
   bool _isUploadingImages = false;
   String? _imageError;
 
@@ -109,6 +109,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   bool _vaccinated = false;
   bool _spayedNeutered = false;
   bool _dewormed = false;
+  bool _specialNeeds = false;
 
   // Temperament / Compatibility / Training all still write into the same
   // flat `keyCharacteristics` array the model already had — three separate
@@ -199,6 +200,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     _vaccinated = d['vaccinated'] as bool? ?? false;
     _spayedNeutered = d['spayedNeutered'] as bool? ?? false;
     _dewormed = d['dewormed'] as bool? ?? false;
+    _specialNeeds = d['specialNeeds'] as bool? ?? false;
 
     final chars = List<String>.from(d['keyCharacteristics'] ?? const []);
     for (final key in _temperament.keys) {
@@ -214,8 +216,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     final background = List<String>.from(d['rescueBackground'] ?? const []);
     _rescueBackground = _rescueBackgroundOptions.cast<String?>().firstWhere(
           (key) => background.contains(key),
-          orElse: () => null,
-        );
+      orElse: () => null,
+    );
   }
 
   /// Prefills whatever the source rescue report/case already captured.
@@ -461,6 +463,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       if (_vaccinated) health.add('Vaccinated');
       if (_spayedNeutered) health.add('Spayed/Neutered');
       if (_dewormed) health.add('Dewormed');
+      if (_specialNeeds) health.add('Special Needs');
 
       final sharedFields = {
         'name': _nameController.text.trim(),
@@ -475,6 +478,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'vaccinated': _vaccinated,
         'spayedNeutered': _spayedNeutered,
         'dewormed': _dewormed,
+        'specialNeeds': _specialNeeds,
         'keyCharacteristics': selectedChars,
         'rescueBackground': selectedBackground,
         'tags': tags,
@@ -569,8 +573,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                   widget.isEditing
                       ? 'Edit Profile'
                       : (widget.stepCurrent != null && widget.stepTotal != null
-                          ? 'Create Animal Record'
-                          : 'Create New Record'),
+                      ? 'Create Animal Record'
+                      : 'Create New Record'),
                   style: GoogleFonts.tiltWarp(
                       fontSize: 20, color: AppColors.textPrimary)),
             ),
@@ -762,6 +766,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                   value: _dewormed,
                   onChanged: (v) => setState(() => _dewormed = v!),
                 ),
+                _CheckboxField(
+                  label: 'Special Needs',
+                  value: _specialNeeds,
+                  onChanged: (v) => setState(() => _specialNeeds = v!),
+                ),
               ],
             ),
 
@@ -774,10 +783,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               spacing: 12, runSpacing: 8,
               children: _temperament.keys
                   .map((key) => _CheckboxField(
-                        label: key,
-                        value: _temperament[key]!,
-                        onChanged: (v) => setState(() => _temperament[key] = v!),
-                      ))
+                label: key,
+                value: _temperament[key]!,
+                onChanged: (v) => setState(() => _temperament[key] = v!),
+              ))
                   .toList(),
             ),
 
@@ -790,10 +799,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               spacing: 12, runSpacing: 8,
               children: _compatibility.keys
                   .map((key) => _CheckboxField(
-                        label: key,
-                        value: _compatibility[key]!,
-                        onChanged: (v) => setState(() => _compatibility[key] = v!),
-                      ))
+                label: key,
+                value: _compatibility[key]!,
+                onChanged: (v) => setState(() => _compatibility[key] = v!),
+              ))
                   .toList(),
             ),
 
@@ -806,10 +815,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               spacing: 12, runSpacing: 8,
               children: _training.keys
                   .map((key) => _CheckboxField(
-                        label: key,
-                        value: _training[key]!,
-                        onChanged: (v) => setState(() => _training[key] = v!),
-                      ))
+                label: key,
+                value: _training[key]!,
+                onChanged: (v) => setState(() => _training[key] = v!),
+              ))
                   .toList(),
             ),
 
@@ -934,10 +943,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 ),
                 child: _isLoading
                     ? const SizedBox(
-                        height: 22, width: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.textPrimary))
+                    height: 22, width: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.textPrimary))
                     : Text(_saveButtonLabel,
-                        style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+                    style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
               ),
             ),
 

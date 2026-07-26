@@ -105,7 +105,7 @@ class AdoptionApplicationRepository {
   Stream<List<Map<String, dynamic>>> streamNotes(String applicationId) {
     return _notesOf(applicationId).orderBy('createdAt', descending: true).snapshots().map(
           (snap) => snap.docs.map((d) => {'id': d.id, ...d.data()}).toList(),
-        );
+    );
   }
 
   Stream<List<Map<String, dynamic>>> streamWarnings(String applicationId) {
@@ -469,7 +469,7 @@ class AdoptionApplicationRepository {
   Stream<List<FollowUpRecord>> streamFollowUps(String applicationId) {
     return _followUpsOf(applicationId).orderBy('sequenceNumber').snapshots().map(
           (snap) => snap.docs.map(FollowUpRecord.fromFirestore).toList(),
-        );
+    );
   }
 
   // ---- Release Details (pre-release) ------------------------------------
@@ -572,6 +572,12 @@ class AdoptionApplicationRepository {
         'releasedAt': now,
         'adoptedAt': now,
         'releasedBy': actorName,
+        // Delivery attempt tracking (spent by the adopter's own Request
+        // Reschedule action — see AdoptionProcess._requestDeliveryReschedule)
+        // starts fresh at every release, since this is the first time a
+        // delivery is actually scheduled for this application.
+        'deliveryAttempts': 0,
+        'rescheduleRequested': false,
         if (notes != null && notes.isNotEmpty) 'releaseNotes': notes,
         'followUpSchedules': rules.map((r) => r.toMap()).toList(),
         'noFollowUpsPlanned': noFollowUpsPlanned,

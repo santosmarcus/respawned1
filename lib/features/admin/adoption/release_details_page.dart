@@ -16,6 +16,12 @@ import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.da
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 
 String _fmtDate(DateTime d) => '${d.month}/${d.day}/${d.year}';
+String _fmtTime(DateTime d) {
+  final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
+  final minute = d.minute.toString().padLeft(2, '0');
+  final period = d.hour < 12 ? 'AM' : 'PM';
+  return '$hour12:$minute $period';
+}
 
 /// Release Details screen (spec §1/§2/§6) — the admin sets the official
 /// release/adoption date and configures the post-adoption follow-up
@@ -61,22 +67,40 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
 
   Future<void> _persistDraft() async {
     await ref.read(adoptionApplicationRepositoryProvider).saveFollowUpScheduleDraft(
-          applicationId: widget.applicationId,
-          rules: _rules,
-          noFollowUpsPlanned: _noFollowUpsPlanned,
-        );
+      applicationId: widget.applicationId,
+      rules: _rules,
+      noFollowUpsPlanned: _noFollowUpsPlanned,
+    );
   }
 
   Future<void> _pickReleaseDate() async {
-    final picked = await showDatePicker(
+    final pickedDate = await showDatePicker(
       context: context,
       initialDate: _releaseDate,
       firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
-    if (picked == null) return;
-    setState(() => _releaseDate = picked);
-    await ref.read(adoptionApplicationRepositoryProvider).setScheduledReleaseDate(applicationId: widget.applicationId, date: picked);
+    if (pickedDate == null) return;
+
+    // Also capture a time-of-day — the adopter's own "Time to Meet" screen
+    // shows this same value back to them as the actual delivery date AND
+    // time, not just a bare date defaulting to midnight.
+    if (!mounted) return;
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_releaseDate),
+    );
+
+    final combined = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime?.hour ?? _releaseDate.hour,
+      pickedTime?.minute ?? _releaseDate.minute,
+    );
+
+    setState(() => _releaseDate = combined);
+    await ref.read(adoptionApplicationRepositoryProvider).setScheduledReleaseDate(applicationId: widget.applicationId, date: combined);
     await _persistDraft(); // release date shifts every "on release date"/"after previous rule" anchor
   }
 
@@ -176,7 +200,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Mark ${app.animalName} as Released?',
-      message: 'This finalizes the adoption on ${_fmtDate(_releaseDate)}${_noFollowUpsPlanned ? '' : ' and schedules ${_combinedPreview.length} follow-up${_combinedPreview.length == 1 ? '' : 's'}'}. The animal will be removed from public adoptable listings.',
+      message: 'This finalizes the adoption on ${_fmtDate(_releaseDate)} at ${_fmtTime(_releaseDate)}${_noFollowUpsPlanned ? '' : ' and schedules ${_combinedPreview.length} follow-up${_combinedPreview.length == 1 ? '' : 's'}'}. The animal will be removed from public adoptable listings.',
       confirmLabel: 'Mark as Released',
     );
     if (!confirmed) return;
@@ -184,13 +208,13 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     setState(() => _busy = true);
     try {
       await ref.read(adoptionApplicationRepositoryProvider).releaseWithFollowUps(
-            applicationId: widget.applicationId,
-            animalId: animalRecordId,
-            actorName: _actorName,
-            releaseDate: _releaseDate,
-            rules: _rules,
-            noFollowUpsPlanned: _noFollowUpsPlanned,
-          );
+        applicationId: widget.applicationId,
+        animalId: animalRecordId,
+        actorName: _actorName,
+        releaseDate: _releaseDate,
+        rules: _rules,
+        noFollowUpsPlanned: _noFollowUpsPlanned,
+      );
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -221,167 +245,167 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
       body: app == null
           ? const Center(child: CircularProgressIndicator())
           : Builder(builder: (context) {
-              _initFromRemote(app);
-              // app.animalId is the legacy join key, never a real doc id —
-              // see the comment on _markReleased.
-              final animalRecordId = app.animalRecordId;
-              final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
-              final guard = _releaseGuard(app, animal);
+        _initFromRemote(app);
+        // app.animalId is the legacy join key, never a real doc id —
+        // see the comment on _markReleased.
+        final animalRecordId = app.animalRecordId;
+        final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
+        final guard = _releaseGuard(app, animal);
 
-              return SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionCard(
+                title: 'Summary',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SectionCard(
-                      title: 'Summary',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _row('Animal', app.animalName),
-                          _row('Adopter', app.adopterName),
-                          _row('Application', '#${app.id.substring(0, app.id.length > 6 ? 6 : app.id.length)}'),
-                          _row('Adoption fee', app.feeStatus.label + (app.paymentAmount != null ? ' · ${formatPeso(app.paymentAmount!)}' : '')),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    SectionCard(
-                      title: 'Release / Adoption Date',
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(_fmtDate(_releaseDate), style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                          ),
-                          OutlinedButton.icon(onPressed: _pickReleaseDate, icon: const Icon(Icons.edit_calendar, size: 16), label: const Text('Change')),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    SectionCard(
-                      title: 'Post-Adoption Follow-up Schedule',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SwitchListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text('No post-adoption follow-ups needed', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-                            value: _noFollowUpsPlanned,
-                            activeThumbColor: AppColors.greenrspwn,
-                            onChanged: _toggleNoFollowUps,
-                          ),
-                          if (!_noFollowUpsPlanned) ...[
-                            if (_rules.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                child: Text('No schedules yet — add at least one.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                              )
-                            else
-                              ReorderableListView.builder(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: _rules.length,
-                                onReorder: (o, n) => _reorder(o, n),
-                                itemBuilder: (context, i) {
-                                  final r = _rules[i];
-                                  return Container(
-                                    key: ValueKey(r.ruleId),
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(10)),
-                                    child: Row(
-                                      children: [
-                                        Text('${i + 1}.', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700)),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text('${r.frequencyLabel} ${r.durationLabel}',
-                                                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                                              Text(r.startLabel, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                                            ],
-                                          ),
-                                        ),
-                                        IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _editRule(i)),
-                                        IconButton(icon: const Icon(Icons.delete_outline, size: 18), onPressed: () => _removeRule(i)),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                            const SizedBox(height: 6),
-                            OutlinedButton.icon(onPressed: _addRule, icon: const Icon(Icons.add), label: const Text('Add Schedule')),
-                            const SizedBox(height: 14),
-                            Text('Combined Preview', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                            const SizedBox(height: 6),
-                            if (_combinedPreview.isEmpty)
-                              Text('No dates yet.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
-                            else
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 6,
-                                children: [
-                                  for (final d in _combinedPreview)
-                                    Chip(
-                                      label: Text(_fmtDate(d), style: GoogleFonts.zain(fontSize: 11)),
-                                      backgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.4),
-                                    ),
-                                ],
-                              ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    if (!guard.canRelease)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Text(guard.reason ?? '', style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
-                      ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                            child: const Text('Cancel'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: (_busy || !guard.canRelease) ? null : () => _markReleased(app),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.yellowrspwn,
-                              disabledBackgroundColor: AppColors.slaterspwn,
-                              foregroundColor: AppColors.textPrimary,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            child: Text('Mark as Released', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
+                    _row('Animal', app.animalName),
+                    _row('Adopter', app.adopterName),
+                    _row('Application', '#${app.id.substring(0, app.id.length > 6 ? 6 : app.id.length)}'),
+                    _row('Adoption fee', app.feeStatus.label + (app.paymentAmount != null ? ' · ${formatPeso(app.paymentAmount!)}' : '')),
                   ],
                 ),
-              );
-            }),
+              ),
+              const SizedBox(height: 12),
+
+              SectionCard(
+                title: 'Release / Adoption Date',
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text('${_fmtDate(_releaseDate)} at ${_fmtTime(_releaseDate)}', style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    ),
+                    OutlinedButton.icon(onPressed: _pickReleaseDate, icon: const Icon(Icons.edit_calendar, size: 16), label: const Text('Change')),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              SectionCard(
+                title: 'Post-Adoption Follow-up Schedule',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('No post-adoption follow-ups needed', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                      value: _noFollowUpsPlanned,
+                      activeThumbColor: AppColors.greenrspwn,
+                      onChanged: _toggleNoFollowUps,
+                    ),
+                    if (!_noFollowUpsPlanned) ...[
+                      if (_rules.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Text('No schedules yet — add at least one.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                        )
+                      else
+                        ReorderableListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _rules.length,
+                          onReorder: (o, n) => _reorder(o, n),
+                          itemBuilder: (context, i) {
+                            final r = _rules[i];
+                            return Container(
+                              key: ValueKey(r.ruleId),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(10)),
+                              child: Row(
+                                children: [
+                                  Text('${i + 1}.', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700)),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('${r.frequencyLabel} ${r.durationLabel}',
+                                            style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                                        Text(r.startLabel, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                                      ],
+                                    ),
+                                  ),
+                                  IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _editRule(i)),
+                                  IconButton(icon: const Icon(Icons.delete_outline, size: 18), onPressed: () => _removeRule(i)),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(onPressed: _addRule, icon: const Icon(Icons.add), label: const Text('Add Schedule')),
+                      const SizedBox(height: 14),
+                      Text('Combined Preview', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      const SizedBox(height: 6),
+                      if (_combinedPreview.isEmpty)
+                        Text('No dates yet.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+                      else
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 6,
+                          children: [
+                            for (final d in _combinedPreview)
+                              Chip(
+                                label: Text(_fmtDate(d), style: GoogleFonts.zain(fontSize: 11)),
+                                backgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.4),
+                              ),
+                          ],
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              if (!guard.canRelease)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(guard.reason ?? '', style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: (_busy || !guard.canRelease) ? null : () => _markReleased(app),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.yellowrspwn,
+                        disabledBackgroundColor: AppColors.slaterspwn,
+                        foregroundColor: AppColors.textPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: Text('Mark as Released', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      }),
     );
   }
 
   Widget _row(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(width: 90, child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
-            Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: 90, child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
+        Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+      ],
+    ),
+  );
 }

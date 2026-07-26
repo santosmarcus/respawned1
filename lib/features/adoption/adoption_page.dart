@@ -19,13 +19,6 @@ enum AnimalCategory { dog, cat }
 
 class Animal {
   final int id;
-  // The real `animals/{id}` Firestore document id, when this Animal was
-  // built from a live AnimalRecord (see animalRecordToCard below) — empty
-  // for anything built without one (e.g. a favorites snapshot). `id` above
-  // is a one-way stableIntIdFor hash of this, kept only to satisfy the
-  // legacy int-keyed pipeline (AnimalPage/AdoptionProcess/favorites); it
-  // cannot be reversed back into this string, which is why adoption
-  // submissions need this field written separately (see adoption_process.dart).
   final String animalRecordId;
   final String name;
   final String species;
@@ -33,12 +26,8 @@ class Animal {
   final String age;
   final String description;
   final List<String> healthTags;
+  final bool specialNeeds;
   final AnimalGender gender;
-  // Raw sex string ('Male'/'Female'/'Unknown'/''), kept alongside the
-  // binary `gender` enum above (unchanged — other readers, e.g.
-  // favorite_screen.dart, still depend on it) so AnimalPage's gender icon
-  // can correctly hide itself for Unknown/unset instead of guessing Male,
-  // the same behavior genderIconFor gives AnimalRecordCard.
   final String sex;
   final AnimalCategory category;
   final Color cardColor;
@@ -52,18 +41,8 @@ class Animal {
   final List<String> keyCharacteristics;
   final List<String> rescueBackground;
 
-  // Public adoption-availability label ("Available"/"Reserved"/"Adopted"/
-  // "Not Available") — see _publicStatusLabel. Never one of the internal
-  // AdoptionStatus values (Pending/Interview/Rejected/...), which describe
-  // an application, not the animal, and live in a different collection.
   final String? publicStatus;
-  // Real animal-record photo, when this Animal was built from a live
-  // AnimalRecord (see _animalToCard below) — null falls back to the
-  // existing placeholder icon, same as before real data existed.
   final String? photoUrl;
-  // Every photo on the source AnimalRecord, for AnimalPage's swipeable
-  // gallery — photoUrl above (single) is kept for any code path that only
-  // ever needed one image.
   final List<String> photoUrls;
 
   Animal({
@@ -75,6 +54,7 @@ class Animal {
     required this.age,
     required this.description,
     required this.healthTags,
+    this.specialNeeds = false,
     required this.gender,
     this.sex = '',
     required this.category,
@@ -91,14 +71,6 @@ class Animal {
   });
 }
 
-// Deterministic, stable-forever string -> non-negative int hash (FNV-1a,
-// 32-bit) — used only to bridge a real AnimalRecord's Firestore string id
-// into the legacy `Animal.id` (int) shape that AnimalPage/AdoptionProcess/
-// favorites persistence are built around (see the plan's scope note on why
-// that pipeline isn't being rewired to string ids in this change). Never
-// String.hashCode: that's explicitly not guaranteed stable across Dart
-// versions/platforms, and favorites persistence depends on this id staying
-// the same for the same animal across app runs.
 int stableIntIdFor(String value) {
   var hash = 0x811C9DC5;
   for (final unit in value.codeUnits) {
@@ -108,8 +80,7 @@ int stableIntIdFor(String value) {
   return hash & 0x7FFFFFFF;
 }
 
-// A small, deterministic (not random) card-color rotation for real animal
-// records, which don't carry a stored color of their own.
+
 const List<Color> _cardColorRotation = [
   AppColors.greenrspwn,
   AppColors.lavenderrspwn,
@@ -117,11 +88,6 @@ const List<Color> _cardColorRotation = [
   AppColors.tearspwn,
 ];
 
-/// Public-facing availability label — deliberately only ever one of these
-/// four values. Internal application statuses (Pending/Interview/Rejected/
-/// Withdrawn/...) belong to the applicant's own AdoptionApplication/
-/// AdoptionStatus (a different collection this page never queries) and are
-/// never surfaced here.
 String _publicStatusLabel(AnimalRecord r) {
   if (r.isAdopted) return 'Adopted';
   if (r.isReserved) return 'Reserved';
@@ -129,32 +95,32 @@ String _publicStatusLabel(AnimalRecord r) {
   return 'Not Available';
 }
 
-/// Only animals the public should ever see on this screen. Reserved
-/// animals stay visible with a "Reserved" label (see _publicStatusLabel)
-/// rather than being hidden — the same precedent the admin's own Animal
-/// Records list already follows for reserved animals (a "Reserved" pill,
-/// not an exclusion). Deceased, archived, not-yet-ready, and already-
-/// adopted animals never show.
 bool isPubliclyVisible(AnimalRecord a) => !a.archived && !a.isDeceased && (a.isAdoptable || a.isReserved);
 
-/// Same three labels the create form itself writes into `health`/derives
-/// from its own checkboxes — reused for both the filter sheet's "Health"
-/// matching and the card's health chips, instead of a separately-maintained
-/// list.
 List<String> healthTagsOf(AnimalRecord r) => [
-      if (r.vaccinated) 'Vaccinated',
-      if (r.spayedNeutered) 'Spayed/Neutered',
-      if (r.dewormed) 'Dewormed',
-    ];
+  if (r.vaccinated) 'Vaccinated',
+  if (r.spayedNeutered) 'Spayed/Neutered',
+  if (r.dewormed) 'Dewormed',
+  if (r.specialNeeds) 'Special Needs',
+];
 
-/// Maps a real AnimalRecord onto the Animal shape AnimalCard/AnimalPage/
-/// AdoptionFilters already understand — only ever reads public fields
-/// (name/species/breed/sex/size/coatLength/age/description/health flags/
-/// characteristics/rescue background/photos). Never reads
-/// reservedForUserId, adoptedByUserId, intakeStaffId, rescuedBy,
-/// vetClinicName, intakeNotes, currentCaseId, treatmentLog, management
-/// logs, or reporter contact info — those have no field on Animal to land
-/// in, so there is no path for them to leak into this screen.
+String ageGroupOf(AnimalRecord r) {
+  final match = RegExp(r'(\d+)\s*(week|month|year)s?', caseSensitive: false)
+      .firstMatch(r.age);
+  if (match == null) return 'Adult';
+  final amount = int.tryParse(match.group(1)!) ?? 0;
+  final unit = match.group(2)!.toLowerCase();
+
+  if (unit == 'week') return 'Baby';
+  if (unit == 'month') return amount <= 6 ? 'Baby' : 'Young';
+  // years
+  if (amount < 1) return 'Baby';
+  if (amount <= 2) return 'Young';
+  if (amount <= 7) return 'Adult';
+  return 'Senior';
+}
+
+
 Animal animalRecordToCard(AnimalRecord r, int index) {
   final healthTags = healthTagsOf(r);
   final sexLower = r.sex.toLowerCase();
@@ -169,6 +135,7 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
     age: r.age,
     description: r.description,
     healthTags: healthTags,
+    specialNeeds: r.specialNeeds,
     gender: sexLower == 'female' ? AnimalGender.female : AnimalGender.male,
     sex: r.sex,
     category: speciesLower == 'cat' ? AnimalCategory.cat : AnimalCategory.dog,
@@ -183,24 +150,23 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
   );
 }
 
-// Options offered in the adoption filter sheet — mirroring the fields the
-// current Animal Record actually supports (see
-// core/models/rescue/animal_characteristics.dart), not the wider set this
-// sheet used to offer that the create form has no checkbox for at all.
 const List<String> kSizeOptions = ['Small', 'Medium', 'Large'];
 const List<String> kCoatLengthOptions = ['Short', 'Medium', 'Long'];
+const List<String> kAgeGroupOptions = ['Baby (0-6 months)', 'Young (6 months - 2 years)', 'Adult (2-7 years)', 'Senior (7+ years)'];
+
 const List<String> kHealthOptions = [
   'Vaccinated',
   'Spayed/Neutered',
   'Dewormed',
 ];
 
-// Holds the currently selected filter values. An empty set for a given
-// field means "no preference" (that field is not filtered on).
+const List<String> kSpecialNeedsOptions = ['Special Needs'];
+
 class AdoptionFilters {
   final Set<String> breeds;
   final Set<String> sizes;
   final Set<String> coatLengths;
+  final Set<String> ageGroups;
   final Set<String> health;
   final Set<String> keyCharacteristics;
   final Set<String> rescueBackground;
@@ -209,6 +175,7 @@ class AdoptionFilters {
     this.breeds = const {},
     this.sizes = const {},
     this.coatLengths = const {},
+    this.ageGroups = const {},
     this.health = const {},
     this.keyCharacteristics = const {},
     this.rescueBackground = const {},
@@ -218,6 +185,7 @@ class AdoptionFilters {
       breeds.isEmpty &&
           sizes.isEmpty &&
           coatLengths.isEmpty &&
+          ageGroups.isEmpty &&
           health.isEmpty &&
           keyCharacteristics.isEmpty &&
           rescueBackground.isEmpty;
@@ -226,6 +194,7 @@ class AdoptionFilters {
       breeds.length +
           sizes.length +
           coatLengths.length +
+          ageGroups.length +
           health.length +
           keyCharacteristics.length +
           rescueBackground.length;
@@ -234,6 +203,7 @@ class AdoptionFilters {
     Set<String>? breeds,
     Set<String>? sizes,
     Set<String>? coatLengths,
+    Set<String>? ageGroups,
     Set<String>? health,
     Set<String>? keyCharacteristics,
     Set<String>? rescueBackground,
@@ -242,20 +212,17 @@ class AdoptionFilters {
       breeds: breeds ?? this.breeds,
       sizes: sizes ?? this.sizes,
       coatLengths: coatLengths ?? this.coatLengths,
+      ageGroups: ageGroups ?? this.ageGroups,
       health: health ?? this.health,
       keyCharacteristics: keyCharacteristics ?? this.keyCharacteristics,
       rescueBackground: rescueBackground ?? this.rescueBackground,
     );
   }
 
-  // A single-valued attribute (breed/size/coat length) matches if the
-  // animal's value is among the ones the user selected, or if the user
-  // didn't select any (no preference).
+
   bool _matchesAny(Set<String> selected, String value) =>
       selected.isEmpty || selected.contains(value);
 
-  // A multi-valued attribute (health/characteristics/background) matches if
-  // the animal has every one of the selected tags.
   bool _matchesAll(Set<String> selected, List<String> values) =>
       selected.isEmpty || selected.every(values.contains);
 
@@ -263,6 +230,7 @@ class AdoptionFilters {
     return _matchesAny(breeds, animal.breed) &&
         _matchesAny(sizes, animal.size) &&
         _matchesAny(coatLengths, animal.coatLength) &&
+        _matchesAny(ageGroups, ageGroupOf(animal)) &&
         _matchesAll(health, healthTagsOf(animal)) &&
         _matchesAll(keyCharacteristics, animal.keyCharacteristics) &&
         _matchesAll(rescueBackground, animal.rescueBackground);
@@ -283,22 +251,10 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
-  // Favorite animal ids (the stable synthetic int id — see
-  // stableIntIdFor), loaded once and updated locally on toggle. Animal
-  // objects are rebuilt fresh from the live stream on every emission, so
-  // "favorited" can't be mutated in place the way it could when the list
-  // was a static constant — it's derived from this set instead.
   Set<int> _favoriteIds = {};
 
-  // Cached from the most recent successful data emission, purely to
-  // populate the breed-filter sheet's options without re-deriving them
-  // from whatever partial state might be visible at the moment the sheet
-  // opens.
   List<AnimalRecord> _lastLoadedRecords = const [];
 
-  // Preference-based filters (breed, size, coat length, health, key
-  // characteristics, rescue background) applied on top of the category tabs
-  // and search bar.
   AdoptionFilters _activeFilters = const AdoptionFilters();
 
   @override
@@ -329,8 +285,6 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
     }).toList();
   }
 
-  // Distinct breeds currently available, used to populate the breed filter
-  // so the sheet never offers a breed nothing in the list actually has.
   List<String> get _availableBreeds =>
       _lastLoadedRecords.map((a) => a.breed).where((b) => b.isNotEmpty).toSet().toList()..sort();
 
@@ -583,9 +537,6 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
 
           const SizedBox(height: 16),
 
-          // Animal list — Loading / Error / Empty / Data, handled
-          // explicitly (never treats an empty successful result as still
-          // loading, never shows the empty-state copy for a failed query).
           Expanded(
             child: recordsAsync.when(
               loading: () => const _LoadingState(),
@@ -742,11 +693,6 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-// Empty state — shown when the query succeeded but nothing matches (either
-// there are no adoptable animals at all, or the current tab/search/
-// preference filters exclude everything). Never shown while loading or on
-// a failed query — see _LoadingState/_ErrorState above.
-
 class _EmptyState extends StatelessWidget {
   final int filterIndex;
   final bool hasActiveFilters;
@@ -840,10 +786,6 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// Adoption preference filter sheet — lets adopters narrow the list down by
-// breed, size, coat length, health, key characteristics, and rescue
-// background, mirroring the fields captured on the intake form.
-
 class AdoptionFilterSheet extends StatefulWidget {
   final AdoptionFilters initialFilters;
   final List<String> breedOptions;
@@ -862,6 +804,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
   late Set<String> _breeds;
   late Set<String> _sizes;
   late Set<String> _coatLengths;
+  late Set<String> _ageGroups;
   late Set<String> _health;
   late Set<String> _keyCharacteristics;
   late Set<String> _rescueBackground;
@@ -872,6 +815,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
     _breeds = {...widget.initialFilters.breeds};
     _sizes = {...widget.initialFilters.sizes};
     _coatLengths = {...widget.initialFilters.coatLengths};
+    _ageGroups = {...widget.initialFilters.ageGroups};
     _health = {...widget.initialFilters.health};
     _keyCharacteristics = {...widget.initialFilters.keyCharacteristics};
     _rescueBackground = {...widget.initialFilters.rescueBackground};
@@ -892,6 +836,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
       _breeds.clear();
       _sizes.clear();
       _coatLengths.clear();
+      _ageGroups.clear();
       _health.clear();
       _keyCharacteristics.clear();
       _rescueBackground.clear();
@@ -905,6 +850,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
         breeds: _breeds,
         sizes: _sizes,
         coatLengths: _coatLengths,
+        ageGroups: _ageGroups,
         health: _health,
         keyCharacteristics: _keyCharacteristics,
         rescueBackground: _rescueBackground,
@@ -1004,8 +950,32 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
                       ),
                     ),
                     const SizedBox(height: 22),
+                    // Lets adopters looking specifically for a puppy/kitten
+                    // or a senior pet (or anything in between) filter by
+                    // life stage directly, derived from each animal's own
+                    // age (see ageGroupOf) rather than reading every age
+                    // string one card at a time.
                     _FilterSection(
-                      label: 'Health',
+                      label: 'Age',
+                      child: _ChipGroup(
+                        options: kAgeGroupOptions,
+                        selected: _ageGroups,
+                        onToggle: (v) => _toggle(_ageGroups, v),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+
+                    _FilterSection(
+                      label: 'Special Needs',
+                      child: _CheckboxGroup(
+                        options: kSpecialNeedsOptions,
+                        selected: _health,
+                        onToggle: (v) => _toggle(_health, v),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    _FilterSection(
+                      label: 'Health Status',
                       child: _CheckboxGroup(
                         options: kHealthOptions,
                         selected: _health,
@@ -1013,13 +983,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
                       ),
                     ),
                     const SizedBox(height: 22),
-                    // Temperament / Compatibility / Training are three
-                    // separate sections here (matching what the create form
-                    // actually asks and the admin Profile tab actually
-                    // displays), but all three write into the same
-                    // `keyCharacteristics` set — that's genuinely one flat
-                    // array on the Animal Record itself; only the *display*
-                    // groups it into three labeled sections.
+
                     _FilterSection(
                       label: 'Temperament',
                       child: _CheckboxGroup(
@@ -1120,8 +1084,6 @@ class _FilterSection extends StatelessWidget {
   }
 }
 
-// Multi-select pill chips — used for single-valued attributes (breed, size,
-// coat length) where matching any selected value is sufficient.
 class _ChipGroup extends StatelessWidget {
   final List<String> options;
   final Set<String> selected;
@@ -1172,9 +1134,7 @@ class _ChipGroup extends StatelessWidget {
   }
 }
 
-// Checkbox list — used for multi-valued attributes (health, key
-// characteristics, rescue background) where an animal must have every
-// selected tag to match.
+
 class _CheckboxGroup extends StatelessWidget {
   final List<String> options;
   final Set<String> selected;

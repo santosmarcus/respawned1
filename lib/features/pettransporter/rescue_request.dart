@@ -226,11 +226,11 @@ class _RescueRequestState extends State<RescueRequest> {
     'Capacity is full',
     'Total transaction time conflicts with schedule',
     'Road closure or heavy traffic prevents timely transit',
+    'Other',
   ];
 
   Future<void> _showDeclineReasonSheet() async {
-    final selected = <String>{};
-    bool otherChecked = false;
+    String? selectedReason;
     final otherController = TextEditingController();
     String? errorText;
 
@@ -276,76 +276,40 @@ class _RescueRequestState extends State<RescueRequest> {
                     ),
                     const SizedBox(height: 20),
                     for (final reason in _declineReasonOptions)
-                      _DeclineReasonCheckbox(
-                        label: reason,
-                        value: selected.contains(reason),
-                        onChanged: (v) => setModalState(() {
-                          if (v == true) {
-                            selected.add(reason);
-                          } else {
-                            selected.remove(reason);
-                          }
-                        }),
+                      RadioListTile<String>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: reason,
+                        groupValue: selectedReason,
+                        activeColor: AppColors.textPrimary,
+                        title: Text(reason,
+                            style: GoogleFonts.zain(
+                                fontSize: 14, color: AppColors.textPrimary)),
+                        onChanged: (v) =>
+                            setModalState(() => selectedReason = v),
                       ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Checkbox(
-                            value: otherChecked,
-                            side: const BorderSide(
-                                color: AppColors.textPrimary, width: 1.5),
-                            activeColor: AppColors.textPrimary,
-                            materialTapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
-                            onChanged: (v) => setModalState(
-                                    () => otherChecked = v ?? false),
+                    if (selectedReason == 'Other')
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8, top: 4),
+                        child: TextField(
+                          controller: otherController,
+                          style: GoogleFonts.zain(fontSize: 13),
+                          decoration: InputDecoration(
+                            hintText: 'Please specify',
+                            hintStyle: GoogleFonts.zain(
+                                fontSize: 13, color: AppColors.textSecondary),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            filled: true,
+                            fillColor: Colors.white,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                  color: AppColors.slaterspwn),
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(top: 12),
-                                child: Text('Other:',
-                                    style: GoogleFonts.zain(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.textPrimary)),
-                              ),
-                              if (otherChecked)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 6),
-                                  child: TextField(
-                                    controller: otherController,
-                                    style: GoogleFonts.zain(fontSize: 13),
-                                    decoration: InputDecoration(
-                                      hintText: 'Please specify',
-                                      hintStyle: GoogleFonts.zain(
-                                          fontSize: 13,
-                                          color: AppColors.textSecondary),
-                                      contentPadding:
-                                      const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 10),
-                                      filled: true,
-                                      fillColor: Colors.white,
-                                      border: OutlineInputBorder(
-                                        borderRadius:
-                                        BorderRadius.circular(10),
-                                        borderSide: const BorderSide(
-                                            color: AppColors.slaterspwn),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
                     if (errorText != null) ...[
                       const SizedBox(height: 8),
                       Align(
@@ -369,18 +333,21 @@ class _RescueRequestState extends State<RescueRequest> {
                           ),
                         ),
                         onPressed: () {
-                          final finalReasons = [...selected];
-                          if (otherChecked &&
-                              otherController.text.trim().isNotEmpty) {
-                            finalReasons
-                                .add('Other: ${otherController.text.trim()}');
-                          }
-                          if (finalReasons.isEmpty) {
+                          if (selectedReason == null) {
                             setModalState(() => errorText =
-                            'Please select or specify at least one reason.');
+                            'Please select a reason.');
                             return;
                           }
-                          Navigator.pop(ctx, finalReasons);
+                          if (selectedReason == 'Other' &&
+                              otherController.text.trim().isEmpty) {
+                            setModalState(() => errorText =
+                            'Please specify a reason.');
+                            return;
+                          }
+                          final finalReason = selectedReason == 'Other'
+                              ? 'Other: ${otherController.text.trim()}'
+                              : selectedReason!;
+                          Navigator.pop(ctx, [finalReason]);
                         },
                         child: Text(
                           'Confirm',
@@ -795,55 +762,6 @@ class _RescueRequestState extends State<RescueRequest> {
                   padding: const EdgeInsets.all(6),
                   child: const Icon(Icons.close,
                       color: Colors.white, size: 20),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DeclineReasonCheckbox extends StatelessWidget {
-  final String label;
-  final bool value;
-  final ValueChanged<bool?> onChanged;
-
-  const _DeclineReasonCheckbox({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Checkbox(
-                value: value,
-                side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                activeColor: AppColors.textPrimary,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onChanged: onChanged,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  label,
-                  style: GoogleFonts.zain(
-                      fontSize: 14, color: AppColors.textPrimary),
                 ),
               ),
             ),

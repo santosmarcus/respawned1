@@ -1320,6 +1320,8 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           _DetailRow('Address', data['address']),
           _DetailRow('Description', data['condition']),
           _DetailRow('Type of Animal', data['animalType']),
+          _DetailRow('Containment', data['containmentStatus']),
+          _DetailRow('Approachability', data['strayTemperament']),
           _DetailRow('Urgency', data['urgency']),
           _DetailRow('Coordination', data['coordinateWithShelter']),
           if (data['coordinateWithShelter'] == 'no') ...[
@@ -1602,10 +1604,8 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
   }
 
   Future<void> _submit() async {
-    if (_selectedType == null || _submitting || _detectingLocation) return;
-    if (_selectedType == 'moved' &&
-        (_locationController.text.trim().isEmpty ||
-            _locationController.text.trim() == 'Detecting your location…')) {
+    if (_selectedType == null || _submitting) return;
+    if (_selectedType == 'moved' && _locationController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter the new location.'),
@@ -1873,7 +1873,7 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: (_submitting || _detectingLocation) ? null : _submit,
+                onPressed: _submitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
                   foregroundColor: AppColors.textPrimary,
