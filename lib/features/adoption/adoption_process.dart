@@ -173,15 +173,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   String _appointmentType = 'On-site Visit';
   String? _appointmentTime;
 
-  // Set by the admin's "Complete Interview" action
-  // (adoption_application_detail_page.dart's _completeInterview ->
-  // AdoptionApplicationRepository.completeInterview) — deliberately
-  // separate from `status`, which stays 'interview' until the org
-  // separately Accepts or Rejects. This is what actually unlocks the
-  // payment step below, not status alone — see _stepForStatus.
-  DateTime? _interviewCompletedAt;
-  String? _interviewCompletedBy;
-
   _AdoptionProcess? _reviewStep;
 
   _AdoptionProcess get _displayStep => _reviewStep ?? _step;
@@ -214,33 +205,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   List<String> get _slotsForDate {
     if (_appointmentDate == null) return [];
     return interviewSlotsForDate(_appointmentDate!);
-  }
-
-  // Combines _appointmentDate with the parsed _appointmentTime slot string
-  // (e.g. "10:00 AM") into a single comparable DateTime — used only to show
-  // an informational "interview complete" message on the Application
-  // Review step below; it does NOT advance _step or unlock payment on its
-  // own. The org still has to explicitly approve the application (see
-  // _stepForStatus) before _AdoptionProcess.timeToMeet — and therefore the
-  // payment prompt — is reached, since the interview happening isn't the
-  // same as the org deciding to approve.
-  DateTime? get _appointmentDateTime {
-    if (_appointmentDate == null || _appointmentTime == null) return null;
-    final match =
-        RegExp(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$', caseSensitive: false).firstMatch(_appointmentTime!.trim());
-    if (match == null) return _appointmentDate;
-    var hour = int.parse(match.group(1)!);
-    final minute = int.parse(match.group(2)!);
-    final period = match.group(3)!.toUpperCase();
-    if (period == 'PM' && hour != 12) hour += 12;
-    if (period == 'AM' && hour == 12) hour = 0;
-    return DateTime(_appointmentDate!.year, _appointmentDate!.month, _appointmentDate!.day, hour, minute);
-  }
-
-  bool get _interviewTimeHasPassed {
-    final dt = _appointmentDateTime;
-    if (dt == null) return false;
-    return DateTime.now().isAfter(dt);
   }
 
   @override
@@ -442,23 +406,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   // appointment (booked but not yet admin-confirmed — see _saveAppointment,
   // which no longer advances status itself) should resume on the Review
   // step, not send the applicant back to re-book.
-  // [interviewCompleted]: status stays 'interview' even after the admin
-  // clicks Complete Interview — Accept/Reject is a separate, later
-  // decision. Complete Interview is what should unlock payment here, not
-  // waiting for that later Accept — otherwise the adopter would be stuck
-  // on Application Review long after their interview actually happened.
-  _AdoptionProcess _stepForStatus(
-    String? status, {
-    required bool hasAppointment,
-    required bool interviewCompleted,
-  }) {
+  _AdoptionProcess _stepForStatus(String? status, {required bool hasAppointment}) {
     switch (status) {
       case 'pending':
       case 'pending_appointment':
         return hasAppointment ? _AdoptionProcess.appReview : _AdoptionProcess.bookAppointment;
       case 'interview':
       case 'under_review':
-        return interviewCompleted ? _AdoptionProcess.timeToMeet : _AdoptionProcess.appReview;
+        return _AdoptionProcess.appReview;
       case 'approved':
       case 'appointment_confirmed':
         return _AdoptionProcess.timeToMeet;
@@ -611,18 +566,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             : null;
         _deliveryAttempts = data['deliveryAttempts'] as int? ?? 0;
 
-        // Set by adoption_application_detail_page.dart's Complete
-        // Interview action — see the field's own doc comment above for why
-        // this (not status/Accept) is what unlocks payment.
-        final interviewCompletedTs = data['interviewCompletedAt'];
-        _interviewCompletedAt = interviewCompletedTs is Timestamp ? interviewCompletedTs.toDate() : null;
-        _interviewCompletedBy = data['interviewCompletedBy'] as String?;
-
-        var computedStep = _stepForStatus(
-          rawStatus,
-          hasAppointment: appointmentTs is Timestamp,
-          interviewCompleted: _interviewCompletedAt != null,
-        );
+        var computedStep = _stepForStatus(rawStatus, hasAppointment: appointmentTs is Timestamp);
         // The backend flips status to 'adopted' the moment the org
         // schedules the release (which may be a future date/time) — the
         // adopter shouldn't see "Adoption Day" until that scheduled
@@ -952,8 +896,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _appointmentDate = null;
     _appointmentType = 'On-site Visit';
     _appointmentTime = null;
-    _interviewCompletedAt = null;
-    _interviewCompletedBy = null;
   }
 
   Future<void> _withdrawApplication() async {
@@ -1934,31 +1876,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                   child: Text(
                     '$_appointmentType  ·  ${_formatDate(_appointmentDate!)}  ·  $_appointmentTime',
                     style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-
-        // Informational only — does not itself advance the tracker; the
-        // org still has to explicitly Accept the application afterward.
-        if (_interviewTimeHasPassed) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.slaterspwn.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Interview complete — awaiting review.',
-                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                   ),
                 ),
               ],

@@ -1,6 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:respawnd1/core/utils/community_adoption_eligibility.dart'
-    as community_adoption_util;
 
 String _animalSummary(List animals) {
   final counts = <String, int>{};
@@ -29,9 +27,6 @@ class PublicRescueItem {
   final String urgency;
   final double? lat;
   final double? lng;
-  final String? rawStatus;
-  final String? rejectionReason;
-  final String? rescueType;
 
   const PublicRescueItem({
     required this.caseId,
@@ -44,22 +39,7 @@ class PublicRescueItem {
     required this.urgency,
     this.lat,
     this.lng,
-    this.rawStatus,
-    this.rejectionReason,
-    this.rescueType,
   });
-
-  /// True for a healthy/low-urgency report that was rejected (and isn't a
-  /// Lost Pet report) — see community_adoption_eligibility.dart. Feed/card
-  /// UI uses this to keep the item visible and offer the Community
-  /// Adoption listing action instead of hiding it like any other
-  /// rejection.
-  bool get isCommunityAdoptionEligible =>
-      community_adoption_util.isCommunityAdoptionEligible(
-        status: rawStatus,
-        rejectionReason: rejectionReason,
-        rescueType: rescueType,
-      );
 
   factory PublicRescueItem.fromDoc(
       QueryDocumentSnapshot<Map<String, dynamic>> doc) {
@@ -94,9 +74,6 @@ class PublicRescueItem {
       urgency: data['urgency'] as String? ?? '',
       lat: (data['lat'] as num?)?.toDouble(),
       lng: (data['lng'] as num?)?.toDouble(),
-      rawStatus: data['status'] as String?,
-      rejectionReason: data['rejectionReason'] as String?,
-      rescueType: data['rescueType'] as String?,
     );
   }
 }
