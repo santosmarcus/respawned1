@@ -20,6 +20,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
@@ -90,30 +91,32 @@ class _FoundAnimalEntry {
   String? sex;
   String? size;
 
+  // Health & Behavior Assessment — per animal, never applied across other
+  // animals in the same multi-animal report; each entry owns its own
+  // values. See core/utils/animal_health_assessment.dart for each field's
+  // option list. Single-select:
+  String? bodyCondition;
+  String? mobility;
+  String? alertness;
+  String? eyesNoseMouth;
+  String? skinAndCoat;
+  String? appetiteHydration;
+  // Multi-select:
+  final Set<String> behavior = {};
+  // Multi-select + reporter-added custom entries beyond the predefined
+  // list (see _EnvironmentSafetySection).
+  final Set<String> environmentSafety = {};
+  final TextEditingController environmentSafetyOtherController = TextEditingController();
+
   // Per-animal safety risk — never applied across other animals in the
-  // same multi-animal report; each entry owns its own values. Additional
-  // safety-indicator tags and free-text handling notes were removed per
-  // a later revision — bite/escape risk are the single structured source
-  // of truth now (see rescue_risk.dart).
+  // same multi-animal report; each entry owns its own values.
   String? biteRisk;
   String? escapeRisk;
-
-  // Community Adoption Details — information that may be needed later if
-  // an organization determines this animal is healthy/low-urgency and
-  // eligible for Community Adoption (see
-  // core/utils/community_adoption_eligibility.dart). All optional at
-  // report time — a name left blank gets a stable generated label
-  // ("Dog 1", "Cat 2", ...) at submission (see _generatedAnimalName),
-  // never a single shared "Unnamed" for every animal in the report.
-  final TextEditingController nameController = TextEditingController();
-  final TextEditingController descriptionController = TextEditingController();
-  final List<XFile> adoptionPhotos = [];
 
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
-    nameController.dispose();
-    descriptionController.dispose();
+    environmentSafetyOtherController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -142,6 +145,10 @@ class _RescuePageState extends State<RescuePage> {
   String? _selectedRescueType;
   String? _coordinateChoice;
   String? _adoptionChoice;
+  // Only asked/answered when _adoptionChoice == 'yes' — resets to false if
+  // the reporter changes their mind and un-checks Yes, so a stale consent
+  // never survives under a "No" answer.
+  bool _adoptionCommitmentAccepted = false;
   String? _selectedAnimalType;
   bool _isLoading = false;
 
@@ -1744,8 +1751,10 @@ class _RescuePageState extends State<RescuePage> {
                           height: 20,
                           child: Checkbox(
                             value: _adoptionChoice == 'no',
-                            onChanged: (val) =>
-                                setState(() => _adoptionChoice = 'no'),
+                            onChanged: (val) => setState(() {
+                              _adoptionChoice = 'no';
+                              _adoptionCommitmentAccepted = false;
+                            }),
                             activeColor: AppColors.textPrimary,
                             side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
                             shape: RoundedRectangleBorder(
@@ -1764,6 +1773,74 @@ class _RescuePageState extends State<RescuePage> {
                         ),
                       ],
                     ),
+
+                    // Only shown once the reporter has expressed interest in
+                    // adopting — a plain "yes I'd like to adopt" isn't
+                    // enough on its own; this makes the actual obligations
+                    // explicit (cost, interview, agreement, follow-ups)
+                    // before staff treat them as a real candidate at
+                    // discharge. Separate from (and not automatic approval
+                    // for) the removed Community Adoption Details path.
+                    if (_adoptionChoice == 'yes') ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'By agreeing to this, you confirm that you are '
+                              'willing to cover any necessary veterinary '
+                              'expenses, participate in the adoption interview '
+                              'process, comply with the adoption agreement, and '
+                              'provide post-adoption updates as required.',
+                              style: GoogleFonts.zain(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text(
+                            '*',
+                            style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Once the animal is in treatment, the organization will '
+                        'visit you at the veterinary clinic to discuss the '
+                        'adoption process with you.',
+                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => setState(() => _adoptionCommitmentAccepted = !_adoptionCommitmentAccepted),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: Checkbox(
+                                value: _adoptionCommitmentAccepted,
+                                onChanged: (val) => setState(() => _adoptionCommitmentAccepted = val ?? false),
+                                activeColor: AppColors.textPrimary,
+                                side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text('I agree.',
+                                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
 
                     if (_selectedRescueType == 'Neglect or Abuse') ...[
                       const SizedBox(height: 20),
@@ -2240,12 +2317,11 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Widget _lostPetTextField(TextEditingController controller, String hint,
-      {TextInputType? keyboardType, List<TextInputFormatter>? inputFormatters, int maxLines = 1}) {
+      {TextInputType? keyboardType, List<TextInputFormatter>? inputFormatters}) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
-      maxLines: maxLines,
       decoration: InputDecoration(
         hintText: hint,
         hintStyle:
@@ -2623,96 +2699,150 @@ class _RescuePageState extends State<RescuePage> {
           ),
           const SizedBox(height: 10),
           _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
+          const SizedBox(height: 14),
+          _buildHealthBehaviorAssessment(entry),
           const SizedBox(height: 10),
           _buildRiskFieldsRow(entry),
-          const SizedBox(height: 14),
-          _buildCommunityAdoptionDetails(entry, index),
         ],
       ),
     );
   }
 
-  /// Community Adoption Details (optional at report time) — reused later
-  /// if an organization determines this animal is healthy/low-urgency and
-  /// transitions it into Community Adoption. Never blocks submission of an
-  /// emergency rescue report over adoption-profile information.
-  Widget _buildCommunityAdoptionDetails(_FoundAnimalEntry entry, int index) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.slaterspwn.withValues(alpha: 0.6)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Community Adoption Details',
-              style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          const SizedBox(height: 6),
-          _lostPetTextField(entry.nameController, 'Animal name or temporary name'),
-          const SizedBox(height: 10),
-          _lostPetTextField(entry.descriptionController, 'Short description for potential adopters',
-              maxLines: 2),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (var i = 0; i < entry.adoptionPhotos.length; i++)
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.file(File(entry.adoptionPhotos[i].path), width: 64, height: 64, fit: BoxFit.cover),
-                    ),
-                    Positioned(
-                      top: -6,
-                      right: -6,
-                      child: GestureDetector(
-                        onTap: () => setState(() => entry.adoptionPhotos.removeAt(i)),
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
-                          child: const Icon(Icons.close, size: 12, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              GestureDetector(
-                onTap: () => _pickAdoptionPhotos(entry),
-                child: Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: AppColors.greenrspwn, width: 1.5),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.add_photo_alternate_outlined, size: 22, color: AppColors.greenrspwn),
-                ),
+  /// Health & Behavior Assessment — restored per-animal section, below the
+  /// base Species/Breed/Sex/Size/Color fields and above Bite/Escape Risk.
+  /// Every option list/conflict rule comes from the shared
+  /// core/utils/animal_health_assessment.dart constants — never duplicated
+  /// here — so this page can't drift from any other reader of the same
+  /// values.
+  Widget _buildHealthBehaviorAssessment(_FoundAnimalEntry entry) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Health & Behavior Assessment',
+            style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        _assessmentDropdown(
+          hintText: 'Body Condition',
+          value: entry.bodyCondition,
+          options: kBodyConditionOptions,
+          onChanged: (v) => setState(() => entry.bodyCondition = v),
+        ),
+        const SizedBox(height: 10),
+        _assessmentDropdown(
+          hintText: 'Mobility',
+          value: entry.mobility,
+          options: kMobilityOptions,
+          onChanged: (v) => setState(() => entry.mobility = v),
+        ),
+        const SizedBox(height: 10),
+        _assessmentDropdown(
+          hintText: 'Alertness',
+          value: entry.alertness,
+          options: kAlertnessOptions,
+          onChanged: (v) => setState(() => entry.alertness = v),
+        ),
+        const SizedBox(height: 10),
+        _assessmentDropdown(
+          hintText: 'Eyes, Nose, Mouth',
+          value: entry.eyesNoseMouth,
+          options: kEyesNoseMouthOptions,
+          onChanged: (v) => setState(() => entry.eyesNoseMouth = v),
+        ),
+        const SizedBox(height: 10),
+        _assessmentDropdown(
+          hintText: 'Skin and Coat',
+          value: entry.skinAndCoat,
+          options: kSkinAndCoatOptions,
+          onChanged: (v) => setState(() => entry.skinAndCoat = v),
+        ),
+        const SizedBox(height: 10),
+        _assessmentDropdown(
+          hintText: 'Appetite and Hydration',
+          value: entry.appetiteHydration,
+          options: kAppetiteHydrationOptions,
+          onChanged: (v) => setState(() => entry.appetiteHydration = v),
+        ),
+        const SizedBox(height: 12),
+        Text('Behavior', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in kBehaviorOptions)
+              _toggleChip(
+                label: option,
+                selected: entry.behavior.contains(option),
+                onTap: () => setState(() {
+                  if (entry.behavior.contains(option)) {
+                    entry.behavior.remove(option);
+                  } else {
+                    entry.behavior.add(option);
+                    // Deselect anything this option conflicts with, in
+                    // both directions — 'Calm' clears 'Aggressive' and
+                    // vice versa.
+                    final conflicts = kBehaviorConflicts[option] ?? const {};
+                    entry.behavior.removeWhere((b) => conflicts.contains(b));
+                    for (final other in List.of(entry.behavior)) {
+                      if ((kBehaviorConflicts[other] ?? const {}).contains(option)) {
+                        entry.behavior.remove(other);
+                      }
+                    }
+                  }
+                }),
               ),
-            ],
-          ),
-        ],
-      ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _EnvironmentSafetySection(entry: entry, onChanged: () => setState(() {})),
+      ],
     );
   }
 
-  static const _maxAdoptionPhotosPerAnimal = 4;
+  Widget _assessmentDropdown({
+    required String hintText,
+    required String? value,
+    required List<String> options,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isDense: true,
+      isExpanded: true,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hintText,
+        hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+        border: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+      ),
+      items: [
+        for (final o in options)
+          DropdownMenuItem(
+            value: o,
+            child: Text(o, overflow: TextOverflow.ellipsis, style: GoogleFonts.zain(fontSize: 13)),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
 
-  Future<void> _pickAdoptionPhotos(_FoundAnimalEntry entry) async {
-    final picked = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1280);
-    if (picked.isEmpty || !mounted) return;
-    final room = _maxAdoptionPhotosPerAnimal - entry.adoptionPhotos.length;
-    if (room <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('You can add at most $_maxAdoptionPhotosPerAnimal photos per animal.')),
-      );
-      return;
-    }
-    setState(() => entry.adoptionPhotos.addAll(picked.take(room)));
+  Widget _toggleChip({required String label, required bool selected, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.yellowrspwn : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? AppColors.yellowrspwn : AppColors.slaterspwn),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.zain(
+              fontSize: 12, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: AppColors.textPrimary),
+        ),
+      ),
+    );
   }
 
   /// Bite risk / Escape risk side by side when there's enough width for
@@ -2819,6 +2949,16 @@ class _RescuePageState extends State<RescuePage> {
       return;
     }
 
+    if (_adoptionChoice == 'yes' && !_adoptionCommitmentAccepted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please agree to the adoption-interest terms before submitting.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     if (_coordinateChoice == 'no') {
       final witnessNameError =
       AppValidators.name(_witnessNameController.text, fieldName: 'Witness name');
@@ -2871,37 +3011,27 @@ class _RescuePageState extends State<RescuePage> {
       // write-side change needed to keep every animal attached through the
       // whole workflow instead of losing all but one to a since-removed
       // per-animal-doc split.
-      // A blank name never becomes a single shared "Unnamed" for every
-      // animal — each gets its own species-ordinal label ("Dog 1", "Dog
-      // 2", "Cat 1") so a multi-animal case stays distinguishable even
-      // with no reporter-entered name at all (Community Adoption Details,
-      // spec).
-      final speciesOrdinal = <String, int>{};
       final animalsArray = [
         for (final animal in validAnimals)
-          () {
-            final key = animal.speciesText.isEmpty ? 'Animal' : animal.speciesText;
-            final ordinal = (speciesOrdinal[key] ?? 0) + 1;
-            speciesOrdinal[key] = ordinal;
-            final enteredName = animal.nameController.text.trim();
-            final description = animal.descriptionController.text.trim();
-            return {
-              'species': animal.speciesText,
-              'breed': animal.breedText,
-              'sex': animal.sex,
-              'size': animal.size,
-              'colorMarkings': animal.colorController.text.trim(),
-              'biteRisk': animal.biteRisk,
-              'escapeRisk': animal.escapeRisk,
-              // Community Adoption Details (optional at report time) —
-              // reused later if this animal is transitioned into
-              // Community Adoption (see
-              // core/utils/community_adoption_eligibility.dart).
-              'name': enteredName.isNotEmpty ? enteredName : '$key $ordinal',
-              if (description.isNotEmpty) 'description': description,
-              'photoUrls': const <String>[],
-            };
-          }(),
+          {
+            'species': animal.speciesText,
+            'breed': animal.breedText,
+            'sex': animal.sex,
+            'size': animal.size,
+            'colorMarkings': animal.colorController.text.trim(),
+            // Health & Behavior Assessment (spec) — per animal, never
+            // collapsed into a shared/first-animal value.
+            'bodyCondition': animal.bodyCondition,
+            'mobility': animal.mobility,
+            'alertness': animal.alertness,
+            'eyesNoseMouth': animal.eyesNoseMouth,
+            'skinAndCoat': animal.skinAndCoat,
+            'appetiteHydration': animal.appetiteHydration,
+            'behavior': animal.behavior.toList(),
+            'environmentSafety': animal.environmentSafety.toList(),
+            'biteRisk': animal.biteRisk,
+            'escapeRisk': animal.escapeRisk,
+          },
       ];
 
       final docRef = await casesCollection.add({
@@ -2958,27 +3088,6 @@ class _RescuePageState extends State<RescuePage> {
         });
       }
 
-      // Per-animal Community Adoption photos — uploaded after the case doc
-      // exists (mirrors the case-level media upload above) so Storage
-      // paths can be scoped under this case's own id. Never copies case
-      // photos onto every animal, and never applies one animal's photos to
-      // another.
-      final hasAnyAdoptionPhotos = validAnimals.any((a) => a.adoptionPhotos.isNotEmpty);
-      if (hasAnyAdoptionPhotos) {
-        final updatedAnimals = List<Map<String, dynamic>>.from(animalsArray);
-        for (var i = 0; i < validAnimals.length; i++) {
-          final photos = validAnimals[i].adoptionPhotos;
-          if (photos.isEmpty) continue;
-          final urls = <String>[];
-          for (var j = 0; j < photos.length; j++) {
-            final ref = FirebaseStorage.instance.ref().child('cases/$primaryCaseId/animals/$i/adoption_$j.jpg');
-            await ref.putFile(File(photos[j].path), SettableMetadata(contentType: 'image/jpeg'));
-            urls.add(await ref.getDownloadURL());
-          }
-          updatedAnimals[i] = {...updatedAnimals[i], 'photoUrls': urls};
-        }
-        await casesCollection.doc(primaryCaseId).update({'animals': updatedAnimals});
-      }
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -3301,6 +3410,164 @@ class _RescuePageState extends State<RescuePage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+}
+
+/// Environment and Safety chips for one animal — the predefined options
+/// plus an optional reporter-added custom entry. Values belong to this
+/// [entry] only; [onChanged] just triggers the parent's setState since the
+/// actual data lives on the entry, not local widget state.
+class _EnvironmentSafetySection extends StatefulWidget {
+  final _FoundAnimalEntry entry;
+  final VoidCallback onChanged;
+  const _EnvironmentSafetySection({required this.entry, required this.onChanged});
+
+  @override
+  State<_EnvironmentSafetySection> createState() => _EnvironmentSafetySectionState();
+}
+
+class _EnvironmentSafetySectionState extends State<_EnvironmentSafetySection> {
+  bool _addingCustom = false;
+
+  void _addCustomValue() {
+    final value = widget.entry.environmentSafetyOtherController.text.trim();
+    if (value.isEmpty) return;
+    // Case-insensitive de-dupe against both the predefined list and
+    // whatever custom values this animal already has.
+    final alreadyPresent = widget.entry.environmentSafety.any((v) => v.toLowerCase() == value.toLowerCase()) ||
+        kEnvironmentSafetyOptions.any((v) => v.toLowerCase() == value.toLowerCase());
+    if (alreadyPresent) {
+      widget.entry.environmentSafetyOtherController.clear();
+      setState(() => _addingCustom = false);
+      return;
+    }
+    widget.entry.environmentSafety.add(value);
+    widget.entry.environmentSafetyOtherController.clear();
+    setState(() => _addingCustom = false);
+    widget.onChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
+    // Custom values are whatever's in the set beyond the predefined list —
+    // shown as their own removable chips alongside it.
+    final customValues = entry.environmentSafety.where((v) => !kEnvironmentSafetyOptions.contains(v)).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Environment and Safety',
+            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in kEnvironmentSafetyOptions)
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (entry.environmentSafety.contains(option)) {
+                      entry.environmentSafety.remove(option);
+                    } else {
+                      entry.environmentSafety.add(option);
+                    }
+                  });
+                  widget.onChanged();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: entry.environmentSafety.contains(option) ? AppColors.yellowrspwn : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: entry.environmentSafety.contains(option)
+                            ? AppColors.yellowrspwn
+                            : AppColors.slaterspwn),
+                  ),
+                  child: Text(option,
+                      style: GoogleFonts.zain(
+                          fontSize: 12,
+                          fontWeight:
+                              entry.environmentSafety.contains(option) ? FontWeight.w700 : FontWeight.w500,
+                          color: AppColors.textPrimary)),
+                ),
+              ),
+            for (final custom in customValues)
+              GestureDetector(
+                onTap: () {
+                  setState(() => entry.environmentSafety.remove(custom));
+                  widget.onChanged();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: AppColors.yellowrspwn,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.yellowrspwn),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(custom,
+                          style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.close, size: 14, color: AppColors.textPrimary),
+                    ],
+                  ),
+                ),
+              ),
+            if (!_addingCustom)
+              GestureDetector(
+                onTap: () => setState(() => _addingCustom = true),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.slaterspwn, style: BorderStyle.solid),
+                  ),
+                  child: Text('Add another (optional)',
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                ),
+              ),
+          ],
+        ),
+        if (_addingCustom) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: entry.environmentSafetyOtherController,
+                  autofocus: true,
+                  onSubmitted: (_) => _addCustomValue(),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Enter a custom value',
+                    hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                    enabledBorder:
+                        const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                ),
+              ),
+              IconButton(
+                onPressed: _addCustomValue,
+                icon: const Icon(Icons.check, color: AppColors.greenrspwn),
+              ),
+              IconButton(
+                onPressed: () {
+                  entry.environmentSafetyOtherController.clear();
+                  setState(() => _addingCustom = false);
+                },
+                icon: const Icon(Icons.close, color: AppColors.textSecondary),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
   }
 }
 

@@ -203,6 +203,43 @@ List<ReportMapEntry> extractPublicReports(
   return out;
 }
 
+/// The current user's OWN reports, for the "My Reports" map filter — the
+/// same [isCasePublic] rules apply (hidden/final-status/groupId/Community
+/// Adoption carve-out), just with the self-report exclusion deliberately
+/// bypassed (`viewerId: null`), since these reports are being shown
+/// *because* they're the viewer's own, not despite it. Reuses the one
+/// shared visibility predicate rather than a second implementation.
+List<ReportMapEntry> extractMyReports(
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  String uid,
+) {
+  final out = <ReportMapEntry>[];
+  for (final doc in docs) {
+    final data = doc.data();
+    if (data['reporterId'] != uid) continue;
+    final isPublic = isCasePublic(
+      reporterId: data['reporterId'] as String?,
+      viewerId: null,
+      status: data['status'] as String?,
+      rejectionReason: data['rejectionReason'] as String?,
+      rescueType: data['rescueType'] as String?,
+      hiddenFromExplore: data['hiddenFromExplore'] == true,
+      groupId: data['groupId'] as String?,
+      docId: doc.id,
+    );
+    if (!isPublic) continue;
+
+    final report = ReportMapEntry.fromDoc(doc);
+    if (report != null) out.add(report);
+  }
+  return out;
+}
+
+/// Scope-modifier filter chip labels — combined with rescue-type filters
+/// using AND, never OR (see _ExploreReportsMapState._visibleMarkers).
+const String kCommunityAdoptionFilterLabel = 'Community Adoption';
+const String kMyReportsFilterLabel = 'My Reports';
+
 class ExploreReportsMap extends StatefulWidget {
   final VoidCallback? onSeeAll;
   const ExploreReportsMap({super.key, this.onSeeAll});
@@ -215,11 +252,21 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
   GoogleMapController? _mapController;
   final Map<String, BitmapDescriptor> _iconCache = {};
   final Set<String> _iconRequestsInFlight = {};
-  String? _selectedCategory; // null == "All"
+  // Empty set == "All" — never a normal selected chip alongside others (see
+  // _toggleFilter/_selectAll). Rescue-type labels inside this set are OR'd
+  // together; the two scope modifiers (Community Adoption/My Reports) are
+  // AND'd against that OR group and against each other — see
+  // _visibleMarkers.
+  final Set<String> _selectedFilters = {};
   LatLng _initialCamera = const LatLng(14.5416, 121.0644); // Pateros, Metro Manila fallback
 
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
   List<ReportMapEntry> _allReports = [];
+  // The viewer's own reports — only computed/used when the My Reports
+  // filter is active; kept as a separate list rather than folded into
+  // _allReports since the two use different visibility rules (see
+  // extractMyReports's doc comment).
+  List<ReportMapEntry> _myReports = [];
   bool _loadingReports = true;
   Object? _loadError;
 
@@ -245,8 +292,10 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
       setState(() {
         _allReports = extractPublicReports(snap.docs);
+        _myReports = uid == null ? const [] : extractMyReports(snap.docs, uid);
         _loadingReports = false;
         _loadError = null;
       });
@@ -514,8 +563,11 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
 
         const SizedBox(height: 14),
 
-        // Filter row — same pill treatment as the reference, colored per
-        // report type so it doubles as a legend.
+        // Filter row — multi-select toggle chips (spec): tapping an
+        // unselected chip adds it, tapping a selected one removes it; "All"
+        // clears everything and is never itself a member of the set. No
+        // separate Apply button — every tap updates markers immediately via
+        // setState.
         SizedBox(
           height: 40,
           child: ListView(
@@ -526,8 +578,24 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                 label: 'All',
                 color: AppColors.textPrimary,
                 icon: Icons.public,
-                selected: _selectedCategory == null,
-                onTap: () => setState(() => _selectedCategory = null),
+                selected: _selectedFilters.isEmpty,
+                onTap: () => setState(() => _selectedFilters.clear()),
+              ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: kCommunityAdoptionFilterLabel,
+                color: AppColors.greenrspwn,
+                icon: Icons.favorite,
+                selected: _selectedFilters.contains(kCommunityAdoptionFilterLabel),
+                onTap: () => _toggleFilter(kCommunityAdoptionFilterLabel),
+              ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: kMyReportsFilterLabel,
+                color: AppColors.lavenderrspwn,
+                icon: Icons.person_outline,
+                selected: _selectedFilters.contains(kMyReportsFilterLabel),
+                onTap: () => _toggleFilter(kMyReportsFilterLabel),
               ),
               const SizedBox(width: 8),
               for (final c in kReportCategories) ...[
@@ -535,8 +603,8 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                   label: c.label,
                   color: c.color,
                   icon: c.icon,
-                  selected: _selectedCategory == c.label,
-                  onTap: () => setState(() => _selectedCategory = c.label),
+                  selected: _selectedFilters.contains(c.label),
+                  onTap: () => _toggleFilter(c.label),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -547,10 +615,40 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     );
   }
 
+  void _toggleFilter(String label) {
+    setState(() {
+      if (_selectedFilters.contains(label)) {
+        _selectedFilters.remove(label);
+      } else {
+        _selectedFilters.add(label);
+      }
+    });
+  }
+
+  /// Filter-combination rules (spec): rescue-type labels are OR'd together
+  /// (any case matching ANY selected type qualifies); the two scope
+  /// modifiers (Community Adoption / My Reports) are each AND'd on top of
+  /// that OR group, and AND'd against each other when both are selected.
+  /// "My Reports" swaps the base pool to the viewer's own reports (which
+  /// the ordinary public pool excludes by design) rather than filtering the
+  /// public pool by reporterId.
   Set<Marker> _visibleMarkers() {
-    final filtered = _selectedCategory == null
-        ? _allReports
-        : _allReports.where((r) => categoryForRescueType(r.rescueType).label == _selectedCategory);
+    final myReportsSelected = _selectedFilters.contains(kMyReportsFilterLabel);
+    final communityAdoptionSelected = _selectedFilters.contains(kCommunityAdoptionFilterLabel);
+    final typeFilters = _selectedFilters
+        .where((f) => f != kMyReportsFilterLabel && f != kCommunityAdoptionFilterLabel)
+        .toSet();
+
+    final basePool = myReportsSelected ? _myReports : _allReports;
+
+    final filtered = basePool.where((r) {
+      if (communityAdoptionSelected && !r.isCommunityAdoptionEligible) return false;
+      if (typeFilters.isNotEmpty && !typeFilters.contains(categoryForRescueType(r.rescueType).label)) {
+        return false;
+      }
+      return true;
+    });
+
     return filtered.map(_markerFor).toSet();
   }
 

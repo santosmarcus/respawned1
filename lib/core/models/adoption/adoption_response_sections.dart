@@ -78,7 +78,10 @@ List<ResponseSection> buildAdoptionResponseSections(Map<String, dynamic> data) {
       ResponseItem('Primary Caregiver', _orNA(lifestyle['primaryCaregiver'])),
       ResponseItem('Where will pet stay?', _orNA(lifestyle['petStayLocation'])),
       ResponseItem('Can afford', affordable.isEmpty ? kNotProvided : affordable.join(', ')),
-      ResponseItem('Monthly Pet Budget', _orNA(lifestyle['monthlyBudget'])),
+      // Monthly Pet Budget removed from the form — never shown here either,
+      // even for an older application that still has `lifestyle.
+      // monthlyBudget` on file (that historical value is left untouched in
+      // Firestore, just no longer surfaced).
     ]),
     ResponseSection('Adoption Intent', [
       ResponseItem('Why do you want to adopt?', _orNA(agreement['reason'])),

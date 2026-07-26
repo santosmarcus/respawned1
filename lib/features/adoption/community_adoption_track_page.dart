@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/adoption/community_adoption_listing.dart';
+import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 
 /// How close (meters) a viewer's live GPS position must be to the animal's
 /// last known location before the "Community Adoption" button is offered at
@@ -106,6 +107,18 @@ class _CommunityAdoptionBody extends StatelessWidget {
           const SizedBox(height: 8),
 
           _DetailRow('Location', data['address']),
+
+          const SizedBox(height: 8),
+          const Divider(color: AppColors.slaterspwn),
+          const SizedBox(height: 8),
+
+          // Reuses the exact same cases/{caseId}/communityReports
+          // subcollection and shared widget Track Case already uses — not
+          // a second messaging/report collection. Submitting a sighting
+          // update here never closes this case automatically; it stays
+          // open (and this adoption action stays available per the usual
+          // eligibility rule) until every animal is actually claimed.
+          CommunityReportSection(caseId: caseId),
 
           const SizedBox(height: 16),
           _AdoptionButtonSection(caseId: caseId, data: data),

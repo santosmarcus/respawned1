@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
@@ -130,9 +131,15 @@ class ActivityCard extends StatelessWidget{
     return  GestureDetector(
       onTap: () {
         if(item.type == ActivityType.rescue){
+          // A Community-Adoption-eligible rejection routes to the CA
+          // tracking page instead of the normal (now read-only) Track Case
+          // page — an ordinary rejection just opens Track Case, which has
+          // no admin-only actions for the reporter to begin with.
           Navigator.push(context,
             MaterialPageRoute(
-              builder: (_) => TrackCasePage(caseId: item.docId),
+              builder: (_) => item.isRejected && item.communityAdoptionEligible
+                  ? CommunityAdoptionTrackPage(caseId: item.docId)
+                  : TrackCasePage(caseId: item.docId),
             ),
           );
         } else if (item.type == ActivityType.adoption){
@@ -250,6 +257,70 @@ class ActivityCard extends StatelessWidget{
                           ]),
                         ],
 
+                        // Rejected Rescue Reports spec §2 — a clear
+                        // "Rejected" state plus reason/date/reviewer, and a
+                        // Community Adoption action when the rejection made
+                        // this case eligible. Ordinary rejection stays
+                        // read-only (tap still just opens Track Case).
+                        if (item.isRejected) ...[
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE05353).withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  const Icon(Icons.block, size: 14, color: Color(0xFFE05353)),
+                                  const SizedBox(width: 6),
+                                  Text('Rejected',
+                                      style: GoogleFonts.zain(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFFE05353))),
+                                ]),
+                                if (item.rejectionReasonLabel != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text('Reason: ${item.rejectionReasonLabel}',
+                                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                                ],
+                                if (item.rejectedAt != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text('Rejected on ${_formatDate(item.rejectedAt!)}',
+                                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                                ],
+                                _ReviewedByLine(caseId: item.docId),
+                                if (item.communityAdoptionEligible) ...[
+                                  const SizedBox(height: 6),
+                                  GestureDetector(
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                          builder: (_) => CommunityAdoptionTrackPage(caseId: item.docId)),
+                                    ),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.greenrspwn.withOpacity(0.18),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Text('View Community Adoption',
+                                          style: GoogleFonts.zain(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: AppColors.greenrspwn)),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+
                         const SizedBox(height: 8),
 
                         // Status row
@@ -258,7 +329,7 @@ class ActivityCard extends StatelessWidget{
                           children: [
                             Expanded(
                               child: Text(
-                                item.status,
+                                item.isRejected ? 'Rejected' : item.status,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.zain(
@@ -272,7 +343,9 @@ class ActivityCard extends StatelessWidget{
                                 item.type == ActivityType.adoption ||
                                 item.type == ActivityType.lostFoundPet)
                               Text(
-                                'View details →',
+                                item.isRejected && item.communityAdoptionEligible
+                                    ? 'View Community Adoption →'
+                                    : 'View details →',
                                 style: GoogleFonts.zain(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
@@ -296,4 +369,52 @@ class ActivityCard extends StatelessWidget{
 
 
 
+}
+
+String _formatDate(DateTime d) {
+  const months = [
+    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
+    'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  return '${months[d.month]} ${d.day}, ${d.year}';
+}
+
+/// Best-effort "reviewed by" line for a rejected report — this app has no
+/// per-case organization field (single-organization deployment, see
+/// rescue_case.dart), so the closest available identity is the staff
+/// member recorded on the case's own activityLogs 'rejected' entry
+/// (RescueCaseRepository.rejectCase always writes one). Silently renders
+/// nothing if the reporter's own security rules can't read that
+/// subcollection or no entry is found yet, rather than blocking the card.
+class _ReviewedByLine extends StatelessWidget {
+  final String caseId;
+  const _ReviewedByLine({required this.caseId});
+
+  @override
+  Widget build(BuildContext context) {
+    // Filters by action == 'rejected' client-side rather than in the query
+    // (no .where here) — matches RescueCaseRepository.streamActivityLogs's
+    // own established pattern of ordering by timestamp only and never
+    // combining it with an equality filter, which would need a composite
+    // index this project doesn't define (no firestore.indexes.json).
+    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance
+          .collection('cases')
+          .doc(caseId)
+          .collection('activityLogs')
+          .orderBy('timestamp', descending: true)
+          .get(),
+      builder: (context, snap) {
+        final rejectionDocs =
+            snap.data?.docs.where((d) => d.data()['action'] == 'rejected') ?? const [];
+        final actorName = rejectionDocs.isNotEmpty ? rejectionDocs.first.data()['actorName'] as String? : null;
+        if (actorName == null || actorName.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text('Reviewed by: $actorName',
+              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+        );
+      },
+    );
+  }
 }

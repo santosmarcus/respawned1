@@ -9,10 +9,13 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:video_player/video_player.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
@@ -986,6 +989,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   child: const Text('Close Case — Aggressive Animal / Unsafe Rescue'),
                 ),
               ),
+            ] else if (c.status == RescueStatus.rejected) ...[
+              _RejectionDetailsCard(rescueCase: c),
             ] else
               SectionCard(
                 child: Text(
@@ -1020,6 +1025,91 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       ),
     );
   }
+}
+
+/// Rejected-case summary — reason, who rejected it and when, and whether
+/// the rejection makes the case Community-Adoption eligible. Rendered in
+/// place of the generic terminal-status message so a rejected report's
+/// "complete report details and rejection history" (Rejected Rescue
+/// Reports spec) are actually visible, not just a status label.
+class _RejectionDetailsCard extends ConsumerWidget {
+  final RescueCase rescueCase;
+  const _RejectionDetailsCard({required this.rescueCase});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = rescueCase;
+    final reason = c.rejectionReason;
+    final reasonLabel = reason == RejectionReason.other
+        ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false ? c.rejectionReasonOther! : 'Other')
+        : (reason?.label ?? 'Not specified');
+
+    final logsAsync = ref.watch(caseActivityLogsProvider(c.id));
+    final rejectionLog = logsAsync.asData?.value
+        .where((l) => l.action == 'rejected')
+        .fold<ActivityLogEntry?>(null, (latest, entry) {
+      if (latest == null) return entry;
+      if (entry.timestamp == null) return latest;
+      if (latest.timestamp == null) return entry;
+      return entry.timestamp!.isAfter(latest.timestamp!) ? entry : latest;
+    });
+
+    final rejectedDate = rejectionLog?.timestamp;
+    final dateStr = rejectedDate != null
+        ? '${rejectedDate.month}/${rejectedDate.day}/${rejectedDate.year}'
+        : 'Unknown';
+
+    final eligible = isCommunityAdoptionEligible(
+      status: c.status.firestoreValue,
+      rejectionReason: reason?.name,
+      rescueType: c.raw['rescueType'] as String?,
+    );
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Rejection Details',
+              style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+          const SizedBox(height: 10),
+          _rejectionRow('Reason', reasonLabel),
+          _rejectionRow('Rejected date', dateStr),
+          _rejectionRow('Rejected by', rejectionLog?.actorName ?? 'Unknown'),
+          if (eligible) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.greenrspwn.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text('Community Adoption eligible',
+                  style: GoogleFonts.zain(
+                      fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.greenrspwn)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _rejectionRow(String label, String value) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 100,
+              child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            ),
+            Expanded(
+              child: Text(value,
+                  style: GoogleFonts.zain(
+                      fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            ),
+          ],
+        ),
+      );
 }
 
 /// Owner-identification section (spec §1) — always visible (not just once
@@ -1287,13 +1377,22 @@ class _AnimalGroupSection extends StatelessWidget {
 
   // Maps an `animals[]` entry onto the same key shape
   // `_AnimalCard._animalFields()` already expects from a full case doc
-  // (animalType/breed/sex/size/colorMarkings/biteRisk/escapeRisk).
+  // (animalType/breed/sex/size/colorMarkings/ + Health & Behavior
+  // Assessment fields/biteRisk/escapeRisk).
   Map<String, dynamic> _animalMap(Map raw) => {
     'animalType': raw['species'],
     'breed': raw['breed'],
     'sex': raw['sex'],
     'size': raw['size'],
     'colorMarkings': raw['colorMarkings'],
+    'bodyCondition': raw['bodyCondition'],
+    'mobility': raw['mobility'],
+    'alertness': raw['alertness'],
+    'eyesNoseMouth': raw['eyesNoseMouth'],
+    'skinAndCoat': raw['skinAndCoat'],
+    'appetiteHydration': raw['appetiteHydration'],
+    'behavior': raw['behavior'],
+    'environmentSafety': raw['environmentSafety'],
     'biteRisk': raw['biteRisk'],
     'escapeRisk': raw['escapeRisk'],
   };
@@ -1439,14 +1538,43 @@ class _AnimalCard extends StatelessWidget {
     );
   }
 
+  // Tolerant parsing (spec) — a legacy/malformed value might be a single
+  // String instead of a List, or missing/null entirely; either way this
+  // never throws, and an unrecognized option value is still shown as-is
+  // (never dropped just because it isn't one of the current predefined
+  // choices).
+  static List<String> _stringList(dynamic value) {
+    if (value == null) return const [];
+    if (value is List) return value.whereType<String>().where((s) => s.trim().isNotEmpty).toList();
+    if (value is String && value.trim().isNotEmpty) return [value.trim()];
+    return const [];
+  }
+
   List<Widget> _animalFields() {
     final species = data['animalType'] as String?;
     final breed = data['breed'] as String?;
     final sex = data['sex'] as String?;
     final size = data['size'] as String?;
     final colorMarkings = data['colorMarkings'] as String?;
+    final bodyCondition = data['bodyCondition'] as String?;
+    final mobility = data['mobility'] as String?;
+    final alertness = data['alertness'] as String?;
+    final eyesNoseMouth = data['eyesNoseMouth'] as String?;
+    final skinAndCoat = data['skinAndCoat'] as String?;
+    final appetiteHydration = data['appetiteHydration'] as String?;
+    final behavior = _stringList(data['behavior']);
+    final environmentSafety = _stringList(data['environmentSafety']);
     final biteRisk = data['biteRisk'] as String?;
     final escapeRisk = data['escapeRisk'] as String?;
+
+    final hasAssessment = (bodyCondition?.isNotEmpty ?? false) ||
+        (mobility?.isNotEmpty ?? false) ||
+        (alertness?.isNotEmpty ?? false) ||
+        (eyesNoseMouth?.isNotEmpty ?? false) ||
+        (skinAndCoat?.isNotEmpty ?? false) ||
+        (appetiteHydration?.isNotEmpty ?? false) ||
+        behavior.isNotEmpty ||
+        environmentSafety.isNotEmpty;
 
     return [
       if (species != null && species.isNotEmpty) _DetailSection(label: 'Species', value: species),
@@ -1455,6 +1583,25 @@ class _AnimalCard extends StatelessWidget {
       if (size != null && size.isNotEmpty) _DetailSection(label: 'Size', value: size),
       if (colorMarkings != null && colorMarkings.isNotEmpty)
         _DetailSection(label: 'Color / Distinguishing Markings', value: colorMarkings),
+      if (hasAssessment) ...[
+        const SizedBox(height: 6),
+        Text('Health & Behavior Assessment',
+            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        const SizedBox(height: 2),
+        if (bodyCondition != null && bodyCondition.isNotEmpty)
+          _DetailSection(label: 'Body Condition', value: bodyCondition),
+        if (mobility != null && mobility.isNotEmpty) _DetailSection(label: 'Mobility', value: mobility),
+        if (alertness != null && alertness.isNotEmpty) _DetailSection(label: 'Alertness', value: alertness),
+        if (eyesNoseMouth != null && eyesNoseMouth.isNotEmpty)
+          _DetailSection(label: 'Eyes, Nose, Mouth', value: eyesNoseMouth),
+        if (skinAndCoat != null && skinAndCoat.isNotEmpty)
+          _DetailSection(label: 'Skin and Coat', value: skinAndCoat),
+        if (appetiteHydration != null && appetiteHydration.isNotEmpty)
+          _DetailSection(label: 'Appetite and Hydration', value: appetiteHydration),
+        if (behavior.isNotEmpty) _DetailSection(label: 'Behavior', value: behavior.join(', ')),
+        if (environmentSafety.isNotEmpty)
+          _DetailSection(label: 'Environment and Safety', value: environmentSafety.join(', ')),
+      ],
       if (biteRisk != null && biteRisk.isNotEmpty) _DetailSection(label: 'Bite Risk', value: biteRisk),
       if (escapeRisk != null && escapeRisk.isNotEmpty) _DetailSection(label: 'Escape Risk', value: escapeRisk),
     ];

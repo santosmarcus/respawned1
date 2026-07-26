@@ -7,8 +7,9 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 
 /// Bottom sheet for the Rescue Reports list: urgency, status, species,
 /// date range, and location filters. Status here reaches the
-/// referred/possibleDuplicate/merged/rejected/completed/cancelled buckets
-/// the five pipeline tabs don't cover; picking one overrides the active tab.
+/// referred/possibleDuplicate/merged/completed/cancelled buckets the six
+/// pipeline tabs don't cover (rejected has its own tab); picking one
+/// overrides the active tab.
 Future<void> showRescueFilterSheet(BuildContext context, {
   required RescueFilters current,
   required void Function(RescueFilters) onApply,
