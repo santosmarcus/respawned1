@@ -56,6 +56,17 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
     super.dispose();
   }
 
+  /// Same vaccine name + same administration date = the same event already
+  /// recorded — blocked. A later (or earlier) date for the same vaccine
+  /// name is a legitimate booster/separate dose and stays allowed.
+  bool _isDuplicateEvent(List<VaccinationRecord> existing) {
+    return existing.any((r) =>
+        r.vaccineName.trim().toLowerCase() == _vaccineName.trim().toLowerCase() &&
+        r.dateAdministered.year == _dateAdministered.year &&
+        r.dateAdministered.month == _dateAdministered.month &&
+        r.dateAdministered.day == _dateAdministered.day);
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     if (_vaccineName.isEmpty) {
@@ -65,6 +76,13 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
     final validityDays = int.tryParse(_validityController.text.trim());
     if (validityDays == null || validityDays <= 0) {
       setState(() => _error = 'Enter a valid duration in days.');
+      return;
+    }
+    final existing = ref.read(vaccinationsProvider(widget.animal.id)).asData?.value ?? const <VaccinationRecord>[];
+    if (_isDuplicateEvent(existing)) {
+      setState(() => _error =
+          'A "$_vaccineName" record for ${_dateAdministered.month}/${_dateAdministered.day}/${_dateAdministered.year} already exists. '
+          'Pick a different date if this is a booster or separate dose.');
       return;
     }
 
@@ -99,8 +117,62 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
     }
   }
 
+  void _showExistingRecords(List<VaccinationRecord> records, String vaccineName) {
+    final matches = records.where((r) => r.vaccineName.trim().toLowerCase() == vaccineName.trim().toLowerCase()).toList()
+      ..sort((a, b) => b.dateAdministered.compareTo(a.dateAdministered));
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: Text('$vaccineName — already added', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final r in matches) ...[
+                Text(
+                  'Last administered: ${r.dateAdministered.month}/${r.dateAdministered.day}/${r.dateAdministered.year}',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                ),
+                Text('Validity: ${r.validityDurationDays} days', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                Text('Next due: ${r.nextDueDate.month}/${r.nextDueDate.day}/${r.nextDueDate.year}',
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                const SizedBox(height: 10),
+              ],
+              Text(
+                'You may still add this vaccine again with a different administration date (booster/new dose).',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() {
+                _selectedTemplate = VaccineTemplate.forSpecies(widget.animal.species)
+                    .where((t) => t.name.toLowerCase() == vaccineName.toLowerCase())
+                    .cast<VaccineTemplate?>()
+                    .firstWhere((t) => true, orElse: () => null);
+                if (_selectedTemplate == null) _customNameController.text = vaccineName;
+              });
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            child: const Text('Add Another Dose'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final existingRecords = ref.watch(vaccinationsProvider(widget.animal.id)).asData?.value ?? const <VaccinationRecord>[];
+    final addedNames = existingRecords.map((r) => r.vaccineName.trim().toLowerCase()).toSet();
     return Padding(
       padding: EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 20 + MediaQuery.of(context).viewInsets.bottom),
       child: SingleChildScrollView(
@@ -120,16 +192,21 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
             const SizedBox(height: 12),
 
             Text('Vaccine', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            const SizedBox(height: 4),
+            Text('Chips marked "Added" already have a record — tap to view it, or select the chip to add another dose.',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
+            const SizedBox(height: 6),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 for (final t in _templates)
-                  ChoiceChip(
-                    label: Text(t.name),
+                  _VaccineChip(
+                    label: t.name,
+                    added: addedNames.contains(t.name.toLowerCase()),
                     selected: _selectedTemplate?.name == t.name,
-                    selectedColor: AppColors.yellowrspwn,
-                    onSelected: (_) => setState(() {
+                    onTapAdded: () => _showExistingRecords(existingRecords, t.name),
+                    onSelect: () => setState(() {
                       _selectedTemplate = t;
                       _validityController.text = '${t.defaultValidityDays}';
                       _nextDueOverride = null;
@@ -233,6 +310,59 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
                     : Text('Save Vaccine Record', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A vaccine option chip that's either plain-selectable (never recorded
+/// yet) or marked "Added" (at least one record already exists) — tapping
+/// an Added chip opens that record's info instead of silently selecting
+/// it, per spec ("show its current record ... rather than silently doing
+/// nothing").
+class _VaccineChip extends StatelessWidget {
+  final String label;
+  final bool added;
+  final bool selected;
+  final VoidCallback onTapAdded;
+  final VoidCallback onSelect;
+  const _VaccineChip({
+    required this.label,
+    required this.added,
+    required this.selected,
+    required this.onTapAdded,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!added) {
+      return ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        selectedColor: AppColors.yellowrspwn,
+        onSelected: (_) => onSelect(),
+      );
+    }
+    return GestureDetector(
+      onTap: onTapAdded,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.yellowrspwn : AppColors.greenrspwn.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.greenrspwn),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+            const SizedBox(width: 4),
+            const Icon(Icons.check_circle, size: 13, color: AppColors.greenrspwn),
+            const SizedBox(width: 2),
+            Text('Added', style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
           ],
         ),
       ),

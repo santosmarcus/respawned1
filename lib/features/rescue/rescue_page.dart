@@ -19,6 +19,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 
@@ -97,10 +99,17 @@ class _FoundAnimalEntry {
   String? containmentStatus; // 'contained' | 'could_escape'
   String? temperament;
 
+  // Per-animal safety risk (spec §1) — never applied across other animals
+  // in the same multi-animal report; each entry owns its own values.
+  String? biteRisk;
+  String? escapeRisk;
+  final Set<String> safetyIndicators = {};
+  final TextEditingController handlingNotesController = TextEditingController();
+
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
-    conditionController.dispose();
+    handlingNotesController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -2549,64 +2558,71 @@ class _RescuePageState extends State<RescuePage> {
           ),
           const SizedBox(height: 10),
           _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
-          if (showTriage) ...[
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Text('Describe Condition',
-                    style: GoogleFonts.zain(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
-                const SizedBox(width: 4),
-                const Text('*',
-                    style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 4),
-            _lostPetTextField(entry.conditionController, 'Calm, scared, injured…'),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Text('Is it contained, or could it escape?',
-                    style: GoogleFonts.zain(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
-                const SizedBox(width: 4),
-                const Text('*',
-                    style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 4),
-            _buildCheckboxOption2(
-                'Contained / cannot escape',
-                entry.containmentStatus,
-                    (val) => setState(() => entry.containmentStatus = val)),
-            _buildCheckboxOption2(
-                'Could escape / is moving around',
-                entry.containmentStatus,
-                    (val) => setState(() => entry.containmentStatus = val)),
-            const SizedBox(height: 10),
-            Text('Approachability / bite risk',
-                style: GoogleFonts.zain(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 4),
-            _buildCheckboxOption2(
-                'Friendly, approachable',
-                entry.temperament,
-                    (val) => setState(() => entry.temperament = val)),
-            _buildCheckboxOption2(
-                'Nervous, may run',
-                entry.temperament,
-                    (val) => setState(() => entry.temperament = val)),
-            _buildCheckboxOption2(
-                'Can be defensive / bite risk',
-                entry.temperament,
-                    (val) => setState(() => entry.temperament = val)),
-          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: entry.biteRisk,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Bite risk',
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  items: [
+                    for (final level in kBiteRiskLevels)
+                      DropdownMenuItem(value: level, child: Text(level)),
+                  ],
+                  onChanged: (v) => setState(() => entry.biteRisk = v),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: entry.escapeRisk,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Escape risk',
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                  ),
+                  items: [
+                    for (final level in kEscapeRiskLevels)
+                      DropdownMenuItem(value: level, child: Text(level)),
+                  ],
+                  onChanged: (v) => setState(() => entry.escapeRisk = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text('Additional safety indicators (optional)',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final indicator in kSafetyIndicatorOptions)
+                FilterChip(
+                  label: Text(indicator, style: GoogleFonts.zain(fontSize: 12)),
+                  selected: entry.safetyIndicators.contains(indicator),
+                  selectedColor: AppColors.yellowrspwn,
+                  onSelected: (selected) => setState(() {
+                    if (selected) {
+                      entry.safetyIndicators.add(indicator);
+                    } else {
+                      entry.safetyIndicators.remove(indicator);
+                    }
+                  }),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _lostPetTextField(entry.handlingNotesController, 'Handling notes (optional)'),
         ],
       ),
     );
@@ -2675,6 +2691,10 @@ class _RescuePageState extends State<RescuePage> {
           'sex': animal.sex,
           'size': animal.size,
           'colorMarkings': animal.colorController.text.trim(),
+          'biteRisk': animal.biteRisk,
+          'escapeRisk': animal.escapeRisk,
+          'safetyIndicators': animal.safetyIndicators.toList(),
+          'handlingNotes': animal.handlingNotesController.text.trim(),
           'rescueType': _selectedRescueType,
           'condition': animal.conditionController.text.trim(),
           'urgency': _selectedUrgency,

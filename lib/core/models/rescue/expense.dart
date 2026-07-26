@@ -71,6 +71,14 @@ class Expense {
   final DateTime? createdAt;
   final String? createdBy;
 
+  /// Same representation and null-means-"applies to everything" convention
+  /// as TreatmentLogEntry.animalIndexes (see its doc comment) — here null/
+  /// empty means "Shared case expense" rather than "All Animals", but it's
+  /// the identical `animals[]`-index list underneath. One expense document
+  /// either way; a shared expense is never duplicated per animal, and
+  /// totals are never auto-split across the listed animals.
+  final List<int>? animalIndexes;
+
   const Expense({
     required this.id,
     required this.caseId,
@@ -83,9 +91,14 @@ class Expense {
     this.incurredAt,
     this.createdAt,
     this.createdBy,
+    this.animalIndexes,
   });
 
   bool get isFunded => fundingSource != FundingSource.unfunded;
+
+  bool get isSharedCaseExpense => animalIndexes == null || animalIndexes!.isEmpty;
+
+  bool appliesToAnimal(int animalIndex) => isSharedCaseExpense || animalIndexes!.contains(animalIndex);
 
   factory Expense.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc, String caseId) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -106,6 +119,7 @@ class Expense {
       incurredAt: ts('incurredAt'),
       createdAt: ts('createdAt'),
       createdBy: data['createdBy'] as String?,
+      animalIndexes: (data['animalIndexes'] as List?)?.map((e) => (e as num).toInt()).toList(),
     );
   }
 
@@ -118,5 +132,6 @@ class Expense {
         if (notes != null && notes!.isNotEmpty) 'notes': notes,
         'incurredAt': incurredAt != null ? Timestamp.fromDate(incurredAt!) : Timestamp.now(),
         'createdBy': createdBy,
+        if (animalIndexes != null && animalIndexes!.isNotEmpty) 'animalIndexes': animalIndexes,
       };
 }

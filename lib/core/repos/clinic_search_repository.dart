@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:respawnd1/core/constants/maps_config.dart';
 import 'package:respawnd1/core/models/rescue/clinic_search_result.dart';
+import 'package:respawnd1/core/models/rescue/locality_result.dart';
 
 /// Base type for every failure ClinicSearchRepository can throw. Callers
 /// (select_clinic_sheet.dart) catch this and show a message appropriate to
@@ -145,13 +146,45 @@ class ClinicSearchRepository {
     return _search(uri, body);
   }
 
+  // Validated city/locality search for the Organization service-area picker
+  // (spec §13) — restricted to Philippine cities/localities via
+  // includedType + regionCode so a fragment like "mani" can only ever
+  // resolve to a real place (or nothing), never be saved as free text.
+  // Requests addressComponents (not part of the clinic field mask above,
+  // and billed separately) so LocalityResult can carry the
+  // province/region + country the spec's stored shape wants.
+  static const _localityFieldMask = 'places.id,places.displayName,places.addressComponents';
+
+  Future<List<LocalityResult>> searchLocalities({required String query}) async {
+    if (query.trim().isEmpty) return const [];
+    final uri = Uri.https(_baseUrl, '/v1/places:searchText');
+    final body = jsonEncode({
+      'textQuery': query,
+      'includedType': 'locality',
+      'regionCode': 'PH',
+    });
+    final places = await _searchRaw(uri, body, fieldMask: _localityFieldMask);
+    return places
+        .map((r) => LocalityResult.fromPlacesJson(r as Map<String, dynamic>))
+        .where((c) => c.placeId.isNotEmpty && c.name.isNotEmpty)
+        .toList();
+  }
+
   Future<List<ClinicSearchResult>> _search(Uri uri, String body) async {
+    final places = await _searchRaw(uri, body, fieldMask: _fieldMask);
+    return places
+        .map((r) => ClinicSearchResult.fromPlacesJson(r as Map<String, dynamic>))
+        .where((c) => c.placeId.isNotEmpty)
+        .toList();
+  }
+
+  Future<List<dynamic>> _searchRaw(Uri uri, String body, {required String fieldMask}) async {
     MapsConfig.logKeySourceOnce();
 
     http.Response res;
     try {
       res = await http
-          .post(uri, headers: _headers, body: body)
+          .post(uri, headers: {..._headers, 'X-Goog-FieldMask': fieldMask}, body: body)
           .timeout(const Duration(seconds: 12));
     } on TimeoutException {
       throw const ClinicSearchNetworkException(
@@ -166,11 +199,7 @@ class ClinicSearchRepository {
     if (res.statusCode == 200) {
       final decoded = jsonDecode(res.body);
       final places = (decoded is Map<String, dynamic> ? decoded['places'] : null) as List<dynamic>?;
-      if (places == null || places.isEmpty) return const []; // valid "zero results", not an error
-      return places
-          .map((r) => ClinicSearchResult.fromPlacesJson(r as Map<String, dynamic>))
-          .where((c) => c.placeId.isNotEmpty)
-          .toList();
+      return places ?? const []; // valid "zero results", not an error
     }
 
     // Non-200: classify by status so the UI can tell "fix your Google

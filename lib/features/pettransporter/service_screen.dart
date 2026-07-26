@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/pettransporter/service_filter_sheet.dart';
@@ -29,6 +31,12 @@ class _ServiceScreenState extends State<ServiceScreen> {
   bool _loadingLocation = false;
   LatLng? _currentLocation;
 
+  // Keeps `users/{uid}.lastSeenAt` fresh while online so the admin side
+  // (PetTransporter.isOnline / kTransporterPresenceThreshold) doesn't stop
+  // considering this transporter online just because no other write has
+  // happened recently.
+  Timer? _presenceHeartbeat;
+
   @override
   void initState() {
     super.initState();
@@ -37,8 +45,27 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
   @override
   void dispose(){
+    _presenceHeartbeat?.cancel();
+    // Best-effort — this screen going away (backgrounded/killed) doesn't
+    // guarantee the write lands, which is exactly why isOnline also checks
+    // lastSeenAt staleness rather than trusting `online` alone.
+    _writePresence(online: false);
     _mapController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _writePresence({required bool online}) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).set(
+        {'online': online, 'lastSeenAt': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      );
+    } catch (_) {
+      // Presence is best-effort — never blocks the transporter's own
+      // online/offline toggle on a write failure.
+    }
   }
 
   // The service range is personal to each transporter and should persist
@@ -381,6 +408,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
         _currentLocation = LatLng(pos.latitude, pos.longitude);
         _isOnline = true;
       });
+      await _writePresence(online: true);
+      _presenceHeartbeat?.cancel();
+      _presenceHeartbeat = Timer.periodic(
+          const Duration(minutes: 2), (_) => _writePresence(online: true));
     } catch (_) {
       _showError('Could not get location.');
     } finally {
@@ -388,10 +419,15 @@ class _ServiceScreenState extends State<ServiceScreen> {
     }
   }
 
-  void _goOffline() => setState(() {
-    _isOnline = false;
-    _currentLocation = null;
-  });
+  void _goOffline() {
+    _presenceHeartbeat?.cancel();
+    _presenceHeartbeat = null;
+    _writePresence(online: false);
+    setState(() {
+      _isOnline = false;
+      _currentLocation = null;
+    });
+  }
   void _showError(String msg) {
     if (!mounted) return;
     setState(() => _loadingLocation = false);

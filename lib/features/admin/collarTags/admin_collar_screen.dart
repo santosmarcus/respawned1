@@ -13,7 +13,7 @@ class AdminCollarTagScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: const AdminDrawer(),
+      drawer: const AdminDrawer(active: AdminModule.collarTags),
       appBar: AppBar(
         //leading: IconButton(
         //icon: const Icon(Icons.menu, color: AppColors.background),

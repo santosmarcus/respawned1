@@ -5,6 +5,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/core/repos/organization_repository.dart';
+import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
+import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
+import 'package:respawnd1/features/organization/signup/organization_verification_screen.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
@@ -131,12 +135,57 @@ class _AuthWrapperState extends State<AuthWrapper> {
                 return const ServiceScreen();
               case 'rescue_volunteer':
                 return const ServiceScreen();
+              case 'organization':
+                final organizationId = data?['organizationId'] as String?;
+                if (organizationId == null || organizationId.isEmpty) {
+                  // Role was saved but the draft org doc never got created
+                  // (interrupted session) — About Your Organization always
+                  // resumes an existing draft rather than creating a new
+                  // one, so this is safe to send them back to.
+                  return const OrganizationAboutScreen();
+                }
+                return _OrganizationRoleRouter(organizationId: organizationId);
               case 'general':
               default:
                 return const HomeScreen();
             }
           },
         );
+      },
+    );
+  }
+}
+
+/// Second-level routing for role == 'organization' — reads the org doc's
+/// verificationStatus and picks the right step of the signup pipeline
+/// (draft still needs documents uploaded; pending/rejected/requires_changes
+/// show the status page; approved reaches the admin shell), mirroring the
+/// existing pet_transporter case's use of transporterVerificationStatus
+/// just one Firestore hop further (organization, not the user doc itself).
+class _OrganizationRoleRouter extends StatelessWidget {
+  final String organizationId;
+  const _OrganizationRoleRouter({required this.organizationId});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance.collection('organizations').doc(organizationId).get(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        final data = snapshot.data?.data() as Map<String, dynamic>?;
+        final status = OrgVerificationStatus.fromName(data?['verificationStatus'] as String?);
+        switch (status) {
+          case OrgVerificationStatus.approved:
+            return const AdminHomeScreen();
+          case OrgVerificationStatus.draft:
+            return OrganizationVerificationScreen(organizationId: organizationId);
+          case OrgVerificationStatus.pending:
+          case OrgVerificationStatus.rejected:
+          case OrgVerificationStatus.requiresChanges:
+            return OrganizationVerificationPendingPage(organizationId: organizationId);
+        }
       },
     );
   }

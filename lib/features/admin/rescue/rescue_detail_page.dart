@@ -9,16 +9,20 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:video_player/video_player.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/accept_case_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/merge_history_section.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/ownership_status_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/possible_duplicate_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/refer_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/referral_history_section.dart';
@@ -87,6 +91,171 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     // _openClinicSheet): dismissing it just leaves the case in "accepted,
     // no clinic yet", which the action area below renders as "Select Clinic".
     if (mounted) await _openClinicSheet(c, offerAssignRider: true);
+  }
+
+  /// Shared Close Case flow (spec §2) — reused from every screen that can
+  /// close a case. The sheet only picks a reason/details; this method does
+  /// the actual write, guarded by [_isLoading] so a double-tap can't fire
+  /// two closures.
+  Future<void> _closeCase(RescueCase c, {ClosureReason? initialReason}) async {
+    final result = await showCloseCaseSheet(context, rescueCase: c, initialReason: initialReason);
+    if (result == null || !mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).closeCase(
+            caseId: c.id,
+            reason: result.reason,
+            details: result.details,
+            actorUid: _actorUid,
+            actorName: _actorName,
+            lastKnownLocation: result.lastKnownLocation,
+            clinicUnavailableDetails: result.clinicUnavailableDetails,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not close case: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateOwnership(RescueCase c) async {
+    final raw = c.raw;
+    final result = await showOwnershipStatusSheet(
+      context,
+      currentOwnershipStatus: raw['ownershipStatus'] as String?,
+      currentCategory: raw['ownedAnimalCategory'] as String?,
+      currentOwnerName: raw['ownerName'] as String?,
+      currentOwnerContact: raw['ownerContact'] as String?,
+      currentNotes: raw['ownershipNotes'] as String?,
+    );
+    if (result == null || !mounted) return;
+    try {
+      await ref.read(rescueCaseRepositoryProvider).updateOwnershipInfo(
+            caseId: c.id,
+            ownershipStatus: result.ownershipStatus,
+            ownedAnimalCategory: result.ownedAnimalCategory,
+            ownerName: result.ownerName,
+            ownerContact: result.ownerContact,
+            ownershipNotes: result.ownershipNotes,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save ownership info: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  /// "Contact owner" (spec §1) — this app has no owner-messaging channel,
+  /// so this surfaces the stored contact info for the admin to reach out
+  /// through their own means, rather than a fake "message sent" action.
+  void _contactOwner(RescueCase c) {
+    final name = c.raw['ownerName'] as String?;
+    final contact = c.raw['ownerContact'] as String?;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Owner Contact'),
+        content: Text(
+          (contact == null || contact.isEmpty)
+              ? 'No owner contact information has been recorded yet. Use Update Ownership Info to add it.'
+              : '${name != null && name.isNotEmpty ? '$name\n' : ''}$contact',
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  /// "Retry with a different transporter" after a safety report (spec
+  /// §3) — requires the admin to acknowledge the warning before the case
+  /// even becomes reassignable, then hands off to the existing Assign
+  /// Transporter screen exactly as normal (no transporter is auto-picked).
+  Future<void> _retryWithDifferentTransporter(RescueCase c) async {
+    final notes = c.raw['endReasonNotes'] as String?;
+    final acknowledged = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Acknowledge Safety Warning'),
+        content: Text(
+          'A previous transporter reported that this animal may be aggressive.'
+          '${notes != null && notes.isNotEmpty ? '\n\n"$notes"' : ''}'
+          '\n\nDo you acknowledge this before selecting another transporter?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            child: const Text('I Acknowledge'),
+          ),
+        ],
+      ),
+    );
+    if (acknowledged != true || !mounted) return;
+
+    setState(() => _isLoading = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).resumeAssignmentAfterSafetyReport(
+            caseId: c.id,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+      if (mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not resume assignment: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _keepTransporterWithInstructions(RescueCase c) async {
+    final controller = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Instructions for Transporter'),
+        content: TextField(controller: controller, maxLines: 3, autofocus: true, decoration: const InputDecoration(hintText: 'e.g. use a carrier, approach from the left, wait for backup')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (note == null || note.isEmpty || !mounted) return;
+    try {
+      await ref.read(rescueCaseRepositoryProvider).addSafetyResponseNote(
+            caseId: c.id,
+            note: note,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save instructions: $e'), backgroundColor: Colors.redAccent));
+      }
+    }
   }
 
   /// Single entry point for the Select Clinic sheet, used both right after
@@ -296,6 +465,13 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       textAlign: TextAlign.right,
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
               ],
+            ),
+            const SizedBox(height: 12),
+            RescueRiskBanner(
+              biteRisk: c.biteRisk,
+              escapeRisk: c.escapeRisk,
+              safetyIndicators: c.safetyIndicators,
+              handlingNotes: c.handlingNotes,
             ),
 
             if (c.openForTransfer) ...[
@@ -515,6 +691,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               const SizedBox(height: 12),
             ],
 
+            _OwnershipSection(
+              rescueCase: c,
+              busy: _isLoading,
+              onUpdate: () => _updateOwnership(c),
+              onContactOwner: () => _contactOwner(c),
+              onReferToLgu: () => _referCase(c),
+              onReturnToOwner: () => _closeCase(c, initialReason: ClosureReason.reunitedWithOwner),
+              onCloseHasOwner: () => _closeCase(c, initialReason: ClosureReason.hasOwner),
+            ),
+            const SizedBox(height: 12),
+
             MergeHistorySection(rescueCase: c, onOpenCase: _openCase),
             const SizedBox(height: 12),
             ReferralHistorySection(caseId: c.id),
@@ -603,11 +790,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                 ),
               ),
-            ] else if (c.status == RescueStatus.awaitingAssignment) ...[
+            ] else if (c.status == RescueStatus.accepted || c.status == RescueStatus.awaitingAssignment) ...[
               // Accepted. Primary action is derived from saved case data —
               // not local widget state — so reopening this screen always
               // shows the right button: no clinic yet means Select Clinic,
               // a saved clinic means Assign Transporter is unblocked.
+              // status == accepted specifically means "no clinic yet" (see
+              // acceptCase/assignClinic) — !c.hasSavedClinic covers it, but
+              // is kept as the single source of truth here rather than
+              // branching on status a second time, so this still behaves
+              // correctly for animal-record admissions which start at
+              // awaitingAssignment with no clinic (see createAdmissionCase).
               if (!c.hasSavedClinic)
                 SizedBox(
                   width: double.infinity,
@@ -714,6 +907,89 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                 ),
               ),
+            ] else if (c.status == RescueStatus.needsSpecializedAssistance) ...[
+              // Set by the real transporter app's own End Reason flow
+              // (transit_progress_page.dart) — endReason/endReasonNotes are
+              // read here, never re-derived or guessed.
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: const Color(0xFFE05353).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Safety warning', style: GoogleFonts.tiltWarp(fontSize: 14, color: const Color(0xFFE05353))),
+                    const SizedBox(height: 6),
+                    Text(
+                      'A previous transporter reported that the animal may be aggressive. Review the incident before assigning another transporter.',
+                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                    ),
+                    if ((c.raw['endReasonNotes'] as String?)?.isNotEmpty ?? false) ...[
+                      const SizedBox(height: 6),
+                      Text('Reported: ${c.raw['endReasonNotes']}', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : () => _retryWithDifferentTransporter(c),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text('Retry with a Different Transporter',
+                      style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _keepTransporterWithInstructions(c),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.textPrimary,
+                    side: const BorderSide(color: AppColors.textPrimary),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text('Keep Current Transporter + Instructions',
+                      style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _referCase(c),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary,
+                    side: const BorderSide(color: AppColors.slaterspwn),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text('Escalate to Trained Responder / Authority',
+                      style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textSecondary)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _closeCase(c, initialReason: ClosureReason.aggressiveAnimal),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFE05353),
+                    side: const BorderSide(color: Color(0xFFE05353)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Close Case — Aggressive Animal / Unsafe Rescue'),
+                ),
+              ),
             ] else
               SectionCard(
                 child: Text(
@@ -722,6 +998,18 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 ),
               ),
 
+            if (!c.status.isTerminal) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: _isLoading ? null : () => _closeCase(c),
+                  style: TextButton.styleFrom(foregroundColor: const Color(0xFFE05353)),
+                  child: const Text('Close Case'),
+                ),
+              ),
+            ],
+
             const SizedBox(height: 24),
 
             CommunityReportsSection(caseId: c.id),
@@ -729,6 +1017,83 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             const SizedBox(height: 32),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Owner-identification section (spec §1) — always visible (not just once
+/// a status is set), so ownership can be recorded the moment it's
+/// discovered at any point in the rescue. Owner contact details are
+/// intentionally never rendered inline in this card (only via the
+/// "Contact Owner" dialog, an explicit tap) — this card itself only ever
+/// shows the status/category, never the contact info, so it stays safe to
+/// have on screen during a normal triage pass.
+class _OwnershipSection extends StatelessWidget {
+  final RescueCase rescueCase;
+  final bool busy;
+  final VoidCallback onUpdate;
+  final VoidCallback onContactOwner;
+  final VoidCallback onReferToLgu;
+  final VoidCallback onReturnToOwner;
+  final VoidCallback onCloseHasOwner;
+  const _OwnershipSection({
+    required this.rescueCase,
+    required this.busy,
+    required this.onUpdate,
+    required this.onContactOwner,
+    required this.onReferToLgu,
+    required this.onReturnToOwner,
+    required this.onCloseHasOwner,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final raw = rescueCase.raw;
+    final status = raw['ownershipStatus'] as String? ?? 'Unknown';
+    final category = raw['ownedAnimalCategory'] as String?;
+    final hasPossibleOwner = status == 'Possible owner' || status == 'Owner identified';
+
+    return SectionCard(
+      title: 'Ownership Status',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: status == 'Unknown' ? AppColors.slaterspwn : AppColors.lavenderrspwn,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(status, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+              if (category != null) ...[
+                const SizedBox(width: 8),
+                Text(category, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(onPressed: busy ? null : onUpdate, child: const Text('Update Ownership Info')),
+              if (hasPossibleOwner) ...[
+                OutlinedButton(onPressed: busy ? null : onContactOwner, child: const Text('Contact Owner')),
+                OutlinedButton(onPressed: busy ? null : onReturnToOwner, child: const Text('Return/Reunite with Owner')),
+                OutlinedButton(onPressed: busy ? null : onReferToLgu, child: const Text('Refer to LGU')),
+                OutlinedButton(
+                  onPressed: busy ? null : onCloseHasOwner,
+                  style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFE05353), side: const BorderSide(color: Color(0xFFE05353))),
+                  child: const Text('Close Case'),
+                ),
+              ],
+            ],
+          ),
+        ],
       ),
     );
   }

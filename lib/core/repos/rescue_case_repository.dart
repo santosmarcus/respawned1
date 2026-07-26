@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
@@ -213,6 +214,22 @@ class RescueCaseRepository {
       actorName: actorName,
       details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'returnRequestId': returnRequestId},
     );
+    // Same medicalEpisodes + currentCaseId linkage AnimalRecordRepository.
+    // admitAnimal already writes for its own sourceAnimalRecordId flow —
+    // without this, the existing record's Medical tab (_EpisodesSection)
+    // has no way to know this new intake case exists at all, since it
+    // reads sourceCaseIds from that subcollection, not from this case's own
+    // sourceAnimalRecordId pointer.
+    await _animals.doc(sourceAnimalRecordId).collection('medicalEpisodes').add({
+      'animalId': sourceAnimalRecordId,
+      'sourceCaseId': ref.id,
+      'sourceType': 'adoptionReturn',
+      'reason': 'other',
+      'notes': 'Adoption return intake${returnExplanation != null && returnExplanation.isNotEmpty ? ': $returnExplanation' : ''}',
+      'createdAt': FieldValue.serverTimestamp(),
+      if (actorName.isNotEmpty) 'createdBy': actorName,
+    });
+    await _animals.doc(sourceAnimalRecordId).update({'currentCaseId': ref.id, 'updatedAt': FieldValue.serverTimestamp()});
     return ref.id;
   }
 
@@ -315,6 +332,22 @@ class RescueCaseRepository {
   Stream<List<PetTransporter>> streamPetTransporters() {
     return _users.where('role', isEqualTo: 'pet_transporter').snapshots().map(
           (snap) => snap.docs.map(PetTransporter.fromFirestore).toList(),
+        );
+  }
+
+  /// Every account with role == 'rescue_volunteer' — the other real
+  /// signup role from onboard_screen.dart / role_screen.dart, currently
+  /// routed to the same ServiceScreen as pet_transporter (see main.dart's
+  /// AuthWrapper), so it writes the exact same users/{uid} shape
+  /// (name/phone/online/lastSeenAt/transporterVerification) that
+  /// [PetTransporter] already models — reused as-is rather than a second
+  /// near-identical model, since the Volunteers directory (spec §7) needs
+  /// the same fields (name, online/availability, contact).
+  Stream<List<PetTransporter>> streamRescueVolunteers() {
+    return _users.where('role', isEqualTo: 'rescue_volunteer').snapshots().map(
+          (snap) => snap.docs
+              .map((doc) => PetTransporter.fromFirestore(doc, unnamedLabel: 'Unnamed Volunteer'))
+              .toList(),
         );
   }
 
@@ -422,6 +455,7 @@ class RescueCaseRepository {
     }
     final activeStatuses = [
       RescueStatus.pendingReview,
+      RescueStatus.accepted,
       RescueStatus.awaitingAssignment,
       RescueStatus.ongoing,
     ].expand((s) => s.queryValues).toSet().toList();
@@ -432,9 +466,19 @@ class RescueCaseRepository {
         .limit(50)
         .get();
 
+    // Pairs the admin already explicitly reviewed and dismissed via "Keep
+    // Separate" (see keepSeparate) are never re-suggested — unless the
+    // source case's own location/species changed since (a coarse "did
+    // meaningful data change" signal: this whole method already re-derives
+    // candidates from the CURRENT source.animalType/lat/lng every call, so
+    // a source that moved or was re-typed naturally produces a different
+    // candidate set anyway; the dismissed-id list itself is never
+    // invalidated automatically beyond that).
+    final dismissed = (source.raw['dismissedDuplicateCaseIds'] as List?)?.cast<String>().toSet() ?? const {};
+
     final candidates = snap.docs
         .map(RescueCase.fromFirestore)
-        .where((c) => c.id != source.id && c.lat != null && c.lng != null)
+        .where((c) => c.id != source.id && c.lat != null && c.lng != null && !dismissed.contains(c.id))
         .toList();
 
     candidates.sort((a, b) {
@@ -479,7 +523,11 @@ class RescueCaseRepository {
     bool openForTransfer = false,
   }) async {
     await _caseDoc(caseId).update({
-      'status': RescueStatus.awaitingAssignment.firestoreValue,
+      // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
+      // jumping straight to awaitingAssignment — the case stays visible
+      // under Rescue Review until assignClinic actually saves a clinic and
+      // advances it. See rescue_status.dart's firestoreValue doc comment.
+      'status': RescueStatus.accepted.firestoreValue,
       'openForTransfer': openForTransfer,
       'statusHistory': FieldValue.arrayUnion([
         {
@@ -551,14 +599,22 @@ class RescueCaseRepository {
 
   /// Reverts a possibleDuplicate case back to normal triage after the org
   /// decides the two reports are NOT the same incident.
+  ///
+  /// [dismissedCandidateIds] — the candidate case id(s) actually shown and
+  /// dismissed (from possible_duplicate_sheet.dart) — recorded onto
+  /// `dismissedDuplicateCaseIds` so findPossibleDuplicates never
+  /// re-suggests this exact pair to this case again.
   Future<void> keepSeparate({
     required String caseId,
     required String actorUid,
     required String actorName,
+    List<String> dismissedCandidateIds = const [],
   }) async {
     await _caseDoc(caseId).update({
       'status': RescueStatus.pendingReview.firestoreValue,
       'possibleDuplicateOfCaseId': FieldValue.delete(),
+      if (dismissedCandidateIds.isNotEmpty)
+        'dismissedDuplicateCaseIds': FieldValue.arrayUnion(dismissedCandidateIds),
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Confirmed as a separate, unrelated report.', 'timestamp': Timestamp.now()}
       ]),
@@ -650,6 +706,53 @@ class RescueCaseRepository {
         'details': {'mergedIntoCaseId': primaryCaseId, 'role': 'duplicate'},
       });
     });
+  }
+
+  // ---- Ownership (spec §1) --------------------------------------------
+
+  /// Records what's known about a possible/confirmed owner (lost animal,
+  /// suspected neglect/abandonment, owner present at pickup, ...) —
+  /// deliberately additive `raw`-only fields (`ownershipStatus`/
+  /// `ownedAnimalCategory`/`ownerName`/`ownerContact`/`ownershipNotes`/
+  /// `ownerConfirmedAt`), following this model's existing convention for
+  /// fields that don't need to be part of every read path (see [RescueCase.
+  /// raw]'s own doc comment) — never a second case-like collection. Never
+  /// changes `status`/closes the case on its own — an owner being
+  /// identified is information the admin acts on deliberately via a
+  /// separate next action (Continue rescue / Contact owner / Close Case),
+  /// never an automatic closure.
+  Future<void> updateOwnershipInfo({
+    required String caseId,
+    required String ownershipStatus, // 'Unknown' | 'No known owner' | 'Possible owner' | 'Owner identified'
+    String? ownedAnimalCategory, // 'Lost animal' | 'Neglect concern' | 'Abandonment concern' | 'Other'
+    String? ownerName,
+    String? ownerContact,
+    String? ownershipNotes,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'ownershipStatus': ownershipStatus,
+      if (ownedAnimalCategory != null) 'ownedAnimalCategory': ownedAnimalCategory,
+      if (ownerName != null) 'ownerName': ownerName,
+      if (ownerContact != null) 'ownerContact': ownerContact,
+      if (ownershipNotes != null) 'ownershipNotes': ownershipNotes,
+      if (ownershipStatus == 'Owner identified') 'ownerConfirmedAt': Timestamp.now(),
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Ownership status updated: $ownershipStatus.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'updated_ownership_info',
+      actorUid: actorUid,
+      actorName: actorName,
+      // Owner contact details are never written to the activity log's own
+      // details map — that log is broadly readable by staff, and contact
+      // info should only live on the case doc's own ownership fields,
+      // never duplicated somewhere with wider/different visibility.
+      details: {'ownershipStatus': ownershipStatus, 'ownedAnimalCategory': ownedAnimalCategory},
+    );
   }
 
   Future<String> referToOrganization({
@@ -777,6 +880,13 @@ class RescueCaseRepository {
     String? clinicPhone,
     required String actorUid,
     required String actorName,
+    // Clinic-availability warning (spec §6) — 'open'/'closed'/'unavailable'
+    // from the Places result's own openNow field, never fabricated when
+    // Places has no reliable hours data (openNow == null -> 'unavailable').
+    // Acknowledgment fields are only set when the admin actually confirmed
+    // "Proceed Anyway" on a closed clinic.
+    String? availabilityStatus,
+    bool closedWarningAcknowledged = false,
   }) async {
     await _caseDoc(caseId).update({
       'vetClinicName': clinicName,
@@ -786,6 +896,24 @@ class RescueCaseRepository {
       'vetClinicLng': clinicLng,
       'vetClinicPhone': clinicPhone,
       'vetClinicSelectedAt': Timestamp.now(),
+      if (availabilityStatus != null) ...{
+        'clinicAvailabilityStatus': availabilityStatus,
+        'clinicAvailabilityCheckedAt': Timestamp.now(),
+      },
+      if (closedWarningAcknowledged) ...{
+        'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
+        'clinicClosedWarningAcknowledgedBy': actorUid,
+      },
+      // assignClinic is only ever called for a case's FIRST clinic (see
+      // select_clinic_sheet.dart's assignClinic-vs-changeClinic branch on
+      // previousClinicName), so the case is always still at
+      // RescueStatus.accepted (from Rescue Review) or already at
+      // RescueStatus.awaitingAssignment (animal-record admissions, which
+      // start there directly — see createAdmissionCase) when this runs.
+      // Writing awaitingAssignment here is a no-op for the latter and is
+      // exactly the "clinic saved -> ready to assign" transition for the
+      // former.
+      'status': RescueStatus.awaitingAssignment.firestoreValue,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Assigned to clinic: $clinicName.', 'timestamp': Timestamp.now()}
       ]),
@@ -796,6 +924,63 @@ class RescueCaseRepository {
       actorUid: actorUid,
       actorName: actorName,
       details: {'clinicPlaceId': clinicPlaceId, 'clinicName': clinicName},
+    );
+  }
+
+  /// Clinic reselection during tracking (spec §7) — same fields/write
+  /// pattern as [assignClinic] (never a new assignment/case, never marks
+  /// the transporter assignment completed), just a more specific
+  /// statusHistory message naming both clinics, and its own activity-log
+  /// action so "changed" is distinguishable from the initial "assigned".
+  /// The old clinic is never erased from history — every prior
+  /// `assigned_clinic`/`changed_clinic` activity-log entry and every past
+  /// `statusHistory` line naming it stays exactly as written.
+  Future<void> changeClinic({
+    required String caseId,
+    required String previousClinicName,
+    required String clinicName,
+    String? clinicAddress,
+    String? clinicPlaceId,
+    double? clinicLat,
+    double? clinicLng,
+    String? clinicPhone,
+    required String actorUid,
+    required String actorName,
+    String? availabilityStatus,
+    bool closedWarningAcknowledged = false,
+  }) async {
+    await _caseDoc(caseId).update({
+      'vetClinicName': clinicName,
+      'vetClinicAddress': clinicAddress,
+      'vetClinicPlaceId': clinicPlaceId,
+      'vetClinicLat': clinicLat,
+      'vetClinicLng': clinicLng,
+      'vetClinicPhone': clinicPhone,
+      'vetClinicSelectedAt': Timestamp.now(),
+      if (availabilityStatus != null) ...{
+        'clinicAvailabilityStatus': availabilityStatus,
+        'clinicAvailabilityCheckedAt': Timestamp.now(),
+      },
+      if (closedWarningAcknowledged) ...{
+        'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
+        'clinicClosedWarningAcknowledgedBy': actorUid,
+      },
+      // Clears any stale route/ETA computed for the old clinic — the
+      // tracking map recalculates (or falls back to a straight line) once
+      // it sees a new vetClinicLat/Lng with no matching cached route.
+      'cachedRoutePolyline': FieldValue.delete(),
+      'cachedRouteDistanceKm': FieldValue.delete(),
+      'cachedRouteEtaMinutes': FieldValue.delete(),
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Clinic changed from $previousClinicName to $clinicName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'changed_clinic',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'previousClinicName': previousClinicName, 'clinicPlaceId': clinicPlaceId, 'clinicName': clinicName},
     );
   }
 
@@ -839,6 +1024,22 @@ class RescueCaseRepository {
 
     await _db.runTransaction((tx) async {
       final caseSnap = await tx.get(caseRef);
+      // Revalidate presence here, not just in the UI's rider list — that
+      // list may already be stale by the time the admin taps Confirm (the
+      // transporter could have gone offline moments ago). Demo riders have
+      // no real presence data and are exempt.
+      if (!isDemo) {
+        final riderSnap = await tx.get(_users.doc(riderId));
+        final riderData = riderSnap.data();
+        final online = riderData?['online'] as bool? ?? false;
+        final lastSeen = riderData?['lastSeenAt'];
+        final lastSeenAt = lastSeen is Timestamp ? lastSeen.toDate() : null;
+        final stillOnline =
+            online && lastSeenAt != null && DateTime.now().difference(lastSeenAt) <= kTransporterPresenceThreshold;
+        if (!stillOnline) {
+          throw const TransporterNoLongerOnlineException();
+        }
+      }
       final currentId = caseSnap.data()?['currentAssignmentId'] as String?;
       if (currentId != null) {
         final currentSnap = await tx.get(assignmentsCol.doc(currentId));
@@ -873,13 +1074,15 @@ class RescueCaseRepository {
         // rejected / cancelled / completed: nothing to do here, the
         // pointer overwrite below is the reconciliation.
       }
+      final offeredAt = Timestamp.now();
       tx.set(newRef, {
         'caseId': caseId,
         'riderId': riderId,
         'riderName': riderName,
         'riderType': riderType,
         'status': 'pending',
-        'offeredAt': Timestamp.now(),
+        'offeredAt': offeredAt,
+        'expiresAt': Timestamp.fromDate(offeredAt.toDate().add(kTransportOfferTtl)),
         'respondedAt': null,
         'acceptedAt': null,
         'rejectedAt': null,
@@ -912,29 +1115,68 @@ class RescueCaseRepository {
     final caseRef = _caseDoc(caseId);
     final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
 
-    await _db.runTransaction((tx) async {
-      final snap = await tx.get(assignmentRef);
-      if (!snap.exists || snap.data()?['status'] != 'pending') return;
-      final now = Timestamp.now();
-      tx.update(assignmentRef, {
-        'status': 'accepted',
-        'respondedAt': now,
-        'acceptedAt': now,
-        'vehicle': riderVehicle,
-        'plate': riderPlate,
+    try {
+      await _db.runTransaction((tx) async {
+        // All reads before any writes — a transaction that interleaves a
+        // read after a write (as this method used to for the case doc, and
+        // as cancelAssignment used to as well) throws on every run and the
+        // write silently never commits. See cancelAssignment's doc comment
+        // for the full incident this class of bug caused.
+        final snap = await tx.get(assignmentRef);
+        final caseSnap = await tx.get(caseRef);
+
+        if (!snap.exists) {
+          throw const OfferNoLongerAvailableException('assignment no longer exists');
+        }
+        final data = snap.data()!;
+        if (data['status'] != 'pending') {
+          throw OfferNoLongerAvailableException('status is ${data['status']}, not pending');
+        }
+        if (caseSnap.data()?['currentAssignmentId'] != assignmentId) {
+          // The case has moved on to a newer offer (or none) since this one
+          // was created — a stale/superseded offer trying to resurrect
+          // itself. Ignore rather than accept.
+          throw const OfferNoLongerAvailableException('a newer offer has superseded this one');
+        }
+        final expiresAt = data['expiresAt'];
+        final now = Timestamp.now();
+        if (expiresAt is Timestamp && now.compareTo(expiresAt) > 0) {
+          // Clean up in place instead of accepting a stale offer.
+          tx.update(assignmentRef, {'status': 'expired', 'respondedAt': now});
+          tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
+          throw const OfferNoLongerAvailableException('offer expired');
+        }
+
+        tx.update(assignmentRef, {
+          'status': 'accepted',
+          'respondedAt': now,
+          'acceptedAt': now,
+          'vehicle': riderVehicle,
+          'plate': riderPlate,
+        });
+        tx.update(caseRef, {
+          'status': 'assigned',
+          'riderId': riderId,
+          'assignedVolunteerId': riderId,
+          'assignedVolunteerName': riderName,
+          'assignedVehicle': riderVehicle,
+          'assignedPlate': riderPlate,
+          'statusHistory': FieldValue.arrayUnion([
+            {'status': 'Pet transporter assigned: $riderName.', 'timestamp': now},
+          ]),
+        });
       });
-      tx.update(caseRef, {
-        'status': 'assigned',
-        'riderId': riderId,
-        'assignedVolunteerId': riderId,
-        'assignedVolunteerName': riderName,
-        'assignedVehicle': riderVehicle,
-        'assignedPlate': riderPlate,
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Pet transporter assigned: $riderName.', 'timestamp': now},
-        ]),
-      });
-    });
+    } on FirebaseException catch (error, stackTrace) {
+      _logAssignmentFailure(
+        operation: 'acceptAssignment',
+        caseId: caseId,
+        assignmentId: assignmentId,
+        riderId: riderId,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   /// Marks an offer rejected with [reason]. Deliberately never changes the
@@ -948,18 +1190,46 @@ class RescueCaseRepository {
     required String assignmentId,
     required String reason,
   }) async {
+    final caseRef = _caseDoc(caseId);
     final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
-    await _db.runTransaction((tx) async {
-      final snap = await tx.get(assignmentRef);
-      if (!snap.exists || snap.data()?['status'] != 'pending') return;
-      final now = Timestamp.now();
-      tx.update(assignmentRef, {
-        'status': 'rejected',
-        'respondedAt': now,
-        'rejectedAt': now,
-        'rejectionReason': reason,
+    try {
+      await _db.runTransaction((tx) async {
+        final snap = await tx.get(assignmentRef);
+        final caseSnap = await tx.get(caseRef);
+        if (!snap.exists) {
+          throw const OfferNoLongerAvailableException('assignment no longer exists');
+        }
+        final data = snap.data()!;
+        if (data['status'] != 'pending') {
+          throw OfferNoLongerAvailableException('status is ${data['status']}, not pending');
+        }
+        final expiresAt = data['expiresAt'];
+        final now = Timestamp.now();
+        if (expiresAt is Timestamp && now.compareTo(expiresAt) > 0) {
+          tx.update(assignmentRef, {'status': 'expired', 'respondedAt': now});
+          if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
+            tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
+          }
+          throw const OfferNoLongerAvailableException('offer expired');
+        }
+        tx.update(assignmentRef, {
+          'status': 'rejected',
+          'respondedAt': now,
+          'rejectedAt': now,
+          'rejectionReason': reason,
+        });
       });
-    });
+    } on FirebaseException catch (error, stackTrace) {
+      _logAssignmentFailure(
+        operation: 'rejectAssignment',
+        caseId: caseId,
+        assignmentId: assignmentId,
+        riderId: null,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   /// Organization-initiated cancellation of a still-pending offer — the
@@ -972,6 +1242,18 @@ class RescueCaseRepository {
   /// where a newer offer was already created by the time this resolves).
   /// A no-op if the offer is no longer pending, guarding against
   /// double-cancellation.
+  ///
+  /// IMPORTANT: both `tx.get()` calls must happen before either `tx.update()`
+  /// call — Firestore transactions require every read to precede every write
+  /// in the same transaction, or the transaction throws on every attempt and
+  /// silently never commits. An earlier version of this method read the
+  /// assignment, wrote to it, and only then read the case doc — which meant
+  /// cancellation *always* failed (surfacing as "Could not cancel this
+  /// offer.") while leaving the assignment doc's status as 'pending' in
+  /// Firestore. That, combined with the demo-response timer in
+  /// assign_rider_page.dart re-reading the doc fresh a few seconds later and
+  /// finding it still 'pending', is what let a "cancelled" demo transporter
+  /// become "accepted" after the fact. Do not reorder these calls.
   Future<void> cancelAssignment({
     required String caseId,
     required String assignmentId,
@@ -979,21 +1261,82 @@ class RescueCaseRepository {
   }) async {
     final caseRef = _caseDoc(caseId);
     final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
+    try {
+      await _db.runTransaction((tx) async {
+        final snap = await tx.get(assignmentRef);
+        final caseSnap = await tx.get(caseRef);
+        if (!snap.exists || snap.data()?['status'] != 'pending') return;
+        final now = Timestamp.now();
+        tx.update(assignmentRef, {
+          'status': 'cancelled',
+          'respondedAt': now,
+          'cancelledAt': now,
+          if (reason != null && reason.isNotEmpty) 'cancellationReason': reason,
+        });
+        if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
+          tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
+        }
+      });
+    } on FirebaseException catch (error, stackTrace) {
+      _logAssignmentFailure(
+        operation: 'cancelAssignment',
+        caseId: caseId,
+        assignmentId: assignmentId,
+        riderId: null,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
+  }
+
+  /// Opportunistic cleanup for a pending offer whose TTL has elapsed,
+  /// without an accept/reject/cancel ever having been attempted on it.
+  /// Called from screens that read the latest assignment for a case (spec
+  /// §4's startup-resolution behavior), never on a timer of its own — there
+  /// is no server-side expiry job. Safe to call redundantly; a no-op unless
+  /// the offer is still 'pending' and past its `expiresAt`.
+  Future<void> reconcileStaleOffer({
+    required String caseId,
+    required String assignmentId,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final assignmentRef = _transportAssignmentsOf(caseId).doc(assignmentId);
     await _db.runTransaction((tx) async {
       final snap = await tx.get(assignmentRef);
-      if (!snap.exists || snap.data()?['status'] != 'pending') return;
-      final now = Timestamp.now();
-      tx.update(assignmentRef, {
-        'status': 'cancelled',
-        'respondedAt': now,
-        'cancelledAt': now,
-        if (reason != null && reason.isNotEmpty) 'cancellationReason': reason,
-      });
       final caseSnap = await tx.get(caseRef);
+      if (!snap.exists) return;
+      final data = snap.data()!;
+      if (data['status'] != 'pending') return;
+      final expiresAt = data['expiresAt'];
+      if (expiresAt is! Timestamp) return;
+      if (Timestamp.now().compareTo(expiresAt) <= 0) return;
+      tx.update(assignmentRef, {'status': 'expired', 'respondedAt': Timestamp.now()});
       if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
         tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
       }
     });
+  }
+
+  /// Development diagnostics only (spec §6) — never surfaced in production
+  /// UI copy, which stays a plain user-facing message at the call site.
+  void _logAssignmentFailure({
+    required String operation,
+    required String caseId,
+    required String assignmentId,
+    required String? riderId,
+    required FirebaseException error,
+    required StackTrace stackTrace,
+  }) {
+    if (!kDebugMode) return;
+    debugPrint('Transporter assignment operation failed: $operation');
+    debugPrint('caseId: $caseId');
+    debugPrint('assignmentId: $assignmentId');
+    if (riderId != null) debugPrint('riderId: $riderId');
+    debugPrint('code: ${error.code}');
+    debugPrint('message: ${error.message}');
+    debugPrint('plugin: ${error.plugin}');
+    debugPrintStack(stackTrace: stackTrace);
   }
 
   /// Closes out an accepted assignment once the animal has reached
@@ -1007,6 +1350,252 @@ class RescueCaseRepository {
       'status': 'completed',
       'completedAt': Timestamp.now(),
     });
+  }
+
+  // ---- Aggressive-animal / safety report response (spec §3) -----------
+
+  /// "Retry with a different transporter" after a transporter's safety
+  /// report (needsSpecializedAssistance, set by the real transporter app's
+  /// own End Reason flow in transit_progress_page.dart — see
+  /// [RescueStatus.needsSpecializedAssistance]'s own doc comment). Returns
+  /// the case to [RescueStatus.awaitingAssignment] so Assign Transporter
+  /// is reachable again, WITHOUT touching `endReason`/`endReasonNotes` —
+  /// the original transporter's report is never erased, it just stops
+  /// being the case's *current* blocking state. Does not itself pick or
+  /// assign anyone; the caller still navigates to Assign Transporter and
+  /// the admin manually selects someone.
+  Future<void> resumeAssignmentAfterSafetyReport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'status': RescueStatus.awaitingAssignment.firestoreValue,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Case returned to Assign after a transporter safety report — a different transporter may now be selected.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'resumed_after_safety_report',
+      actorUid: actorUid,
+      actorName: actorName,
+    );
+  }
+
+  /// "Keep current transporter and provide instructions" — records the
+  /// admin's guidance without changing status (the case stays
+  /// needsSpecializedAssistance until the admin explicitly resolves it some
+  /// other way) or touching the original report.
+  Future<void> addSafetyResponseNote({
+    required String caseId,
+    required String note,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _caseDoc(caseId).update({
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Instructions provided to transporter: $note', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'safety_response_instructions',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'note': note},
+    );
+  }
+
+  // ---- Per-animal death outcome (spec §4) ------------------------------
+
+  /// Smallest backward-compatible per-animal outcome structure: [RescueCase.
+  /// animals] entries (`{species, breed, sex, size, colorMarkings}`) gain
+  /// optional `outcome`/`deceasedAt`/`deceasedReason`/`deceasedConfirmedBy`/
+  /// `deceasedNotes`/`deceasedPhotoUrl` keys — every existing reader that
+  /// only looks at `species`/`breed`/etc. is unaffected (it already reads
+  /// each animal as a loose `Map<String, dynamic>`, not a fixed-shape
+  /// model). This is read-modify-write (Firestore has no per-array-element
+  /// update), so it always re-reads the array fresh, never assumes the
+  /// caller's copy is current.
+  ///
+  /// Deliberately never changes case-level `status`/closes the case, even
+  /// when this is the last remaining animal — per spec §4, closing only
+  /// happens when *every* animal is deceased AND the admin explicitly
+  /// chooses to close (via the shared Close Case flow), never
+  /// automatically here.
+  Future<void> reportAnimalDeath({
+    required String caseId,
+    required int animalIndex,
+    required String reason,
+    required String confirmedBy,
+    String? notes,
+    String? photoUrl,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      final animals = List<Map<String, dynamic>>.from(
+        (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      );
+      if (animalIndex < 0 || animalIndex >= animals.length) return;
+      animals[animalIndex] = {
+        ...animals[animalIndex],
+        'outcome': 'deceased',
+        'deceasedAt': Timestamp.now(),
+        'deceasedReason': reason,
+        'deceasedConfirmedBy': confirmedBy,
+        if (notes != null) 'deceasedNotes': notes,
+        if (photoUrl != null) 'deceasedPhotoUrl': photoUrl,
+      };
+      final animalLabel = (animals[animalIndex]['species'] as String?) ?? 'Animal';
+      tx.update(caseRef, {
+        'animals': animals,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Animal death reported during rescue: $animalLabel.', 'timestamp': Timestamp.now()}
+        ]),
+      });
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'animal_death_reported',
+      actorName: confirmedBy,
+      details: {'animalIndex': animalIndex, 'reason': reason},
+    );
+  }
+
+  // ---- Animal moved / could not be located (spec §5) -------------------
+
+  /// "Retry search" — keeps the case open, updates the rescue location,
+  /// and preserves the original reported location under `previousLocations`
+  /// (never overwritten/lost) so every prior location this case was
+  /// reported/searched at stays in history. Never creates a new case.
+  /// Transporter/clinic distances are computed live from `lat`/`lng`
+  /// wherever they're shown (Assign Transporter's rider list, clinic
+  /// search's `centerLat`/`centerLng`) — updating these fields here is
+  /// what makes those already-live computations reflect the new location
+  /// the next time each screen reads it, without a separate recompute step.
+  Future<void> updateCaseLocation({
+    required String caseId,
+    required double lat,
+    required double lng,
+    String? address,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      final previous = List<Map<String, dynamic>>.from(data['previousLocations'] as List? ?? const []);
+      previous.add({
+        'address': data['address'],
+        'lat': data['lat'],
+        'lng': data['lng'],
+        'replacedAt': Timestamp.now(),
+      });
+      tx.update(caseRef, {
+        'lat': lat,
+        'lng': lng,
+        if (address != null) 'address': address,
+        'previousLocations': previous,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Rescue location updated.', 'timestamp': Timestamp.now()}
+        ]),
+      });
+    });
+    await addActivityLog(caseId: caseId, action: 'location_updated', actorUid: actorUid, actorName: actorName);
+  }
+
+  // ---- Close Case (spec §2) ------------------------------------------
+
+  /// Shared "Close Case" flow — reused by every exception path (owner
+  /// found, aggressive animal, died during rescue, animal moved, clinic
+  /// unavailable, duplicate, resolved without transport, other) instead of
+  /// each one inventing its own terminal status. Reuses [RescueStatus.
+  /// cancelled], which already exists in the enum, is already excluded
+  /// from every active RescuePipelineTab's `.statuses` list (Review/
+  /// Assign/Ongoing/Treatment/Intake), and is already reachable through
+  /// the existing filter sheet's `statusOverride`/`kSecondaryStatuses` —
+  /// so closing a case already removes it from every active queue and
+  /// already has a place to view it, with no new queue-filtering code
+  /// needed. [RescueStatus.completed] (legacy alias `'closed'`) is
+  /// deliberately left alone — it already means "successfully finished"
+  /// (transferAnimal/releaseToReporter/completed intake), a different
+  /// concept from "closed due to an exception".
+  ///
+  /// A no-op if the case is already in a terminal status — guards both
+  /// double-tap and a case that was closed by a different admin
+  /// concurrently. Any pending/accepted transporter assignment is safely
+  /// cancelled first (never left dangling), which also frees that
+  /// transporter back to Available.
+  Future<void> closeCase({
+    required String caseId,
+    required ClosureReason reason,
+    required String details,
+    required String actorUid,
+    required String actorName,
+    String? lastKnownLocation,
+    String? clinicUnavailableDetails,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    final preSnap = await caseRef.get();
+    final preData = preSnap.data();
+    if (preData == null) throw StateError('This case no longer exists.');
+    if (RescueStatus.fromFirestoreValue(preData['status'] as String?).isTerminal) return;
+
+    final currentAssignmentId = preData['currentAssignmentId'] as String?;
+    if (currentAssignmentId != null) {
+      final assignmentRef = _transportAssignmentsOf(caseId).doc(currentAssignmentId);
+      final assignmentSnap = await assignmentRef.get();
+      final assignmentStatus = assignmentSnap.data()?['status'] as String?;
+      if (assignmentStatus == 'pending') {
+        await cancelAssignment(caseId: caseId, assignmentId: currentAssignmentId, reason: 'Case closed: ${reason.label}');
+      } else if (assignmentStatus == 'accepted') {
+        // Same effect as cancelAssignment (frees the transporter, keeps
+        // full history) — completeAssignment doesn't fit here, that means
+        // "the transport finished successfully", not "the case closed".
+        await assignmentRef.update({
+          'status': 'cancelled',
+          'respondedAt': Timestamp.now(),
+          'cancelledAt': Timestamp.now(),
+          'cancellationReason': 'Case closed: ${reason.label}',
+        });
+      }
+    }
+
+    final closedFromStatus = preData['status'] as String? ?? '';
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      if (RescueStatus.fromFirestoreValue(data['status'] as String?).isTerminal) return;
+      tx.update(caseRef, {
+        'status': RescueStatus.cancelled.firestoreValue,
+        'closureReason': reason.name,
+        'closureDetails': details,
+        'closedAt': Timestamp.now(),
+        'closedBy': actorUid,
+        'closedByName': actorName,
+        'closedFromStatus': closedFromStatus,
+        if (lastKnownLocation != null) 'closureLastKnownLocation': lastKnownLocation,
+        if (clinicUnavailableDetails != null) 'closureClinicDetails': clinicUnavailableDetails,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Case closed: ${reason.label}.', 'timestamp': Timestamp.now()}
+        ]),
+      });
+    });
+
+    await addActivityLog(
+      caseId: caseId,
+      action: 'case_closed',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'reason': reason.name, 'closedFromStatus': closedFromStatus},
+    );
   }
 
   // ---- Treatment ----------------------------------------------------
@@ -1032,11 +1621,47 @@ class RescueCaseRepository {
   /// `readyForDischarge == true`, no further treatment update of any kind
   /// can be added — a disabled button alone wouldn't stop a direct
   /// repository call, so this is the actual source of truth for the rule.
+  /// Required fields depend on [entry.type] — matches
+  /// treatment_detail_page.dart's own _canSubmit() exactly, so a malformed
+  /// direct call (or a future second UI) can't skip validation the admin
+  /// form otherwise enforces.
+  void _validateTreatmentLogEntry(TreatmentLogEntry entry) {
+    final type = TreatmentUpdateType.fromLabel(entry.type);
+    switch (type) {
+      case TreatmentUpdateType.vaccination:
+        if ((entry.vaccineName ?? '').trim().isEmpty) throw ArgumentError('Vaccine is required.');
+        if ((entry.vaccineDose ?? '').trim().isEmpty) throw ArgumentError('Vaccine dose is required.');
+        break;
+      case TreatmentUpdateType.procedure:
+        if ((entry.procedurePerformed ?? '').trim().isEmpty) {
+          throw ArgumentError('Procedure performed is required.');
+        }
+        break;
+      case TreatmentUpdateType.medication:
+        if ((entry.medicationName ?? '').trim().isEmpty) throw ArgumentError('Medication name is required.');
+        if ((entry.medicationDose ?? '').trim().isEmpty) throw ArgumentError('Medication dose is required.');
+        break;
+      case TreatmentUpdateType.discharge:
+        if ((entry.finalCondition ?? '').trim().isEmpty) throw ArgumentError('Final condition is required.');
+        break;
+      case TreatmentUpdateType.deathReport:
+        if ((entry.causeOfDeath ?? '').trim().isEmpty) throw ArgumentError('Cause of death is required.');
+        break;
+      case TreatmentUpdateType.assessment:
+      case TreatmentUpdateType.followUpCheck:
+      case null:
+        if ((entry.condition ?? '').trim().isEmpty) throw ArgumentError('Overall condition is required.');
+        if (entry.notes.trim().isEmpty) throw ArgumentError('Notes are required for this update type.');
+        break;
+    }
+  }
+
   Future<void> addTreatmentLog({
     required String caseId,
     required TreatmentLogEntry entry,
     String? logId,
   }) async {
+    _validateTreatmentLogEntry(entry);
     final caseSnap = await _caseDoc(caseId).get();
     if (caseSnap.data()?['readyForDischarge'] == true) {
       throw StateError('No further treatment updates can be added after discharge.');
@@ -1048,13 +1673,24 @@ class RescueCaseRepository {
     final now = Timestamp.now();
     final isDischarge = entry.type == TreatmentUpdateType.discharge.label;
     final isDeath = entry.type == TreatmentUpdateType.deathReport.label;
+    // Falls back to a per-type summary when Notes is empty (now legitimate
+    // for Vaccination/Procedure/Medication/Discharge/Death Report) instead
+    // of ever writing a trailing-blank "Type: " history line.
+    final summary = entry.notes.trim().isNotEmpty
+        ? entry.notes
+        : entry.vaccineName ??
+            entry.procedurePerformed ??
+            entry.medicationName ??
+            entry.finalCondition ??
+            entry.causeOfDeath ??
+            entry.type;
 
     await _caseDoc(caseId).update({
       if (entry.condition != null) 'currentCondition': entry.condition,
       'latestTreatmentUpdateType': entry.type,
       'treatmentUpdatedAt': now,
       'statusHistory': FieldValue.arrayUnion([
-        {'status': '${entry.type}: ${entry.notes}', 'timestamp': now},
+        {'status': '${entry.type}: $summary', 'timestamp': now},
       ]),
       if (isDischarge) 'readyForDischarge': true,
       if (isDischarge) 'dischargedAt': now,
@@ -1064,26 +1700,54 @@ class RescueCaseRepository {
     });
   }
 
+  /// [targetType] is one of 'organization' | 'clinic' | 'volunteer' — the
+  /// spec's three required destination types (never one untyped free-text
+  /// destination). Type-specific identity (targetOrganizationId for a real
+  /// OrgReferralCandidate, targetClinicPlaceId/lat/lng for a real Places
+  /// result) is stored alongside the common fields every type shares
+  /// (targetName/targetContact/targetAddress/reason/date/notes) — a
+  /// Volunteer destination has no queryable directory in this app yet, so
+  /// it only ever fills the common fields (see transfer_animal_sheet.dart).
   Future<void> transferAnimal({
     required String caseId,
-    required String targetOrganizationId,
-    required String targetOrganizationName,
+    required String targetType,
+    required String targetName,
+    String? targetContact,
+    String? targetAddress,
+    String? targetOrganizationId,
+    String? targetClinicPlaceId,
+    double? targetLat,
+    double? targetLng,
+    required String reason,
+    DateTime? transferDate,
     String? notes,
     required String actorUid,
     required String actorName,
   }) async {
+    final now = Timestamp.now();
     await _caseDoc(caseId).update({
       'status': RescueStatus.completed.firestoreValue,
-      'targetOrganizationId': targetOrganizationId,
-      'targetOrganizationName': targetOrganizationName,
+      'transferType': targetType,
+      'targetName': targetName,
+      // Legacy field names, kept so any existing reader of a
+      // pre-this-round transfer keeps working unmodified.
+      if (targetType == 'organization') 'targetOrganizationName': targetName,
+      if (targetContact != null && targetContact.isNotEmpty) 'targetContact': targetContact,
+      if (targetAddress != null && targetAddress.isNotEmpty) 'targetAddress': targetAddress,
+      if (targetOrganizationId != null) 'targetOrganizationId': targetOrganizationId,
+      if (targetClinicPlaceId != null) 'targetClinicPlaceId': targetClinicPlaceId,
+      if (targetLat != null) 'targetLat': targetLat,
+      if (targetLng != null) 'targetLng': targetLng,
+      'transferReason': reason,
+      'transferDate': transferDate != null ? Timestamp.fromDate(transferDate) : now,
       'transferNotes': notes,
-      'transferRequestedAt': Timestamp.now(),
+      'transferRequestedAt': now,
       // TODO(transfer): this is a simplified, one-way record — there is no
-      // receiving-organization acceptance workflow yet. 'pending' here just
-      // means "handed off, not yet acknowledged by the receiving org."
+      // receiving-organization/clinic/volunteer acceptance workflow yet.
+      // 'pending' here just means "handed off, not yet acknowledged."
       'transferStatus': 'pending',
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Animal transferred to $targetOrganizationName.', 'timestamp': Timestamp.now()}
+        {'status': 'Animal transferred to $targetName ($targetType).', 'timestamp': now}
       ]),
     });
     await addActivityLog(
@@ -1091,7 +1755,7 @@ class RescueCaseRepository {
       action: 'transferred_animal',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'targetOrganizationId': targetOrganizationId, 'targetOrganizationName': targetOrganizationName},
+      details: {'targetType': targetType, 'targetName': targetName, if (targetOrganizationId != null) 'targetOrganizationId': targetOrganizationId},
     );
   }
 
@@ -1354,6 +2018,13 @@ class RescueCaseRepository {
     }
     if (expense.amount <= 0) {
       throw ArgumentError('Expense amount must be greater than zero.');
+    }
+    // Every NEW expense requires a receipt (spec) — enforced here too, not
+    // just in the UI, so a malformed direct call can't skip it. Existing
+    // (legacy) expenses are never retroactively blocked — see updateExpense,
+    // which deliberately does not repeat this check.
+    if (expense.receiptUrl == null || expense.receiptUrl!.trim().isEmpty) {
+      throw ArgumentError('A receipt is required for this expense.');
     }
     await _expensesOf(caseId).add({
       ...expense.toFirestore(),

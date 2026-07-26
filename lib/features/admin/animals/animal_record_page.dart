@@ -10,8 +10,10 @@ import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'animal_record_detail_page.dart';
 import 'create_animal_record_page.dart';
 
+// 'Recently Updated' removed — it overlapped with 'Newest Intake' (both
+// ultimately read createdAt for most records, since updatedAt is only set
+// on later edits) and added a confusing second "newest-first" option.
 enum _SortOption {
-  recentlyUpdated,
   nameAsc,
   nameDesc,
   newestIntake,
@@ -23,7 +25,6 @@ enum _SortOption {
 
 extension on _SortOption {
   String get label => switch (this) {
-        _SortOption.recentlyUpdated => 'Recently Updated',
         _SortOption.nameAsc => 'Name A–Z',
         _SortOption.nameDesc => 'Name Z–A',
         _SortOption.newestIntake => 'Newest Intake',
@@ -46,7 +47,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   String _statusFilter = 'All';
   String _searchQuery = '';
   final _searchController = TextEditingController();
-  _SortOption _sort = _SortOption.recentlyUpdated;
+  _SortOption _sort = _SortOption.newestIntake;
 
   // Extra filters — surfaced inside the Filter & Sort sheet, along with
   // _statusFilter (the old standalone "All ▾" dropdown next to the species
@@ -56,7 +57,41 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   bool? _inTreatmentOnly;
   bool? _vaccinatedOnly;
   bool? _hasRescueBackground;
-  bool _includeArchived = false;
+  // Reuses the existing AnimalRecord.archived field — 'Active' (default)
+  // excludes archived records the same way the old _includeArchived bool
+  // did; 'Archived'/'All' are the new addition. Never a second archive
+  // field.
+  String _recordStatus = 'Active';
+  static const List<String> _recordStatusOptions = ['Active', 'Archived', 'All'];
+
+  // Long-press multi-select — keyed by the real AnimalRecord doc id, never
+  // a list index, so a selection stays valid even if filtering/sorting
+  // changes what's visible. No bulk actions wired up yet; this just makes
+  // the selection system itself ready for them.
+  final Set<String> _selectedIds = {};
+  bool get _selecting => _selectedIds.isNotEmpty;
+
+  // List/Grid — page-local (no persistence layer exists in this project to
+  // remember it across sessions); switching never re-queries Firestore,
+  // both layouts read the same `sorted` list computed once per build.
+  bool _isGrid = false;
+
+  void _openRecord(BuildContext context, AnimalRecord a) => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => AnimalRecordDetailPage(animalId: a.id, data: a.raw)),
+      );
+
+  void _toggleSelect(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _clearSelection() => setState(_selectedIds.clear);
 
   // 'Closed' dropped — it never corresponded to any real AnimalRecord field
   // value (adoptionStatus is only not_ready/adoptable/reserved/adopted/
@@ -80,7 +115,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       (_inTreatmentOnly == true ? 1 : 0) +
       (_vaccinatedOnly == true ? 1 : 0) +
       (_hasRescueBackground == true ? 1 : 0) +
-      (_includeArchived ? 1 : 0);
+      (_recordStatus != 'Active' ? 1 : 0);
 
   @override
   void dispose() {
@@ -101,7 +136,8 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   }
 
   bool _matchesFilters(AnimalRecord a) {
-    if (!_includeArchived && a.archived) return false;
+    if (_recordStatus == 'Active' && a.archived) return false;
+    if (_recordStatus == 'Archived' && !a.archived) return false;
     if (_speciesFilter != 'All' && a.species != (_speciesFilter == 'Dogs' ? 'Dog' : 'Cat')) return false;
     if (_statusFilter != 'All') {
       final want = _statusFilter.toLowerCase().replaceAll(' ', '_');
@@ -127,9 +163,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     final list = [...records];
     int byDateDesc(DateTime? a, DateTime? b) => (b ?? DateTime(0)).compareTo(a ?? DateTime(0));
     switch (_sort) {
-      case _SortOption.recentlyUpdated:
-        list.sort((a, b) => byDateDesc(a.updatedAt ?? a.createdAt, b.updatedAt ?? b.createdAt));
-        break;
       case _SortOption.nameAsc:
         list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         break;
@@ -137,6 +170,12 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
         list.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
         break;
       case _SortOption.newestIntake:
+        // AnimalRecord has no field distinct from createdAt for "when this
+        // animal actually entered the shelter" (see AnimalRecord.fromMap's
+        // own doc comment: a legacy 'intakeDate' field is folded into
+        // createdAt on parse for older docs) — createdAt is the real intake
+        // signal for every current writer, not merely a fallback. Records
+        // missing it (byDateDesc's `?? DateTime(0)`) sort last, never crash.
         list.sort((a, b) => byDateDesc(a.createdAt, b.createdAt));
         break;
       case _SortOption.oldestIntake:
@@ -198,7 +237,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           _inTreatmentOnly = null;
                           _vaccinatedOnly = null;
                           _hasRescueBackground = null;
-                          _includeArchived = false;
+                          _recordStatus = 'Active';
                         }),
                         child: const Text('Clear'),
                       ),
@@ -282,11 +321,20 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           value: _hasRescueBackground ?? false,
                           onChanged: (v) => setSheetState(() => _hasRescueBackground = v),
                         ),
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Include archived'),
-                          value: _includeArchived,
-                          onChanged: (v) => setSheetState(() => _includeArchived = v ?? false),
+                        const SizedBox(height: 16),
+                        Text('Record Status', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _recordStatusOptions
+                              .map((s) => ChoiceChip(
+                                    label: Text(s),
+                                    selected: _recordStatus == s,
+                                    selectedColor: AppColors.yellowrspwn,
+                                    onSelected: (_) => setSheetState(() => _recordStatus = s),
+                                  ))
+                              .toList(),
                         ),
                       ],
                     ),
@@ -322,24 +370,47 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   Widget build(BuildContext context) {
     final recordsAsync = ref.watch(allAnimalRecordsProvider);
 
-    return Scaffold(
+    return PopScope(
+      // Android/system back exits selection mode first instead of leaving
+      // the page — only allowed to pop normally once nothing is selected.
+      canPop: !_selecting,
+      onPopInvoked: (didPop) {
+        if (!didPop && _selecting) _clearSelection();
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
-      drawer: const AdminDrawer(),
+      drawer: _selecting ? null : const AdminDrawer(active: AdminModule.records),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu, color: AppColors.background),
-            tooltip: 'Menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
+        automaticallyImplyLeading: !_selecting,
+        leading: _selecting
+            ? null
+            : Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu, color: AppColors.background),
+                  tooltip: 'Menu',
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+        title: _selecting
+            ? Text('${_selectedIds.length} selected',
+                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.background))
+            : null,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined,
-                color: AppColors.background),
-            onPressed: () {},
-          ),
+          if (_selecting)
+            // Visible text label, not just a close icon — an icon alone
+            // reads ambiguous (could look like "close the page").
+            TextButton(
+              onPressed: _clearSelection,
+              child: Text('Cancel',
+                  style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.background)),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined,
+                  color: AppColors.background),
+              onPressed: () {},
+            ),
         ],
       ),
       body: Column(
@@ -426,13 +497,38 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                     ],
                   ),
                 ),
+                const SizedBox(width: 10),
+                // List/Grid toggle — page-local only; the project has no
+                // shared_preferences (or similar) dependency yet to persist
+                // it across sessions, so it just resets to List on reopen.
+                GestureDetector(
+                  onTap: () => setState(() => _isGrid = !_isGrid),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.slaterspwn),
+                    ),
+                    child: Tooltip(
+                      message: _isGrid ? 'Switch to list view' : 'Switch to grid view',
+                      child: Icon(_isGrid ? Icons.view_list_outlined : Icons.grid_view_outlined,
+                          color: AppColors.textPrimary, size: 20, semanticLabel: _isGrid ? 'List view' : 'Grid view'),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
 
           const SizedBox(height: 12),
 
-          // Animal list
+          // Animal list — same resolved AnimalRecord source and same
+          // search/filter/sort computation feeds both layouts, and
+          // selection (_selectedIds) is shared state untouched by which
+          // layout is active, so switching view never loses or re-queries
+          // anything.
           Expanded(
             child: recordsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -453,6 +549,31 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   );
                 }
 
+                if (_isGrid) {
+                  return GridView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    // Max-extent delegate: 2 columns at normal phone
+                    // widths, more only once there's enough width for them
+                    // (tablets/landscape) — no hardcoded column count.
+                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 190,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 0.72,
+                    ),
+                    itemCount: sorted.length,
+                    itemBuilder: (context, index) {
+                      final a = sorted[index];
+                      return AnimalRecordGridTile(
+                        animal: a,
+                        selected: _selectedIds.contains(a.id),
+                        onTap: _selecting ? () => _toggleSelect(a.id) : () => _openRecord(context, a),
+                        onLongPress: () => _toggleSelect(a.id),
+                      );
+                    },
+                  );
+                }
+
                 return ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: sorted.length,
@@ -460,29 +581,20 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final a = sorted[index];
-                    // Cheap, doc-level-only attention signals — no extra
-                    // subcollection watches on the list page (see
-                    // animal_record_repository.dart's streamAllAnimalRecords
-                    // doc comment on why this stays client-side and bounded
-                    // to what's already loaded).
-                    final chips = <CardChip>[
-                      if (!a.vaccinated) const CardChip('Vaccine'),
-                      if (a.currentCaseId != null) const CardChip('In Treatment', color: AppColors.pinkrspwn),
-                      if (a.isReserved) const CardChip('Reserved', color: AppColors.lavenderrspwn),
-                      if (a.archived) const CardChip('Archived', color: AppColors.slaterspwn),
-                    ];
+                    final isSelected = _selectedIds.contains(a.id);
+                    // Compact admin card (spec §6): no description, no
+                    // health/attention chips — just image, name+gender,
+                    // species/breed, age. The user-facing adoption list
+                    // keeps its own chips untouched.
                     return AnimalRecordCard(
                       animal: a,
-                      extraChips: chips,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AnimalRecordDetailPage(
-                            animalId: a.id,
-                            data: a.raw,
-                          ),
-                        ),
-                      ),
+                      compact: true,
+                      selected: isSelected,
+                      // Tapping while selecting toggles instead of
+                      // navigating; long-press always enters/adds to
+                      // selection, keyed by the real doc id, never index.
+                      onTap: _selecting ? () => _toggleSelect(a.id) : () => _openRecord(context, a),
+                      onLongPress: () => _toggleSelect(a.id),
                     );
                   },
                 );
@@ -490,7 +602,9 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
             ),
           ),
 
-          // Create Animal Record button
+          // Create Animal Record button — hidden while selecting so it
+          // can't be mistaken for a selection action.
+          if (!_selecting)
           Padding(
             padding: const EdgeInsets.all(16),
             child: ElevatedButton(
@@ -513,6 +627,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

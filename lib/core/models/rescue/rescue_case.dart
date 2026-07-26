@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_id.dart' as case_id_util;
+import 'package:respawnd1/core/utils/rescue_risk.dart' as rescue_risk_util;
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 
 /// A single entry in a case's `statusHistory` array — already used
@@ -65,6 +66,15 @@ class RescueCase {
   final String? rejectionReasonOther;
   final String? organizationId;
   final bool openForTransfer;
+  // ---- Per-animal safety risk (spec §1) ------------------------------
+  // Written once at report time (see rescue_page.dart's _FoundAnimalEntry)
+  // — one animal per case doc in this app's actual multi-animal model (see
+  // [animals]'s own doc comment), so these are simply this case's own risk
+  // fields, never shared across other animals in the same report group.
+  final String? biteRisk;
+  final String? escapeRisk;
+  final List<String> safetyIndicators;
+  final String? handlingNotes;
   final List<StatusHistoryEntry> statusHistory;
   final String? assignedVolunteerId;
   final String? assignedVolunteerName;
@@ -143,6 +153,10 @@ class RescueCase {
     this.rejectionReasonOther,
     this.organizationId,
     this.openForTransfer = false,
+    this.biteRisk,
+    this.escapeRisk,
+    this.safetyIndicators = const [],
+    this.handlingNotes,
     this.statusHistory = const [],
     this.assignedVolunteerId,
     this.assignedVolunteerName,
@@ -220,6 +234,10 @@ class RescueCase {
       rejectionReasonOther: data['rejectionReasonOther'] as String?,
       organizationId: data['organizationId'] as String?,
       openForTransfer: data['openForTransfer'] as bool? ?? false,
+      biteRisk: data['biteRisk'] as String?,
+      escapeRisk: data['escapeRisk'] as String?,
+      safetyIndicators: List<String>.from(data['safetyIndicators'] ?? const []),
+      handlingNotes: data['handlingNotes'] as String?,
       statusHistory: List<Map<String, dynamic>>.from(data['statusHistory'] ?? const [])
           .map(StatusHistoryEntry.fromMap)
           .toList(),
@@ -274,6 +292,10 @@ class RescueCase {
   String get shortCaseId => case_id_util.shortCaseId(id);
 
   bool get hasSavedClinic => vetClinicName != null && vetClinicName!.isNotEmpty;
+
+  /// True only for elevated bite/escape risk levels — 'Unknown'/null never
+  /// counts, so an unassessed animal is never treated as aggressive.
+  bool get hasHighRisk => rescue_risk_util.hasHighRescueRisk(biteRisk: biteRisk, escapeRisk: escapeRisk);
 
   /// e.g. "Dog ×2, Cat" — prefers [animals], falls back to [animalType].
   String get speciesSummary =>

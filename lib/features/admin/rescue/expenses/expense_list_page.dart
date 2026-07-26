@@ -6,15 +6,36 @@ import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 
 /// Every expense entry for one case — editing or deleting here always
 /// updates the calculated Total/Funded/Outstanding totals automatically,
 /// since those are computed live from this same `expensesProvider` stream,
 /// never stored as an editable number.
-class ExpenseListPage extends ConsumerWidget {
+///
+/// [animalOptions] drives an optional animal filter bar (hidden entirely
+/// for a single-animal case). When a specific animal is selected, the list
+/// shows that animal's own expenses plus every shared case expense —
+/// clearly labeled which is which — never a per-animal split of the
+/// shared ones (spec §1: no automatic division of shared costs).
+class ExpenseListPage extends ConsumerStatefulWidget {
   final String caseId;
-  const ExpenseListPage({super.key, required this.caseId});
+  final List<CaseAnimalOption> animalOptions;
+  final int? initialAnimalIndex;
+  const ExpenseListPage({
+    super.key,
+    required this.caseId,
+    this.animalOptions = const [],
+    this.initialAnimalIndex,
+  });
+
+  @override
+  ConsumerState<ExpenseListPage> createState() => _ExpenseListPageState();
+}
+
+class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
+  late int? _selectedAnimalIndex = widget.initialAnimalIndex;
 
   Future<void> _delete(BuildContext context, WidgetRef ref, Expense expense) async {
     final confirmed = await showConfirmActionDialog(
@@ -26,7 +47,7 @@ class ExpenseListPage extends ConsumerWidget {
     );
     if (!confirmed) return;
     try {
-      await ref.read(rescueCaseRepositoryProvider).deleteExpense(caseId: caseId, expenseId: expense.id);
+      await ref.read(rescueCaseRepositoryProvider).deleteExpense(caseId: widget.caseId, expenseId: expense.id);
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -36,9 +57,21 @@ class ExpenseListPage extends ConsumerWidget {
     }
   }
 
+  String _labelForIndex(int i) {
+    for (final o in widget.animalOptions) {
+      if (o.index == i) return o.label;
+    }
+    return 'Animal ${i + 1}';
+  }
+
+  String? _animalLabelFor(Expense e) {
+    if (e.isSharedCaseExpense) return widget.animalOptions.length > 1 ? 'Shared case expense' : null;
+    return e.animalIndexes!.map(_labelForIndex).join(' and ');
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final expensesAsync = ref.watch(expensesProvider(caseId));
+  Widget build(BuildContext context) {
+    final expensesAsync = ref.watch(expensesProvider(widget.caseId));
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -52,16 +85,36 @@ class ExpenseListPage extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppColors.yellowrspwn,
-        onPressed: () => showAddEditExpenseSheet(context, caseId: caseId),
+        onPressed: () => showAddEditExpenseSheet(
+          context,
+          caseId: widget.caseId,
+          animalOptions: widget.animalOptions,
+          initialAnimalIndexes: _selectedAnimalIndex != null ? {_selectedAnimalIndex!} : const {},
+        ),
         child: const Icon(Icons.add, color: AppColors.textPrimary),
       ),
-      body: expensesAsync.when(
+      body: Column(
+        children: [
+          if (widget.animalOptions.length > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: CaseAnimalSelectorBar(
+                options: widget.animalOptions,
+                selected: _selectedAnimalIndex,
+                onChanged: (v) => setState(() => _selectedAnimalIndex = v),
+              ),
+            ),
+          Expanded(
+            child: expensesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
           child: Text('Could not load expenses: $e',
               style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
         ),
-        data: (expenses) {
+        data: (allExpenses) {
+          final expenses = _selectedAnimalIndex == null
+              ? allExpenses
+              : allExpenses.where((e) => e.appliesToAnimal(_selectedAnimalIndex!)).toList();
           if (expenses.isEmpty) {
             return Center(
               child: Text('No expenses recorded yet.',
@@ -77,6 +130,7 @@ class ExpenseListPage extends ConsumerWidget {
               final dateStr = e.incurredAt != null
                   ? '${e.incurredAt!.month}/${e.incurredAt!.day}/${e.incurredAt!.year}'
                   : '-';
+              final animalLabel = _animalLabelFor(e);
               return Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -104,6 +158,10 @@ class ExpenseListPage extends ConsumerWidget {
                           ),
                           Text(e.category.label,
                               style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                          if (animalLabel != null)
+                            Text(animalLabel,
+                                style: GoogleFonts.zain(
+                                    fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                           const SizedBox(height: 4),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -130,7 +188,12 @@ class ExpenseListPage extends ConsumerWidget {
                         Row(
                           children: [
                             GestureDetector(
-                              onTap: () => showAddEditExpenseSheet(context, caseId: caseId, existing: e),
+                              onTap: () => showAddEditExpenseSheet(
+                                context,
+                                caseId: widget.caseId,
+                                existing: e,
+                                animalOptions: widget.animalOptions,
+                              ),
                               child: const Icon(Icons.edit_outlined, size: 18, color: AppColors.textPrimary),
                             ),
                             const SizedBox(width: 10),
@@ -148,6 +211,9 @@ class ExpenseListPage extends ConsumerWidget {
             },
           );
         },
+      ),
+          ),
+        ],
       ),
     );
   }

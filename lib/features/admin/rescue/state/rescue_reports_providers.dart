@@ -111,6 +111,12 @@ final petTransportersProvider = StreamProvider<List<PetTransporter>>((ref) {
   return ref.watch(rescueCaseRepositoryProvider).streamPetTransporters();
 });
 
+/// Real accounts with role == 'rescue_volunteer' — backs the Volunteers
+/// directory page.
+final rescueVolunteersProvider = StreamProvider<List<PetTransporter>>((ref) {
+  return ref.watch(rescueCaseRepositoryProvider).streamRescueVolunteers();
+});
+
 /// Chronological treatment history for a case (subcollection, with legacy
 /// array-field fallback — see streamTreatmentLogs's own doc comment).
 final treatmentLogsProvider = StreamProvider.family<List<TreatmentLogEntry>, String>((ref, caseId) {
@@ -175,7 +181,7 @@ enum RescuePipelineTab {
   // every call for the same tab returns the exact same object — so the
   // family provider correctly resolves to one stable, reused instance.
   List<RescueStatus> get statuses => switch (this) {
-        RescuePipelineTab.review => const [RescueStatus.pendingReview],
+        RescuePipelineTab.review => const [RescueStatus.pendingReview, RescueStatus.accepted],
         RescuePipelineTab.assign => const [RescueStatus.awaitingAssignment],
         RescuePipelineTab.ongoing => const [RescueStatus.ongoing],
         RescuePipelineTab.treatment => const [RescueStatus.treatment],

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -59,10 +60,13 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     // drop-in for all of their existing logic.
     switch (c.status) {
       case RescueStatus.pendingReview:
+      case RescueStatus.accepted:
+        // accepted means "accepted, no clinic saved yet" — stays on Rescue
+        // Details, which renders its own Select Clinic action for this
+        // status (see rescue_detail_page.dart).
         Navigator.push(context, MaterialPageRoute(
             builder: (_) => RescueDetailPage(caseId: c.id, data: c.raw)));
         break;
-      case RescueStatus.accepted:
       case RescueStatus.awaitingAssignment:
         Navigator.push(context, MaterialPageRoute(
             builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)));
@@ -96,7 +100,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      drawer: const AdminDrawer(),
+      drawer: const AdminDrawer(active: AdminModule.rescue),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
         leading: Builder(
@@ -106,8 +110,6 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: Text('Rescue Reports',
-            style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
@@ -115,14 +117,16 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
           ),
         ],
       ),
+      // Centered module heading in the content area, same as Adoptions/
+      // Animal Records — never a second title in the AppBar too.
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 20),
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Rescue Process',
+            child: Text('Rescue Reports',
+                textAlign: TextAlign.center,
                 style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
           ),
 
@@ -130,10 +134,14 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
 
           // Filter tabs
           SizedBox(
-            height: 80,
+            height: 86,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              clipBehavior: Clip.none,
+              // Extra top padding so the badge's negative top offset below
+              // has room to render instead of being sliced off by the
+              // ListView's own viewport edge.
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
               itemCount: RescuePipelineTab.values.length,
               separatorBuilder: (_, __) => const SizedBox(width: 16),
               itemBuilder: (context, index) {
@@ -169,9 +177,12 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                             Positioned(
                               top: -6,
                               right: -6,
+                              // Grows horizontally for 2-/3-digit counts
+                              // instead of a fixed 18x18 box that would
+                              // squeeze "100" unreadable.
                               child: Container(
-                                width: 18,
-                                height: 18,
+                                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
                                 decoration: const BoxDecoration(
                                   color: Colors.orange,
                                   shape: BoxShape.circle,
@@ -179,6 +190,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                                 child: Center(
                                   child: Text(
                                     '$badgeCount',
+                                    textAlign: TextAlign.center,
                                     style: const TextStyle(
                                         fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
                                   ),
@@ -331,11 +343,37 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final c = cases[index];
-                    return RescueCaseCard(
-                      rescueCase: c,
-                      showStatusChip: filters.statusOverride != null,
-                      highlightBorder: c.status == RescueStatus.pendingReview,
-                      onTap: () => _navigateToDetail(context, c),
+                    // accepted (no clinic saved yet) can never have a
+                    // transporter offer — offers only start from
+                    // AssignRiderPage, reached once status is
+                    // awaitingAssignment.
+                    final canHavePendingOffer = c.status == RescueStatus.awaitingAssignment;
+                    if (!canHavePendingOffer) {
+                      return RescueCaseCard(
+                        rescueCase: c,
+                        showStatusChip: filters.statusOverride != null,
+                        highlightBorder: c.status == RescueStatus.pendingReview,
+                        onTap: () => _navigateToDetail(context, c),
+                      );
+                    }
+                    // Assign-tab cases only: watch the current offer so the
+                    // card never reads as completely unassigned while one
+                    // is outstanding (spec §5). Scoped to this branch so
+                    // every other tab avoids the extra per-card listener.
+                    return Consumer(
+                      builder: (context, ref, _) {
+                        final assignment = ref.watch(currentAssignmentProvider(c.id)).asData?.value;
+                        final pendingNote =
+                            assignment != null && assignment.status == TransportAssignmentStatus.pending
+                                ? 'Awaiting transporter response · Offered to: ${assignment.riderName}'
+                                : null;
+                        return RescueCaseCard(
+                          rescueCase: c,
+                          showStatusChip: filters.statusOverride != null,
+                          pendingOfferNote: pendingNote,
+                          onTap: () => _navigateToDetail(context, c),
+                        );
+                      },
                     );
                   },
                 );

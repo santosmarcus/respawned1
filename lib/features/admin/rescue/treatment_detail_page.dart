@@ -1,19 +1,25 @@
 import 'dart:io';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/create_fundraiser_draft_page.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/release_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transfer_animal_sheet.dart';
@@ -47,6 +53,58 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   bool _showUpdateForm = false;
   bool _isSaving = false;
   bool _isActingOnNextStep = false;
+  bool _closingCase = false;
+
+  /// Shared by Treatment Logs and Cost Tracking (spec §1) — both sections
+  /// live in this one page/State, so a single field naturally preserves the
+  /// selection when scrolling between them. Null = All Animals (default).
+  /// Keyed by the case's `animals[]` list index — see CaseAnimalOption's
+  /// doc comment for why that's the only stable identifier available.
+  int? _selectedAnimalIndex;
+
+  /// "Applies to" selection for the update form currently being filled in
+  /// — separate from [_selectedAnimalIndex] (the page-level filter) since
+  /// the admin can still choose "All Animals" for a log while viewing one
+  /// animal's filtered timeline, or vice versa. Empty set = All Animals.
+  Set<int> _updateAnimalIndexes = {};
+
+  String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _actorName {
+    final n = FirebaseAuth.instance.currentUser?.displayName;
+    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
+
+  /// General Close Case (spec §2) — separate from [_closeDeceasedCase]
+  /// below, which stays exactly as-is for its own specific
+  /// deceased-with-financial-summary flow. This is for every other
+  /// exception reason while a case is still in Treatment.
+  Future<void> _closeCase(RescueCase c) async {
+    if (_closingCase) return;
+    final result = await showCloseCaseSheet(context, rescueCase: c);
+    if (result == null || !mounted) return;
+    setState(() => _closingCase = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).closeCase(
+            caseId: c.id,
+            reason: result.reason,
+            details: result.details,
+            actorUid: _actorUid,
+            actorName: _actorName,
+            lastKnownLocation: result.lastKnownLocation,
+            clinicUnavailableDetails: result.clinicUnavailableDetails,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not close case: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _closingCase = false);
+    }
+  }
 
   // Update form state
   TreatmentUpdateType? _selectedType;
@@ -60,6 +118,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   final _medicationNameController = TextEditingController();
   final _medicationDoseController = TextEditingController();
   final _procedureController = TextEditingController();
+  // Vaccine is chip-selected from the existing species vaccine list where
+  // possible (spec) — _vaccineNameController only holds the free-text name
+  // when "Other" is chosen, mirroring add_vaccine_record_sheet.dart's own
+  // template/Other split exactly rather than reinventing it.
+  VaccineTemplate? _selectedVaccineTemplate;
   final _vaccineNameController = TextEditingController();
   final _vaccineDoseController = TextEditingController();
   DateTime? _nextVaccineSchedule;
@@ -104,13 +167,29 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   bool get _isDeathReport => _selectedType == TreatmentUpdateType.deathReport;
   bool get _isDischarge => _selectedType == TreatmentUpdateType.discharge;
 
+  String get _effectiveVaccineName => _selectedVaccineTemplate?.name ?? _vaccineNameController.text.trim();
+
+  /// Required fields depend on the selected update type (spec) — a
+  /// Vaccination/Procedure/Medication no longer needs generic Notes filled
+  /// in just to satisfy this check, and Discharge no longer double-requires
+  /// both Discharge Notes and generic Notes.
   bool _canSubmit() {
     if (_selectedType == null || _treatmentDate == null) return false;
-    if (_isDeathReport) return _selectedCauseOfDeath != null;
-    if (_isDischarge) {
-      return _finalCondition != null && _dischargeNotesController.text.trim().isNotEmpty;
-    }
-    return _selectedCondition != null && _notesController.text.trim().isNotEmpty;
+    return switch (_selectedType!) {
+      TreatmentUpdateType.deathReport => _selectedCauseOfDeath != null,
+      // Discharge Notes is optional now — Final Condition (discharge
+      // condition) is the one thing that actually gates completion, same
+      // as Post-Treatment Instructions already being optional.
+      TreatmentUpdateType.discharge => _finalCondition != null,
+      TreatmentUpdateType.vaccination =>
+        _effectiveVaccineName.isNotEmpty && _vaccineDoseController.text.trim().isNotEmpty,
+      TreatmentUpdateType.procedure => _procedureController.text.trim().isNotEmpty,
+      TreatmentUpdateType.medication =>
+        _medicationNameController.text.trim().isNotEmpty && _medicationDoseController.text.trim().isNotEmpty,
+      TreatmentUpdateType.assessment ||
+      TreatmentUpdateType.followUpCheck =>
+        _selectedCondition != null && _notesController.text.trim().isNotEmpty,
+    };
   }
 
   Future<void> _pickFromGallery() async {
@@ -205,7 +284,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _selectedType == TreatmentUpdateType.medication ? _medicationDoseController.text.trim() : null,
       procedurePerformed:
           _selectedType == TreatmentUpdateType.procedure ? _procedureController.text.trim() : null,
-      vaccineName: _selectedType == TreatmentUpdateType.vaccination ? _vaccineNameController.text.trim() : null,
+      vaccineName: _selectedType == TreatmentUpdateType.vaccination ? _effectiveVaccineName : null,
       vaccineDose: _selectedType == TreatmentUpdateType.vaccination ? _vaccineDoseController.text.trim() : null,
       nextScheduleAt: _selectedType == TreatmentUpdateType.vaccination ? _nextVaccineSchedule : null,
       dischargeNotes: _isDischarge ? _dischargeNotesController.text.trim() : null,
@@ -219,6 +298,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       mediaTypes: mediaTypes,
       storagePaths: storagePaths,
       createdBy: 'Admin Staff',
+      animalIndexes: _updateAnimalIndexes.isEmpty ? null : _updateAnimalIndexes.toList(),
     );
 
     try {
@@ -236,12 +316,14 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _medicationNameController.clear();
           _medicationDoseController.clear();
           _procedureController.clear();
+          _selectedVaccineTemplate = null;
           _vaccineNameController.clear();
           _vaccineDoseController.clear();
           _dischargeNotesController.clear();
           _postTreatmentInstructionsController.clear();
           _pickedMedia.clear();
           _mediaError = null;
+          _updateAnimalIndexes = {};
         });
       }
     } catch (e) {
@@ -314,7 +396,35 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final data = c.raw.isNotEmpty ? c.raw : widget.data;
 
     final logsAsync = ref.watch(treatmentLogsProvider(widget.caseId));
-    final logs = (logsAsync.asData?.value ?? const <TreatmentLogEntry>[]).reversed.toList();
+    final allLogs = (logsAsync.asData?.value ?? const <TreatmentLogEntry>[]).reversed.toList();
+
+    // Most cases reach Treatment with no AnimalRecord created yet (that
+    // normally happens at Intake) — namesByAnimalIndex is empty for those,
+    // and every option falls back to a species-ordinal label ("Dog 1").
+    final linkedRecords = ref.watch(recordsForCaseProvider(widget.caseId)).asData?.value ?? const [];
+    final namesByAnimalIndex = <int, String>{
+      for (final r in linkedRecords)
+        if (r.sourceAnimalIndex != null && r.name.isNotEmpty) r.sourceAnimalIndex!: r.name,
+    };
+    final animalOptions = buildCaseAnimalOptions(c, namesByAnimalIndex: namesByAnimalIndex);
+    final selectedAnimalIndex = _selectedAnimalIndex != null && _selectedAnimalIndex! < animalOptions.length
+        ? _selectedAnimalIndex
+        : null;
+
+    final logs = selectedAnimalIndex == null
+        ? allLogs
+        : allLogs.where((l) => l.appliesToAnimal(selectedAnimalIndex)).toList();
+
+    String? logAnimalLabel(TreatmentLogEntry log) {
+      if (animalOptions.length <= 1) return null;
+      if (log.appliesToAllAnimals) return 'All animals';
+      final labels = <String>[];
+      for (final i in log.animalIndexes!) {
+        final match = animalOptions.where((o) => o.index == i);
+        labels.add(match.isNotEmpty ? match.first.label : 'Animal ${i + 1}');
+      }
+      return labels.join(' and ');
+    }
 
     final expensesAsync = ref.watch(expensesProvider(widget.caseId));
     final expenses = expensesAsync.asData?.value ?? const [];
@@ -341,6 +451,15 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
             onPressed: () {},
           ),
+          if (!c.isDeceased)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppColors.background),
+              enabled: !_closingCase,
+              onSelected: (_) => _closeCase(c),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'close_case', child: Text('Close Case')),
+              ],
+            ),
         ],
       ),
       body: SingleChildScrollView(
@@ -385,6 +504,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               ],
             ),
 
+            if (animalOptions.length > 1) ...[
+              const SizedBox(height: 16),
+              CaseAnimalSelectorBar(
+                options: animalOptions,
+                selected: selectedAnimalIndex,
+                onChanged: (v) => setState(() {
+                  _selectedAnimalIndex = v;
+                  _showAllLogs = false;
+                }),
+              ),
+            ],
+
             const SizedBox(height: 16),
 
             // Treatment Logs
@@ -398,10 +529,14 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (logs.isEmpty)
-              Text('No treatment logs yet.',
+              Text(
+                  selectedAnimalIndex == null
+                      ? 'No treatment logs yet.'
+                      : 'No treatment logs for this animal yet.',
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
             else ...[
-              ...(_showAllLogs ? logs : logs.take(2).toList()).map((log) => TreatmentLogCard(log: log)),
+              ...(_showAllLogs ? logs : logs.take(2).toList())
+                  .map((log) => TreatmentLogCard(log: log, animalLabel: logAnimalLabel(log))),
               if (logs.length > 2)
                 Center(
                   child: GestureDetector(
@@ -430,7 +565,16 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
-                    onPressed: () => setState(() => _showUpdateForm = !_showUpdateForm),
+                    onPressed: () => setState(() {
+                      _showUpdateForm = !_showUpdateForm;
+                      // Defaults the new update's "Applies to" to whatever
+                      // animal is currently in view, so filling out a form
+                      // while viewing one animal's timeline doesn't
+                      // silently default to All Animals underneath it.
+                      if (_showUpdateForm) {
+                        _updateAnimalIndexes = selectedAnimalIndex != null ? {selectedAnimalIndex} : {};
+                      }
+                    }),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.textPrimary),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
@@ -442,7 +586,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 ),
                 if (_showUpdateForm) ...[
                   const SizedBox(height: 16),
-                  _buildUpdateForm(),
+                  _buildUpdateForm(animalOptions),
                 ],
               ],
               const SizedBox(height: 24),
@@ -451,9 +595,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             _CostTrackingSection(
               caseId: widget.caseId,
               rescueCase: c,
+              allExpenses: expenses,
               totalExpenses: totalExpenses,
               fundedAmount: fundedAmount,
               outstandingBalance: outstandingBalance,
+              animalOptions: animalOptions,
+              selectedAnimalIndex: selectedAnimalIndex,
             ),
 
             const SizedBox(height: 32),
@@ -524,13 +671,28 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         _ => 'Choose Next Step',
       };
 
-  Widget _buildUpdateForm() {
+  Widget _buildUpdateForm(List<CaseAnimalOption> animalOptions) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Enter Treatment Update',
             style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
         const SizedBox(height: 16),
+
+        // Required per spec: One animal / Multiple animals / All animals.
+        // Only shown for a multi-animal case — a single-animal case has
+        // nothing to choose between, so this stays hidden and every log
+        // implicitly applies to that one animal (animalIndexes left null).
+        if (animalOptions.length > 1) ...[
+          _FieldLabel('Applies to', required: true),
+          const SizedBox(height: 4),
+          CaseAnimalMultiSelectBar(
+            options: animalOptions,
+            selected: _updateAnimalIndexes,
+            onChanged: (next) => setState(() => _updateAnimalIndexes = next),
+          ),
+          const SizedBox(height: 16),
+        ],
 
         // Date only — defaults to today when the form opens (see initState /
         // _addUpdate's reset), never a time picker. Only a manual change
@@ -580,28 +742,56 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         ),
         const SizedBox(height: 16),
 
-        // Fields shown/hidden by update type, per spec.
+        // Fields shown/hidden by update type, per spec — required
+        // asterisks now match _canSubmit()'s actual rules exactly.
         if (_selectedType == TreatmentUpdateType.medication) ...[
-          _FieldLabel('Medication Name'),
+          _FieldLabel('Medication Name', required: true),
           _TextInput(controller: _medicationNameController, hint: 'e.g. Amoxicillin'),
           const SizedBox(height: 12),
-          _FieldLabel('Dose'),
+          _FieldLabel('Dose', required: true),
           _TextInput(controller: _medicationDoseController, hint: 'e.g. 250mg twice daily'),
           const SizedBox(height: 16),
         ],
         if (_selectedType == TreatmentUpdateType.procedure) ...[
-          _FieldLabel('Procedure Performed'),
+          _FieldLabel('Procedure Performed', required: true),
           _TextInput(controller: _procedureController, hint: 'e.g. Wound cleaning and suturing'),
           const SizedBox(height: 16),
         ],
         if (_selectedType == TreatmentUpdateType.vaccination) ...[
-          _FieldLabel('Vaccine'),
-          _TextInput(controller: _vaccineNameController, hint: 'e.g. Anti-rabies'),
+          _FieldLabel('Vaccine', required: true),
+          const SizedBox(height: 4),
+          // Reuses the exact same species vaccine list/Other-chip pattern
+          // already established in add_vaccine_record_sheet.dart — not a
+          // second vaccine list. Falls back to the dog list for a mixed/
+          // unrecognized case species, same as that sheet's own fallback.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final t in VaccineTemplate.forSpecies(widget.data['animalType'] as String?))
+                ChoiceChip(
+                  label: Text(t.name),
+                  selected: _selectedVaccineTemplate?.name == t.name,
+                  selectedColor: AppColors.yellowrspwn,
+                  onSelected: (_) => setState(() => _selectedVaccineTemplate = t),
+                ),
+              ChoiceChip(
+                label: const Text('Other'),
+                selected: _selectedVaccineTemplate == null,
+                selectedColor: AppColors.yellowrspwn,
+                onSelected: (_) => setState(() => _selectedVaccineTemplate = null),
+              ),
+            ],
+          ),
+          if (_selectedVaccineTemplate == null) ...[
+            const SizedBox(height: 8),
+            _TextInput(controller: _vaccineNameController, hint: 'Vaccine name'),
+          ],
           const SizedBox(height: 12),
-          _FieldLabel('Dose'),
+          _FieldLabel('Dose', required: true),
           _TextInput(controller: _vaccineDoseController, hint: 'e.g. 1ml'),
           const SizedBox(height: 12),
-          _FieldLabel('Next Schedule (optional)'),
+          _FieldLabel('Next Due Date (optional)'),
           GestureDetector(
             onTap: () async {
               final picked = await showDatePicker(
@@ -634,10 +824,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           const SizedBox(height: 16),
         ],
         if (_isDischarge) ...[
-          _FieldLabel('Discharge Notes', required: true),
-          _TextInput(controller: _dischargeNotesController, hint: 'Enter discharge notes'),
-          const SizedBox(height: 12),
-          _FieldLabel('Final Condition', required: true),
+          // Final Condition is the field that actually gates discharge
+          // completion now — Discharge Notes is optional, and the generic
+          // Notes field below is hidden entirely for this type (spec: don't
+          // keep both a generic Notes and a separate Discharge Notes field).
+          _FieldLabel('Final Condition (discharge condition)', required: true),
           _Dropdown<String>(
             value: _finalCondition,
             hint: 'Select',
@@ -649,6 +840,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           _FieldLabel('Post-Treatment Instructions'),
           _TextInput(
               controller: _postTreatmentInstructionsController, hint: 'e.g. Keep wound dry for 5 days'),
+          const SizedBox(height: 12),
+          _FieldLabel('Discharge Notes'),
+          _TextInput(controller: _dischargeNotesController, hint: 'Optional additional notes'),
           const SizedBox(height: 16),
         ],
         if (_isDeathReport) ...[
@@ -662,7 +856,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           ),
           const SizedBox(height: 16),
         ],
-        if (!_isDischarge && !_isDeathReport) ...[
+        // Overall Condition only actually applies to (and is only required
+        // for) Assessment/Follow-up Check — it used to render for every
+        // non-discharge/non-death type (including Vaccination/Procedure/
+        // Medication) with a "required" label that _canSubmit() never
+        // actually enforced there. Shown+required only where it's real.
+        if (_selectedType == TreatmentUpdateType.assessment || _selectedType == TreatmentUpdateType.followUpCheck) ...[
           _FieldLabel('Overall Condition', required: true),
           _Dropdown<String>(
             value: _selectedCondition,
@@ -674,8 +873,17 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           const SizedBox(height: 16),
         ],
 
-        _FieldLabel('Notes', required: true),
-        _TextInput(controller: _notesController, hint: 'Enter notes'),
+        // Generic Notes: required for Assessment/Follow-up Check (no other
+        // structured field captures what happened), optional for
+        // Vaccination/Procedure/Medication/Death Report, and hidden
+        // entirely for Discharge (Discharge Notes above covers it — never
+        // both).
+        if (!_isDischarge) ...[
+          _FieldLabel('Notes',
+              required: _selectedType == TreatmentUpdateType.assessment ||
+                  _selectedType == TreatmentUpdateType.followUpCheck),
+          _TextInput(controller: _notesController, hint: 'Enter notes'),
+        ],
 
         const SizedBox(height: 16),
         _FieldLabel('Include images'),
@@ -826,20 +1034,49 @@ class _NextStepDropdown extends StatelessWidget {
 class _CostTrackingSection extends StatelessWidget {
   final String caseId;
   final RescueCase rescueCase;
+  final List<Expense> allExpenses;
   final double totalExpenses;
   final double fundedAmount;
   final double outstandingBalance;
+  final List<CaseAnimalOption> animalOptions;
+  final int? selectedAnimalIndex;
 
   const _CostTrackingSection({
     required this.caseId,
     required this.rescueCase,
+    required this.allExpenses,
     required this.totalExpenses,
     required this.fundedAmount,
     required this.outstandingBalance,
+    required this.animalOptions,
+    required this.selectedAnimalIndex,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Total/Funded/Outstanding always reflect the whole case (never
+    // filtered by animal — Close Case's own financial summary and every
+    // other reader of these totals expects the case-wide figure). The
+    // per-animal breakdown below is purely additional, computed from the
+    // same list, and never sums to more than totalExpenses since a shared
+    // expense is counted once here, not once per animal.
+    final breakdown = <String, double>{};
+    if (animalOptions.length > 1) {
+      var shared = 0.0;
+      for (final e in allExpenses) {
+        if (e.isSharedCaseExpense) {
+          shared += e.amount;
+        } else {
+          for (final i in e.animalIndexes!) {
+            final match = animalOptions.where((o) => o.index == i);
+            final label = match.isNotEmpty ? match.first.label : 'Animal ${i + 1}';
+            breakdown[label] = (breakdown[label] ?? 0) + e.amount;
+          }
+        }
+      }
+      if (shared > 0) breakdown['Shared Expenses'] = shared;
+    }
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -853,17 +1090,29 @@ class _CostTrackingSection extends StatelessWidget {
           Text('Cost Tracking',
               style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
           const SizedBox(height: 10),
-          _CostRow('Total Expenses', totalExpenses),
+          _CostRow('Total Case Cost', totalExpenses),
           _CostRow('Funded Amount', fundedAmount),
           _CostRow('Outstanding Balance', outstandingBalance, emphasize: true),
+          if (breakdown.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Divider(height: 1, color: AppColors.slaterspwn),
+            const SizedBox(height: 8),
+            for (final entry in breakdown.entries) _CostRow(entry.key, entry.value),
+          ],
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               OutlinedButton(
-                onPressed: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => ExpenseListPage(caseId: caseId))),
+                onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => ExpenseListPage(
+                              caseId: caseId,
+                              animalOptions: animalOptions,
+                              initialAnimalIndex: selectedAnimalIndex,
+                            ))),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.textPrimary),
@@ -872,7 +1121,12 @@ class _CostTrackingSection extends StatelessWidget {
                 child: Text('View Expenses', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
               ),
               ElevatedButton(
-                onPressed: () => showAddEditExpenseSheet(context, caseId: caseId),
+                onPressed: () => showAddEditExpenseSheet(
+                  context,
+                  caseId: caseId,
+                  animalOptions: animalOptions,
+                  initialAnimalIndexes: selectedAnimalIndex != null ? {selectedAnimalIndex!} : const {},
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
                   // Explicit foreground — without it this falls back to the

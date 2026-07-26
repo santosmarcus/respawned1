@@ -383,6 +383,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     'Return approved.': 'Return Approved',
     'Retrieval scheduled.': 'Return Pickup Scheduled',
     'Post-adoption monitoring completed.': 'Post-Adoption',
+    'Return initiated by the organization.': 'Return Initiated',
   };
   // Prefix-match messages whose text carries variable content (a reason, an
   // actor name, ...) — checked in order after the exact-match map misses.
@@ -390,6 +391,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     'Return declined': 'Return Declined',
     'Follow-up reminder sent': 'Post-Adoption Reminder',
     'A follow-up was rescheduled': 'Post-Adoption',
+    // AdoptionApplicationRepository.sendWarning writes 'Warning sent:
+    // $category.' — the category is variable, so this is a prefix match.
+    'Warning sent:': 'Post-Adoption Warning',
   };
 
   String? _classifyAdoptionStatusType(String message) {

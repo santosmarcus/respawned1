@@ -45,14 +45,22 @@ enum RescueStatus {
 
   /// The canonical string this module writes to Firestore for this status.
   ///
-  /// [accepted] and [awaitingAssignment] intentionally share `'accepted'`:
-  /// in the existing flow, accepting a report immediately routes the case
-  /// into the assign-rider screen, so there is no separate persisted state
-  /// between the two. Call sites that need a specific legacy string other
-  /// than this canonical one (e.g. assign_rider_page.dart writing
-  /// `'assigned'` so the transporter's own job board keeps working) should
-  /// keep writing that literal string directly rather than going through
-  /// this getter.
+  /// [accepted] and [awaitingAssignment] used to intentionally share
+  /// `'accepted'` back when accepting a report immediately routed the case
+  /// into the assign-rider screen with no separate persisted state between
+  /// the two. That's no longer true: [acceptCase] now stops at [accepted]
+  /// (case is accepted but has no saved clinic yet, stays under Rescue
+  /// Review) and only advances to [awaitingAssignment] once [assignClinic]
+  /// actually saves one — so the two need distinguishable Firestore
+  /// strings. [accepted] was never previously written with its own
+  /// canonical value (only ever read back as [awaitingAssignment] via that
+  /// status's `'accepted'` legacy alias below), so giving it
+  /// `'accepted_pending_clinic'` here doesn't change how any existing
+  /// persisted case data is interpreted. Call sites that need a specific
+  /// legacy string other than this canonical one (e.g. assign_rider_page.dart
+  /// writing `'assigned'` so the transporter's own job board keeps working)
+  /// should keep writing that literal string directly rather than going
+  /// through this getter.
   ///
   /// ROOT CAUSE (fixed here) of "Proceed to Treatment doesn't leave
   /// Ongoing": this getter used to return the bare string `'treatment'` for
@@ -69,7 +77,7 @@ enum RescueStatus {
   /// read finally agree.
   String get firestoreValue => switch (this) {
     RescueStatus.pendingReview => 'pending',
-    RescueStatus.accepted => 'accepted',
+    RescueStatus.accepted => 'accepted_pending_clinic',
     RescueStatus.awaitingAssignment => 'accepted',
     RescueStatus.rejected => 'rejected',
     RescueStatus.referred => 'referred',
@@ -90,6 +98,7 @@ enum RescueStatus {
   /// reading, including legacy/sub-state strings written by other features.
   static const Map<RescueStatus, List<String>> _legacyAliases = {
     RescueStatus.pendingReview: ['pending'],
+    RescueStatus.accepted: ['accepted_pending_clinic'],
     RescueStatus.awaitingAssignment: ['accepted'],
     RescueStatus.rejected: ['rejected'],
     RescueStatus.referred: ['referred'],

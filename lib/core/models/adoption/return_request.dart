@@ -72,6 +72,17 @@ class ReturnRequest {
   final String? intakeCaseId;
   final DateTime? proceededToIntakeAt;
 
+  /// 'adopter' (default — every return request before this field existed
+  /// was adopter-initiated) or 'organization' (admin's own Initiate Return
+  /// action, spec §4). Purely descriptive — every status/workflow read
+  /// site keys off [status] alone, never this, so an org-initiated request
+  /// flows through the exact same approve/schedule/retrieve/intake
+  /// pipeline an adopter-initiated one does.
+  final String source;
+
+  final DateTime? proposedRetrievalDateTime;
+  final String? internalNotes;
+
   const ReturnRequest({
     required this.reason,
     this.reasonOther,
@@ -99,9 +110,13 @@ class ReturnRequest {
     this.retrievedBy,
     this.intakeCaseId,
     this.proceededToIntakeAt,
+    this.source = 'adopter',
+    this.proposedRetrievalDateTime,
+    this.internalNotes,
   });
 
   bool get hasRetrievalSchedule => retrievalDateTime != null;
+  bool get isOrgInitiated => source == 'organization';
 
   static ReturnRequest? fromMap(Map<String, dynamic>? map) {
     if (map == null) return null;
@@ -133,6 +148,9 @@ class ReturnRequest {
       retrievedBy: map['retrievedBy'] as String?,
       intakeCaseId: map['intakeCaseId'] as String?,
       proceededToIntakeAt: ts(map['proceededToIntakeAt']),
+      source: map['source'] as String? ?? 'adopter',
+      proposedRetrievalDateTime: ts(map['proposedRetrievalDateTime']),
+      internalNotes: map['internalNotes'] as String?,
     );
   }
 }

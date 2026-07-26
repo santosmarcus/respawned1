@@ -7,11 +7,21 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
+import 'package:respawnd1/core/models/adoption/return_request.dart';
 import 'package:respawnd1/core/widgets/date_time_picker_sheet.dart' as picker;
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
+
+const List<String> kPostAdoptionWarningCategories = [
+  'Missed follow-up',
+  'Animal welfare concern',
+  'Incomplete information',
+  'Unable to contact adopter',
+  'Agreement concern',
+  'Other',
+];
 
 String _fmtDate(DateTime? d) => d == null ? 'Not set' : '${d.month}/${d.day}/${d.year}';
 String _fmtDateTime(DateTime? d) =>
@@ -36,6 +46,8 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     final n = FirebaseAuth.instance.currentUser?.displayName;
     return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
   }
+
+  String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
@@ -157,12 +169,87 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).markPostAdoptionComplete(applicationId: widget.applicationId, actorName: _actorName));
   }
 
+  Future<void> _addNote() async {
+    final text = await _promptText(title: 'Add Note', label: 'Private organization note (never shown to the adopter)', required: true);
+    if (text == null || text.isEmpty) return;
+    await _run(() =>
+        ref.read(adoptionApplicationRepositoryProvider).addPrivateNote(applicationId: widget.applicationId, text: text, actorUid: _actorUid, actorName: _actorName));
+  }
+
+  Future<void> _sendWarning() async {
+    final result = await showModalBottomSheet<_WarningDraft>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => const _SendWarningSheet(),
+    );
+    if (result == null) return;
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).sendWarning(
+          applicationId: widget.applicationId,
+          category: result.category,
+          message: result.message,
+          requiredAction: result.requiredAction,
+          responseDeadline: result.responseDeadline,
+          actorUid: _actorUid,
+          actorName: _actorName,
+        ));
+  }
+
+  Future<void> _resolveWarning(String warningId) async {
+    final confirmed = await showConfirmActionDialog(context, title: 'Mark Warning Resolved?', message: 'This does not notify the adopter.', confirmLabel: 'Mark Resolved');
+    if (!confirmed) return;
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).resolveWarning(applicationId: widget.applicationId, warningId: warningId, actorName: _actorName));
+  }
+
+  Future<void> _initiateReturn() async {
+    final result = await showModalBottomSheet<_InitiateReturnDraft>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => const _InitiateReturnSheet(),
+    );
+    if (result == null) return;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Initiate Return?',
+      message: 'This starts the same return workflow an adopter-requested return uses. The adopter will see a return banner stating '
+          'the organization initiated this.',
+      confirmLabel: 'Initiate Return',
+    );
+    if (!confirmed) return;
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).adminInitiateReturn(
+          applicationId: widget.applicationId,
+          reason: result.reason,
+          explanation: result.explanation,
+          urgency: result.urgency,
+          proposedRetrievalDateTime: result.proposedRetrievalDateTime,
+          internalNotes: result.internalNotes,
+          actorUid: _actorUid,
+          actorName: _actorName,
+        ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final appAsync = ref.watch(adoptionApplicationProvider(widget.applicationId));
     final app = appAsync.asData?.value;
     final followUpsAsync = ref.watch(followUpsForAdoptionProvider(widget.applicationId));
     final followUps = [...followUpsAsync.asData?.value ?? const <FollowUpRecord>[]]..sort((a, b) => a.sequenceNumber.compareTo(b.sequenceNumber));
+
+    // Action visibility by state (spec §4): a return in progress hides
+    // Add Note/Send Warning/Initiate Return (View Return / Schedule /
+    // Confirm Retrieved already live on ReturnDetailsPage, one tap away
+    // via the return banner below — not duplicated here); Completed shows
+    // only Initiate Return.
+    final returnRequest = app?.returnRequest;
+    final returnActive = returnRequest != null &&
+        returnRequest.status != ReturnRequestStatus.declined &&
+        returnRequest.status != ReturnRequestStatus.cancelled &&
+        returnRequest.status != ReturnRequestStatus.intake;
+    final monitoringCompleted = app?.postAdoptionStatus == 'completed';
+    final activeMonitoring = !returnActive && !monitoringCompleted;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -184,6 +271,17 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
                     _ReturnBanner(app: app),
                     const SizedBox(height: 12),
                   ],
+                  _OrgActionsSection(
+                    activeMonitoring: activeMonitoring,
+                    monitoringCompleted: monitoringCompleted,
+                    busy: _busy,
+                    onAddNote: _addNote,
+                    onSendWarning: _sendWarning,
+                    onInitiateReturn: _initiateReturn,
+                  ),
+                  const SizedBox(height: 12),
+                  _WarningsSection(applicationId: widget.applicationId, busy: _busy, onResolve: _resolveWarning),
+                  const SizedBox(height: 12),
                   if (app.noFollowUpsPlanned)
                     SectionCard(
                       child: Text('No post-adoption follow-ups were scheduled for this adoption.',
@@ -295,10 +393,400 @@ class _ReturnBanner extends StatelessWidget {
             const Icon(Icons.assignment_return_outlined, color: AppColors.textPrimary),
             const SizedBox(width: 10),
             Expanded(
-              child: Text('A return request is in progress — ${r.status.label}. Tap to review.',
+              child: Text(
+                  r.isOrgInitiated
+                      ? 'The organization has initiated a return — ${r.status.label}. Tap to review.'
+                      : 'A return request is in progress — ${r.status.label}. Tap to review.',
                   style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
             ),
             const Icon(Icons.chevron_right, color: AppColors.textPrimary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Add Note / Send Warning / Initiate Return (spec §4) — visibility keyed
+/// off the same active-monitoring/return-active/completed state the
+/// return banner and Mark Complete button already derive, so these never
+/// disagree about what phase the adoption is in.
+class _OrgActionsSection extends StatelessWidget {
+  final bool activeMonitoring;
+  final bool monitoringCompleted;
+  final bool busy;
+  final VoidCallback onAddNote;
+  final VoidCallback onSendWarning;
+  final VoidCallback onInitiateReturn;
+
+  const _OrgActionsSection({
+    required this.activeMonitoring,
+    required this.monitoringCompleted,
+    required this.busy,
+    required this.onAddNote,
+    required this.onSendWarning,
+    required this.onInitiateReturn,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Return-active: nothing here — View Return / Schedule / Confirm
+    // Retrieved already live on ReturnDetailsPage via the banner above.
+    if (!activeMonitoring && !monitoringCompleted) return const SizedBox.shrink();
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Organization Actions', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (activeMonitoring) ...[
+                OutlinedButton(
+                  onPressed: busy ? null : onAddNote,
+                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.textPrimary, side: const BorderSide(color: AppColors.textPrimary)),
+                  child: const Text('Add Note'),
+                ),
+                OutlinedButton(
+                  onPressed: busy ? null : onSendWarning,
+                  style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF9C6B10), side: const BorderSide(color: Color(0xFFE0A353))),
+                  child: const Text('Send Warning'),
+                ),
+              ],
+              ElevatedButton(
+                onPressed: busy ? null : onInitiateReturn,
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE05353), foregroundColor: Colors.white),
+                child: const Text('Initiate Return'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Persistent warning history — this, not just the notification feed, is
+/// what makes a sent warning reliably visible on the admin side and (via
+/// the equivalent user-side section in post_adoption_page.dart) the
+/// adopter side.
+class _WarningsSection extends StatelessWidget {
+  final String applicationId;
+  final bool busy;
+  final ValueChanged<String> onResolve;
+  const _WarningsSection({required this.applicationId, required this.busy, required this.onResolve});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('adoptions').doc(applicationId).collection('warnings').orderBy('sentAt', descending: true).snapshots(),
+      builder: (context, snap) {
+        final docs = snap.data?.docs ?? const [];
+        if (docs.isEmpty) return const SizedBox.shrink();
+        return SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Warnings', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              for (final doc in docs) _WarningRow(id: doc.id, data: doc.data(), busy: busy, onResolve: () => onResolve(doc.id)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WarningRow extends StatelessWidget {
+  final String id;
+  final Map<String, dynamic> data;
+  final bool busy;
+  final VoidCallback onResolve;
+  const _WarningRow({required this.id, required this.data, required this.busy, required this.onResolve});
+
+  @override
+  Widget build(BuildContext context) {
+    final resolved = data['resolved'] as bool? ?? false;
+    final sentAt = data['sentAt'];
+    final sentAtStr = sentAt is Timestamp ? _fmtDateTime(sentAt.toDate()) : 'Not set';
+    final deadline = data['responseDeadline'];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: resolved ? AppColors.tearspwn.withValues(alpha: 0.3) : const Color(0xFFE0A353).withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(data['category'] as String? ?? 'Other',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+              Text(resolved ? 'Resolved' : 'Open', style: GoogleFonts.zain(fontSize: 11, color: resolved ? AppColors.greenrspwn : const Color(0xFF9C6B10))),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(data['message'] as String? ?? '', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+          if ((data['requiredAction'] as String?)?.isNotEmpty ?? false)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('Required action: ${data['requiredAction']}', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+            ),
+          if (deadline is Timestamp)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('Response due: ${_fmtDate(deadline.toDate())}', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text('Sent $sentAtStr by ${data['sentBy'] ?? '—'}', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+          ),
+          if (!resolved) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: busy ? null : onResolve,
+                child: Text('Mark Resolved', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+typedef _WarningDraft = ({String category, String message, String? requiredAction, DateTime? responseDeadline});
+
+class _SendWarningSheet extends StatefulWidget {
+  const _SendWarningSheet();
+  @override
+  State<_SendWarningSheet> createState() => _SendWarningSheetState();
+}
+
+class _SendWarningSheetState extends State<_SendWarningSheet> {
+  String _category = kPostAdoptionWarningCategories.first;
+  final _messageController = TextEditingController();
+  final _actionController = TextEditingController();
+  DateTime? _deadline;
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _actionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Send Warning', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+            const SizedBox(height: 16),
+            Text('Warning Category', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final c in kPostAdoptionWarningCategories)
+                  ChoiceChip(
+                    label: Text(c),
+                    selected: _category == c,
+                    selectedColor: AppColors.yellowrspwn,
+                    onSelected: (_) => setState(() => _category = c),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text('Message', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            TextField(controller: _messageController, maxLines: 3, decoration: const InputDecoration(hintText: 'Describe the concern')),
+            const SizedBox(height: 14),
+            Text('Required Corrective Action (optional)', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            TextField(controller: _actionController, decoration: const InputDecoration(hintText: 'What should the adopter do?')),
+            const SizedBox(height: 14),
+            Text('Response Deadline (optional)', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.now().add(const Duration(days: 7)),
+                  firstDate: DateTime.now(),
+                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                );
+                if (picked != null) setState(() => _deadline = picked);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.textPrimary))),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(_deadline == null ? 'None set' : _fmtDate(_deadline), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.textPrimary),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _messageController.text.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(context, (
+                          category: _category,
+                          message: _messageController.text.trim(),
+                          requiredAction: _actionController.text.trim().isEmpty ? null : _actionController.text.trim(),
+                          responseDeadline: _deadline,
+                        )),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                child: const Text('Send Warning'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+typedef _InitiateReturnDraft = ({
+  String reason,
+  String explanation,
+  String urgency,
+  DateTime? proposedRetrievalDateTime,
+  String? internalNotes,
+});
+
+const List<String> kAdminReturnUrgencyOptions = ['Low', 'Medium', 'High'];
+
+class _InitiateReturnSheet extends StatefulWidget {
+  const _InitiateReturnSheet();
+  @override
+  State<_InitiateReturnSheet> createState() => _InitiateReturnSheetState();
+}
+
+class _InitiateReturnSheetState extends State<_InitiateReturnSheet> {
+  final _reasonController = TextEditingController();
+  final _explanationController = TextEditingController();
+  final _notesController = TextEditingController();
+  String _urgency = 'Medium';
+  DateTime? _proposedDate;
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    _explanationController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  bool get _canSubmit => _reasonController.text.trim().isNotEmpty && _explanationController.text.trim().isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Initiate Return', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+            const SizedBox(height: 4),
+            Text('Starts the same return workflow an adopter-requested return uses.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            const SizedBox(height: 16),
+            Text('Reason', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            TextField(controller: _reasonController, onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'e.g. Welfare concern, agreement violation')),
+            const SizedBox(height: 14),
+            Text('Detailed Explanation', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _explanationController,
+              onChanged: (_) => setState(() {}),
+              maxLines: 3,
+              decoration: const InputDecoration(hintText: 'Explain why the organization is initiating this return'),
+            ),
+            const SizedBox(height: 14),
+            Text('Urgency', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final u in kAdminReturnUrgencyOptions)
+                  ChoiceChip(label: Text(u), selected: _urgency == u, selectedColor: AppColors.yellowrspwn, onSelected: (_) => setState(() => _urgency = u)),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text('Proposed Retrieval Schedule (optional)', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.now().add(const Duration(days: 3)),
+                  firstDate: DateTime.now(),
+                  lastDate: DateTime.now().add(const Duration(days: 90)),
+                );
+                if (picked != null) setState(() => _proposedDate = picked);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.textPrimary))),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(_proposedDate == null ? 'Not proposed yet' : _fmtDate(_proposedDate), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.textPrimary),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text('Internal Notes (optional, never shown to adopter)', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            TextField(controller: _notesController, maxLines: 2, decoration: const InputDecoration(hintText: 'Internal notes')),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: !_canSubmit
+                    ? null
+                    : () => Navigator.pop(context, (
+                          reason: _reasonController.text.trim(),
+                          explanation: _explanationController.text.trim(),
+                          urgency: _urgency,
+                          proposedRetrievalDateTime: _proposedDate,
+                          internalNotes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+                        )),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE05353),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppColors.slaterspwn,
+                ),
+                child: const Text('Continue'),
+              ),
+            ),
           ],
         ),
       ),

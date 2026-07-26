@@ -14,6 +14,8 @@ import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 
@@ -148,6 +150,139 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   GoogleMapController? _mapController;
   bool _hasFitCamera = false;
 
+  /// Guards reconcileStaleOffer against being fired again on every rebuild
+  /// while its own write is still in flight (the write itself is already
+  /// idempotent — this just avoids redundant calls).
+  final Set<String> _reconcilingAssignmentIds = {};
+  bool _cancellingOffer = false;
+
+  void _reconcileIfStale(TransportAssignment assignment) {
+    if (!assignment.isStalePending) return;
+    if (_reconcilingAssignmentIds.contains(assignment.id)) return;
+    _reconcilingAssignmentIds.add(assignment.id);
+    ref.read(rescueCaseRepositoryProvider).reconcileStaleOffer(
+          caseId: widget.caseId,
+          assignmentId: assignment.id,
+        );
+  }
+
+  Future<void> _cancelExistingOffer(TransportAssignment assignment) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Cancel this offer?',
+            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        content: Text(
+          'The pending offer to ${assignment.riderName} will be cancelled, and you can select another transporter.',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Keep Waiting',
+                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE05353),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _cancellingOffer = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
+            caseId: widget.caseId,
+            assignmentId: assignment.id,
+            reason: 'Cancelled by organization while waiting',
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not cancel this offer: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cancellingOffer = false);
+    }
+  }
+
+  /// Awaiting-response panel shown in place of the map/rider-list/Next
+  /// whenever the case already has a valid, unexpired pending offer (spec
+  /// §4/§5) — an admin should never be able to pick a second transporter
+  /// while one is still outstanding.
+  Widget _pendingOfferPanel(TransportAssignment assignment) {
+    final offeredAt = assignment.offeredAt;
+    final pendingFor = offeredAt == null
+        ? ''
+        : DateTime.now().difference(offeredAt).inMinutes < 1
+            ? 'Pending for ${DateTime.now().difference(offeredAt).inSeconds}s'
+            : 'Pending for ${DateTime.now().difference(offeredAt).inMinutes}m';
+    return Expanded(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.hourglass_top, size: 36, color: AppColors.textSecondary),
+              const SizedBox(height: 12),
+              Text('Awaiting transporter response',
+                  style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              Text('Offered to: ${assignment.riderName}',
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              if (pendingFor.isNotEmpty)
+                Text(pendingFor, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton(
+                    onPressed: _cancellingOffer ? null : () => _cancelExistingOffer(assignment),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFE05353),
+                      side: const BorderSide(color: Color(0xFFE05353)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    child: _cancellingOffer
+                        ? const SizedBox(
+                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => AdminTrackCasePage(
+                            caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode))),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   LatLng? _caseLocationFrom(Map<String, dynamic> data) {
     final lat = (data['lat'] as num?)?.toDouble();
     final lng = (data['lng'] as num?)?.toDouble();
@@ -177,12 +312,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// grouped Available -> Pending -> Busy (a demo transporter that goes
   /// Pending/Busy — e.g. right after declining — joins those same groups
   /// instead of staying pinned to the top). Each group sorted by distance.
-  /// Pending/busy transporters are never hidden.
+  /// Pending/busy transporters are never hidden — only OFFLINE real
+  /// transporters are (spec: only online + available transporters are
+  /// assignable; pending/busy real transporters are still online, just not
+  /// selectable right now). Demo transporters are dev-only and never shown
+  /// outside kDebugMode, regardless of any online concept (they don't have
+  /// real presence data at all).
   List<_RiderVm> _buildRiderVms(
     LatLng center,
     List<PetTransporter> transporters,
     Map<String, TransportAssignmentStatus> activeByRider,
   ) {
+    final onlineTransporters = transporters.where((t) => t.isOnline).toList();
     double distanceFor(LatLng pos) =>
         haversineDistanceKm(center.latitude, center.longitude, pos.latitude, pos.longitude);
 
@@ -207,20 +348,26 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       );
     }
 
-    final demoA = demoRider(
-      uid: _demoAcceptingRiderUid,
-      name: _demoAcceptingRiderName,
-      vehicle: _demoAcceptingRiderVehicle,
-      plate: _demoAcceptingRiderPlate,
-    );
-    final demoB = demoRider(
-      uid: _demoRejectingRiderUid,
-      name: _demoRejectingRiderName,
-      vehicle: _demoRejectingRiderVehicle,
-      plate: _demoRejectingRiderPlate,
-    );
+    // Demo transporters have no real presence data at all — never shown
+    // outside a debug build, regardless of any online concept.
+    final demoA = kDebugMode
+        ? demoRider(
+            uid: _demoAcceptingRiderUid,
+            name: _demoAcceptingRiderName,
+            vehicle: _demoAcceptingRiderVehicle,
+            plate: _demoAcceptingRiderPlate,
+          )
+        : null;
+    final demoB = kDebugMode
+        ? demoRider(
+            uid: _demoRejectingRiderUid,
+            name: _demoRejectingRiderName,
+            vehicle: _demoRejectingRiderVehicle,
+            plate: _demoRejectingRiderPlate,
+          )
+        : null;
 
-    final realRiders = transporters.map((t) {
+    final realRiders = onlineTransporters.map((t) {
       final pos = _positionFor(center, t.uid);
       return _RiderVm(
         uid: t.uid,
@@ -244,11 +391,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // distance-sorted Pending/Busy bucket as everyone else instead of
     // staying artificially glued to the top — that's what actually moves
     // a just-declined transporter down and out of easy re-selection.
-    final allRiders = [demoA, demoB, ...realRiders];
+    final demoRiders = [if (demoA != null) demoA, if (demoB != null) demoB];
+    final allRiders = [...demoRiders, ...realRiders];
 
-    final demoAvailable = [demoA, demoB]
-        .where((r) => r.availability == _RiderAvailability.available)
-        .toList()
+    final demoAvailable = demoRiders.where((r) => r.availability == _RiderAvailability.available).toList()
       ..sort(byDistance);
     final available = realRiders.where((r) => r.availability == _RiderAvailability.available).toList()
       ..sort(byDistance);
@@ -293,6 +439,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         );
       }
       return;
+    }
+
+    final caseData = _currentCaseData();
+    final caseBiteRisk = caseData['biteRisk'] as String?;
+    final caseEscapeRisk = caseData['escapeRisk'] as String?;
+    if (hasHighRescueRisk(biteRisk: caseBiteRisk, escapeRisk: caseEscapeRisk)) {
+      final acknowledged = await confirmHighRiskAcknowledgment(
+        context,
+        biteRisk: caseBiteRisk,
+        escapeRisk: caseEscapeRisk,
+      );
+      if (!acknowledged || !mounted) return;
     }
 
     setState(() => _isAssigning = true);
@@ -407,6 +565,22 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
     final riders = _buildRiderVms(riderCenter, transporters, activeByRider);
 
+    // Startup / reopen resolution (spec §4): this case may already have a
+    // valid pending offer outstanding (e.g. the admin backgrounded the app
+    // mid-offer and is reopening this case from the Assign queue). Never
+    // let the rider list/Next button be reachable while that's true — only
+    // View Pending / Cancel Offer are available until it resolves.
+    final currentAssignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
+    final blockingOffer =
+        currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.pending
+            ? currentAssignment
+            : null;
+    if (blockingOffer != null) {
+      if (blockingOffer.isStalePending) {
+        _reconcileIfStale(blockingOffer);
+      }
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -432,7 +606,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         children: [
           // Case header
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -464,6 +638,15 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                           color: Colors.white)),
                 ),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: RescueRiskBanner(
+              biteRisk: d['biteRisk'] as String?,
+              escapeRisk: d['escapeRisk'] as String?,
+              safetyIndicators: List<String>.from(d['safetyIndicators'] ?? const []),
+              handlingNotes: d['handlingNotes'] as String?,
             ),
           ),
 
@@ -503,74 +686,89 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
           const SizedBox(height: 16),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Transporters',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 16, color: AppColors.textPrimary)),
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          // Transporter list — fixed order (see _buildRiderVms): demo
-          // transporters pinned above the real-Available group only while
-          // they're Available themselves, then real transporters grouped
-          // available -> pending -> busy, each by distance. Pending/busy
-          // transporters stay visible, just not selectable.
-          Expanded(
-            child: ListView.separated(
+          if (blockingOffer != null)
+            _pendingOfferPanel(blockingOffer)
+          else ...[
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: riders.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final rider = riders[index];
-                final isSelected = _selectedRiderUid == rider.uid;
-                return _RiderCard(
-                  rider: rider,
-                  isSelected: isSelected,
-                  onSelect: () => _selectRider(rider),
-                );
-              },
-            ),
-          ),
-
-          // Fixed bottom action — always visible; "Next" is simply disabled
-          // until an available transporter is selected. No Back button
-          // here — the app-bar back arrow is the only way to leave this page.
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              border: Border(top: BorderSide(color: AppColors.slaterspwn)),
-            ),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(riders),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: _isAssigning
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                    : Text('Next',
-                        style: GoogleFonts.tiltWarp(
-                            fontSize: 15,
-                            color: _selectedRiderUid == null
-                                ? AppColors.textSecondary
-                                : AppColors.textPrimary)),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Transporters',
+                    style: GoogleFonts.tiltWarp(
+                        fontSize: 16, color: AppColors.textPrimary)),
               ),
             ),
-          ),
+
+            const SizedBox(height: 8),
+
+            // Transporter list — fixed order (see _buildRiderVms): demo
+            // transporters pinned above the real-Available group only while
+            // they're Available themselves, then real transporters grouped
+            // available -> pending -> busy, each by distance. Pending/busy
+            // transporters stay visible, just not selectable.
+            Expanded(
+              child: riders.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'No online transporters are currently available.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: riders.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final rider = riders[index];
+                        final isSelected = _selectedRiderUid == rider.uid;
+                        return _RiderCard(
+                          rider: rider,
+                          isSelected: isSelected,
+                          onSelect: () => _selectRider(rider),
+                        );
+                      },
+                    ),
+            ),
+
+            // Fixed bottom action — always visible; "Next" is simply disabled
+            // until an available transporter is selected. No Back button
+            // here — the app-bar back arrow is the only way to leave this page.
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                border: Border(top: BorderSide(color: AppColors.slaterspwn)),
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(riders),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    disabledBackgroundColor: AppColors.slaterspwn,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: _isAssigning
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                      : Text('Next',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 15,
+                              color: _selectedRiderUid == null
+                                  ? AppColors.textSecondary
+                                  : AppColors.textPrimary)),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -693,17 +891,12 @@ class _RiderCard extends StatelessWidget {
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Message removed — redundant with the shared case-level
+                // Messages thread on Track Case (spec: only Call stays on
+                // a transporter card).
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    GestureDetector(
-                      onTap: () {},
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        child: const Icon(Icons.chat_outlined,
-                            size: 20, color: AppColors.textPrimary),
-                      ),
-                    ),
                     GestureDetector(
                       onTap: () {},
                       child: Container(
@@ -783,7 +976,7 @@ class _Avatar extends StatelessWidget {
 /// Track Case, which already renders the right pending/accepted view.
 enum _DialogOutcome { cancelled, accepted, declined, offerCancelled, viewExisting }
 
-enum _ModalPhase { confirmation, creating, pending, accepted, declined, cancelled, error, conflict }
+enum _ModalPhase { confirmation, creating, cancelling, pending, accepted, declined, cancelled, error, conflict }
 
 /// The single dialog instance that carries the admin from "Confirm
 /// Transporter Assignment" through Pending and into Accepted/Declined/Error
@@ -878,6 +1071,21 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
           _conflict = e;
         });
       }
+    } on FirebaseException catch (error, stackTrace) {
+      _hasCreatedOffer = false; // let Retry actually attempt again
+      // Diagnostics for development — never shown to the admin, whose
+      // dialog only ever gets the generic message below.
+      debugPrint('Assign transporter failed');
+      debugPrint('code: ${error.code}');
+      debugPrint('message: ${error.message}');
+      debugPrint('plugin: ${error.plugin}');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        setState(() {
+          _phase = _ModalPhase.error;
+          _errorMessage = 'Could not assign this transporter. The previous offer may not have been cleared. Please retry.';
+        });
+      }
     } catch (e) {
       _hasCreatedOffer = false; // let Retry actually attempt again
       if (mounted) {
@@ -936,12 +1144,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       case 'accepted':
         if (_phase == _ModalPhase.accepted) return;
         _elapsedTimer?.cancel();
+        // Shows the success state and stays open — the admin closes this
+        // (and only then does the caller navigate to Track Case) by
+        // pressing "View Transport Tracking" below, never automatically.
         setState(() => _phase = _ModalPhase.accepted);
-        // Brief success state, then close and let the caller navigate to
-        // Track Case — never navigates from inside the dialog itself.
-        Future.delayed(const Duration(milliseconds: 900), () {
-          if (mounted) Navigator.of(context).pop(_DialogOutcome.accepted);
-        });
         break;
       case 'rejected':
         if (_phase == _ModalPhase.declined) return;
@@ -953,13 +1159,11 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         break;
       case 'cancelled':
         // Normally only reached via our own _back() — handled defensively
-        // in case the offer is ever cancelled by some other path.
+        // in case the offer is ever cancelled by some other path. Stays
+        // open until the admin presses OK below — never auto-closes.
         if (_phase == _ModalPhase.cancelled) return;
         _elapsedTimer?.cancel();
         setState(() => _phase = _ModalPhase.cancelled);
-        Future.delayed(const Duration(milliseconds: 700), () {
-          if (mounted) Navigator.of(context).pop(_DialogOutcome.offerCancelled);
-        });
         break;
       case 'pending':
         // Nothing to do — already showing the pending UI (or about to).
@@ -1018,36 +1222,47 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
 
     _elapsedTimer?.cancel();
     _assignmentSub?.cancel();
-    setState(() => _phase = _ModalPhase.cancelled);
+    setState(() => _phase = _ModalPhase.cancelling);
     try {
       await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
             caseId: widget.caseId,
             assignmentId: _assignmentId!,
             reason: 'Cancelled by organization while waiting',
           );
-    } catch (_) {
-      // Best-effort — the admin explicitly asked to stop waiting, so leave
-      // the modal regardless; a failed cancellation write just means the
-      // offer stays pending in Firestore (still visible/actionable via
-      // Retry from a freshly opened dialog later), never silently lost.
-    }
-    if (mounted) {
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) Navigator.of(context).pop(_DialogOutcome.offerCancelled);
-      });
+      // Cancellation is confirmed written — show the cancelled state and
+      // wait for the admin to press OK (below) before closing. Never
+      // auto-closes, and never leaves the modal in a loading state.
+      if (mounted) setState(() => _phase = _ModalPhase.cancelled);
+    } catch (e) {
+      // The write actually failed — surface it with Retry rather than
+      // silently pretending the offer was cancelled (that would leave it
+      // still 'pending' in Firestore while the admin believes it's clear
+      // to pick another transporter).
+      if (mounted) {
+        setState(() {
+          _phase = _ModalPhase.error;
+          _errorMessage = 'Could not cancel this offer. The previous offer may not have been cleared. Please retry.';
+        });
+      }
     }
   }
+
+  /// Guards against a double-tap firing two concurrent retries — the
+  /// button is disabled while this is true (see _actions()).
+  bool _isRetrying = false;
 
   /// "Retry" — never creates a second offer. If one already exists, re-reads
   /// it fresh and re-attaches the listener; only attempts creation if no
   /// offer exists yet at all (i.e. Retry from the [creating]-failure error
   /// state, where [_confirm] never actually succeeded).
   Future<void> _retry() async {
+    if (_isRetrying) return;
     if (_assignmentId == null) {
       await _confirm();
       return;
     }
     setState(() {
+      _isRetrying = true;
       _phase = _ModalPhase.pending;
       _errorMessage = null;
     });
@@ -1082,6 +1297,8 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
           _errorMessage = 'Could not check transporter response: $e';
         });
       }
+    } finally {
+      if (mounted) setState(() => _isRetrying = false);
     }
   }
 
@@ -1090,6 +1307,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         _ModalPhase.creating ||
         _ModalPhase.pending =>
           'Confirm Transporter Assignment',
+        _ModalPhase.cancelling => 'Cancelling Offer',
         _ModalPhase.accepted => 'Assignment Accepted',
         _ModalPhase.declined => 'Assignment Declined',
         _ModalPhase.cancelled => 'Offer Cancelled',
@@ -1100,6 +1318,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   Widget _content(BuildContext context) => switch (_phase) {
         _ModalPhase.confirmation => _confirmationContent(),
         _ModalPhase.creating => _loadingContent('Creating assignment…'),
+        _ModalPhase.cancelling => _loadingContent('Cancelling the pending offer…'),
         _ModalPhase.pending => _pendingContent(),
         _ModalPhase.accepted => _acceptedContent(),
         _ModalPhase.declined => _declinedContent(),
@@ -1291,15 +1510,38 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
               child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
           ],
-        // No dismiss affordance while the initial write is in flight or the
-        // dialog is about to auto-close on its own — this is what "disable
-        // dismissal while the assignment write is being created" means in
-        // practice, alongside barrierDismissible:false at the call site.
-        // Once an offer actually exists and is Pending, though, the org is
-        // never trapped: Back and Retry are always available (this is the
-        // fix for real transporters — who have no accept/reject UI of
-        // their own yet — otherwise leaving Pending stuck forever).
-        _ModalPhase.creating || _ModalPhase.accepted || _ModalPhase.cancelled => const [],
+        // No dismiss affordance while a write is actually in flight — this
+        // is what "disable dismissal while the assignment write is being
+        // created" means in practice, alongside barrierDismissible:false
+        // at the call site.
+        _ModalPhase.creating || _ModalPhase.cancelling => const [],
+        // Accepted/cancelled never auto-close (see _applyAssignmentStatus/
+        // _back) — the admin closes them explicitly here, which is also
+        // the one moment the caller is allowed to navigate to Track Case.
+        _ModalPhase.accepted => [
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              child: Text('View Transport Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        _ModalPhase.cancelled => [
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(_DialogOutcome.offerCancelled),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                foregroundColor: AppColors.textPrimary,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              child: Text('OK', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+            ),
+          ],
         _ModalPhase.pending => [
             OutlinedButton(
               onPressed: _back,
@@ -1311,9 +1553,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
               child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
             ElevatedButton(
-              onPressed: _retry,
+              onPressed: _isRetrying ? null : _retry,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
+                disabledBackgroundColor: AppColors.slaterspwn,
                 foregroundColor: AppColors.textPrimary,
                 elevation: 0,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -1344,9 +1587,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
               child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
             ElevatedButton(
-              onPressed: _retry,
+              onPressed: _isRetrying ? null : _retry,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
+                disabledBackgroundColor: AppColors.slaterspwn,
                 foregroundColor: AppColors.textPrimary,
                 elevation: 0,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
