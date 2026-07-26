@@ -144,12 +144,6 @@ class RescueCaseRepository {
       if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
       'urgency': 'Medium',
       'createdAt': FieldValue.serverTimestamp(),
-      // Both public feed/map queries order by `serverCreatedAt` — without
-      // this, a case created through this admission path (or
-      // createReturnIntakeCase below) would silently never appear there,
-      // since Firestore's orderBy excludes any doc missing the field
-      // entirely.
-      'serverCreatedAt': FieldValue.serverTimestamp(),
       'statusHistory': [
         {'status': 'Medical admission opened for $animalName ($admissionReason).', 'timestamp': now},
       ],
@@ -210,7 +204,6 @@ class RescueCaseRepository {
       if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
       'urgency': 'Medium',
       'createdAt': FieldValue.serverTimestamp(),
-      'serverCreatedAt': FieldValue.serverTimestamp(),
       'statusHistory': [
         {'status': 'Adoption return intake opened for $animalName.', 'timestamp': now},
       ],
