@@ -12,6 +12,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart'
+as community_adoption_util;
+import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 
 import '../../app_theme.dart';
 
@@ -91,6 +94,8 @@ class ReportMapEntry {
   final String reporterTag;
   final DateTime? createdAt;
   final List<String> photoUrls;
+  final String? rawStatus;
+  final String? rejectionReason;
 
   const ReportMapEntry({
     required this.caseId,
@@ -106,11 +111,24 @@ class ReportMapEntry {
     required this.reporterTag,
     required this.createdAt,
     required this.photoUrls,
+    this.rawStatus,
+    this.rejectionReason,
   });
 
   /// True while a transporter is actively en route — the pin should follow
   /// their live position instead of sitting at the original report location.
   bool get hasLiveRider => riderLat != null && riderLng != null;
+
+  /// True for a healthy/low-urgency report that was rejected (and isn't a
+  /// Lost Pet report) — see community_adoption_eligibility.dart. The map
+  /// keeps this pin visible and offers the Community Adoption listing
+  /// action instead of hiding it like any other rejected case.
+  bool get isCommunityAdoptionEligible =>
+      community_adoption_util.isCommunityAdoptionEligible(
+        status: rawStatus,
+        rejectionReason: rejectionReason,
+        rescueType: rescueType,
+      );
 
   static ReportMapEntry? fromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
@@ -144,6 +162,8 @@ class ReportMapEntry {
       reporterTag: reporterTag,
       createdAt: ts?.toDate(),
       photoUrls: List<String>.from(data['photoUrls'] ?? []),
+      rawStatus: data['status'] as String?,
+      rejectionReason: data['rejectionReason'] as String?,
     );
   }
 }
@@ -166,8 +186,19 @@ List<ReportMapEntry> extractPublicReports(
     final data = doc.data();
     final status = (data['status'] as String? ?? '').toLowerCase();
     if (data['reporterId'] == currentUserId) continue;
-    if (kDismissedCaseStatuses.contains(status)) continue;
 
+    // A report rejected specifically for being healthy/low-urgency (and
+    // not a Lost Pet) transitions into Community Adoption instead of
+    // disappearing like a normal rejection — keep its pin on the map.
+    final communityAdoptionEligible = community_adoption_util.isCommunityAdoptionEligible(
+      status: data['status'] as String?,
+      rejectionReason: data['rejectionReason'] as String?,
+      rescueType: data['rescueType'] as String?,
+    );
+
+    if (kDismissedCaseStatuses.contains(status) && !communityAdoptionEligible) {
+      continue;
+    }
 
     final isEndedRescue = status == 'closed' ||
         status.contains('completed') ||
@@ -297,7 +328,14 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       return;
     }
     _iconRequestsInFlight.add(r.caseId);
-    final ringColor = urgencyRingColor(r.urgency);
+    // Community-Adoption-eligible cases get a distinct ring color instead
+    // of the usual urgency color — the animal was assessed healthy, so an
+    // urgency-red/yellow ring would be misleading at this point; lavender
+    // marks it as "up for community adoption" instead, distinct from every
+    // urgency color (red/yellow/green) so the two are never confused on
+    // the map.
+    final ringColor =
+    r.isCommunityAdoptionEligible ? AppColors.lavenderrspwn : urgencyRingColor(r.urgency);
 
     try {
       final quick = await _buildRingIcon(ringColor, photoBytes: null);
@@ -543,7 +581,11 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       markerId: MarkerId(r.caseId),
       position: position,
       icon: _iconCache[r.caseId] ??
-          BitmapDescriptor.defaultMarkerWithHue(_hueForUrgency(r.urgency)),
+          BitmapDescriptor.defaultMarkerWithHue(
+            r.isCommunityAdoptionEligible
+                ? BitmapDescriptor.hueViolet
+                : _hueForUrgency(r.urgency),
+          ),
       onTap: () => _showReportPreview(r, category),
     );
   }
@@ -661,6 +703,31 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                 ),
               ]),
             ],
+            if (r.isCommunityAdoptionEligible) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.greenrspwn.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.favorite, size: 14, color: AppColors.greenrspwn),
+                    const SizedBox(width: 6),
+                    Text(
+                      'This animal is open for adoption.',
+                      style: GoogleFonts.zain(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.greenrspwn,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
@@ -670,7 +737,9 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => TrackCasePage(caseId: r.caseId, initialTabIndex: 0),
+                      builder: (_) => r.isCommunityAdoptionEligible
+                          ? CommunityAdoptionTrackPage(caseId: r.caseId)
+                          : TrackCasePage(caseId: r.caseId, initialTabIndex: 0),
                     ),
                   );
                 },

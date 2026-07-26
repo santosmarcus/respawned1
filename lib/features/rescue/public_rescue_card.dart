@@ -4,6 +4,7 @@ import '../../app_theme.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'track_case_page.dart';
 import 'public_rescue_item.dart';
+import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 
 class PublicRescueCard extends StatelessWidget {
   final PublicRescueItem item;
@@ -31,10 +32,9 @@ class PublicRescueCard extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => TrackCasePage(
-              caseId: item.caseId,
-              initialTabIndex: 0,
-            ),
+            builder: (_) => item.isCommunityAdoptionEligible
+                ? CommunityAdoptionTrackPage(caseId: item.caseId)
+                : TrackCasePage(caseId: item.caseId, initialTabIndex: 0),
           ),
         );
       },
@@ -157,6 +157,28 @@ class PublicRescueCard extends StatelessWidget {
                     Text(item.reporterTag,
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                   ]),
+                  if (item.isCommunityAdoptionEligible) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.greenrspwn.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.favorite, size: 12, color: AppColors.greenrspwn),
+                          const SizedBox(width: 4),
+                          Text('This animal is open for adoption.',
+                              style: GoogleFonts.zain(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.greenrspwn)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

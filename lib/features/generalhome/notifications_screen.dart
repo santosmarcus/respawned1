@@ -59,15 +59,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   final String? _uid = FirebaseAuth.instance.currentUser?.uid;
 
   StreamSubscription<QuerySnapshot>? _casesSub;
+  StreamSubscription<QuerySnapshot>? _willingAdopterCasesSub;
   StreamSubscription<QuerySnapshot>? _adoptionsSub;
   final Map<String, StreamSubscription<QuerySnapshot>> _messageSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _communityReportSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _checkinSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _followUpSubs = {};
 
-  // Nearby-reports feed (reports from OTHER users within _kNearbyRadiusKm) —
-  // same 5km logic as the home-screen NearbyReportBanner, but persisted as
-  // regular notification entries instead of a transient popup.
   StreamSubscription<DocumentSnapshot>? _userDocSub;
   StreamSubscription<QuerySnapshot>? _nearbyCasesSub;
   final Map<String, StreamSubscription<QuerySnapshot>> _nearbyCommunityReportSubs = {};
@@ -78,6 +76,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   final Map<String, List<_NotifItem>> _nearbyCommunityReportItemsByCase = {};
 
   List<_NotifItem> _caseStatusItems = [];
+  List<_NotifItem> _willingAdopterCaseItems = [];
   List<_NotifItem> _adoptionStatusItems = [];
   final Map<String, List<_NotifItem>> _messageItemsByCase = {};
   final Map<String, List<_NotifItem>> _communityReportItemsByCase = {};
@@ -124,6 +123,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         .where('reporterId', isEqualTo: uid)
         .snapshots()
         .listen(_onCasesUpdate);
+
+    _willingAdopterCasesSub = FirebaseFirestore.instance
+        .collection('cases')
+        .where('willingAdopterId', isEqualTo: uid)
+        .snapshots()
+        .listen(_onWillingAdopterCasesUpdate);
 
     _adoptionsSub = FirebaseFirestore.instance
         .collection('adoptions')
@@ -310,6 +315,32 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return 'Status Update';
   }
 
+  void _onWillingAdopterCasesUpdate(QuerySnapshot snap) {
+    final items = <_NotifItem>[];
+
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final label = '#${shortCaseId(doc.id)}';
+      final history = (data['statusHistory'] as List?)?.cast<Map>() ?? [];
+
+      for (final h in history) {
+        final ts = h['timestamp'];
+        if (ts is! Timestamp) continue;
+        final statusMessage = h['status'] as String? ?? '';
+        items.add(_NotifItem(
+          refLabel: label,
+          type: _classifyRescueStatusType(statusMessage),
+          message: statusMessage,
+          timestamp: ts.toDate(),
+          kind: _NotifKind.rescue,
+          docId: doc.id,
+        ));
+      }
+    }
+
+    if (mounted) setState(() => _willingAdopterCaseItems = items);
+  }
+
   static const Map<String, String> _communityReportTypeLabels = {
     'still_here': 'Animal still here',
     'moved': 'Animal moved',
@@ -444,12 +475,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             .listen((checkinSnap) => _onCheckinsUpdate(doc.id, checkinSnap));
       }
 
-      // Due-reminder computation now reads the admin-generated `followUps`
-      // subcollection directly (see AdoptionApplicationRepository.
-      // releaseWithFollowUps) instead of a fixed buildCheckinSchedule — an
-      // adoption with no follow-ups planned, or whose monitoring is already
-      // marked complete, naturally has no open/undue followUps doc, so no
-      // extra status check is needed here.
       if (!_followUpSubs.containsKey(doc.id)) {
         _followUpSubs[doc.id] = FirebaseFirestore.instance
             .collection('adoptions')
@@ -525,6 +550,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void dispose() {
     _casesSub?.cancel();
+    _willingAdopterCasesSub?.cancel();
     _adoptionsSub?.cancel();
     _userDocSub?.cancel();
     _nearbyCasesSub?.cancel();
@@ -549,6 +575,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<_NotifItem> get _allItems {
     final all = <_NotifItem>[
       ..._caseStatusItems,
+      ..._willingAdopterCaseItems,
       ..._adoptionStatusItems,
       ..._nearbyCaseItems,
       for (final list in _messageItemsByCase.values) ...list,
@@ -559,8 +586,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         if (item != null) item,
     ];
     all.removeWhere((item) => _dismissedIds.contains(item.id));
-    all.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    return all;
+    final deduped = <String, _NotifItem>{for (final item in all) item.id: item};
+    final result = deduped.values.toList();
+    result.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return result;
   }
 
   String _timeAgo(DateTime d) {

@@ -8,6 +8,7 @@ import 'package:respawnd1/core/utils/geo.dart';
 import 'public_rescue_card.dart';
 import 'public_rescue_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 
 enum _DistanceFilter { all, nearby, farther }
 
@@ -110,7 +111,21 @@ class _PublicRescueFeedState extends State<PublicRescueFeed> {
           final data = doc.data();
           final status = (data['status'] as String? ?? '').toLowerCase();
           if (data['reporterId'] == currentUserId) continue;
-          if (_dismissedStatuses.contains(status)) continue;
+
+          // A report rejected specifically for being healthy/low-urgency
+          // (and not a Lost Pet) transitions into Community Adoption
+          // instead of disappearing like a normal rejection — keep it in
+          // the feed so it can still be tracked and listed.
+          final communityAdoptionEligible = isCommunityAdoptionEligible(
+            status: data['status'] as String?,
+            rejectionReason: data['rejectionReason'] as String?,
+            rescueType: data['rescueType'] as String?,
+          );
+
+          if (_dismissedStatuses.contains(status) &&
+              !communityAdoptionEligible) {
+            continue;
+          }
           // Once a case is done — 'completed', 'closed', or any variant
           // like 'Rescue Ended'/'rescue_completed' — it no longer belongs
           // in the public feed

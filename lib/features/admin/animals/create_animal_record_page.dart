@@ -146,6 +146,63 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     return widget.stepCurrent! >= widget.stepTotal! ? 'Finish' : 'Save and Continue';
   }
 
+  /// True only on the save that actually makes this animal newly adoptable
+  /// — a brand-new record created adoptable, or an edit that flips a
+  /// previously not-ready animal to adoptable. False when re-saving an
+  /// already-adoptable record's other fields, so that doesn't fire a
+  /// second "ready for adoption" notification. See _notifyInterestedAdopter.
+  bool get _becameAdoptableThisSave {
+    if (!_isAdoptable) return false;
+    if (!widget.isEditing) return true;
+    return widget.existingData?['adoptionStatus'] != 'adoptable';
+  }
+
+  /// Lets whoever already expressed interest in adopting this animal (at
+  /// report time via `interestedToAdopt`, or later via
+  /// track_case_page.dart's "Interest to Adopt"/"Interest to Foster"
+  /// buttons via `willingAdopterId`) know the moment it's actually ready —
+  /// otherwise that interest just sits on the case with nothing telling
+  /// them to come back.
+  ///
+  /// A single `statusHistory` entry on the case covers both audiences:
+  /// notifications_screen.dart watches `cases` where `reporterId == uid`
+  /// (covers the reporter's own interest) AND, separately, `cases` where
+  /// `willingAdopterId == uid` (covers a different user's interest
+  /// registered via track_case_page.dart's _registerInterest) — both
+  /// build their notification feed straight from this same array, so one
+  /// write reaches whichever of them actually exists on this case. No
+  /// separate notification collection needed.
+  ///
+  /// Best-effort: never blocks or fails the record save itself.
+  Future<void> _notifyInterestedAdopter({
+    required String caseId,
+    required String animalId,
+    required String animalName,
+  }) async {
+    try {
+      final caseSnap = await FirebaseFirestore.instance.collection('cases').doc(caseId).get();
+      final caseData = caseSnap.data();
+      if (caseData == null) return;
+
+      final reporterInterested = caseData['interestedToAdopt'] == 'yes';
+      final willingAdopterId = caseData['willingAdopterId'] as String?;
+      final hasWillingAdopter = willingAdopterId != null && willingAdopterId.isNotEmpty;
+      if (!reporterInterested && !hasWillingAdopter) return;
+
+      final displayName = animalName.isEmpty ? 'This animal' : animalName;
+      final message =
+          '$displayName is now ready for adoption! Reach out through the app to start the process.';
+
+      await FirebaseFirestore.instance.collection('cases').doc(caseId).update({
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': message, 'timestamp': Timestamp.now()}
+        ]),
+      });
+    } catch (_) {
+      // Never block the record save on a notification failure.
+    }
+  }
+
   // TODO(qr-nfc): generating a real per-animal QR/NFC tag, associating it
   // with this record, and printing/displaying it are not implemented.
   // Also TODO: NFC support, if it ends up sharing the same identifier as
@@ -513,6 +570,15 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             if (widget.prefillData!['rescueDate'] is Timestamp) 'rescueDate': widget.prefillData!['rescueDate'],
           }
         });
+      }
+
+      final caseIdForNotification = widget.linkedCaseId ?? widget.existingData?['linkedCaseId'] as String?;
+      if (_becameAdoptableThisSave && caseIdForNotification != null && caseIdForNotification.isNotEmpty) {
+        await _notifyInterestedAdopter(
+          caseId: caseIdForNotification,
+          animalId: docRef.id,
+          animalName: _nameController.text.trim(),
+        );
       }
 
       if (mounted) {

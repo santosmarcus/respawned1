@@ -154,6 +154,10 @@ class _RescuePageState extends State<RescuePage> {
   String? _selectedRescueType;
   String? _coordinateChoice;
   String? _adoptionChoice;
+  // Only asked/answered when _adoptionChoice == 'yes' — resets to false if
+  // the reporter changes their mind and un-checks Yes, so a stale consent
+  // never survives under a "No" answer.
+  bool _adoptionCommitmentAccepted = false;
   String? _selectedAnimalType;
   bool _isLoading = false;
 
@@ -1707,8 +1711,10 @@ class _RescuePageState extends State<RescuePage> {
                           height: 20,
                           child: Checkbox(
                             value: _adoptionChoice == 'no',
-                            onChanged: (val) =>
-                                setState(() => _adoptionChoice = 'no'),
+                            onChanged: (val) => setState(() {
+                              _adoptionChoice = 'no';
+                              _adoptionCommitmentAccepted = false;
+                            }),
                             activeColor: AppColors.textPrimary,
                             side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
                             shape: RoundedRectangleBorder(
@@ -1727,6 +1733,89 @@ class _RescuePageState extends State<RescuePage> {
                         ),
                       ],
                     ),
+
+                    // Only shown once the reporter has expressed interest in
+                    // adopting — a plain "yes I'd like to adopt" isn't
+                    // enough on its own; this makes the actual obligations
+                    // explicit (cost, interview, agreement, follow-ups)
+                    // before staff treat them as a real candidate at
+                    // discharge.
+                    if (_adoptionChoice == 'yes') ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'By agreeing to this, you confirm that you are '
+                                  'willing to cover any necessary veterinary '
+                                  'expenses, participate in the adoption interview '
+                                  'process, comply with the adoption agreement, and '
+                                  'provide post-adoption updates as required.',
+                              style: GoogleFonts.zain(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text(
+                            '*',
+                            style: TextStyle(
+                              color: Colors.red,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Once the animal is in treatment, the organization will '
+                            'visit you at the veterinary clinic to discuss the '
+                            'adoption process with you.',
+                        style: GoogleFonts.zain(
+                          fontSize: 11,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => setState(() =>
+                        _adoptionCommitmentAccepted = !_adoptionCommitmentAccepted),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: Checkbox(
+                                value: _adoptionCommitmentAccepted,
+                                onChanged: (val) => setState(() =>
+                                _adoptionCommitmentAccepted = val ?? false),
+                                activeColor: AppColors.textPrimary,
+                                side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'I agree.',
+                                style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
 
                     if (_selectedRescueType == 'Neglect or Abuse') ...[
                       const SizedBox(height: 20),
@@ -2905,7 +2994,8 @@ class _RescuePageState extends State<RescuePage> {
         _conditionController.text.trim().isEmpty ||
         _onSiteChoice == null ||
         _coordinateChoice == null ||
-        _adoptionChoice == null) {
+        _adoptionChoice == null ||
+        (_adoptionChoice == 'yes' && !_adoptionCommitmentAccepted)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please fill in all required fields.'),
@@ -3033,6 +3123,8 @@ class _RescuePageState extends State<RescuePage> {
         'witnessName': _witnessNameController.text.trim(),
         'witnessPhone': _witnessNumberController.text.trim(),
         'interestedToAdopt': _adoptionChoice,
+        'adoptionCommitmentAccepted':
+        _adoptionChoice == 'yes' ? _adoptionCommitmentAccepted : null,
         'scannedTagId': _scannedTagId,
         'status': 'pending',
         'statusHistory': [

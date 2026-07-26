@@ -16,6 +16,7 @@ import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
@@ -1134,7 +1135,21 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
         (willingAdopterId != null && willingAdopterId.isNotEmpty);
   }
 
-  Future<void> _registerInterest(String type) async {
+  /// True once the CURRENT viewer specifically is the one whose adoption
+  /// interest is on file for this case — either as the reporter (checked
+  /// "yes" to adopting at report time) or as a different user who tapped
+  /// "Interest to Adopt" here. Drives the "you'll be notified" banner
+  /// below, as opposed to _hasWillingAdopter, which is just "does anyone
+  /// have interest registered".
+  bool get _viewerIsInterestedParty {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    if (widget.isReporter && data['interestedToAdopt'] == 'yes') return true;
+    return data['willingAdopterId'] == uid;
+  }
+
+  // Foster removed for now — only adoption interest is registered here.
+  Future<void> _registerInterest() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
@@ -1148,7 +1163,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
       final name =
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
           .trim();
-      final label = type == 'foster' ? 'foster' : 'adopt';
 
       await FirebaseFirestore.instance
           .collection('cases')
@@ -1156,11 +1170,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           .update({
         'willingAdopterId': uid,
         'willingAdopterName': name.isEmpty ? 'A general user' : name,
-        'willingAdopterType': type,
+        'willingAdopterType': 'adopt',
         'statusHistory': FieldValue.arrayUnion([
           {
             'status':
-            '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
+            '${name.isEmpty ? 'A general user' : name} expressed interest to adopt.',
             'timestamp': Timestamp.now(),
           }
         ]),
@@ -1168,10 +1182,9 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(type == 'foster'
-                ? 'Thanks! Your interest to foster has been noted.'
-                : 'Thanks! Your interest to adopt has been noted.'),
+          const SnackBar(
+            content: Text(
+                "Thanks! We'll notify you here once this animal is ready for adoption."),
             backgroundColor: AppColors.greenrspwn,
           ),
         );
@@ -1340,7 +1353,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                'This rescue is available for adoption or temporary foster.',
+                'This rescue is available for adoption.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.zain(
                   fontSize: 13,
@@ -1350,62 +1363,66 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                    _isSubmitting ? null : () => _registerInterest('adopt'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: _isSubmitting
-                        ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.textPrimary),
-                    )
-                        : Text('Interest to Adopt',
-                        style: GoogleFonts.zain(fontSize: 13)),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: _isSubmitting ? null : _registerInterest,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textPrimary,
+                  side: const BorderSide(color: AppColors.textPrimary),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                    _isSubmitting ? null : () => _registerInterest('foster'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
+                child: _isSubmitting
+                    ? const SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.textPrimary),
+                )
+                    : Text('Interest to Adopt',
+                    style: GoogleFonts.zain(fontSize: 13)),
+              ),
+            ),
+          ] else if (_viewerIsInterestedParty) ...[
+            // Confirms to the specific person who registered interest
+            // (reporter or otherwise) that they don't need to keep
+            // checking back — see create_animal_record_page.dart's
+            // _notifyInterestedAdopter and notifications_screen.dart's
+            // willingAdopterId-scoped feed for how that notification
+            // actually reaches them once the animal is marked adoptable.
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              decoration: BoxDecoration(
+                color: AppColors.greenrspwn.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.notifications_active_outlined,
+                      size: 18, color: AppColors.greenrspwn),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "You've expressed interest in adopting this animal. "
+                          "We'll notify you here once it's ready for adoption.",
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
                       ),
                     ),
-                    child: _isSubmitting
-                        ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.textPrimary),
-                    )
-                        : Text('Interest to Foster',
-                        style: GoogleFonts.zain(fontSize: 13)),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ] else
             _DetailRow(
-              'Willing adopter/foster',
-              '${data['willingAdopterName'] ?? '-'}'
-                  '${data['willingAdopterType'] != null ? ' (${data['willingAdopterType']})' : ''}',
+              'Willing adopter',
+              '${data['willingAdopterName'] ?? '-'}',
             ),
 
           const SizedBox(height: 24),
@@ -1689,6 +1706,15 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
   XFile? _pickedImage;
   bool _submitting = false;
   bool _detectingLocation = false;
+  // Captured alongside _locationController's resolved address text whenever
+  // detection succeeds via GPS — lets a "moved" report carry real
+  // coordinates, not just a display string, so anything that needs to
+  // measure distance to the animal's latest known location (e.g. the
+  // Community Adoption track page's location-gated adopt button) has
+  // something precise to compare against instead of only the original
+  // report's lat/lng.
+  double? _detectedLat;
+  double? _detectedLng;
   final _commentController = TextEditingController();
   final _locationController = TextEditingController();
   final _picker = ImagePicker();
@@ -1753,7 +1779,11 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (mounted) {
-          setState(() => _locationController.clear());
+          setState(() {
+            _locationController.clear();
+            _detectedLat = null;
+            _detectedLng = null;
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
@@ -1774,7 +1804,13 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        if (mounted) setState(() => _locationController.clear());
+        if (mounted) {
+          setState(() {
+            _locationController.clear();
+            _detectedLat = null;
+            _detectedLng = null;
+          });
+        }
         return;
       }
 
@@ -1819,10 +1855,20 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
 
       }
 
-      if (mounted) setState(() => _locationController.text = resolvedAddress);
+      if (mounted) {
+        setState(() {
+          _locationController.text = resolvedAddress;
+          _detectedLat = pos.latitude;
+          _detectedLng = pos.longitude;
+        });
+      }
     } catch (e) {
       if (mounted) {
-        setState(() => _locationController.clear());
+        setState(() {
+          _locationController.clear();
+          _detectedLat = null;
+          _detectedLng = null;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               content:
@@ -1876,6 +1922,8 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
         'comment': _commentController.text.trim(),
         'newAddress':
         _selectedType == 'moved' ? _locationController.text.trim() : null,
+        'newLat': _selectedType == 'moved' ? _detectedLat : null,
+        'newLng': _selectedType == 'moved' ? _detectedLng : null,
         'photoUrl': photoUrl,
         'timestamp': FieldValue.serverTimestamp(),
       });
@@ -1894,6 +1942,34 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
         },
         'timestamp': FieldValue.serverTimestamp(),
       });
+
+      // Once a case has been rejected as healthy/low-urgency and moved to
+      // Community Adoption, the org is no longer actively tracking it —
+      // any single community sighting update (whichever type) is treated
+      // as enough signal to close the loop, since it means someone in the
+      // community has eyes on the animal. Ordinary active cases (still in
+      // the rescue pipeline) are untouched by this — this only applies to
+      // the Community Adoption carve-out.
+      final caseSnap =
+      await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).get();
+      final caseData = caseSnap.data();
+      if (caseData != null &&
+          isCommunityAdoptionEligible(
+            status: caseData['status'] as String?,
+            rejectionReason: caseData['rejectionReason'] as String?,
+            rescueType: caseData['rescueType'] as String?,
+          )) {
+        await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).update({
+          'status': 'closed',
+          'statusHistory': FieldValue.arrayUnion([
+            {
+              'status':
+              'Case closed after a community update — this animal is now tracked through Community Adoption.',
+              'timestamp': Timestamp.now(),
+            }
+          ]),
+        });
+      }
 
       if (mounted) {
         setState(() {
@@ -2042,6 +2118,18 @@ class _CommunityReportSectionState extends State<_CommunityReportSection> {
               TextField(
                 controller: _locationController,
                 enabled: !_detectingLocation,
+                onChanged: (_) {
+                  // A manual edit means the text no longer necessarily
+                  // matches _detectedLat/_detectedLng — drop them rather
+                  // than silently submitting stale coordinates alongside
+                  // different address text.
+                  if (_detectedLat != null || _detectedLng != null) {
+                    setState(() {
+                      _detectedLat = null;
+                      _detectedLng = null;
+                    });
+                  }
+                },
                 style: GoogleFonts.zain(fontSize: 13),
                 decoration: InputDecoration(
                   hintText: 'Enter the new location',
