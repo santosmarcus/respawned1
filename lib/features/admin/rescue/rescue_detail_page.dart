@@ -18,6 +18,7 @@ import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/accept_case_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_messages_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
@@ -436,7 +437,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text(c.animalType ?? 'Animal',
+                  child: Text(c.speciesSummary,
                       style: GoogleFonts.tiltWarp(
                           fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                 ),
@@ -467,12 +468,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               ],
             ),
             const SizedBox(height: 12),
-            RescueRiskBanner(
-              biteRisk: c.biteRisk,
-              escapeRisk: c.escapeRisk,
-              safetyIndicators: c.safetyIndicators,
-              handlingNotes: c.handlingNotes,
-            ),
+            RescueRiskBanner(highRiskAnimals: c.highRiskAnimals),
 
             if (c.openForTransfer) ...[
               const SizedBox(height: 8),
@@ -1012,6 +1008,10 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
             const SizedBox(height: 24),
 
+            CaseMessagesSection(caseId: c.id),
+
+            const SizedBox(height: 16),
+
             CommunityReportsSection(caseId: c.id),
 
             const SizedBox(height: 32),
@@ -1285,15 +1285,17 @@ class _AnimalGroupSection extends StatelessWidget {
   final RescueCase currentCase;
   const _AnimalGroupSection({required this.currentCase});
 
-  // Maps an `animals[]` entry (species/breed/sex/size/colorMarkings) onto
-  // the same key shape `_AnimalCard._animalFields()` already expects from a
-  // full case doc (animalType/breed/sex/size/colorMarkings).
+  // Maps an `animals[]` entry onto the same key shape
+  // `_AnimalCard._animalFields()` already expects from a full case doc
+  // (animalType/breed/sex/size/colorMarkings/biteRisk/escapeRisk).
   Map<String, dynamic> _animalMap(Map raw) => {
     'animalType': raw['species'],
     'breed': raw['breed'],
     'sex': raw['sex'],
     'size': raw['size'],
     'colorMarkings': raw['colorMarkings'],
+    'biteRisk': raw['biteRisk'],
+    'escapeRisk': raw['escapeRisk'],
   };
 
   @override
@@ -1314,13 +1316,15 @@ class _AnimalGroupSection extends StatelessWidget {
         children: [
           _DetailSection(label: 'No. of Animals', value: '$total'),
           const SizedBox(height: 4),
-          for (var i = 0; i < animals.length; i++)
-            _AnimalCard(
-              data: _animalMap(animals[i] as Map),
-              index: i + 1,
-              total: total,
-              highlight: false,
-            ),
+          _responsiveAnimalCards([
+            for (var i = 0; i < animals.length; i++)
+              _AnimalCard(
+                data: _animalMap(animals[i] as Map),
+                index: i + 1,
+                total: total,
+                highlight: false,
+              ),
+          ]),
         ],
       );
     }
@@ -1352,13 +1356,39 @@ class _AnimalGroupSection extends StatelessWidget {
           children: [
             _DetailSection(label: 'No. of Animals', value: '$total'),
             const SizedBox(height: 4),
-            for (var i = 0; i < docs.length; i++)
-              _AnimalCard(
-                data: docs[i].data(),
-                index: i + 1,
-                total: total,
-                highlight: docs[i].id == currentCase.id,
-              ),
+            _responsiveAnimalCards([
+              for (var i = 0; i < docs.length; i++)
+                _AnimalCard(
+                  data: docs[i].data(),
+                  index: i + 1,
+                  total: total,
+                  highlight: docs[i].id == currentCase.id,
+                ),
+            ]),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Full-width vertical stack on phone widths; a two-column grid of
+  /// equal-width, equal-padding cards once there's enough room for both to
+  /// stay legible — never a horizontally compressed single Row (which is
+  /// what made the second card too narrow to read).
+  Widget _responsiveAnimalCards(List<Widget> cards) {
+    const breakpoint = 480.0;
+    const gap = 8.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < breakpoint) {
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: cards);
+        }
+        final cardWidth = (constraints.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final card in cards) SizedBox(width: cardWidth, child: card),
           ],
         );
       },
@@ -1415,6 +1445,8 @@ class _AnimalCard extends StatelessWidget {
     final sex = data['sex'] as String?;
     final size = data['size'] as String?;
     final colorMarkings = data['colorMarkings'] as String?;
+    final biteRisk = data['biteRisk'] as String?;
+    final escapeRisk = data['escapeRisk'] as String?;
 
     return [
       if (species != null && species.isNotEmpty) _DetailSection(label: 'Species', value: species),
@@ -1423,6 +1455,8 @@ class _AnimalCard extends StatelessWidget {
       if (size != null && size.isNotEmpty) _DetailSection(label: 'Size', value: size),
       if (colorMarkings != null && colorMarkings.isNotEmpty)
         _DetailSection(label: 'Color / Distinguishing Markings', value: colorMarkings),
+      if (biteRisk != null && biteRisk.isNotEmpty) _DetailSection(label: 'Bite Risk', value: biteRisk),
+      if (escapeRisk != null && escapeRisk.isNotEmpty) _DetailSection(label: 'Escape Risk', value: escapeRisk),
     ];
   }
 }

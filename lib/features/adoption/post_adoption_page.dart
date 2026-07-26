@@ -13,6 +13,7 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
+import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
 
 
 String _formatDate(DateTime d) {
@@ -77,6 +78,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
 
             final personal = (data['personal'] as Map?) ?? {};
             final animalName = personal['animalName'] as String? ?? 'Your pet';
+            final animalRecordId = personal['animalRecordId'] as String?;
             final orgName = personal['organizationName'] as String?;
             final adopterName = personal['adopterName'] as String? ?? '';
             final adoptedDate = extractAdoptionCompletedDate(data);
@@ -117,15 +119,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                     children: [
                       Stack(
                         children: [
-                          Container(
-                            height: 150,
-                            width: double.infinity,
-                            color: AppColors.tearspwn,
-                            child: const Center(
-                              child: Icon(Icons.pets,
-                                  size: 56, color: AppColors.textPrimary),
-                            ),
-                          ),
+                          AnimalRecordHeaderImage(animalRecordId: animalRecordId),
                           _BackHeader(onTap: () => Navigator.pop(context)),
                           _MoreOptionsButton(
                             onTap: () => _showPetOptionsDialog(
@@ -146,23 +140,13 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Text(
-                                  animalName,
-                                  style: GoogleFonts.tiltWarp(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.textPrimary,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                const Icon(Icons.pets,
-                                    size: 18, color: AppColors.textPrimary),
-                                const SizedBox(width: 6),
-                                const Icon(Icons.search,
-                                    size: 18, color: AppColors.textPrimary),
-                              ],
+                            Text(
+                              animalName,
+                              style: GoogleFonts.tiltWarp(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
                             ),
                             const SizedBox(height: 18),
 
@@ -291,56 +275,84 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                               final done = f.isTerminal;
                               final isCurrent = currentDue?.id == f.id;
                               final overdue = f.displayStatus(now) == 'Overdue';
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 4),
-                                child: Row(
-                                  crossAxisAlignment:
-                                  CrossAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      done
-                                          ? Icons.check_circle
-                                          : Icons.circle,
-                                      size: done ? 15 : 8,
-                                      color: done
-                                          ? AppColors.greenrspwn
-                                          : (overdue
-                                          ? Colors.redAccent
-                                          : (isCurrent
-                                          ? AppColors.textPrimary
-                                          : AppColors.slaterspwn)),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Follow-up ${f.sequenceNumber} - ${_formatDate(f.scheduledDate)}',
-                                            style: GoogleFonts.zain(
-                                              fontSize: 13,
-                                              color: AppColors.textPrimary,
-                                              fontWeight: isCurrent && !done
-                                                  ? FontWeight.w700
-                                                  : FontWeight.normal,
+                              // Viewable once there's actually something to
+                              // show — a submitted (or later) follow-up.
+                              // Future/locked ones stay non-interactive.
+                              final viewable = f.submittedAt != null;
+                              return InkWell(
+                                onTap: viewable
+                                    ? () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => PostAdoptionFollowUpDetailPage(
+                                              adoptionId: adoptionId,
+                                              followUpId: f.id,
                                             ),
                                           ),
-                                          if (isCurrent && !done)
+                                        )
+                                    : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 4),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                    CrossAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        done
+                                            ? Icons.check_circle
+                                            : Icons.circle,
+                                        size: done ? 15 : 8,
+                                        color: done
+                                            ? AppColors.greenrspwn
+                                            : (overdue
+                                            ? Colors.redAccent
+                                            : (isCurrent
+                                            ? AppColors.textPrimary
+                                            : AppColors.slaterspwn)),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                          children: [
                                             Text(
-                                              f.displayStatus(now),
+                                              'Follow-up ${f.sequenceNumber} - ${_formatDate(f.scheduledDate)}',
                                               style: GoogleFonts.zain(
-                                                fontSize: 11,
-                                                color: overdue
-                                                    ? Colors.redAccent
-                                                    : AppColors.textSecondary,
+                                                fontSize: 13,
+                                                color: AppColors.textPrimary,
+                                                fontWeight: isCurrent && !done
+                                                    ? FontWeight.w700
+                                                    : FontWeight.normal,
                                               ),
                                             ),
-                                        ],
+                                            if (isCurrent && !done)
+                                              Text(
+                                                f.displayStatus(now),
+                                                style: GoogleFonts.zain(
+                                                  fontSize: 11,
+                                                  color: overdue
+                                                      ? Colors.redAccent
+                                                      : AppColors.textSecondary,
+                                                ),
+                                              ),
+                                            if (viewable && !(isCurrent && !done))
+                                              Text(
+                                                f.status.label,
+                                                style: GoogleFonts.zain(
+                                                  fontSize: 11,
+                                                  color: AppColors.textSecondary,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                      if (viewable)
+                                        const Icon(Icons.chevron_right,
+                                            size: 18, color: AppColors.textSecondary),
+                                    ],
+                                  ),
                                 ),
                               );
                             }),
@@ -806,6 +818,223 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
         );
       }
     }
+  }
+}
+
+/// Read-only view of a submitted follow-up — the user-facing counterpart to
+/// admin's expanded follow-up card (post_adoption_details_page.dart's
+/// _FollowUpCard/_AdopterResponseViewer), with admin-only fields (reminder
+/// count, confirmed-by, manual-completion reason, admin notes) left out.
+/// Shows follow-up number, due date, submitted date, the adopter's own
+/// answers, uploaded photos, submission status, and the organization's
+/// response note if one was left when confirming receipt. Legacy
+/// submissions with missing fields render blank/omitted rather than
+/// crashing — every field read here is already null-safe.
+class PostAdoptionFollowUpDetailPage extends StatelessWidget {
+  final String adoptionId;
+  final String followUpId;
+  const PostAdoptionFollowUpDetailPage({super.key, required this.adoptionId, required this.followUpId});
+
+  @override
+  Widget build(BuildContext context) {
+    final followUpRef = FirebaseFirestore.instance
+        .collection('adoptions')
+        .doc(adoptionId)
+        .collection('followUps')
+        .doc(followUpId);
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+        title: Text('Follow-up Details',
+            style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+      ),
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: followUpRef.snapshots(),
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return Center(
+              child: Text('Could not load this follow-up.',
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+            );
+          }
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
+          }
+          if (!snap.data!.exists) {
+            return Center(
+              child: Text('This follow-up could not be found.',
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+            );
+          }
+          final f = FollowUpRecord.fromFirestore(snap.data!);
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Follow-up ${f.sequenceNumber}',
+                    style: GoogleFonts.tiltWarp(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.tearspwn.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(f.status.label,
+                      style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                ),
+                const SizedBox(height: 16),
+                _detail('Due date', _formatDate(f.scheduledDate)),
+                if (f.submittedAt != null) _detail('Submitted', _formatDate(f.submittedAt!)),
+                const SizedBox(height: 12),
+                Text('Your Answers', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                const SizedBox(height: 8),
+                _AnswersViewer(adoptionId: adoptionId, followUpId: followUpId),
+                if (f.confirmationNotes != null && f.confirmationNotes!.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Organization Response', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  const SizedBox(height: 6),
+                  Text(f.confirmationNotes!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _detail(String label, String value) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 90,
+              child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            ),
+            Expanded(
+              child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            ),
+          ],
+        ),
+      );
+}
+
+class _AnswersViewer extends StatelessWidget {
+  final String adoptionId;
+  final String followUpId;
+  const _AnswersViewer({required this.adoptionId, required this.followUpId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(adoptionId)
+          .collection('checkins')
+          .doc(followUpId)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Text('Could not load your answers.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary));
+        }
+        if (!snap.hasData) {
+          return const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2)));
+        }
+        final data = snap.data?.data();
+        if (data == null) {
+          return Text('No submitted answers found for this follow-up.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary));
+        }
+        final healthConcerns = List<String>.from(data['healthConcerns'] ?? const []);
+        final healthOther = data['healthConcernsOther'] as String?;
+        final images = List<String>.from(data['images'] ?? const []);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _qa('How is the pet doing?', data['howIsPetDoing'] as String?),
+            _qa(
+              'Health concerns',
+              healthConcerns.isEmpty
+                  ? null
+                  : healthConcerns.join(', ') + ((healthOther != null && healthOther.isNotEmpty) ? ' ($healthOther)' : ''),
+            ),
+            _qa('Vaccinations', data['vaccinated'] as String?),
+            _qa('Notes', data['notes'] as String?),
+            if (images.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('Photos (${images.length})',
+                  style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final url in images)
+                    GestureDetector(
+                      onTap: () => _showFullImage(context, url),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(url,
+                            width: 90,
+                            height: 90,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(width: 90, height: 90, color: AppColors.tearspwn)),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  void _showFullImage(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                  padding: const EdgeInsets.all(6),
+                  child: const Icon(Icons.close, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _qa(String label, String? value) {
+    if (value == null || value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+          Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
   }
 }
 

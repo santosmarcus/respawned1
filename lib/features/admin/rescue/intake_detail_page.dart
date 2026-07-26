@@ -19,7 +19,18 @@ typedef ShelterDestination = ({String name, String? address, String? placeId, do
 class IntakeDetailPage extends ConsumerStatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const IntakeDetailPage({super.key, required this.caseId, required this.data});
+
+  /// Restricts this page's "Animal Records" progress (spec §9) to a
+  /// specific subset of the case's `animals[]` indexes — the animals the
+  /// admin selected on Treatment Details' Intake action. Null means "every
+  /// animal on the case" (legacy whole-case behavior, unchanged) — the
+  /// shelter destination/transport/quarantine sections below stay
+  /// case-wide either way (a case only ever has one transport leg/shelter
+  /// destination/quarantine decision, even with animals on separate
+  /// post-treatment paths).
+  final List<int>? animalIndexes;
+
+  const IntakeDetailPage({super.key, required this.caseId, required this.data, this.animalIndexes});
 
   @override
   ConsumerState<IntakeDetailPage> createState() => _IntakeDetailPageState();
@@ -339,14 +350,33 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     // Treat every animal as already having its record in that case, both
     // for the UI below and for intake auto-completion.
     final sourceAnimalRecordId = c.raw['sourceAnimalRecordId'] as String?;
-    final totalAnimals = c.animalCount;
-    final completedIndexes = sourceAnimalRecordId != null
-        ? Set<int>.from(List.generate(totalAnimals, (i) => i))
+    // Per-animal path (spec §9): scoped to just the animals this Intake
+    // action was started for — another animal on the same case may still
+    // be mid-Treatment or on a different post-treatment path, and this
+    // page's own "N of M records" progress/completion must never wait on
+    // that other animal.
+    final totalAnimals = widget.animalIndexes?.length ?? c.animalCount;
+    final allCompletedIndexes = sourceAnimalRecordId != null
+        ? Set<int>.from(List.generate(c.animalCount, (i) => i))
         : (ref.watch(completedAnimalRecordIndexesProvider(widget.caseId)).asData?.value ?? <int>{});
+    final completedIndexes = widget.animalIndexes != null
+        ? allCompletedIndexes.where(widget.animalIndexes!.contains).toSet()
+        : allCompletedIndexes;
 
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _checkIntakeAutoComplete(c, completedCount: completedIndexes.length, totalAnimals: totalAnimals),
-    );
+    if (widget.animalIndexes != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (completedIndexes.length >= totalAnimals && c.intakeReceivedAt != null) {
+          await ref.read(rescueCaseRepositoryProvider).completeIntakeForAnimals(
+                caseId: widget.caseId,
+                animalIndexes: widget.animalIndexes!,
+              );
+        }
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _checkIntakeAutoComplete(c, completedCount: completedIndexes.length, totalAnimals: totalAnimals),
+      );
+    }
 
     final dischargeDateStr = c.dischargedAt != null
         ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'
@@ -575,6 +605,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 completedCount: completedIndexes.length,
                 received: c.intakeReceivedAt != null,
                 sourceAnimalRecordId: sourceAnimalRecordId,
+                animalIndexes: widget.animalIndexes,
               ),
             ],
 
@@ -966,6 +997,7 @@ class _AnimalRecordsSection extends StatelessWidget {
   /// single case-level id, and both origin flows that set it are
   /// single-animal only today.
   final String? sourceAnimalRecordId;
+  final List<int>? animalIndexes;
 
   const _AnimalRecordsSection({
     required this.caseId,
@@ -974,6 +1006,7 @@ class _AnimalRecordsSection extends StatelessWidget {
     required this.completedCount,
     required this.received,
     this.sourceAnimalRecordId,
+    this.animalIndexes,
   });
 
   @override
@@ -1029,7 +1062,9 @@ class _AnimalRecordsSection extends StatelessWidget {
                 ? null
                 : () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => AnimalRecordsFlowPage(caseId: caseId, caseData: data)),
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              AnimalRecordsFlowPage(caseId: caseId, caseData: data, animalIndexes: animalIndexes)),
                     ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellowrspwn,

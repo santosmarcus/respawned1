@@ -14,6 +14,8 @@ import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
@@ -806,10 +808,11 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: RescueRiskBanner(
-                            biteRisk: data['biteRisk'] as String?,
-                            escapeRisk: data['escapeRisk'] as String?,
-                            safetyIndicators: List<String>.from(data['safetyIndicators'] ?? const []),
-                            handlingNotes: data['handlingNotes'] as String?,
+                            highRiskAnimals: highRiskAnimalsIn(
+                              animals: data['animals'] as List?,
+                              legacyBiteRisk: data['biteRisk'] as String?,
+                              legacyEscapeRisk: data['escapeRisk'] as String?,
+                            ),
                           ),
                         ),
 
@@ -1296,7 +1299,10 @@ class _AdminCaseDetailTab extends StatelessWidget {
           _Row('Pet Transporter Mobile Number', '-'),
           _Row('Address', data['address']),
           _Row('Description', data['condition']),
-          _Row('Type of Animal', data['animalType']),
+          _Row(
+              'Type of Animal',
+              species_summary_util.summarizeSpecies(
+                  animals: data['animals'] as List?, legacyAnimalType: data['animalType'] as String?)),
           _Row('Urgency', data['urgency']),
           _Row('Coordination', data['coordinateWithShelter']),
           if (data['coordinateWithShelter'] == 'no') ...[

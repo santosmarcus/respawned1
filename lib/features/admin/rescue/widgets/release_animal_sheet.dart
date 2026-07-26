@@ -18,20 +18,25 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 /// minimal handoff fields needed for testing
 /// (releasedToReporterId/Name/At/notes) and shows "Release confirmed", not
 /// "Adoption approved".
-Future<bool> showReleaseAnimalSheet(BuildContext context, {required RescueCase rescueCase}) async {
+Future<bool> showReleaseAnimalSheet(
+  BuildContext context, {
+  required RescueCase rescueCase,
+  List<int>? animalIndexes,
+}) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.background,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (_) => _ReleaseAnimalSheetBody(rescueCase: rescueCase),
+    builder: (_) => _ReleaseAnimalSheetBody(rescueCase: rescueCase, animalIndexes: animalIndexes),
   );
   return result ?? false;
 }
 
 class _ReleaseAnimalSheetBody extends ConsumerStatefulWidget {
   final RescueCase rescueCase;
-  const _ReleaseAnimalSheetBody({required this.rescueCase});
+  final List<int>? animalIndexes;
+  const _ReleaseAnimalSheetBody({required this.rescueCase, this.animalIndexes});
 
   @override
   ConsumerState<_ReleaseAnimalSheetBody> createState() => _ReleaseAnimalSheetBodyState();
@@ -60,6 +65,7 @@ class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody
             notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
             actorUid: 'admin',
             actorName: 'Admin Staff',
+            animalIndexes: widget.animalIndexes,
           );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

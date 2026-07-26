@@ -395,9 +395,12 @@ class _RescueRequestState extends State<RescueRequest> {
     final condition = d['condition'] ?? '';
     final animalType = d['animalType'] ?? '';
     final photoUrls = List<String>.from(d['photoUrls'] ?? []);
-    final biteRisk = d['biteRisk'] as String?;
-    final escapeRisk = d['escapeRisk'] as String?;
-    final isHighRisk = hasHighRescueRisk(biteRisk: biteRisk, escapeRisk: escapeRisk);
+    final highRiskAnimals = highRiskAnimalsIn(
+      animals: d['animals'] as List?,
+      legacyBiteRisk: d['biteRisk'] as String?,
+      legacyEscapeRisk: d['escapeRisk'] as String?,
+    );
+    final isHighRisk = highRiskAnimals.isNotEmpty;
     // A pending admin offer (widget.assignmentId != null) leaves the
     // case's own raw status at 'accepted' while awaiting THIS rider's
     // response — that must never read as "already accepted" here.
@@ -506,12 +509,7 @@ class _RescueRequestState extends State<RescueRequest> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  RescueRiskBanner(
-                    biteRisk: biteRisk,
-                    escapeRisk: escapeRisk,
-                    safetyIndicators: List<String>.from(d['safetyIndicators'] ?? const []),
-                    handlingNotes: d['handlingNotes'] as String?,
-                  ),
+                  RescueRiskBanner(highRiskAnimals: highRiskAnimals),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

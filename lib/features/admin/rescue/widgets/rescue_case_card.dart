@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/utils/animal_treatment_state.dart';
+import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 
 /// Compact rescue list card — image, case ID, species summary, priority,
@@ -35,6 +37,14 @@ class RescueCaseCard extends StatelessWidget {
   final bool highlightBorder;
   final String? pendingOfferNote;
 
+  /// Restricts the species-summary/animal-count line to only the animals
+  /// currently in this stage (spec §7: "card/page must show only the
+  /// animals relevant to that stage") — e.g. 'intake' on the Intake tab so
+  /// a case with one animal still in Treatment doesn't show that animal's
+  /// species here too. Null (every call site outside Treatment/Intake)
+  /// keeps the original whole-case summary unchanged.
+  final String? stageFilter;
+
   const RescueCaseCard({
     super.key,
     required this.rescueCase,
@@ -42,6 +52,7 @@ class RescueCaseCard extends StatelessWidget {
     this.showStatusChip = false,
     this.highlightBorder = false,
     this.pendingOfferNote,
+    this.stageFilter,
   });
 
   @override
@@ -58,6 +69,17 @@ class RescueCaseCard extends StatelessWidget {
     final isTreatmentStage = c.status == RescueStatus.treatment;
     final locationLine = isTreatmentStage ? (c.vetClinicName ?? '') : (c.address ?? '');
     final dateTimeLine = ts != null ? '$dateStr  $timeStr' : '';
+
+    // Stage-filtered species summary/count (spec §7) — falls back to the
+    // whole-case summary whenever no filter is requested, or the case has
+    // no `animals[]` array to filter (legacy single-animal case).
+    final filterStage = stageFilter;
+    final stageAnimalIndexes =
+        filterStage != null && c.animals.isNotEmpty ? animalIndexesInStage(c, filterStage) : null;
+    final stageAnimals = stageAnimalIndexes != null ? [for (final i in stageAnimalIndexes) c.animals[i]] : null;
+    final speciesSummary =
+        stageAnimals != null ? species_summary_util.summarizeSpecies(animals: stageAnimals) : c.speciesSummary;
+    final animalCount = stageAnimals?.length ?? c.animalCount;
 
     return GestureDetector(
       onTap: onTap,
@@ -114,7 +136,7 @@ class RescueCaseCard extends StatelessWidget {
                   // multi-animal report's animals actually show up; the
                   // card itself is always exactly one per case document.
                   Text(
-                    c.animalCount > 1 ? '${c.speciesSummary} · ${c.animalCount} animals' : c.speciesSummary,
+                    animalCount > 1 ? '$speciesSummary · $animalCount animals' : speciesSummary,
                     style: GoogleFonts.zain(
                         fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                     maxLines: 1,

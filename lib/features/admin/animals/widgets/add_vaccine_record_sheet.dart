@@ -193,7 +193,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
 
             Text('Vaccine', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
             const SizedBox(height: 4),
-            Text('Chips marked "Added" already have a record — tap to view it, or select the chip to add another dose.',
+            Text('Chips marked "Added" already have a record — tap the ⓘ to view it. To add a booster, use "Other" with a new date.',
                 style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
             const SizedBox(height: 6),
             Wrap(
@@ -318,10 +318,15 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
 }
 
 /// A vaccine option chip that's either plain-selectable (never recorded
-/// yet) or marked "Added" (at least one record already exists) — tapping
-/// an Added chip opens that record's info instead of silently selecting
-/// it, per spec ("show its current record ... rather than silently doing
-/// nothing").
+/// yet) or marked "Added" (at least one record already exists). An Added
+/// chip uses the exact same yellow the app already uses for a selected
+/// chip elsewhere — never a separate warning/error color — and is
+/// otherwise inert: the chip body itself has no tap handler, so it can't
+/// be mistaken for participating in vaccine selection. Its prior record
+/// is still reachable, just via a separate small info affordance rather
+/// than the chip acting pressable; a legitimate booster is added through
+/// the normal flow (pick the "Other" chip, or wait for a future dose —
+/// the duplicate check is keyed on name+date, not on this chip).
 class _VaccineChip extends StatelessWidget {
   final String label;
   final bool added;
@@ -346,25 +351,25 @@ class _VaccineChip extends StatelessWidget {
         onSelected: (_) => onSelect(),
       );
     }
-    return GestureDetector(
-      onTap: onTapAdded,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.yellowrspwn : AppColors.greenrspwn.withValues(alpha: 0.25),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.greenrspwn),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-            const SizedBox(width: 4),
-            const Icon(Icons.check_circle, size: 13, color: AppColors.greenrspwn),
-            const SizedBox(width: 2),
-            Text('Added', style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-          ],
-        ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.yellowrspwn,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+          const SizedBox(width: 4),
+          Text('Added', style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: onTapAdded,
+            behavior: HitTestBehavior.opaque,
+            child: const Icon(Icons.info_outline, size: 14, color: AppColors.textPrimary),
+          ),
+        ],
       ),
     );
   }

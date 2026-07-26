@@ -22,19 +22,36 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 class AnimalRecordsFlowPage extends ConsumerWidget {
   final String caseId;
   final Map<String, dynamic> caseData;
-  const AnimalRecordsFlowPage({super.key, required this.caseId, required this.caseData});
 
-  List<Map<String, dynamic>> _animalEntries(RescueCase c) {
-    if (c.animals.isNotEmpty) return c.animals;
-    // Legacy single-animal case: one synthetic entry from the flat fields.
+  /// Restricts this flow to a subset of the case's `animals[]` indexes
+  /// (spec §9) — e.g. only the animals the admin just moved to Intake,
+  /// while another animal on the same case may still be in Treatment. Null
+  /// means "every animal on the case" (the original whole-case behavior,
+  /// unchanged).
+  final List<int>? animalIndexes;
+
+  const AnimalRecordsFlowPage({super.key, required this.caseId, required this.caseData, this.animalIndexes});
+
+  /// (originalIndex, animalMap) pairs — original index is what
+  /// `sourceAnimalIndex`/`completedAnimalRecordIndexesProvider` key on, so
+  /// it must survive filtering down to [animalIndexes].
+  List<(int, Map<String, dynamic>)> _animalEntries(RescueCase c) {
+    final all = c.animals.isNotEmpty
+        ? c.animals
+        // Legacy single-animal case: one synthetic entry from the flat fields.
+        : [
+            {
+              'species': c.animalType,
+              'breed': c.raw['breed'],
+              'sex': c.raw['sex'],
+              'size': c.raw['size'],
+              'colorMarkings': c.raw['colorMarkings'],
+            },
+          ];
+    final indexes = animalIndexes;
     return [
-      {
-        'species': c.animalType,
-        'breed': c.raw['breed'],
-        'sex': c.raw['sex'],
-        'size': c.raw['size'],
-        'colorMarkings': c.raw['colorMarkings'],
-      },
+      for (var i = 0; i < all.length; i++)
+        if (indexes == null || indexes.contains(i)) (i, all[i]),
     ];
   }
 
@@ -58,7 +75,7 @@ class AnimalRecordsFlowPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = RescueCase.fromMap(caseId, caseData);
-    final animals = _animalEntries(c);
+    final entries = _animalEntries(c);
     final completedAsync = ref.watch(completedAnimalRecordIndexesProvider(caseId));
 
     return completedAsync.when(
@@ -68,22 +85,27 @@ class AnimalRecordsFlowPage extends ConsumerWidget {
         body: Center(child: Text('Could not load progress: $e')),
       ),
       data: (completed) {
-        final nextIndex = List.generate(animals.length, (i) => i).cast<int?>().firstWhere(
-              (i) => !completed.contains(i),
-              orElse: () => null,
-            );
-
-        if (nextIndex == null) {
-          return _RecordsForCaseView(caseId: caseId, totalAnimals: animals.length);
+        (int, Map<String, dynamic>)? next;
+        for (final e in entries) {
+          if (!completed.contains(e.$1)) {
+            next = e;
+            break;
+          }
         }
 
+        if (next == null) {
+          return _RecordsForCaseView(caseId: caseId, totalAnimals: entries.length, animalIndexes: animalIndexes);
+        }
+
+        final (originalIndex, animal) = next;
+        final stepCurrent = entries.indexWhere((e) => e.$1 == originalIndex) + 1;
         return CreateAnimalRecordPage(
-          key: ValueKey('animal-record-$caseId-$nextIndex'),
-          prefillData: _prefillFor(c, animals[nextIndex]),
+          key: ValueKey('animal-record-$caseId-$originalIndex'),
+          prefillData: _prefillFor(c, animal),
           linkedCaseId: caseId,
-          sourceAnimalIndex: nextIndex,
-          stepCurrent: nextIndex + 1,
-          stepTotal: animals.length,
+          sourceAnimalIndex: originalIndex,
+          stepCurrent: stepCurrent,
+          stepTotal: entries.length,
           popOnSuccess: false,
         );
       },
@@ -99,7 +121,8 @@ class AnimalRecordsFlowPage extends ConsumerWidget {
 class _RecordsForCaseView extends ConsumerStatefulWidget {
   final String caseId;
   final int totalAnimals;
-  const _RecordsForCaseView({required this.caseId, required this.totalAnimals});
+  final List<int>? animalIndexes;
+  const _RecordsForCaseView({required this.caseId, required this.totalAnimals, this.animalIndexes});
 
   @override
   ConsumerState<_RecordsForCaseView> createState() => _RecordsForCaseViewState();
@@ -113,6 +136,16 @@ class _RecordsForCaseViewState extends ConsumerState<_RecordsForCaseView> {
     if (_hasCheckedIntakeCompletion) return;
     _hasCheckedIntakeCompletion = true;
     try {
+      final indexes = widget.animalIndexes;
+      if (indexes != null) {
+        // Per-animal path (spec §9) — completes Intake only for this
+        // subset, never waiting on/requiring any other animal on the case.
+        await ref.read(rescueCaseRepositoryProvider).completeIntakeForAnimals(
+              caseId: widget.caseId,
+              animalIndexes: indexes,
+            );
+        return;
+      }
       final caseSnap = await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).get();
       if (!caseSnap.exists) return;
       final c = RescueCase.fromFirestore(caseSnap);
@@ -133,7 +166,11 @@ class _RecordsForCaseViewState extends ConsumerState<_RecordsForCaseView> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkIntakeCompletion());
     final recordsAsync = ref.watch(recordsForCaseProvider(widget.caseId));
 
-    return recordsAsync.when(
+    return recordsAsync.whenData((records) {
+      final indexes = widget.animalIndexes;
+      if (indexes == null) return records;
+      return records.where((r) => r.sourceAnimalIndex == null || indexes.contains(r.sourceAnimalIndex)).toList();
+    }).when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (e, _) => Scaffold(
         appBar: AppBar(title: const Text('Animal Records')),

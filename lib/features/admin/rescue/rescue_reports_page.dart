@@ -6,6 +6,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/utils/animal_treatment_state.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -54,7 +55,23 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     super.dispose();
   }
 
-  void _navigateToDetail(BuildContext context, RescueCase c) {
+  void _navigateToDetail(BuildContext context, RescueCase c, {String? stageFilter}) {
+    // A case reached via the Intake tab (spec §7) may still carry
+    // `status: 'in_treatment'` if another animal on it is still active
+    // there (see RescueCaseRepository's `_deriveCaseStatusOverride`) — the
+    // admin tapped it from Intake, so it must open Intake Details for
+    // exactly the animals in that stage, not fall through to Treatment
+    // Details via the plain status switch below.
+    if (stageFilter == 'intake' && c.animals.isNotEmpty) {
+      final indexes = animalIndexesInStage(c, 'intake');
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => IntakeDetailPage(caseId: c.id, data: c.raw, animalIndexes: indexes.isEmpty ? null : indexes),
+        ),
+      );
+      return;
+    }
     // The dedicated pipeline screens still take (caseId, Map<String,dynamic>
     // data) — `c.raw` is the full original document, so this stays a
     // drop-in for all of their existing logic.
@@ -147,7 +164,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
               itemBuilder: (context, index) {
                 final tab = RescuePipelineTab.values[index];
                 final isSelected = selectedTab == tab && filters.statusOverride == null;
-                final badgeAsync = ref.watch(casesByStatusesProvider(tab.statuses));
+                final badgeAsync = ref.watch(casesForTabProvider(tab));
                 final badgeCount = badgeAsync.asData?.value.length ?? 0;
 
                 return GestureDetector(
@@ -348,12 +365,24 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                     // AssignRiderPage, reached once status is
                     // awaitingAssignment.
                     final canHavePendingOffer = c.status == RescueStatus.awaitingAssignment;
+                    // Stage-filtered card display (spec §7) — only for the
+                    // two tabs a case can appear under via
+                    // activeAnimalStages while its own animals sit in
+                    // different phases.
+                    final stageFilter = filters.statusOverride == null
+                        ? switch (selectedTab) {
+                            RescuePipelineTab.treatment => 'in_treatment',
+                            RescuePipelineTab.intake => 'intake',
+                            _ => null,
+                          }
+                        : null;
                     if (!canHavePendingOffer) {
                       return RescueCaseCard(
                         rescueCase: c,
                         showStatusChip: filters.statusOverride != null,
                         highlightBorder: c.status == RescueStatus.pendingReview,
-                        onTap: () => _navigateToDetail(context, c),
+                        stageFilter: stageFilter,
+                        onTap: () => _navigateToDetail(context, c, stageFilter: stageFilter),
                       );
                     }
                     // Assign-tab cases only: watch the current offer so the
