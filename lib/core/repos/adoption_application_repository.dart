@@ -44,7 +44,6 @@ class AdoptionApplicationRepository {
   DocumentReference<Map<String, dynamic>> _adoptionDoc(String id) => _adoptions.doc(id);
   CollectionReference<Map<String, dynamic>> _notesOf(String id) => _adoptionDoc(id).collection('notesLog');
   CollectionReference<Map<String, dynamic>> _followUpsOf(String id) => _adoptionDoc(id).collection('followUps');
-  CollectionReference<Map<String, dynamic>> _warningsOf(String id) => _adoptionDoc(id).collection('warnings');
 
   // ---- Reads --------------------------------------------------------
 
@@ -108,77 +107,6 @@ class AdoptionApplicationRepository {
     );
   }
 
-  Stream<List<Map<String, dynamic>>> streamWarnings(String applicationId) {
-    return _warningsOf(applicationId).orderBy('sentAt', descending: true).snapshots().map(
-          (snap) => snap.docs.map((d) => {'id': d.id, ...d.data()}).toList(),
-        );
-  }
-
-  /// A private, internal-only note — never shown to the adopter, and never
-  /// convertible into a warning after the fact (a warning is always a
-  /// distinct, separately-authored doc — see [sendWarning] — so this can
-  /// never "accidentally" become adopter-visible just by editing it).
-  /// Reuses the existing [addNote] write below; this wrapper exists only so
-  /// call sites are explicit about which of the two they mean.
-  Future<void> addPrivateNote({
-    required String applicationId,
-    required String text,
-    required String actorUid,
-    required String actorName,
-  }) =>
-      addNote(applicationId: applicationId, text: text, actorUid: actorUid, actorName: actorName);
-
-  /// Post-adoption concern raised by the organization (spec §4) — a
-  /// separate, append-only `warnings` subcollection doc, distinct from the
-  /// private `notesLog` [addNote] writes to. Also appends a `statusHistory`
-  /// entry (the same mechanism every other adopter-visible event uses —
-  /// see notifications_screen.dart's `_notifiableAdoptionMessagePrefixes`)
-  /// so it surfaces in the adopter's notification feed; the adopter's own
-  /// Post-Adoption page additionally reads this subcollection directly for
-  /// a persistent, always-visible warning banner rather than relying on
-  /// the notification feed alone. Never touches returnRequest — sending a
-  /// warning must never, by itself, start a return.
-  Future<String> sendWarning({
-    required String applicationId,
-    required String category,
-    required String message,
-    String? requiredAction,
-    DateTime? responseDeadline,
-    required String actorUid,
-    required String actorName,
-  }) async {
-    final now = Timestamp.now();
-    final ref = _warningsOf(applicationId).doc();
-    await ref.set({
-      'category': category,
-      'message': message,
-      if (requiredAction != null && requiredAction.isNotEmpty) 'requiredAction': requiredAction,
-      if (responseDeadline != null) 'responseDeadline': Timestamp.fromDate(responseDeadline),
-      'sentBy': actorName,
-      'sentByUid': actorUid,
-      'sentAt': now,
-      'resolved': false,
-    });
-    await _adoptionDoc(applicationId).update({
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Warning sent: $category.', 'timestamp': now}
-      ]),
-    });
-    return ref.id;
-  }
-
-  Future<void> resolveWarning({
-    required String applicationId,
-    required String warningId,
-    required String actorName,
-  }) async {
-    await _warningsOf(applicationId).doc(warningId).update({
-      'resolved': true,
-      'resolvedAt': Timestamp.now(),
-      'resolvedBy': actorName,
-    });
-  }
-
   // ---- Interview ------------------------------------------------------
 
   Future<void> completeInterview({
@@ -191,6 +119,24 @@ class AdoptionApplicationRepository {
       'interviewCompletedBy': actorName,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Interview completed by $actorName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+  }
+
+  /// Admin confirms the interview the applicant booked — moves the
+  /// application from Pending into Interview. New applications (and a
+  /// freshly-booked appointment) stay Pending until this runs; the user's
+  /// own Book Appointment step only ever saves appointmentDate/Time/Type,
+  /// it never sets status itself (see adoption_process.dart's
+  /// _saveAppointment).
+  Future<void> confirmInterview({
+    required String applicationId,
+    required String actorName,
+  }) async {
+    await _adoptionDoc(applicationId).update({
+      'status': AdoptionStatus.interview.firestoreValue,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Interview confirmed by organization.', 'timestamp': Timestamp.now()}
       ]),
     });
   }
@@ -759,53 +705,6 @@ class AdoptionApplicationRepository {
       },
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Return requested.', 'timestamp': Timestamp.now()}
-      ]),
-    });
-  }
-
-  /// Admin-initiated counterpart to [requestReturn] (spec §4) — writes the
-  /// SAME `returnRequest` map shape so every downstream reader
-  /// (approveReturn/setRetrievalSchedule/confirmAnimalRetrieved/
-  /// proceedToIntake, and the adopter's own return banner) keeps working
-  /// unmodified; the only difference is `source: 'organization'` plus the
-  /// optional proposed-schedule/internal-notes fields this action collects
-  /// that an adopter's own request never has. Guards against starting a
-  /// second return while one is already active, the same way the UI's own
-  /// enabled/disabled check does — this is the server-side backstop.
-  Future<void> adminInitiateReturn({
-    required String applicationId,
-    required String reason,
-    required String explanation,
-    required String urgency,
-    DateTime? proposedRetrievalDateTime,
-    String? internalNotes,
-    required String actorUid,
-    required String actorName,
-  }) async {
-    final existing = await _adoptionDoc(applicationId).get();
-    final currentReturn = ReturnRequest.fromMap(existing.data()?['returnRequest'] as Map<String, dynamic>?);
-    if (currentReturn != null &&
-        currentReturn.status != ReturnRequestStatus.declined &&
-        currentReturn.status != ReturnRequestStatus.cancelled) {
-      throw StateError('A return is already in progress for this application.');
-    }
-
-    final now = Timestamp.now();
-    await _adoptionDoc(applicationId).update({
-      'returnRequest': {
-        'reason': reason,
-        'urgency': urgency,
-        'explanation': explanation,
-        'images': const [],
-        'requestedBy': actorUid,
-        'requestedAt': now,
-        'status': ReturnRequestStatus.pendingReview.name,
-        'source': 'organization',
-        if (proposedRetrievalDateTime != null) 'proposedRetrievalDateTime': Timestamp.fromDate(proposedRetrievalDateTime),
-        if (internalNotes != null && internalNotes.isNotEmpty) 'internalNotes': internalNotes,
-      },
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Return initiated by the organization.', 'timestamp': now}
       ]),
     });
   }
