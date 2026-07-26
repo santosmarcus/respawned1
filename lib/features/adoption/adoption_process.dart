@@ -30,6 +30,17 @@ const List<String> _stepLabels = [
   'Adoption Day',
 ];
 
+// Copy shown on the splash screen before the actual form fields (see
+// _buildIntroSplash) — a plain numbered walkthrough of the whole process,
+// not the tracker's own short _stepLabels above.
+const List<String> _introStepDescriptions = [
+  'Step 1: Complete the Adoption Form',
+  'Step 2: Schedule Your Interview Appointment',
+  'Step 3: Adoption Application Review',
+  'Step 4: Attend the Interview & Pay the Adoption Fee',
+  'Step 5: Welcome Your New Companion on Adoption Day',
+];
+
 
 // widget.animal is now always built from a live AnimalRecord
 // (adoption_page.dart's animalRecordToCard) — the old hardcoded catalog
@@ -60,6 +71,13 @@ class AdoptionProcess extends StatefulWidget {
 
 class _AdoptionProcessState extends State<AdoptionProcess> {
   _AdoptionProcess _step = _AdoptionProcess.intro;
+
+  // True once the applicant has tapped "Let's Start" on the intro splash
+  // screen (see _buildIntroSplash) — until then, _AdoptionProcess.intro
+  // shows that splash instead of the actual form fields. Resuming an
+  // existing application (existingAdoptionId != null) skips the splash
+  // entirely, since they've already started.
+  bool _introStarted = false;
 
   // Form fields
   final _formKey = GlobalKey<FormState>();
@@ -173,6 +191,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   String _appointmentType = 'On-site Visit';
   String? _appointmentTime;
 
+  // Set by the admin's "Complete Interview" action
+  // (adoption_application_detail_page.dart's _completeInterview ->
+  // AdoptionApplicationRepository.completeInterview) — deliberately
+  // separate from `status`, which stays 'interview' until the org
+  // separately Accepts or Rejects (see that screen's own confirmation
+  // dialog: "The application stays in Interview until you Accept or
+  // Reject it."). This is what actually unlocks the payment step below,
+  // not status alone — see _stepForStatus.
+  DateTime? _interviewCompletedAt;
+  String? _interviewCompletedBy;
+
   _AdoptionProcess? _reviewStep;
 
   _AdoptionProcess get _displayStep => _reviewStep ?? _step;
@@ -207,10 +236,46 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     return interviewSlotsForDate(_appointmentDate!);
   }
 
+  // Combines _appointmentDate with the parsed _appointmentTime slot
+  // string (e.g. "10:00 AM") into a single comparable DateTime — used
+  // only to show an informational "interview complete" message on the
+  // Application Review step below; it does NOT advance _step or unlock
+  // payment on its own. The org still has to explicitly approve the
+  // application (see _stepForStatus) before _AdoptionProcess.timeToMeet
+  // — and therefore the payment prompt — is reached, since the interview
+  // happening isn't the same as the org deciding to approve.
+  DateTime? get _appointmentDateTime {
+    if (_appointmentDate == null || _appointmentTime == null) return null;
+    final match = RegExp(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$', caseSensitive: false)
+        .firstMatch(_appointmentTime!.trim());
+    if (match == null) return _appointmentDate;
+    var hour = int.parse(match.group(1)!);
+    final minute = int.parse(match.group(2)!);
+    final period = match.group(3)!.toUpperCase();
+    if (period == 'PM' && hour != 12) hour += 12;
+    if (period == 'AM' && hour == 12) hour = 0;
+    return DateTime(
+      _appointmentDate!.year,
+      _appointmentDate!.month,
+      _appointmentDate!.day,
+      hour,
+      minute,
+    );
+  }
+
+  bool get _interviewTimeHasPassed {
+    final dt = _appointmentDateTime;
+    if (dt == null) return false;
+    return DateTime.now().isAfter(dt);
+  }
+
   @override
   void initState() {
     super.initState();
     if (widget.existingAdoptionId != null) {
+      // Resuming an application means they've already been through the
+      // splash — never show it again for an in-progress application.
+      _introStarted = true;
       _isLoadingExisting = true;
       _loadExistingAdoption();
       _adoptionSub = FirebaseFirestore.instance
@@ -406,14 +471,26 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   // appointment (booked but not yet admin-confirmed — see _saveAppointment,
   // which no longer advances status itself) should resume on the Review
   // step, not send the applicant back to re-book.
-  _AdoptionProcess _stepForStatus(String? status, {required bool hasAppointment}) {
+  // [interviewCompleted]: status stays 'interview' even after the admin
+  // clicks Complete Interview — Accept/Reject is a separate, later
+  // decision (see adoption_application_detail_page.dart's
+  // _completeInterview dialog: "The application stays in Interview until
+  // you Accept or Reject it."). Complete Interview is what should unlock
+  // payment here, not waiting for that later Accept — otherwise the
+  // adopter would be stuck on Application Review long after their
+  // interview actually happened.
+  _AdoptionProcess _stepForStatus(
+      String? status, {
+        required bool hasAppointment,
+        required bool interviewCompleted,
+      }) {
     switch (status) {
       case 'pending':
       case 'pending_appointment':
         return hasAppointment ? _AdoptionProcess.appReview : _AdoptionProcess.bookAppointment;
       case 'interview':
       case 'under_review':
-        return _AdoptionProcess.appReview;
+        return interviewCompleted ? _AdoptionProcess.timeToMeet : _AdoptionProcess.appReview;
       case 'approved':
       case 'appointment_confirmed':
         return _AdoptionProcess.timeToMeet;
@@ -566,7 +643,19 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             : null;
         _deliveryAttempts = data['deliveryAttempts'] as int? ?? 0;
 
-        var computedStep = _stepForStatus(rawStatus, hasAppointment: appointmentTs is Timestamp);
+        // Set by adoption_application_detail_page.dart's Complete
+        // Interview action — see the field's own doc comment above for
+        // why this (not status/Accept) is what unlocks payment.
+        final interviewCompletedTs = data['interviewCompletedAt'];
+        _interviewCompletedAt =
+        interviewCompletedTs is Timestamp ? interviewCompletedTs.toDate() : null;
+        _interviewCompletedBy = data['interviewCompletedBy'] as String?;
+
+        var computedStep = _stepForStatus(
+          rawStatus,
+          hasAppointment: appointmentTs is Timestamp,
+          interviewCompleted: _interviewCompletedAt != null,
+        );
         // The backend flips status to 'adopted' the moment the org
         // schedules the release (which may be a future date/time) — the
         // adopter shouldn't see "Adoption Day" until that scheduled
@@ -849,6 +938,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _adoptionId = null;
     _step = _AdoptionProcess.intro;
     _reviewStep = null;
+    _introStarted = false;
 
     _residenceType = null;
     _residenceOtherCtrl.clear();
@@ -896,6 +986,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _appointmentDate = null;
     _appointmentType = 'On-site Visit';
     _appointmentTime = null;
+    _interviewCompletedAt = null;
+    _interviewCompletedBy = null;
   }
 
   Future<void> _withdrawApplication() async {
@@ -1170,7 +1262,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   Widget _buildStepBody() {
     switch (_displayStep) {
       case _AdoptionProcess.intro:
-        return _buildIntro();
+        return _introStarted ? _buildAdoptionForm() : _buildIntroSplash();
       case _AdoptionProcess.bookAppointment:
         return _buildBookAppointment();
       case _AdoptionProcess.appReview:
@@ -1186,8 +1278,71 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
-  // 1st step - fill out form
-  Widget _buildIntro() {
+  // 1st step, part A — splash screen shown before any form fields, per
+  // the mockup: a plain walkthrough of the five steps ending in a "Let's
+  // Start" button. Tapping it just flips _introStarted — no network call,
+  // nothing is created yet (the application doc isn't written until
+  // _submitAdoptionForm actually succeeds).
+  Widget _buildIntroSplash() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Fill out adoption form',
+          style: GoogleFonts.tiltWarp(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Ready to give a rescue a loving forever home?🐾',
+          style: GoogleFonts.zain(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'The adoption process consists of five steps to ensure the best '
+              'match for both you and your future furry companion:',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+        const SizedBox(height: 12),
+        ..._introStepDescriptions.map(
+              (s) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              s,
+              style: GoogleFonts.zain(
+                  fontSize: 14, color: AppColors.textPrimary, height: 1.4),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Fill out this quick form to help us match you with the right '
+              'rescue and confirm eligibility for adoption.',
+          style: GoogleFonts.zain(
+              fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+
+        const SizedBox(height: 32),
+
+        _PrimaryButton(
+          label: "Let's Start",
+          onTap: () => setState(() => _introStarted = true),
+        ),
+
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  // 1st step, part B — the actual form (unchanged from before, just no
+  // longer the first thing shown for this step).
+  Widget _buildAdoptionForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1876,6 +2031,39 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                   child: Text(
                     '$_appointmentType  ·  ${_formatDate(_appointmentDate!)}  ·  $_appointmentTime',
                     style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        // Purely informational — the interview having happened isn't the
+        // same as the org approving the application (they may still
+        // reject after meeting the applicant), so this never advances
+        // _step or unlocks payment on its own; it just reassures the
+        // applicant that they're now waiting on the review decision
+        // itself, not on the interview.
+        if (_interviewTimeHasPassed) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.greenrspwn.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle_outline, color: AppColors.greenrspwn, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Interview complete — awaiting review. We\'ll let you '
+                        'know here as soon as your application has been '
+                        'reviewed and you\'re ready for the next step.',
+                    style: GoogleFonts.zain(
+                        fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                   ),
                 ),
               ],

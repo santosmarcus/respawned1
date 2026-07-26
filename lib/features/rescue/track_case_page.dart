@@ -1135,12 +1135,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
         (willingAdopterId != null && willingAdopterId.isNotEmpty);
   }
 
-  /// True once the CURRENT viewer specifically is the one whose adoption
-  /// interest is on file for this case — either as the reporter (checked
-  /// "yes" to adopting at report time) or as a different user who tapped
-  /// "Interest to Adopt" here. Drives the "you'll be notified" banner
-  /// below, as opposed to _hasWillingAdopter, which is just "does anyone
-  /// have interest registered".
   bool get _viewerIsInterestedParty {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;
