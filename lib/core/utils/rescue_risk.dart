@@ -27,10 +27,13 @@ const List<String> kEscapeRiskLevels = [
 ];
 
 const List<String> kSafetyIndicatorOptions = [
+  'Friendly/Approachable',
+  'Calm',
+  'Distress/Anxious'
   'Aggressive',
   'Fearful',
-  'Injured',
-  'Trapped',
+  ///'Injured',
+  ///'Trapped',
   'Protecting young',
   'In traffic',
   'Hard to approach',

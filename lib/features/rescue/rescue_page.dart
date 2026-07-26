@@ -20,6 +20,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
@@ -85,17 +86,11 @@ class _FoundAnimalEntry {
   String? breed; // one of _breedOptionsFor(species), or _othersBreedLabel
   final TextEditingController breedOtherController = TextEditingController();
   final TextEditingController colorController = TextEditingController();
-  // Per-animal condition description — each animal in a multi-animal group
-  // case may be in a different physical state, so this lives on the entry
-  // itself rather than as one shared description for the whole report
-  // (see _buildFoundAnimalCard).
-  final TextEditingController conditionController = TextEditingController();
   String? sex;
   String? size;
-  // Per-animal triage — each animal in a multi-animal group case may have a
-  // different containment/escape risk and a different temperament, so
-  // these live on the entry itself rather than as one shared answer for
-  // the whole report (see _buildFoundAnimalCard).
+  // Per-animal triage — kept on the model and still written into the
+  // submission payload, but there is currently no UI control that sets
+  // these.
   String? containmentStatus; // 'contained' | 'could_escape'
   String? temperament;
 
@@ -103,13 +98,34 @@ class _FoundAnimalEntry {
   // in the same multi-animal report; each entry owns its own values.
   String? biteRisk;
   String? escapeRisk;
-  final Set<String> safetyIndicators = {};
   final TextEditingController handlingNotesController = TextEditingController();
+
+  // Per-animal health/behavior assessment — see
+  // core/utils/animal_health_assessment.dart for each field's option list.
+  // Single-select:
+  String? bodyCondition;
+  String? mobility;
+  String? alertness;
+  String? eyesNoseMouth;
+  String? skinAndCoat;
+  String? appetiteHydration;
+  // Multi-select:
+  final Set<String> behavior = {};
+  // Multi-select + reporter-added custom entries beyond the predefined
+  // list (see _EnvironmentSafetySection).
+  final Set<String> environmentSafety = {};
+  final TextEditingController environmentSafetyOtherController = TextEditingController();
+
+  // Lets each animal's card be collapsed independently of every other
+  // animal's — defaults open so a freshly-added card is immediately
+  // usable.
+  bool expanded = true;
 
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
     handlingNotesController.dispose();
+    environmentSafetyOtherController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -141,10 +157,11 @@ class _RescuePageState extends State<RescuePage> {
   String? _selectedAnimalType;
   bool _isLoading = false;
 
-  // Additional stray-rescue triage questions
-  // (Containment and approachability are now per-animal — see
-  // _FoundAnimalEntry.containmentStatus / .temperament — since a
-  // multi-animal group case may have animals in very different states.)
+  // Additional stray-rescue triage questions.
+  // (containmentStatus/temperament still exist on _FoundAnimalEntry and are
+  // still sent in the submission payload, but there is currently no UI
+  // control that sets them — they'll always be null until/unless that's
+  // added back.)
   String? _onSiteChoice; // 'yes' | 'no'
   bool _reportAnonymously = false;
 
@@ -193,15 +210,15 @@ class _RescuePageState extends State<RescuePage> {
       'urgency': 'Low',
     },
     {
-      'label': 'Illness',
-      'description':
-      'Appears weak, vomiting, coughing, skin disease; suspected illness',
-      'urgency': 'Medium',
-    },
-    {
       'label': 'Abandonment',
       'description': 'Animal left without care',
       'urgency': 'Medium',
+    },
+    {
+      'label': 'Illness',
+      'description':
+      'Appears weak, vomiting, coughing, skin disease; suspected illness',
+      'urgency': 'Critical',
     },
     {
       'label': 'Injury',
@@ -1447,8 +1464,14 @@ class _RescuePageState extends State<RescuePage> {
                       ),
                       const SizedBox(height: 20),
                     ],
-                    // Describe Condition is now asked per animal — see the
-                    // "Type of Animal" cards below (showTriage: true).
+                    // Describe Condition covers the whole report (not
+                    // per-animal) — sits right below Rescue Type/Urgency,
+                    // outside each animal's own card below.
+                    _buildLabel('Describe Condition', required: true),
+                    const SizedBox(height: 6),
+                    _lostPetTextField(
+                        _conditionController, 'Calm, scared, injured…'),
+                    const SizedBox(height: 20),
 
                     _buildLabel('Type of Animal', required: true),
                     const SizedBox(height: 4),
@@ -1459,7 +1482,7 @@ class _RescuePageState extends State<RescuePage> {
                           fontSize: 11, color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 10),
-                    ..._buildAnimalEntryFields(showTriage: true),
+                    ..._buildAnimalEntryFields(),
 
                     const SizedBox(height: 20),
 
@@ -2005,7 +2028,6 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
-
   Future<void> _pickLastSeenDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -2438,10 +2460,10 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
-  List<Widget> _buildAnimalEntryFields({bool showTriage = false}) {
+  List<Widget> _buildAnimalEntryFields() {
     return [
       for (int i = 0; i < _foundAnimals.length; i++)
-        _buildFoundAnimalCard(i, showTriage: showTriage),
+        _buildFoundAnimalCard(i),
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
@@ -2458,7 +2480,7 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
-  Widget _buildFoundAnimalCard(int index, {bool showTriage = false}) {
+  Widget _buildFoundAnimalCard(int index) {
     final entry = _foundAnimals[index];
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2474,11 +2496,27 @@ class _RescuePageState extends State<RescuePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Animal ${index + 1}',
-                  style: GoogleFonts.zain(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => entry.expanded = !entry.expanded),
+                  child: Row(
+                    children: [
+                      Icon(
+                        entry.expanded ? Icons.expand_less : Icons.expand_more,
+                        size: 20,
+                        color: AppColors.textPrimary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text('Animal ${index + 1}',
+                          style: GoogleFonts.zain(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+              ),
               if (_foundAnimals.length > 1)
                 GestureDetector(
                   onTap: () {
@@ -2490,141 +2528,364 @@ class _RescuePageState extends State<RescuePage> {
                 ),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _speciesDropdown(
-                  value: entry.species,
-                  onChanged: (v) => setState(() {
-                    entry.species = v;
-                    entry.breed = null;
-                  }),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _breedDropdown(
-                  species: entry.species,
-                  breedValue: entry.breed,
-                  onChanged: (v) => setState(() => entry.breed = v),
-                  otherController: entry.breedOtherController,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: entry.sex,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Sex',
-                    border: UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary)),
+          if (entry.expanded) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _speciesDropdown(
+                    value: entry.species,
+                    onChanged: (v) => setState(() {
+                      entry.species = v;
+                      entry.breed = null;
+                    }),
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'Male', child: Text('Male')),
-                    DropdownMenuItem(value: 'Female', child: Text('Female')),
-                    DropdownMenuItem(value: 'Unsure', child: Text('Unsure')),
-                  ],
-                  onChanged: (v) => setState(() => entry.sex = v),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: entry.size,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Size',
-                    border: UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _breedDropdown(
+                    species: entry.species,
+                    breedValue: entry.breed,
+                    onChanged: (v) => setState(() => entry.breed = v),
+                    otherController: entry.breedOtherController,
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'Small', child: Text('Small')),
-                    DropdownMenuItem(value: 'Medium', child: Text('Medium')),
-                    DropdownMenuItem(value: 'Large', child: Text('Large')),
-                  ],
-                  onChanged: (v) => setState(() => entry.size = v),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: entry.biteRisk,
-                  isDense: true,
-                  decoration: const InputDecoration(
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: entry.sex,
                     isDense: true,
-                    hintText: 'Bite risk',
-                    border: UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Sex',
+                      border: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary)),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'Male', child: Text('Male')),
+                      DropdownMenuItem(value: 'Female', child: Text('Female')),
+                      DropdownMenuItem(value: 'Unsure', child: Text('Unsure')),
+                    ],
+                    onChanged: (v) => setState(() => entry.sex = v),
                   ),
-                  items: [
-                    for (final level in kBiteRiskLevels)
-                      DropdownMenuItem(value: level, child: Text(level)),
-                  ],
-                  onChanged: (v) => setState(() => entry.biteRisk = v),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: entry.escapeRisk,
-                  isDense: true,
-                  decoration: const InputDecoration(
+                const SizedBox(width: 10),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: entry.size,
                     isDense: true,
-                    hintText: 'Escape risk',
-                    border: UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary)),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Size',
+                      border: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary)),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'Small', child: Text('Small')),
+                      DropdownMenuItem(value: 'Medium', child: Text('Medium')),
+                      DropdownMenuItem(value: 'Large', child: Text('Large')),
+                    ],
+                    onChanged: (v) => setState(() => entry.size = v),
                   ),
-                  items: [
-                    for (final level in kEscapeRiskLevels)
-                      DropdownMenuItem(value: level, child: Text(level)),
-                  ],
-                  onChanged: (v) => setState(() => entry.escapeRisk = v),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text('Additional safety indicators (optional)',
-              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final indicator in kSafetyIndicatorOptions)
-                FilterChip(
-                  label: Text(indicator, style: GoogleFonts.zain(fontSize: 12)),
-                  selected: entry.safetyIndicators.contains(indicator),
-                  selectedColor: AppColors.yellowrspwn,
-                  onSelected: (selected) => setState(() {
-                    if (selected) {
-                      entry.safetyIndicators.add(indicator);
-                    } else {
-                      entry.safetyIndicators.remove(indicator);
-                    }
-                  }),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
+
+            const SizedBox(height: 14),
+            const Divider(height: 1, color: AppColors.slaterspwn),
+            const SizedBox(height: 14),
+            Text('Health & Behavior Assessment',
+                style: GoogleFonts.zain(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 10),
+
+            const SizedBox(height: 4),
+            _singleSelectDropdown(
+              value: entry.bodyCondition,
+              hint: 'Body Condition',
+              options: kBodyConditionOptions,
+              onChanged: (v) => setState(() => entry.bodyCondition = v),
+            ),
+
+            const SizedBox(height: 12),
+            _singleSelectDropdown(
+              value: entry.mobility,
+              hint: 'Mobility',
+              options: kMobilityOptions,
+              onChanged: (v) => setState(() => entry.mobility = v),
+            ),
+
+            const SizedBox(height: 12),
+            _singleSelectDropdown(
+              value: entry.alertness,
+              hint: 'Alertness',
+              options: kAlertnessOptions,
+              onChanged: (v) => setState(() => entry.alertness = v),
+            ),
+
+            const SizedBox(height: 12),
+            _singleSelectDropdown(
+              value: entry.eyesNoseMouth,
+              hint: 'Eyes, Nose, Mouth',
+              options: kEyesNoseMouthOptions,
+              onChanged: (v) => setState(() => entry.eyesNoseMouth = v),
+            ),
+
+            const SizedBox(height: 12),
+            _singleSelectDropdown(
+              value: entry.skinAndCoat,
+              hint: 'Skin and Coat',
+              options: kSkinAndCoatOptions,
+              onChanged: (v) => setState(() => entry.skinAndCoat = v),
+            ),
+
+            const SizedBox(height: 12),
+            _singleSelectDropdown(
+              value: entry.appetiteHydration,
+              hint: 'Appetite and Hydration',
+              options: kAppetiteHydrationOptions,
+              onChanged: (v) => setState(() => entry.appetiteHydration = v),
+            ),
+
+            const SizedBox(height: 12),
+            _buildLabel('Behavior'),
+            const SizedBox(height: 6),
+            _multiSelectChips(
+              selected: entry.behavior,
+              options: kBehaviorOptions,
+              onToggle: (option, selected) => setState(() {
+                if (selected) {
+                  entry.behavior.add(option);
+                  // Selecting an option deselects anything already chosen
+                  // that contradicts it (e.g. picking "Aggressive" clears
+                  // "Calm") — see kBehaviorConflicts' doc comment.
+                  final conflicts = kBehaviorConflicts[option];
+                  if (conflicts != null) {
+                    entry.behavior.removeWhere(conflicts.contains);
+                  }
+                } else {
+                  entry.behavior.remove(option);
+                }
+              }),
+            ),
+
+            const SizedBox(height: 12),
+            _buildLabel('Environment and Safety'),
+            const SizedBox(height: 6),
+            _environmentSafetySection(entry),
+
+
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: entry.biteRisk,
+                    isDense: true,
+                    // Without this, the button sizes itself to its widest
+                    // item's intrinsic width (e.g. "Has attempted to bite")
+                    // instead of the space Expanded actually gives it here,
+                    // which is what was causing the RenderFlex overflow.
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Bite risk',
+                      border: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary)),
+                    ),
+                    items: [
+                      for (final level in kBiteRiskLevels)
+                        DropdownMenuItem(
+                          value: level,
+                          child: Text(
+                            level,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => entry.biteRisk = v),
+                  ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _lostPetTextField(entry.handlingNotesController, 'Handling notes (optional)'),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: entry.escapeRisk,
+                    isDense: true,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Escape risk',
+                      border: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary)),
+                    ),
+                    items: [
+                      for (final level in kEscapeRiskLevels)
+                        DropdownMenuItem(
+                          value: level,
+                          child: Text(
+                            level,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => entry.escapeRisk = v),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _buildLabel('Handling'),
+            const SizedBox(height: 6),
+            _lostPetTextField(entry.handlingNotesController, 'Handling notes (optional)'),
+
+          ], // if (entry.expanded)
         ],
       ),
+    );
+  }
+
+  // Generic single-select dropdown used by the Health & Behavior
+  // Assessment section (Body Condition, Mobility, Alertness, Eyes/Nose/
+  // Mouth) — isExpanded:true and ellipsis-clamped item text so long
+  // option strings never overflow, same fix applied to Bite/Escape risk.
+  Widget _singleSelectDropdown({
+    required String? value,
+    required String hint,
+    required List<String> options,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isDense: true,
+      isExpanded: true,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hint,
+        hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+        border: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary),
+        ),
+      ),
+      items: [
+        for (final option in options)
+          DropdownMenuItem(
+            value: option,
+            child: Text(
+              option,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+            ),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
+
+  // Generic multi-select chip group — used by Behavior (the only
+  // multi-select field in the Health & Behavior Assessment section; Skin
+  // and Coat and Appetite and Hydration are single-select dropdowns).
+  Widget _multiSelectChips({
+    required Set<String> selected,
+    required List<String> options,
+    required void Function(String option, bool selected) onToggle,
+  }) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final option in options)
+          FilterChip(
+            label: Text(option, style: GoogleFonts.zain(fontSize: 12)),
+            selected: selected.contains(option),
+            selectedColor: AppColors.yellowrspwn,
+            onSelected: (v) => onToggle(option, v),
+          ),
+      ],
+    );
+  }
+
+  // Environment and Safety — same multi-select chip pattern as the others,
+  // but the reporter can also type and add entries beyond
+  // kEnvironmentSafetyOptions (e.g. "near a school", "inside a storm
+  // drain"). Custom entries render as deletable InputChips alongside the
+  // predefined FilterChips.
+  Widget _environmentSafetySection(_FoundAnimalEntry entry) {
+    final customEntries =
+    entry.environmentSafety.where((s) => !kEnvironmentSafetyOptions.contains(s)).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final option in kEnvironmentSafetyOptions)
+              FilterChip(
+                label: Text(option, style: GoogleFonts.zain(fontSize: 12)),
+                selected: entry.environmentSafety.contains(option),
+                selectedColor: AppColors.yellowrspwn,
+                onSelected: (selected) => setState(() {
+                  if (selected) {
+                    entry.environmentSafety.add(option);
+                  } else {
+                    entry.environmentSafety.remove(option);
+                  }
+                }),
+              ),
+            for (final custom in customEntries)
+              InputChip(
+                label: Text(custom, style: GoogleFonts.zain(fontSize: 12)),
+                backgroundColor: AppColors.yellowrspwn,
+                onDeleted: () => setState(() => entry.environmentSafety.remove(custom)),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _lostPetTextField(
+                entry.environmentSafetyOtherController,
+                'Add another (optional)',
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                final text = entry.environmentSafetyOtherController.text.trim();
+                if (text.isEmpty) return;
+                setState(() {
+                  entry.environmentSafety.add(text);
+                  entry.environmentSafetyOtherController.clear();
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  color: AppColors.yellowrspwn,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.add, size: 18, color: AppColors.textPrimary),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -2641,8 +2902,7 @@ class _RescuePageState extends State<RescuePage> {
     if (_selectedRescueType == null ||
         _selectedUrgency == null ||
         validAnimals.isEmpty ||
-        validAnimals.any((a) => a.containmentStatus == null) ||
-        validAnimals.any((a) => a.conditionController.text.trim().isEmpty) ||
+        _conditionController.text.trim().isEmpty ||
         _onSiteChoice == null ||
         _coordinateChoice == null ||
         _adoptionChoice == null) {
@@ -2677,68 +2937,119 @@ class _RescuePageState extends State<RescuePage> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
       final casesCollection = FirebaseFirestore.instance.collection('cases');
-      String? groupId;
-      final createdDocIds = <String>[];
 
-      for (final animal in validAnimals) {
-        final docRef = await casesCollection.add({
-          'reporterId': uid,
-          'reporterName': reporterName,
-          'reporterPhone': userData?['phone'] ?? '',
-          'groupId': groupId, // backfilled below once the first doc exists
-          'animalType': animal.speciesText,
-          'breed': animal.breedText,
-          'sex': animal.sex,
-          'size': animal.size,
-          'colorMarkings': animal.colorController.text.trim(),
-          'biteRisk': animal.biteRisk,
-          'escapeRisk': animal.escapeRisk,
-          'safetyIndicators': animal.safetyIndicators.toList(),
-          'handlingNotes': animal.handlingNotesController.text.trim(),
-          'rescueType': _selectedRescueType,
-          'condition': animal.conditionController.text.trim(),
-          'urgency': _selectedUrgency,
-          'containmentStatus': animal.containmentStatus,
-          'strayTemperament': animal.temperament,
-          'onSite': _onSiteChoice,
-          'accessInstructions': _accessInstructionsController.text.trim(),
-          'bestTimeToContact': _bestTimeContactController.text.trim(),
-          'reportAnonymously':
-          _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
-          'address': _addressController.text.trim().isEmpty
-              ? _pinnedAddress
-              : _addressController.text.trim(),
-          'lat': _pinnedLocation.latitude,
-          'lng': _pinnedLocation.longitude,
-          'coordinateWithShelter': _coordinateChoice,
-          'witnessName': _witnessNameController.text.trim(),
-          'witnessPhone': _witnessNumberController.text.trim(),
-          'interestedToAdopt': _adoptionChoice,
-          'scannedTagId': _scannedTagId,
-          'status': 'pending',
-          'statusHistory': [
-            {
-              'status': 'Rescue case is being reviewed.',
-              'timestamp': Timestamp.now(),
-            }
-          ],
-          'photoUrls': [],
-          'createdAt': Timestamp.now(),
-          'serverCreatedAt' : FieldValue.serverTimestamp(),
-        });
-        groupId ??= docRef.id;
-        createdDocIds.add(docRef.id);
-      }
-      for (final id in createdDocIds) {
-        await casesCollection.doc(id).update({'groupId': groupId});
+      // Every animal logged in this report lives inside ONE case doc's
+      // `animals` array — a single Case ID for the whole report, however
+      // many animals were found together. This matches how
+      // rescue_detail_page.dart's _AnimalGroupSection, case_summary_page.dart,
+      // and rescue_case_repository.dart already read multi-animal cases;
+      // creating one Firestore doc per animal (linked only by a shared
+      // groupId) is legacy-only and is exactly why previously-submitted
+      // multi-animal reports were showing up as separate cards in the
+      // admin Rescue Reports queue instead of one grouped report.
+      final primaryAnimal = validAnimals.first;
+
+      String combineField(String Function(_FoundAnimalEntry) selector) {
+        if (validAnimals.length == 1) return selector(validAnimals.first).trim();
+        final parts = <String>[];
+        for (var i = 0; i < validAnimals.length; i++) {
+          final text = selector(validAnimals[i]).trim();
+          if (text.isEmpty) continue;
+          parts.add('Animal ${i + 1} (${validAnimals[i].speciesText}): $text');
+        }
+        return parts.join('\n');
       }
 
-      final primaryCaseId = createdDocIds.first;
+      final animalsPayload = [
+        for (final a in validAnimals)
+          {
+            'species': a.speciesText,
+            'breed': a.breedText,
+            'sex': a.sex,
+            'size': a.size,
+            'colorMarkings': a.colorController.text.trim(),
+            // Kept alongside the shared species/breed/sex/size/colorMarkings
+            // keys _AnimalGroupSection already reads, for any future
+            // per-animal detail view — ignored today by every existing
+            // reader, so nothing breaks by including them. Condition is
+            // NOT per-animal — see the case-level 'condition' field below,
+            // sourced from the single shared _conditionController.
+            'containmentStatus': a.containmentStatus,
+            'temperament': a.temperament,
+            'biteRisk': a.biteRisk,
+            'escapeRisk': a.escapeRisk,
+            'handlingNotes': a.handlingNotesController.text.trim(),
+            // Health & Behavior Assessment — see
+            // core/utils/animal_health_assessment.dart for each field's
+            // option list.
+            'bodyCondition': a.bodyCondition,
+            'mobility': a.mobility,
+            'alertness': a.alertness,
+            'behavior': a.behavior.toList(),
+            'eyesNoseMouth': a.eyesNoseMouth,
+            'skinAndCoat': a.skinAndCoat,
+            'appetiteHydration': a.appetiteHydration,
+            'environmentSafety': a.environmentSafety.toList(),
+          },
+      ];
+
+      final docRef = await casesCollection.add({
+        'reporterId': uid,
+        'reporterName': reporterName,
+        'reporterPhone': userData?['phone'] ?? '',
+        // Legacy single-animal fields — mirror the first/primary animal so
+        // any screen still reading these directly (rather than `animals`)
+        // keeps working for a multi-animal report too.
+        'animalType': primaryAnimal.speciesText,
+        'breed': primaryAnimal.breedText,
+        'sex': primaryAnimal.sex,
+        'size': primaryAnimal.size,
+        'colorMarkings': primaryAnimal.colorController.text.trim(),
+        'animals': animalsPayload,
+        'rescueType': _selectedRescueType,
+        'condition': _conditionController.text.trim(),
+        'urgency': _selectedUrgency,
+        // RescueCase only carries one case-level value for these — the
+        // first/primary animal's answer is used as that representative
+        // value, while every animal's own answer still lives in `animals`
+        // above (see intake_detail_page.dart's own note that per-animal
+        // risk isn't independently representable at the case level yet).
+        'containmentStatus': primaryAnimal.containmentStatus,
+        'strayTemperament': primaryAnimal.temperament,
+        'biteRisk': primaryAnimal.biteRisk,
+        'escapeRisk': primaryAnimal.escapeRisk,
+        'handlingNotes': combineField((a) => a.handlingNotesController.text),
+        'onSite': _onSiteChoice,
+        'accessInstructions': _accessInstructionsController.text.trim(),
+        'bestTimeToContact': _bestTimeContactController.text.trim(),
+        'reportAnonymously':
+        _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
+        'address': _addressController.text.trim().isEmpty
+            ? _pinnedAddress
+            : _addressController.text.trim(),
+        'lat': _pinnedLocation.latitude,
+        'lng': _pinnedLocation.longitude,
+        'coordinateWithShelter': _coordinateChoice,
+        'witnessName': _witnessNameController.text.trim(),
+        'witnessPhone': _witnessNumberController.text.trim(),
+        'interestedToAdopt': _adoptionChoice,
+        'scannedTagId': _scannedTagId,
+        'status': 'pending',
+        'statusHistory': [
+          {
+            'status': 'Rescue case is being reviewed.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'photoUrls': [],
+        'createdAt': Timestamp.now(),
+        'serverCreatedAt' : FieldValue.serverTimestamp(),
+      });
+
+      final primaryCaseId = docRef.id;
       final photoUrls = await _uploadAllMedia(primaryCaseId);
       if (photoUrls.isNotEmpty) {
-        for (final id in createdDocIds) {
-          await casesCollection.doc(id).update({'photoUrls': photoUrls});
-        }
+        await casesCollection.doc(primaryCaseId).update({'photoUrls': photoUrls});
       }
 
       if (mounted) {
