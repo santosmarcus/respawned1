@@ -15,6 +15,7 @@ import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
@@ -442,14 +443,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     }
 
     final caseData = _currentCaseData();
-    final caseBiteRisk = caseData['biteRisk'] as String?;
-    final caseEscapeRisk = caseData['escapeRisk'] as String?;
-    if (hasHighRescueRisk(biteRisk: caseBiteRisk, escapeRisk: caseEscapeRisk)) {
-      final acknowledged = await confirmHighRiskAcknowledgment(
-        context,
-        biteRisk: caseBiteRisk,
-        escapeRisk: caseEscapeRisk,
-      );
+    final caseHighRiskAnimals = highRiskAnimalsIn(
+      animals: caseData['animals'] as List?,
+      legacyBiteRisk: caseData['biteRisk'] as String?,
+      legacyEscapeRisk: caseData['escapeRisk'] as String?,
+    );
+    if (caseHighRiskAnimals.isNotEmpty) {
+      final acknowledged = await confirmHighRiskAcknowledgment(context, highRiskAnimals: caseHighRiskAnimals);
       if (!acknowledged || !mounted) return;
     }
 
@@ -613,7 +613,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(d['animalType'] ?? 'Animal',
+                    Text(
+                        species_summary_util.summarizeSpecies(
+                            animals: d['animals'] as List?, legacyAnimalType: d['animalType'] as String?),
                         style: GoogleFonts.tiltWarp(
                             fontSize: 22, color: AppColors.textPrimary)),
                     Text(
@@ -643,10 +645,11 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: RescueRiskBanner(
-              biteRisk: d['biteRisk'] as String?,
-              escapeRisk: d['escapeRisk'] as String?,
-              safetyIndicators: List<String>.from(d['safetyIndicators'] ?? const []),
-              handlingNotes: d['handlingNotes'] as String?,
+              highRiskAnimals: highRiskAnimalsIn(
+                animals: d['animals'] as List?,
+                legacyBiteRisk: d['biteRisk'] as String?,
+                legacyEscapeRisk: d['escapeRisk'] as String?,
+              ),
             ),
           ),
 

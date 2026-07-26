@@ -63,7 +63,7 @@ class _TransferAnimalRecordSheetBodyState extends ConsumerState<_TransferAnimalR
     setState(() => _loading = true);
     final results = await ref
         .read(organizationDirectoryRepositoryProvider)
-        .search(nameQuery: query, species: widget.animal.species);
+        .search(nameQuery: query, species: [widget.animal.species]);
     if (!mounted) return;
     setState(() {
       _results = results;

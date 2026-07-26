@@ -76,15 +76,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
         .completeInterview(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
   }
 
-  Future<void> _markNoShow(AdoptionApplication app) async {
-    final confirmed = await showConfirmActionDialog(context,
-        title: 'Mark as No-show?',
-        message: 'This records that the applicant did not attend. It does not reject the application automatically.',
-        confirmLabel: 'Mark No-show');
-    if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).markNoShow(applicationId: app.id, actorName: _actorName));
-  }
-
   Future<void> _reschedule(AdoptionApplication app) async {
     final result = await showInterviewRescheduleSheet(
       context,
@@ -100,11 +91,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
           type: result.type,
           actorName: _actorName,
         ));
-  }
-
-  Future<void> _setFitAssessment(AdoptionApplication app, FitAssessmentValue value) async {
-    await _run(() =>
-        ref.read(adoptionApplicationRepositoryProvider).setManualFitAssessment(applicationId: app.id, value: value, actorName: _actorName));
   }
 
   Future<void> _saveNote(AdoptionApplication app) async {
@@ -221,7 +207,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                   const SizedBox(height: 12),
                   _FitAssessmentCard(
                     app: app,
-                    onSelect: (v) => _setFitAssessment(app, v),
                     expanded: _fitAssessmentExpanded,
                     onToggle: () => setState(() => _fitAssessmentExpanded = !_fitAssessmentExpanded),
                   ),
@@ -248,7 +233,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                     app: app,
                     busy: _busy,
                     onCompleteInterview: () => _completeInterview(app),
-                    onNoShow: () => _markNoShow(app),
                     onReschedule: () => _reschedule(app),
                   ),
 
@@ -363,10 +347,9 @@ class _InfoItem extends StatelessWidget {
 
 class _FitAssessmentCard extends ConsumerWidget {
   final AdoptionApplication app;
-  final ValueChanged<FitAssessmentValue> onSelect;
   final bool expanded;
   final VoidCallback onToggle;
-  const _FitAssessmentCard({required this.app, required this.onSelect, required this.expanded, required this.onToggle});
+  const _FitAssessmentCard({required this.app, required this.expanded, required this.onToggle});
 
   Color _bandColor(FitAssessmentBand band) => switch (band) {
         FitAssessmentBand.strong => AppColors.greenrspwn,
@@ -406,27 +389,6 @@ class _FitAssessmentCard extends ConsumerWidget {
             )
           else
             _AssessmentSummary(assessment: assessment, expanded: expanded, onToggle: onToggle, bandColor: _bandColor(assessment.band)),
-
-          const Divider(height: 24),
-          Text('Admin Decision', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Text('Manual assessment: ${app.fitAssessment.label}',
-              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          if (app.fitAssessedBy != null)
-            Text('By ${app.fitAssessedBy} · ${_fmtDate(app.fitAssessedAt)}', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final v in [FitAssessmentValue.goodCandidate, FitAssessmentValue.needsReview, FitAssessmentValue.notRecommended])
-                ChoiceChip(
-                  label: Text(v.label),
-                  selected: app.fitAssessment == v,
-                  selectedColor: AppColors.yellowrspwn,
-                  onSelected: (_) => onSelect(v),
-                ),
-            ],
-          ),
         ],
       ),
     );
@@ -814,13 +776,11 @@ class _AppointmentSection extends StatelessWidget {
   final AdoptionApplication app;
   final bool busy;
   final VoidCallback onCompleteInterview;
-  final VoidCallback onNoShow;
   final VoidCallback onReschedule;
   const _AppointmentSection({
     required this.app,
     required this.busy,
     required this.onCompleteInterview,
-    required this.onNoShow,
     required this.onReschedule,
   });
 
@@ -877,18 +837,12 @@ class _AppointmentSection extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (app.interviewCompletedAt == null && app.noShowAt == null) ...[
+                if (app.interviewCompletedAt == null && app.noShowAt == null)
                   ElevatedButton(
                     onPressed: busy ? null : onCompleteInterview,
                     style: _yellowButton(),
                     child: const Text('Complete Interview'),
                   ),
-                  ElevatedButton(
-                    onPressed: busy ? null : onNoShow,
-                    style: _yellowButton(),
-                    child: const Text('Mark as No-show'),
-                  ),
-                ],
                 ElevatedButton(
                   onPressed: busy ? null : onReschedule,
                   style: _yellowButton(),

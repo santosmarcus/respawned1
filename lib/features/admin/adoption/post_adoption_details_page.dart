@@ -8,6 +8,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
+import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
 import 'package:respawnd1/core/widgets/date_time_picker_sheet.dart' as picker;
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
@@ -100,43 +101,17 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
         ref.read(adoptionApplicationRepositoryProvider).sendFollowUpReminder(applicationId: widget.applicationId, followUpId: f.id, actorName: _actorName));
   }
 
-  Future<void> _confirmReceipt(FollowUpRecord f) async {
-    final notes = await _promptText(title: 'Confirm Receipt', label: 'Organization notes (optional, never shown to adopter)');
-    if (notes == null) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).confirmFollowUpReceipt(
-          applicationId: widget.applicationId,
-          followUpId: f.id,
-          actorName: _actorName,
-          notes: notes.isEmpty ? null : notes,
-        ));
-  }
-
+  // No separate "Confirm Receipt" step anymore — Mark as Complete is the
+  // only completion action for an individual follow-up (spec: "Do not
+  // require a separate Confirm Receipt step"). completeFollowUp itself
+  // never required the prior confirmed status at the repository level
+  // (see its own doc comment), so this was purely a UI gate to relax.
   Future<void> _completeFollowUp(FollowUpRecord f) async {
     final confirmed = await showConfirmActionDialog(context,
         title: 'Mark Follow-up Complete?', message: 'This closes follow-up #${f.sequenceNumber}.', confirmLabel: 'Mark Complete');
     if (!confirmed) return;
     await _run(
         () => ref.read(adoptionApplicationRepositoryProvider).completeFollowUp(applicationId: widget.applicationId, followUpId: f.id, actorName: _actorName));
-  }
-
-  Future<void> _manualComplete(FollowUpRecord f) async {
-    final reason = await _promptText(title: 'Close Without a Response?', label: 'Reason (required)', required: true);
-    if (reason == null || reason.isEmpty) return;
-    final confirmed = await showConfirmActionDialog(
-      context,
-      title: 'Confirm Manual Completion',
-      message: 'Follow-up #${f.sequenceNumber} will be closed without an adopter response. This is recorded in the audit trail.',
-      confirmLabel: 'Close Follow-up',
-      destructive: true,
-    );
-    if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).completeFollowUp(
-          applicationId: widget.applicationId,
-          followUpId: f.id,
-          actorName: _actorName,
-          manualOverride: true,
-          reason: reason,
-        ));
   }
 
   Future<void> _reschedule(FollowUpRecord f) async {
@@ -300,9 +275,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
                         busy: _busy,
                         onToggle: () => setState(() => _expanded.contains(f.id) ? _expanded.remove(f.id) : _expanded.add(f.id)),
                         onSendReminder: () => _sendReminder(f),
-                        onConfirmReceipt: () => _confirmReceipt(f),
                         onComplete: () => _completeFollowUp(f),
-                        onManualComplete: () => _manualComplete(f),
                         onReschedule: () => _reschedule(f),
                       ),
                       const SizedBox(height: 10),
@@ -334,6 +307,11 @@ class _Header extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: AnimalRecordHeaderImage(animalRecordId: app.animalRecordId, height: 110),
+          ),
+          const SizedBox(height: 10),
           Text(app.animalName, style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
           const SizedBox(height: 10),
           _row('Adopter', app.adopterName),
@@ -854,9 +832,7 @@ class _FollowUpCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onToggle;
   final VoidCallback onSendReminder;
-  final VoidCallback onConfirmReceipt;
   final VoidCallback onComplete;
-  final VoidCallback onManualComplete;
   final VoidCallback onReschedule;
 
   const _FollowUpCard({
@@ -866,9 +842,7 @@ class _FollowUpCard extends StatelessWidget {
     required this.busy,
     required this.onToggle,
     required this.onSendReminder,
-    required this.onConfirmReceipt,
     required this.onComplete,
-    required this.onManualComplete,
     required this.onReschedule,
   });
 
@@ -955,23 +929,16 @@ class _FollowUpCard extends StatelessWidget {
                                     ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
                                 child: const Text('Send Reminder'),
                               ),
-                            if (followUp.status == FollowUpStatus.submitted)
-                              ElevatedButton(
-                                onPressed: busy ? null : onConfirmReceipt,
-                                style: ElevatedButton.styleFrom(backgroundColor: AppColors.greenrspwn, foregroundColor: Colors.white),
-                                child: const Text('Confirm Receipt'),
-                              ),
-                            if (followUp.status == FollowUpStatus.confirmed)
+                            // No separate Confirm Receipt step — Mark as
+                            // Complete is reachable directly once a
+                            // response is submitted (or immediately, for
+                            // any already-confirmed legacy follow-up).
+                            if (followUp.status == FollowUpStatus.submitted ||
+                                followUp.status == FollowUpStatus.confirmed)
                               ElevatedButton(
                                 onPressed: busy ? null : onComplete,
                                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
                                 child: const Text('Mark as Complete'),
-                              ),
-                            if (!followUp.isTerminal && followUp.status != FollowUpStatus.confirmed)
-                              ElevatedButton(
-                                onPressed: busy ? null : onManualComplete,
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
-                                child: const Text('Close without response'),
                               ),
                           ],
                         ),

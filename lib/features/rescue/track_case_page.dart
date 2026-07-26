@@ -757,62 +757,68 @@ class _TrackingTabState extends State<_TrackingTab> {
     );
   }
 
+  // Everything (tracking timeline, community reports, org messages, and
+  // the message input) lives in ONE ListView instead of the previous
+  // Column([Expanded(ListView), fixed-height messages block]) — that split
+  // meant the messages header/list/input had a non-shrinkable minimum
+  // height that didn't fit once the keyboard ate most of the remaining
+  // space below the fixed 232px map, producing "BOTTOM OVERFLOWED BY 146
+  // PIXELS". A single scrollable never overflows regardless of available
+  // height, and a focused TextField inside it is auto-scrolled above the
+  // keyboard by Flutter's own EditableText behavior — so the input stays
+  // reachable without resizing the map or nesting a second unbounded
+  // scroll view.
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return ListView(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       children: [
-        Expanded(
-          child: ListView(
-            children: [
-              _collapsibleHeader(
-                title: 'Tracking Progress',
-                expanded: _trackingExpanded,
-                onToggle: () => setState(() => _trackingExpanded = !_trackingExpanded),
-              ),
-              const SizedBox(height: 8),
-
-              if (_trackingExpanded) ...[
-                if (widget.statusHistory.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 24),
-                    child: Center(
-                      child: Text('No status updates yet.',
-                          style: GoogleFonts.zain(
-                              fontSize: 13, color: AppColors.textSecondary)),
-                    ),
-                  )
-                else
-                  for (int i = 0; i < widget.statusHistory.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _buildTimelineItem(i),
-                    ),
-
-                const SizedBox(height: 12),
-                _buildMediaSection(
-                  context,
-                  'Pickup Verification',
-                  List<String>.from(widget.data['pickupVerificationUrls'] ?? []),
-                ),
-                const SizedBox(height: 12),
-                _buildMediaSection(
-                  context,
-                  'Dropoff Verification',
-                  List<String>.from(widget.data['dropoffVerificationUrls'] ?? []),
-                ),
-              ],
-              const SizedBox(height: 16),
-
-              // Community Reports — visible to the reporter (for
-              // situational awareness) and to every other user (who can
-              // submit sighting reports to help verify/update the case).
-              _CommunityReportSection(caseId: widget.caseId),
-              const SizedBox(height: 8),
-              const Divider(color: AppColors.slaterspwn),
-            ],
-          ),
+        _collapsibleHeader(
+          title: 'Tracking Progress',
+          expanded: _trackingExpanded,
+          onToggle: () => setState(() => _trackingExpanded = !_trackingExpanded),
         ),
+        const SizedBox(height: 8),
+
+        if (_trackingExpanded) ...[
+          if (widget.statusHistory.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 24),
+              child: Center(
+                child: Text('No status updates yet.',
+                    style: GoogleFonts.zain(
+                        fontSize: 13, color: AppColors.textSecondary)),
+              ),
+            )
+          else
+            for (int i = 0; i < widget.statusHistory.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildTimelineItem(i),
+              ),
+
+          const SizedBox(height: 12),
+          _buildMediaSection(
+            context,
+            'Pickup Verification',
+            List<String>.from(widget.data['pickupVerificationUrls'] ?? []),
+          ),
+          const SizedBox(height: 12),
+          _buildMediaSection(
+            context,
+            'Dropoff Verification',
+            List<String>.from(widget.data['dropoffVerificationUrls'] ?? []),
+          ),
+        ],
+        const SizedBox(height: 16),
+
+        // Community Reports — visible to the reporter (for
+        // situational awareness) and to every other user (who can
+        // submit sighting reports to help verify/update the case).
+        _CommunityReportSection(caseId: widget.caseId),
+        const SizedBox(height: 8),
+        const Divider(color: AppColors.slaterspwn),
 
         // Messages to the Organization — reporter-only private channel.
         if (widget.isReporter) ...[

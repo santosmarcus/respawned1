@@ -38,6 +38,18 @@ class ClinicPickerBody extends StatefulWidget {
   final String confirmLabel;
   final String errorPrefix;
 
+  // A clinic to disable/mark as unselectable — used by Transfer to Clinic
+  // so the animal's current/admitting clinic can't be picked as its own
+  // transfer destination (spec §12). Matched by Place ID first when
+  // available; falls back to normalized name + approximate coordinates
+  // since clinic names aren't unique. Left null everywhere else (e.g. the
+  // live "currently treating" clinic sheet), which never excludes anything.
+  final String? excludeClinicPlaceId;
+  final String? excludeClinicName;
+  final double? excludeClinicLat;
+  final double? excludeClinicLng;
+  final String excludeClinicLabel;
+
   /// Called with the picked clinic and whether the closed-clinic warning
   /// was acknowledged for it. Implementations should pop the sheet on
   /// success and throw (with a user-readable message) on failure.
@@ -55,6 +67,11 @@ class ClinicPickerBody extends StatefulWidget {
     this.currentClinicBannerLabel = 'Currently saved',
     required this.confirmLabel,
     this.errorPrefix = 'Could not save clinic',
+    this.excludeClinicPlaceId,
+    this.excludeClinicName,
+    this.excludeClinicLat,
+    this.excludeClinicLng,
+    this.excludeClinicLabel = 'Current clinic',
     required this.onConfirm,
   });
 
@@ -215,18 +232,42 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
             style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
       );
 
+  /// Whether [clinic] is the clinic the caller wants disabled (Transfer to
+  /// Clinic excluding the animal's current clinic). Place ID is the primary
+  /// key when both sides have one; otherwise falls back to a normalized
+  /// name + close-enough coordinate match, since clinic names alone can be
+  /// duplicated across different real locations.
+  bool _isExcluded(ClinicSearchResult clinic) {
+    final excludePlaceId = widget.excludeClinicPlaceId;
+    if (excludePlaceId != null && excludePlaceId.isNotEmpty) {
+      return clinic.placeId == excludePlaceId;
+    }
+    final excludeName = widget.excludeClinicName?.trim().toLowerCase();
+    final excludeLat = widget.excludeClinicLat;
+    final excludeLng = widget.excludeClinicLng;
+    if (excludeName == null || excludeName.isEmpty || excludeLat == null || excludeLng == null) {
+      return false;
+    }
+    const coordTolerance = 0.0005; // ~50m — close enough to call it the same place
+    return clinic.name.trim().toLowerCase() == excludeName &&
+        (clinic.lat - excludeLat).abs() < coordTolerance &&
+        (clinic.lng - excludeLng).abs() < coordTolerance;
+  }
+
   Widget _clinicTile(ClinicSearchResult clinic) {
     final isSelected = clinic.placeId == _selected?.placeId;
     final isSaved = _isSaved(clinic.placeId);
     final isBookmarkPending = _pendingBookmarkToggles.contains(clinic.placeId);
     final distanceKm = _distanceKmTo(clinic);
+    final isExcluded = _isExcluded(clinic);
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
+      enabled: !isExcluded,
       tileColor: isSelected ? AppColors.yellowrspwn.withValues(alpha: 0.15) : null,
       leading: Icon(
         isSelected ? Icons.check_circle : Icons.local_hospital_outlined,
-        color: isSelected ? AppColors.greenrspwn : AppColors.textPrimary,
+        color: isSelected ? AppColors.greenrspwn : (isExcluded ? AppColors.textSecondary : AppColors.textPrimary),
       ),
       title: Text(clinic.name, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
       subtitle: Column(
@@ -236,10 +277,14 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
           Wrap(
             spacing: 8,
             children: [
-              Text(
-                distanceKm != null ? '${distanceKm.toStringAsFixed(1)} km away' : 'Distance unknown',
-                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-              ),
+              if (isExcluded)
+                Text(widget.excludeClinicLabel,
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary))
+              else
+                Text(
+                  distanceKm != null ? '${distanceKm.toStringAsFixed(1)} km away' : 'Distance unknown',
+                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                ),
               if (clinic.openNow != null)
                 Text(
                   clinic.openNow! ? 'Open now' : 'Closed now',
@@ -254,7 +299,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
         ],
       ),
       isThreeLine: true,
-      onTap: () => _selectResult(clinic),
+      onTap: isExcluded ? null : () => _selectResult(clinic),
       trailing: SizedBox(
         width: 48,
         height: 48,
@@ -358,6 +403,10 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
   }
 
   void _selectResult(ClinicSearchResult clinic) {
+    // Belt-and-suspenders: the list tile already disables its own tap for
+    // an excluded clinic, but the map marker doesn't have a separate
+    // disabled state, so this is the one chokepoint both funnel through.
+    if (_isExcluded(clinic)) return;
     setState(() {
       _selected = clinic;
       _saveError = null;
@@ -398,6 +447,13 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
   Future<void> _confirm() async {
     final clinic = _selected;
     if (clinic == null || _saving) return;
+    // Final guard in case a selection was made before this exclusion
+    // existed (e.g. restored from initialClinic) — never trust the
+    // disabled UI state alone.
+    if (_isExcluded(clinic)) {
+      setState(() => _saveError = 'Select a different clinic for the transfer.');
+      return;
+    }
     if (!await _confirmAvailability(clinic)) return;
     setState(() {
       _saving = true;
@@ -651,6 +707,11 @@ Future<ClinicSearchResult?> showClinicPickerSheet(
   ClinicSearchResult? initialClinic,
   required String title,
   required String confirmLabel,
+  String? excludeClinicPlaceId,
+  String? excludeClinicName,
+  double? excludeClinicLat,
+  double? excludeClinicLng,
+  String excludeClinicLabel = 'Current clinic',
 }) {
   return showModalBottomSheet<ClinicSearchResult>(
     context: context,
@@ -668,6 +729,11 @@ Future<ClinicSearchResult?> showClinicPickerSheet(
       currentClinicBannerLabel: 'Currently selected',
       confirmLabel: confirmLabel,
       errorPrefix: 'Could not select clinic',
+      excludeClinicPlaceId: excludeClinicPlaceId,
+      excludeClinicName: excludeClinicName,
+      excludeClinicLat: excludeClinicLat,
+      excludeClinicLng: excludeClinicLng,
+      excludeClinicLabel: excludeClinicLabel,
       onConfirm: (clinic, _) async => Navigator.pop(context, clinic),
     ),
   );

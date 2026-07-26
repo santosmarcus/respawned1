@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
@@ -23,6 +24,7 @@ import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
+import 'package:video_player/video_player.dart';
 
 const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
 
@@ -85,31 +87,20 @@ class _FoundAnimalEntry {
   String? breed; // one of _breedOptionsFor(species), or _othersBreedLabel
   final TextEditingController breedOtherController = TextEditingController();
   final TextEditingController colorController = TextEditingController();
-  // Per-animal condition description — each animal in a multi-animal group
-  // case may be in a different physical state, so this lives on the entry
-  // itself rather than as one shared description for the whole report
-  // (see _buildFoundAnimalCard).
-  final TextEditingController conditionController = TextEditingController();
   String? sex;
   String? size;
-  // Per-animal triage — each animal in a multi-animal group case may have a
-  // different containment/escape risk and a different temperament, so
-  // these live on the entry itself rather than as one shared answer for
-  // the whole report (see _buildFoundAnimalCard).
-  String? containmentStatus; // 'contained' | 'could_escape'
-  String? temperament;
 
-  // Per-animal safety risk (spec §1) — never applied across other animals
-  // in the same multi-animal report; each entry owns its own values.
+  // Per-animal safety risk — never applied across other animals in the
+  // same multi-animal report; each entry owns its own values. Additional
+  // safety-indicator tags and free-text handling notes were removed per
+  // a later revision — bite/escape risk are the single structured source
+  // of truth now (see rescue_risk.dart).
   String? biteRisk;
   String? escapeRisk;
-  final Set<String> safetyIndicators = {};
-  final TextEditingController handlingNotesController = TextEditingController();
 
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
-    handlingNotesController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -142,9 +133,6 @@ class _RescuePageState extends State<RescuePage> {
   bool _isLoading = false;
 
   // Additional stray-rescue triage questions
-  // (Containment and approachability are now per-animal — see
-  // _FoundAnimalEntry.containmentStatus / .temperament — since a
-  // multi-animal group case may have animals in very different states.)
   String? _onSiteChoice; // 'yes' | 'no'
   bool _reportAnonymously = false;
 
@@ -648,6 +636,17 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   //Media picker
+  Future<void> _previewVideo(XFile file) async {
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _VideoPreviewPage(file: File(file.path)),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
   Future<void> _pickMedia(int index) async{
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -709,6 +708,17 @@ class _RescuePageState extends State<RescuePage> {
                       fontSize: 15, color: AppColors.textPrimary)),
               onTap: () => Navigator.pop(context, 'video_gallery'),
             ),
+            if (_mediaFiles[index] != null && _mediaFiles[index]!.isVideo)
+              ListTile(
+                leading: const Icon(Icons.play_circle_outline, color: AppColors.textPrimary),
+                title: Text('Preview video',
+                    style: GoogleFonts.zain(
+                        fontSize: 15, color: AppColors.textPrimary)),
+                onTap: () {
+                  Navigator.pop(context, 'preview');
+                  _previewVideo(_mediaFiles[index]!.file);
+                },
+              ),
             if (_mediaFiles[index] != null)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -793,8 +803,10 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   // Firebase Storage upload, uploads media slots to firebase storage
-  Future<List<String>> _uploadAllMedia(String caseId) async {
-    final urls = <String>[];
+  Future<({List<String> photoUrls, List<String> videoUrls})> _uploadAllMedia(
+      String caseId) async {
+    final photoUrls = <String>[];
+    final videoUrls = <String>[];
 
     for (int i = 0; i < _mediaFiles.length; i++) {
       final item = _mediaFiles[i];
@@ -823,12 +835,16 @@ class _RescuePageState extends State<RescuePage> {
 
       await task;
       final url = await ref.getDownloadURL();
-      urls.add(url);
+      if (item.isVideo) {
+        videoUrls.add(url);
+      } else {
+        photoUrls.add(url);
+      }
 
       if (mounted) setState(() => _uploadProgress[i] = null);
     }
 
-    return urls;
+    return (photoUrls: photoUrls, videoUrls: videoUrls);
   }
 
   //NFC and QR
@@ -1447,19 +1463,44 @@ class _RescuePageState extends State<RescuePage> {
                       ),
                       const SizedBox(height: 20),
                     ],
-                    // Describe Condition is now asked per animal — see the
-                    // "Type of Animal" cards below (showTriage: true).
+                    // Describe Condition
+                    _buildLabel('Describe Condition', required: true),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _conditionController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter condition',
+                        hintStyle: GoogleFonts.zain(
+                          color: AppColors.textSecondary,
+                          fontSize: 14,
+                        ),
+                        enabledBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+                        ),
+                        focusedBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.only(bottom: 8),
+                      ),
+                      style: GoogleFonts.zain(
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
 
                     _buildLabel('Type of Animal', required: true),
                     const SizedBox(height: 4),
                     Text(
-                      'Found more than one? Add each animal below. They will '
+                      'Found more than one? Add each animal below — they will '
                           'be tracked together as one case.',
                       style: GoogleFonts.zain(
                           fontSize: 11, color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 10),
-                    ..._buildAnimalEntryFields(showTriage: true),
+                    ..._buildAnimalEntryFields(),
 
                     const SizedBox(height: 20),
 
@@ -1568,8 +1609,11 @@ class _RescuePageState extends State<RescuePage> {
                     ),
                     if (_coordinateChoice == 'no') ...[
                       const SizedBox(height: 6),
+                      _buildLabel('Witness name', required: true),
+                      const SizedBox(height: 6),
                       TextField(
                         controller: _witnessNameController,
+                        inputFormatters: [AppInputFormatters.nameOnly],
                         decoration: InputDecoration(
                           hintText: 'Enter name of witness',
                           hintStyle: GoogleFonts.zain(
@@ -1587,10 +1631,13 @@ class _RescuePageState extends State<RescuePage> {
                         ),
                         style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
                       ),
+                      const SizedBox(height: 12),
+                      _buildLabel('Witness mobile number', required: true),
                       const SizedBox(height: 6),
                       TextField(
                         controller: _witnessNumberController,
                         keyboardType: TextInputType.phone,
+                        inputFormatters: AppInputFormatters.phoneFlexible,
                         decoration: InputDecoration(
                           hintText: 'Enter mobile number of witness',
                           hintStyle: GoogleFonts.zain(
@@ -2180,10 +2227,11 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Widget _lostPetTextField(TextEditingController controller, String hint,
-      {TextInputType? keyboardType}) {
+      {TextInputType? keyboardType, List<TextInputFormatter>? inputFormatters}) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         hintText: hint,
         hintStyle:
@@ -2207,7 +2255,8 @@ class _RescuePageState extends State<RescuePage> {
       const SizedBox(height: 20),
       _buildLabel('Pet Name', required: true),
       const SizedBox(height: 6),
-      _lostPetTextField(_petNameController, 'Enter pet name'),
+      _lostPetTextField(_petNameController, 'Enter pet name',
+          inputFormatters: [AppInputFormatters.nameOnly]),
       const SizedBox(height: 20),
       _buildLabel('Species', required: true),
       const SizedBox(height: 6),
@@ -2346,13 +2395,15 @@ class _RescuePageState extends State<RescuePage> {
       if (_offerReward) ...[
         const SizedBox(height: 6),
         _lostPetTextField(_rewardAmountController, 'Enter amount',
-            keyboardType: TextInputType.number),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [AppInputFormatters.decimal]),
       ],
       const SizedBox(height: 20),
       _buildLabel('Contact Number', required: true),
       const SizedBox(height: 6),
       _lostPetTextField(_ownerContactController, 'Mobile number',
-          keyboardType: TextInputType.phone),
+          keyboardType: TextInputType.phone,
+          inputFormatters: AppInputFormatters.phoneFlexible),
       const SizedBox(height: 6),
       Text(
         'Only revealed to a finder once you confirm a match.',
@@ -2429,7 +2480,8 @@ class _RescuePageState extends State<RescuePage> {
       _buildLabel('Contact Number', required: true),
       const SizedBox(height: 6),
       _lostPetTextField(_finderContactController, 'Mobile number',
-          keyboardType: TextInputType.phone),
+          keyboardType: TextInputType.phone,
+          inputFormatters: AppInputFormatters.phoneFlexible),
       const SizedBox(height: 6),
       Text(
         "We'll check this against open lost pet alerts nearby.",
@@ -2438,10 +2490,9 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
-  List<Widget> _buildAnimalEntryFields({bool showTriage = false}) {
+  List<Widget> _buildAnimalEntryFields() {
     return [
-      for (int i = 0; i < _foundAnimals.length; i++)
-        _buildFoundAnimalCard(i, showTriage: showTriage),
+      for (int i = 0; i < _foundAnimals.length; i++) _buildFoundAnimalCard(i),
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
@@ -2458,7 +2509,7 @@ class _RescuePageState extends State<RescuePage> {
     ];
   }
 
-  Widget _buildFoundAnimalCard(int index, {bool showTriage = false}) {
+  Widget _buildFoundAnimalCard(int index) {
     final entry = _foundAnimals[index];
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2559,72 +2610,86 @@ class _RescuePageState extends State<RescuePage> {
           const SizedBox(height: 10),
           _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: entry.biteRisk,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Bite risk',
-                    border: UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary)),
-                  ),
-                  items: [
-                    for (final level in kBiteRiskLevels)
-                      DropdownMenuItem(value: level, child: Text(level)),
-                  ],
-                  onChanged: (v) => setState(() => entry.biteRisk = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: entry.escapeRisk,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Escape risk',
-                    border: UnderlineInputBorder(
-                        borderSide: BorderSide(color: AppColors.textPrimary)),
-                  ),
-                  items: [
-                    for (final level in kEscapeRiskLevels)
-                      DropdownMenuItem(value: level, child: Text(level)),
-                  ],
-                  onChanged: (v) => setState(() => entry.escapeRisk = v),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text('Additional safety indicators (optional)',
-              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final indicator in kSafetyIndicatorOptions)
-                FilterChip(
-                  label: Text(indicator, style: GoogleFonts.zain(fontSize: 12)),
-                  selected: entry.safetyIndicators.contains(indicator),
-                  selectedColor: AppColors.yellowrspwn,
-                  onSelected: (selected) => setState(() {
-                    if (selected) {
-                      entry.safetyIndicators.add(indicator);
-                    } else {
-                      entry.safetyIndicators.remove(indicator);
-                    }
-                  }),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _lostPetTextField(entry.handlingNotesController, 'Handling notes (optional)'),
+          _buildRiskFieldsRow(entry),
         ],
       ),
+    );
+  }
+
+  /// Bite risk / Escape risk side by side when there's enough width for
+  /// both dropdowns to stay legible, stacked full-width otherwise — fixes
+  /// the "RIGHT OVERFLOWED BY 25 PIXELS" this row produced on narrow
+  /// devices (the long option strings, e.g. "Has attempted to bite", plus
+  /// two Expanded halves in a Row, didn't leave enough room). Each
+  /// dropdown also gets isExpanded + ellipsis so a long value never
+  /// overflows even at the breakpoint boundary or under text scaling.
+  Widget _buildRiskFieldsRow(_FoundAnimalEntry entry) {
+    const breakpoint = 340.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bite = _riskDropdown(
+          hintText: 'Bite risk',
+          value: entry.biteRisk,
+          options: kBiteRiskLevels,
+          onChanged: (v) => setState(() => entry.biteRisk = v),
+        );
+        final escape = _riskDropdown(
+          hintText: 'Escape risk',
+          value: entry.escapeRisk,
+          options: kEscapeRiskLevels,
+          onChanged: (v) => setState(() => entry.escapeRisk = v),
+        );
+        if (constraints.maxWidth < breakpoint) {
+          return Column(
+            children: [
+              bite,
+              const SizedBox(height: 10),
+              escape,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: bite),
+            const SizedBox(width: 10),
+            Expanded(child: escape),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _riskDropdown({
+    required String hintText,
+    required String? value,
+    required List<String> options,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isDense: true,
+      isExpanded: true, // lets the selected-value Text shrink to fit instead of overflowing
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hintText,
+        border: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+      ),
+      items: [
+        for (final level in options)
+          DropdownMenuItem(
+            value: level,
+            child: Text(level, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      selectedItemBuilder: (context) => [
+        for (final _ in options)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(value ?? '', overflow: TextOverflow.ellipsis, maxLines: 1),
+          ),
+      ],
+      onChanged: onChanged,
     );
   }
 
@@ -2634,15 +2699,15 @@ class _RescuePageState extends State<RescuePage> {
       return;
     }
 
+    final condition = _conditionController.text.trim();
     final filledCount = _mediaFiles.where((f) => f != null).length;
     final validAnimals =
     _foundAnimals.where((a) => a.speciesText.isNotEmpty).toList();
 
-    if (_selectedRescueType == null ||
+    if (condition.isEmpty ||
+        _selectedRescueType == null ||
         _selectedUrgency == null ||
         validAnimals.isEmpty ||
-        validAnimals.any((a) => a.containmentStatus == null) ||
-        validAnimals.any((a) => a.conditionController.text.trim().isEmpty) ||
         _onSiteChoice == null ||
         _coordinateChoice == null ||
         _adoptionChoice == null) {
@@ -2653,6 +2718,25 @@ class _RescuePageState extends State<RescuePage> {
         ),
       );
       return;
+    }
+
+    if (_coordinateChoice == 'no') {
+      final witnessNameError =
+      AppValidators.name(_witnessNameController.text, fieldName: 'Witness name');
+      if (witnessNameError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(witnessNameError), backgroundColor: Colors.redAccent),
+        );
+        return;
+      }
+      final witnessPhoneError =
+      AppValidators.phFlexiblePhone(_witnessNumberController.text);
+      if (witnessPhoneError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(witnessPhoneError), backgroundColor: Colors.redAccent),
+        );
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
@@ -2677,68 +2761,82 @@ class _RescuePageState extends State<RescuePage> {
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
       final casesCollection = FirebaseFirestore.instance.collection('cases');
-      String? groupId;
-      final createdDocIds = <String>[];
 
-      for (final animal in validAnimals) {
-        final docRef = await casesCollection.add({
-          'reporterId': uid,
-          'reporterName': reporterName,
-          'reporterPhone': userData?['phone'] ?? '',
-          'groupId': groupId, // backfilled below once the first doc exists
-          'animalType': animal.speciesText,
-          'breed': animal.breedText,
-          'sex': animal.sex,
-          'size': animal.size,
-          'colorMarkings': animal.colorController.text.trim(),
-          'biteRisk': animal.biteRisk,
-          'escapeRisk': animal.escapeRisk,
-          'safetyIndicators': animal.safetyIndicators.toList(),
-          'handlingNotes': animal.handlingNotesController.text.trim(),
-          'rescueType': _selectedRescueType,
-          'condition': animal.conditionController.text.trim(),
-          'urgency': _selectedUrgency,
-          'containmentStatus': animal.containmentStatus,
-          'strayTemperament': animal.temperament,
-          'onSite': _onSiteChoice,
-          'accessInstructions': _accessInstructionsController.text.trim(),
-          'bestTimeToContact': _bestTimeContactController.text.trim(),
-          'reportAnonymously':
-          _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
-          'address': _addressController.text.trim().isEmpty
-              ? _pinnedAddress
-              : _addressController.text.trim(),
-          'lat': _pinnedLocation.latitude,
-          'lng': _pinnedLocation.longitude,
-          'coordinateWithShelter': _coordinateChoice,
-          'witnessName': _witnessNameController.text.trim(),
-          'witnessPhone': _witnessNumberController.text.trim(),
-          'interestedToAdopt': _adoptionChoice,
-          'scannedTagId': _scannedTagId,
-          'status': 'pending',
-          'statusHistory': [
-            {
-              'status': 'Rescue case is being reviewed.',
-              'timestamp': Timestamp.now(),
-            }
-          ],
-          'photoUrls': [],
-          'createdAt': Timestamp.now(),
-          'serverCreatedAt' : FieldValue.serverTimestamp(),
+      // One case document covers every animal in this report — an
+      // `animals[]` entry per animal, not a separate case doc per animal.
+      // Every phase downstream (Treatment's animal selector, Intake,
+      // Animal Record creation via sourceAnimalIndex, findPossibleDuplicates,
+      // etc.) already reads this array as the primary source, falling back
+      // to the legacy top-level animalType/breed/... fields only for
+      // reports saved before this array existed — so this is the only
+      // write-side change needed to keep every animal attached through the
+      // whole workflow instead of losing all but one to a since-removed
+      // per-animal-doc split.
+      final animalsArray = [
+        for (final animal in validAnimals)
+          {
+            'species': animal.speciesText,
+            'breed': animal.breedText,
+            'sex': animal.sex,
+            'size': animal.size,
+            'colorMarkings': animal.colorController.text.trim(),
+            'biteRisk': animal.biteRisk,
+            'escapeRisk': animal.escapeRisk,
+          },
+      ];
+
+      final docRef = await casesCollection.add({
+        'reporterId': uid,
+        'reporterName': reporterName,
+        'reporterPhone': userData?['phone'] ?? '',
+        'animals': animalsArray,
+        // Legacy singular fields, kept for any code path that hasn't been
+        // migrated to read `animals[]` yet — mirrors the first animal,
+        // same as every other reader's own fallback convention.
+        'animalType': animalsArray.first['species'],
+        'breed': animalsArray.first['breed'],
+        'sex': animalsArray.first['sex'],
+        'size': animalsArray.first['size'],
+        'colorMarkings': animalsArray.first['colorMarkings'],
+        'biteRisk': animalsArray.first['biteRisk'],
+        'escapeRisk': animalsArray.first['escapeRisk'],
+        'rescueType': _selectedRescueType,
+        'condition': condition,
+        'urgency': _selectedUrgency,
+        'onSite': _onSiteChoice,
+        'accessInstructions': _accessInstructionsController.text.trim(),
+        'bestTimeToContact': _bestTimeContactController.text.trim(),
+        'reportAnonymously':
+        _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
+        'address': _addressController.text.trim().isEmpty
+            ? _pinnedAddress
+            : _addressController.text.trim(),
+        'lat': _pinnedLocation.latitude,
+        'lng': _pinnedLocation.longitude,
+        'coordinateWithShelter': _coordinateChoice,
+        'witnessName': _witnessNameController.text.trim(),
+        'witnessPhone': _witnessNumberController.text.trim(),
+        'interestedToAdopt': _adoptionChoice,
+        'scannedTagId': _scannedTagId,
+        'status': 'pending',
+        'statusHistory': [
+          {
+            'status': 'Rescue case is being reviewed.',
+            'timestamp': Timestamp.now(),
+          }
+        ],
+        'photoUrls': [],
+        'createdAt': Timestamp.now(),
+        'serverCreatedAt' : FieldValue.serverTimestamp(),
+      });
+
+      final primaryCaseId = docRef.id;
+      final media = await _uploadAllMedia(primaryCaseId);
+      if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
+        await casesCollection.doc(primaryCaseId).update({
+          'photoUrls': media.photoUrls,
+          'videoUrls': media.videoUrls,
         });
-        groupId ??= docRef.id;
-        createdDocIds.add(docRef.id);
-      }
-      for (final id in createdDocIds) {
-        await casesCollection.doc(id).update({'groupId': groupId});
-      }
-
-      final primaryCaseId = createdDocIds.first;
-      final photoUrls = await _uploadAllMedia(primaryCaseId);
-      if (photoUrls.isNotEmpty) {
-        for (final id in createdDocIds) {
-          await casesCollection.doc(id).update({'photoUrls': photoUrls});
-        }
       }
 
       if (mounted) {
@@ -2799,6 +2897,28 @@ class _RescuePageState extends State<RescuePage> {
         );
         return;
       }
+
+      final ownerPhoneError =
+      AppValidators.phFlexiblePhone(_ownerContactController.text);
+      if (ownerPhoneError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ownerPhoneError), backgroundColor: Colors.redAccent),
+        );
+        return;
+      }
+
+      if (_offerReward) {
+        final amountError = AppValidators.amount(
+          _rewardAmountController.text,
+          fieldName: 'Reward amount',
+        );
+        if (amountError != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(amountError), backgroundColor: Colors.redAccent),
+          );
+          return;
+        }
+      }
     } else {
       final hasEmptySpecies = _foundAnimals
           .any((a) => a.speciesText.isEmpty);
@@ -2812,6 +2932,15 @@ class _RescuePageState extends State<RescuePage> {
             content: Text('Please fill in all required fields.'),
             backgroundColor: Colors.redAccent,
           ),
+        );
+        return;
+      }
+
+      final finderPhoneError =
+      AppValidators.phFlexiblePhone(_finderContactController.text);
+      if (finderPhoneError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(finderPhoneError), backgroundColor: Colors.redAccent),
         );
         return;
       }
@@ -2935,10 +3064,13 @@ class _RescuePageState extends State<RescuePage> {
       }
 
       // Media is shared across the whole group (same sighting/animal(s)).
-      final photoUrls = await _uploadAllMedia('lostpet_$groupId');
-      if (photoUrls.isNotEmpty) {
+      final media = await _uploadAllMedia('lostpet_$groupId');
+      if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
         for (final id in createdDocIds) {
-          await alertsCollection.doc(id).update({'photoUrls': photoUrls});
+          await alertsCollection.doc(id).update({
+            'photoUrls': media.photoUrls,
+            'videoUrls': media.videoUrls,
+          });
         }
       }
 
@@ -3152,4 +3284,86 @@ void _showScanInfo(BuildContext context) {
       ],
     ),
   );
+}
+// Full-screen local-file video preview — lets someone actually watch a
+// video before submitting it, instead of the report form's play-icon
+// thumbnail (which never played anything; tapping it just re-opened the
+// file picker to replace that slot).
+class _VideoPreviewPage extends StatefulWidget {
+  final File file;
+  const _VideoPreviewPage({required this.file});
+
+  @override
+  State<_VideoPreviewPage> createState() => _VideoPreviewPageState();
+}
+
+class _VideoPreviewPageState extends State<_VideoPreviewPage> {
+  late final VideoPlayerController _controller;
+  bool _ready = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(widget.file)
+      ..initialize().then((_) {
+        if (!mounted) return;
+        setState(() => _ready = true);
+        _controller.play();
+      }).catchError((_) {
+        if (!mounted) return;
+        setState(() => _failed = true);
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Center(
+        child: _failed
+            ? const Text(
+          'Could not play this video.',
+          style: TextStyle(color: Colors.white),
+        )
+            : !_ready
+            ? const CircularProgressIndicator(color: Colors.white)
+            : AspectRatio(
+          aspectRatio: _controller.value.aspectRatio == 0
+              ? 16 / 9
+              : _controller.value.aspectRatio,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              VideoPlayer(_controller),
+              GestureDetector(
+                onTap: () => setState(() {
+                  _controller.value.isPlaying
+                      ? _controller.pause()
+                      : _controller.play();
+                }),
+                child: AnimatedOpacity(
+                  opacity: _controller.value.isPlaying ? 0 : 1,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(Icons.play_circle_fill,
+                      size: 64, color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

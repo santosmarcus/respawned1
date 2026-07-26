@@ -19,9 +19,13 @@ class OrganizationDirectoryRepository {
   CollectionReference<Map<String, dynamic>> get _organizations => _db.collection('organizations');
   CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
 
+  /// [species] — every species the source case actually covers (a case can
+  /// have more than one animal via its `animals[]` array). An organization
+  /// matches if it accepts any one of them, or accepts everything — never
+  /// filtered down to just the first animal's species.
   Future<List<OrgReferralCandidate>> search({
     String? nameQuery,
-    String? species,
+    List<String>? species,
     int limit = 30,
   }) async {
     final snap = await _organizations.limit(200).get();
@@ -31,11 +35,13 @@ class OrganizationDirectoryRepository {
       final q = nameQuery.trim().toLowerCase();
       results = results.where((o) => o.name.toLowerCase().contains(q)).toList();
     }
-    if (species != null && species.trim().isNotEmpty) {
+    final speciesFilter = (species ?? const []).where((s) => s.trim().isNotEmpty).toList();
+    if (speciesFilter.isNotEmpty) {
       results = results
           .where((o) =>
               o.acceptedSpecies.isEmpty ||
-              o.acceptedSpecies.any((s) => s.toLowerCase() == species.toLowerCase()))
+              o.acceptedSpecies.any((accepted) =>
+                  speciesFilter.any((s) => accepted.toLowerCase() == s.toLowerCase())))
           .toList();
     }
 
