@@ -40,6 +40,23 @@ class OrgMembershipService {
 
   final FirebaseFirestore _db;
 
+  /// Just "which organization is this account linked to" — reads
+  /// `users/{uid}.organizationId` directly, with NO dependency on the
+  /// `organizations/{orgId}/members/{uid}` subdoc [getMembership] requires.
+  /// Per this class's own TODO above, no member subdoc exists for real
+  /// users yet, so [getMembership] returns null for every legitimate,
+  /// already-configured organization today — which was silently routing
+  /// "open my Organization Profile" into the blank bootstrap/invitation
+  /// flow instead of the account's real org. Use this for "which org
+  /// profile should open" (viewing); keep using [getMembership] for
+  /// role-gated actions (editing/staff management), which SHOULD fail open
+  /// on missing membership per the TODO above, not silently succeed.
+  Future<String?> resolveOrganizationId(String uid) async {
+    final userDoc = await _db.collection('users').doc(uid).get();
+    final orgId = userDoc.data()?['organizationId'] as String?;
+    return (orgId == null || orgId.isEmpty) ? null : orgId;
+  }
+
   Future<OrgMembership?> getMembership(String uid) async {
     final userDoc = await _db.collection('users').doc(uid).get();
     final orgId = userDoc.data()?['organizationId'] as String?;

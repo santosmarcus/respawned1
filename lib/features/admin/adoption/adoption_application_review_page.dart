@@ -607,6 +607,15 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                 icon: const Icon(Icons.arrow_back, color: AppColors.background),
                 onPressed: () => Navigator.pop(context),
               ),
+        // Page title restored to the top header (spec) — same typography/
+        // placement as Volunteers/Collar Tags. Only shown at the root
+        // module entry (matches the drill-down back-arrow condition above
+        // — a pushed-in Adoptions view opened from an Animal Record keeps
+        // its own context, not a repeated "Adoptions" banner). The body's
+        // own smaller title is removed below so it's never shown twice.
+        title: isRootModule
+            ? Text('Adoptions', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background))
+            : null,
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
@@ -614,18 +623,8 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
           ),
         ],
       ),
-      // Same structure/order as Rescue Reports: module heading inside the
-      // content area, then workflow tabs, then a search + sort/filter row,
-      // then the list — never a second oversized AppBar title.
       body: Column(
         children: [
-          const SizedBox(height: 20),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Adoptions', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-          ),
-
           const SizedBox(height: 16),
 
           // Workflow tabs — icon + count badge + label, matching Rescue

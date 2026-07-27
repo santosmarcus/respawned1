@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +8,7 @@ import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/admin_adoption_page.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
+import 'package:respawnd1/features/admin/audit/audit_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
@@ -16,7 +18,10 @@ import 'package:respawnd1/features/organization/organization_profile_edit_page.d
 /// The full set of admin root modules the drawer can open, in the required
 /// order — the single source of truth for labels/ordering/highlighting so
 /// no page can drift into its own separately-ordered/labeled copy again.
-enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, shelterResources, collarTags }
+/// `shelterResources` removed — it was a permanent no-op placeholder with
+/// no destination page at all; shelter-capacity now lives in Organization
+/// Profile. `audit` added for the new Audit module.
+enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit }
 
 /// Pops back to AdminHomeScreen (the app's first/root route) before pushing
 /// the requested module — every drawer module item uses this so switching
@@ -86,12 +91,27 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final membership = await ref.read(currentOrgMembershipProvider.future);
+      // Viewing the profile must not depend on the organizations/{id}/
+      // members/{uid} subdoc existing (see OrgMembershipService's own
+      // TODO — no such subdoc exists for real users yet, so `membership`
+      // is null for every legitimate account today). Fall back to
+      // resolving the organization directly off users/{uid}.organizationId
+      // so the real profile opens instead of the blank bootstrap/
+      // invitation flow. Role-gated actions inside the page itself still
+      // rely on membership, unaffected by this fallback.
+      var organizationId = membership?.organizationId;
+      if (organizationId == null) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          organizationId = await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
+        }
+      }
       if (!mounted) return;
       Navigator.pop(context); // close the drawer only once the destination is ready
       if (!context.mounted) return;
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership?.organizationId)),
+        MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: organizationId)),
       );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Could not open Organization Profile: $e')));
@@ -169,11 +189,13 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
 
             // Menu items — order matches the project's required admin menu
             // order: Dashboard, Rescue, Adoptions, Donations, Records,
-            // Events, Volunteers, Transporters, Shelter Resources, Collar
-            // Tags. Volunteers now opens VolunteersPage (role ==
-            // 'rescue_volunteer' directory). Events, Transporters, and
-            // Shelter Resources still have no admin screen built yet, so
-            // they stay no-op placeholders.
+            // Events, Volunteers, Transporters, Collar Tags, Audit.
+            // Volunteers now opens VolunteersPage (role ==
+            // 'rescue_volunteer' directory). Events and Transporters still
+            // have no admin screen built yet, so they stay no-op
+            // placeholders. Shelter Resources was removed entirely — it
+            // was a permanent no-op with no destination page; shelter
+            // capacity is edited from Organization Profile.
             _DrawerItem(
               label: 'Dashboard',
               selected: widget.active == AdminModule.dashboard,
@@ -219,11 +241,14 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             ),
             _DrawerItem(label: 'Transporters', selected: widget.active == AdminModule.transporters, onTap: () {}),
             _DrawerItem(
-                label: 'Shelter Resources', selected: widget.active == AdminModule.shelterResources, onTap: () {}),
-            _DrawerItem(
               label: 'Collar Tags',
               selected: widget.active == AdminModule.collarTags,
               onTap: () => _openModule(context, (_) => const AdminCollarTagScreen()),
+            ),
+            _DrawerItem(
+              label: 'Audit',
+              selected: widget.active == AdminModule.audit,
+              onTap: () => _openModule(context, (_) => const AuditPage()),
             ),
             const Divider(color: Colors.white24),
             _DrawerItem(

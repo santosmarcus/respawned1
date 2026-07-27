@@ -3087,13 +3087,15 @@ class _RescuePageState extends State<RescuePage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final bite = _riskDropdown(
-          hintText: 'Bite risk',
+          label: 'Bite Risk',
+          hintText: 'Select',
           value: entry.biteRisk,
           options: kBiteRiskLevels,
           onChanged: (v) => setState(() => entry.biteRisk = v),
         );
         final escape = _riskDropdown(
-          hintText: 'Escape risk',
+          label: 'Escape Risk',
+          hintText: 'Select',
           value: entry.escapeRisk,
           options: kEscapeRiskLevels,
           onChanged: (v) => setState(() => entry.escapeRisk = v),
@@ -3120,35 +3122,50 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Widget _riskDropdown({
+    required String label,
     required String hintText,
     required String? value,
     required List<String> options,
     required ValueChanged<String?> onChanged,
   }) {
-    return DropdownButtonFormField<String>(
-      value: value,
-      isDense: true,
-      isExpanded: true, // lets the selected-value Text shrink to fit instead of overflowing
-      decoration: InputDecoration(
-        isDense: true,
-        hintText: hintText,
-        border: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
-      ),
-      items: [
-        for (final level in options)
-          DropdownMenuItem(
-            value: level,
-            child: Text(level, overflow: TextOverflow.ellipsis),
+    // A persistent label above the field, separate from `hintText` (which
+    // is Flutter's InputDecoration.hintText — it only renders while the
+    // value is null and disappears the moment anything is selected). Once
+    // an admin/reporter picks a level, the dropdown itself only shows the
+    // bare value (e.g. "High") with nothing else identifying it as Bite
+    // vs. Escape risk — this label fixes that in both view and edit
+    // states, since it's always visible regardless of selection.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        const SizedBox(height: 2),
+        DropdownButtonFormField<String>(
+          value: value,
+          isDense: true,
+          isExpanded: true, // lets the selected-value Text shrink to fit instead of overflowing
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: hintText,
+            border: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
           ),
+          items: [
+            for (final level in options)
+              DropdownMenuItem(
+                value: level,
+                child: Text(level, overflow: TextOverflow.ellipsis),
+              ),
+          ],
+          selectedItemBuilder: (context) => [
+            for (final _ in options)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(value ?? '', overflow: TextOverflow.ellipsis, maxLines: 1),
+              ),
+          ],
+          onChanged: onChanged,
+        ),
       ],
-      selectedItemBuilder: (context) => [
-        for (final _ in options)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(value ?? '', overflow: TextOverflow.ellipsis, maxLines: 1),
-          ),
-      ],
-      onChanged: onChanged,
     );
   }
 

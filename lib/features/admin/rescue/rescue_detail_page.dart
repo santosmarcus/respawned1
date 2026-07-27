@@ -951,9 +951,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               onContactOwner: () => _contactOwner(c),
               onReferToLgu: () => _referCase(c),
               onReturnToOwner: () =>
-                  _closeCase(c, initialReason: ClosureReason.reunitedWithOwner),
+                  _closeCase(c, initialReason: ClosureReason.reunited),
               onCloseHasOwner: () =>
-                  _closeCase(c, initialReason: ClosureReason.hasOwner),
+                  _closeCase(c, initialReason: ClosureReason.reunited),
             ),
             const SizedBox(height: 12),
 
@@ -1445,8 +1445,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                           initialReason:
                               (c.raw['endReason'] as String?) ==
                                   'Animal requires specialized transport that I cannot provide'
-                              ? ClosureReason.requiresSpecializedTransport
-                              : ClosureReason.aggressiveAnimal,
+                              ? ClosureReason.requiresTransport
+                              : ClosureReason.aggressive,
                         ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFFE05353),
@@ -2245,10 +2245,14 @@ class _AnimalCard extends StatelessWidget {
             value: environmentSafety.join(', '),
           ),
       ],
-      if (biteRisk != null && biteRisk.isNotEmpty)
-        _DetailSection(label: 'Bite Risk', value: biteRisk),
-      if (escapeRisk != null && escapeRisk.isNotEmpty)
-        _DetailSection(label: 'Escape Risk', value: escapeRisk),
+      _DetailSection(
+        label: 'Bite Risk',
+        value: (biteRisk != null && biteRisk.isNotEmpty) ? biteRisk : 'Not assessed',
+      ),
+      _DetailSection(
+        label: 'Escape Risk',
+        value: (escapeRisk != null && escapeRisk.isNotEmpty) ? escapeRisk : 'Not assessed',
+      ),
     ];
   }
 }

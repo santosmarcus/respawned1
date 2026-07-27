@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -433,6 +434,64 @@ class _CompactMetricCard extends StatelessWidget {
   }
 }
 
+/// The Capacity card's own navigation to Organization Profile — pulled out
+/// of the otherwise-stateless TopMetricsRow into its own tiny
+/// ConsumerStatefulWidget purely so it can hold a re-entrancy guard, same
+/// as admin_drawer.dart's already-fixed _handleOpenOrganizationProfile
+/// (this card's onTap previously had none of that: no guard against a
+/// double-tap pushing two stacked profile routes, no loading feedback
+/// during the membership lookup, no try/catch — a slow/failed lookup just
+/// looked like nothing happened, exactly the "cannot reliably be opened"
+/// symptom). Also resolves organizationId via resolveOrganizationId as a
+/// fallback, same reasoning as the drawer's fix.
+class _CapacityMetricCard extends ConsumerStatefulWidget {
+  final String primary;
+  final String? secondary;
+  const _CapacityMetricCard({required this.primary, this.secondary});
+
+  @override
+  ConsumerState<_CapacityMetricCard> createState() => _CapacityMetricCardState();
+}
+
+class _CapacityMetricCardState extends ConsumerState<_CapacityMetricCard> {
+  bool _opening = false;
+
+  Future<void> _open() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final membership = await ref.read(currentOrgMembershipProvider.future);
+      var organizationId = membership?.organizationId;
+      if (organizationId == null) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          organizationId = await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
+        }
+      }
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: organizationId)),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not open Organization Profile: $e')));
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _CompactMetricCard(
+      title: 'Capacity',
+      primary: widget.primary,
+      secondary: _opening ? 'Opening…' : widget.secondary,
+      onTap: _opening ? null : _open,
+    );
+  }
+}
+
 /// Shelter Capacity / Active Rescues / Active Volunteers — the three
 /// compact top-level metrics requested right after Action Required.
 class TopMetricsRow extends ConsumerWidget {
@@ -474,25 +533,11 @@ class TopMetricsRow extends ConsumerWidget {
 
     return Row(
       children: [
-        _CompactMetricCard(
-          title: 'Capacity',
+        _CapacityMetricCard(
           primary: currentOccupancy == null
               ? '—'
               : '$currentOccupancy / ${maxCapacity ?? '—'}',
           secondary: maxCapacity == null ? 'Capacity not configured' : null,
-          // Opens Organization Profile (spec §9) — Shelter Capacity now
-          // lives there (see section 8), so this is the "existing... page"
-          // this metric's own maximum comes from, rather than the Animal
-          // Records list this used to open.
-          onTap: () async {
-            final membership = await ref.read(currentOrgMembershipProvider.future);
-            if (context.mounted) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership?.organizationId)),
-              );
-            }
-          },
         ),
         const SizedBox(width: 10),
         _CompactMetricCard(

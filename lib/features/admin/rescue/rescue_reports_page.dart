@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -51,6 +52,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     RescuePipelineTab.treatment: Icons.medical_services_outlined,
     RescuePipelineTab.intake: Icons.pets_outlined,
     RescuePipelineTab.rejected: Icons.block_outlined,
+    RescuePipelineTab.closed: Icons.folder_off_outlined,
   };
 
   @override
@@ -131,6 +133,12 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
+        // Page title restored to the top header (spec) — same typography/
+        // placement as Volunteers/Collar Tags (GoogleFonts.tiltWarp,
+        // fontSize 18, background color). The body previously carried its
+        // own smaller title here instead; that's removed below so the
+        // title is never shown twice.
+        title: Text('Rescue Reports', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
@@ -138,19 +146,8 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
           ),
         ],
       ),
-      // Centered module heading in the content area, same as Adoptions/
-      // Animal Records — never a second title in the AppBar too.
       body: Column(
         children: [
-          const SizedBox(height: 20),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Rescue Reports',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-          ),
-
           const SizedBox(height: 16),
 
           // Filter tabs
@@ -453,6 +450,26 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                             onTap: () => _navigateToDetail(context, c),
                           );
                         },
+                      );
+                    }
+                    if (c.status == RescueStatus.cancelled) {
+                      // Closed-tab only — closureReason/closedAt/
+                      // closedByName are written directly onto the case doc
+                      // by RescueCaseRepository.closeCase, no extra
+                      // subcollection lookup needed (unlike Rejected's
+                      // rejected-by, which lives in activityLogs).
+                      final closedAtRaw = c.raw['closedAt'];
+                      final closedAt = closedAtRaw is Timestamp ? closedAtRaw.toDate() : null;
+                      final reason = ClosureReason.fromName(c.raw['closureReason'] as String?);
+                      return RescueCaseCard(
+                        rescueCase: c,
+                        showStatusChip: filters.statusOverride != null,
+                        closureInfo: ClosureCardInfo(
+                          reasonLabel: reason.label,
+                          closedDate: closedAt,
+                          closedBy: c.raw['closedByName'] as String?,
+                        ),
+                        onTap: () => _navigateToDetail(context, c),
                       );
                     }
                     if (!canHavePendingOffer) {

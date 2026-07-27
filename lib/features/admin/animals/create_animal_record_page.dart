@@ -128,11 +128,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   final _descriptionController = TextEditingController();
   final _tagsController = TextEditingController();
   String? _selectedSpecies;
-  // Breed has no dedicated input in the current design, but the record
-  // model/other screens (animal_record_page.dart's list card/filtering)
-  // already support it — captured from the report's prefill data below and
-  // still persisted, just not user-editable here.
+  // Editable at creation (free-text field below); locked/read-only once
+  // the record exists — see the identity-lock spec these three fields
+  // (Sex/Species/Breed) share.
   String? _selectedBreed;
+  final _breedController = TextEditingController();
   String? _selectedSex;
   String? _selectedSize;
   String? _selectedCoatLength;
@@ -413,6 +413,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     } else {
       _prefill();
     }
+    _breedController.text = _selectedBreed ?? '';
   }
 
   /// Parses a saved `age` string like "2 years" (or legacy free-text like
@@ -562,6 +563,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     _nameController.dispose();
     _descriptionController.dispose();
     _tagsController.dispose();
+    _breedController.dispose();
     _specialNeedsOtherController.dispose();
     _specialNeedsNotesController.dispose();
     super.dispose();
@@ -1185,21 +1187,46 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             _FieldLabel('Species', required: true),
             const SizedBox(height: 6),
-            Row(
-              children: [
-                _SpeciesCheck(
-                  label: 'Dog',
-                  selected: _selectedSpecies == 'Dog',
-                  onTap: () => setState(() => _selectedSpecies = 'Dog'),
+            // Locked once the record exists — species is a core identity
+            // field, never changeable after creation (only at creation
+            // time, via the checkboxes below).
+            if (widget.isEditing)
+              _LockedFieldValue(value: _selectedSpecies ?? 'Not specified')
+            else
+              Row(
+                children: [
+                  _SpeciesCheck(
+                    label: 'Dog',
+                    selected: _selectedSpecies == 'Dog',
+                    onTap: () => setState(() => _selectedSpecies = 'Dog'),
+                  ),
+                  const SizedBox(width: 12),
+                  _SpeciesCheck(
+                    label: 'Cat',
+                    selected: _selectedSpecies == 'Cat',
+                    onTap: () => setState(() => _selectedSpecies = 'Cat'),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 16),
+
+            _FieldLabel('Breed'),
+            const SizedBox(height: 6),
+            // Same lock rule as Species/Sex — editable only at creation.
+            if (widget.isEditing)
+              _LockedFieldValue(value: _selectedBreed ?? 'Not specified')
+            else
+              TextField(
+                controller: _breedController,
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: 'e.g. Aspin, Shih Tzu, Domestic Shorthair',
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
                 ),
-                const SizedBox(width: 12),
-                _SpeciesCheck(
-                  label: 'Cat',
-                  selected: _selectedSpecies == 'Cat',
-                  onTap: () => setState(() => _selectedSpecies = 'Cat'),
-                ),
-              ],
-            ),
+                onChanged: (v) => _selectedBreed = v.trim().isEmpty ? null : v.trim(),
+              ),
             const SizedBox(height: 16),
 
             Row(
@@ -1209,12 +1236,17 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _FieldLabel('Sex', required: true),
-                      _DropdownField(
-                        value: _selectedSex,
-                        hint: 'Select',
-                        items: const ['Male', 'Female', 'Unknown'],
-                        onChanged: (v) => setState(() => _selectedSex = v),
-                      ),
+                      // Locked once the record exists — same identity-lock
+                      // rule as Species/Breed above.
+                      if (widget.isEditing)
+                        _LockedFieldValue(value: _selectedSex ?? 'Not specified')
+                      else
+                        _DropdownField(
+                          value: _selectedSex,
+                          hint: 'Select',
+                          items: const ['Male', 'Female', 'Unknown'],
+                          onChanged: (v) => setState(() => _selectedSex = v),
+                        ),
                     ],
                   ),
                 ),
@@ -1658,6 +1690,34 @@ class _UnderlineField extends StatelessWidget {
       contentPadding: const EdgeInsets.only(bottom: 8),
     ),
     style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+  );
+}
+
+/// Read-only display for Sex/Species/Breed once an Animal Record exists —
+/// these are core identity fields, editable only at creation. Kept clearly
+/// readable (full-strength text/border colors, not dimmed) with a small
+/// lock icon as the only visual cue that it's non-interactive, rather than
+/// disabling the original dropdown/checkbox widgets (which would still
+/// look tappable).
+class _LockedFieldValue extends StatelessWidget {
+  final String value;
+  const _LockedFieldValue({required this.value});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: AppColors.slaterspwn.withValues(alpha: 0.2),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.slaterspwn),
+    ),
+    child: Row(
+      children: [
+        Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))),
+        const Icon(Icons.lock_outline, size: 15, color: AppColors.textSecondary),
+      ],
+    ),
   );
 }
 

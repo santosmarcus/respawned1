@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 
 /// The animal's gender icon, or null for 'Unknown'/unset sex — never
 /// guesses Male as a default. Shared by the list card and the admin/user
@@ -37,6 +38,25 @@ Widget specialNeedsBadge() => Container(
           const Icon(Icons.favorite, size: 10, color: AppColors.textPrimary),
           const SizedBox(width: 3),
           Text('Special Needs', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+
+/// "In Shelter" indicator — same shape/placement rule as [specialNeedsBadge]
+/// (icon + text, shown even in compact mode). Uses the shared [isInShelter]
+/// classifier (adoptable/unadoptable/reserved/in-treatment/quarantined all
+/// count; released/transferred/deceased/archived don't) so this card can
+/// never disagree with the list's own default-sort grouping.
+Widget inShelterBadge() => Container(
+      margin: const EdgeInsets.only(top: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: AppColors.greenrspwn.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.home_outlined, size: 10, color: AppColors.textPrimary),
+          const SizedBox(width: 3),
+          Text('In Shelter', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
         ],
       ),
     );
@@ -191,6 +211,7 @@ class AnimalRecordCard extends StatelessWidget {
                   if (animal.age.isNotEmpty)
                     Text(animal.age, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                   if (animal.hasSpecialNeeds) specialNeedsBadge(),
+                  if (isInShelter(animal)) inShelterBadge(),
                   if (!compact && animal.description.isNotEmpty)
                     Text(
                       animal.description,
@@ -336,6 +357,7 @@ class AnimalRecordGridTile extends StatelessWidget {
             if (animal.age.isNotEmpty)
               Text(animal.age, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
             if (animal.hasSpecialNeeds) specialNeedsBadge(),
+            if (isInShelter(animal)) inShelterBadge(),
           ],
         ),
       ),

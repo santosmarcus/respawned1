@@ -169,7 +169,13 @@ enum RescuePipelineTab {
   ongoing,
   treatment,
   intake,
-  rejected;
+  rejected,
+  // Cases closed through the controlled Close Case flow (closeCase ->
+  // RescueStatus.cancelled) — same reasoning as [rejected] getting its own
+  // tab: previously only reachable through the filter-sheet override
+  // (kSecondaryStatuses), which meant a closed case looked like it had
+  // vanished unless an admin knew to check there.
+  closed;
 
   String get label => switch (this) {
         RescuePipelineTab.review => 'Review',
@@ -178,6 +184,7 @@ enum RescuePipelineTab {
         RescuePipelineTab.treatment => 'In Treatment',
         RescuePipelineTab.intake => 'Intake',
         RescuePipelineTab.rejected => 'Rejected',
+        RescuePipelineTab.closed => 'Closed',
       };
 
   // Deliberately `const` — casesByStatusesProvider is a StreamProvider.family
@@ -203,6 +210,7 @@ enum RescuePipelineTab {
         // tab intentionally shows only true rejections, not those other
         // terminal buckets.
         RescuePipelineTab.rejected => const [RescueStatus.rejected],
+        RescuePipelineTab.closed => const [RescueStatus.cancelled],
       };
 }
 
@@ -238,16 +246,16 @@ final casesForTabProvider =
 });
 
 /// Extra statuses reachable only through the status filter (not one of the
-/// six pipeline tabs above) — referral/duplicate/terminal states. Rejected
-/// is deliberately NOT listed here anymore now that it's its own pipeline
-/// tab (RescuePipelineTab.rejected) — keeping it in both places would just
-/// make the filter-sheet override redundant with the tab.
+/// pipeline tabs above) — referral/duplicate/terminal states. Rejected and
+/// Cancelled are deliberately NOT listed here anymore now that each has
+/// its own pipeline tab (RescuePipelineTab.rejected / .closed) — keeping
+/// them in both places would just make the filter-sheet override
+/// redundant with the tab.
 const List<RescueStatus> kSecondaryStatuses = [
   RescueStatus.referred,
   RescueStatus.possibleDuplicate,
   RescueStatus.merged,
   RescueStatus.completed,
-  RescueStatus.cancelled,
 ];
 
 class RescueFilters {

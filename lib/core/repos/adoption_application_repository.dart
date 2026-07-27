@@ -7,7 +7,9 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_schedule.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
+import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
+import 'package:respawnd1/core/repos/audit_log_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 
 /// Result of [AdoptionApplicationRepository.checkAvailability] — what a
@@ -62,13 +64,16 @@ class AdoptionApplicationRepository {
     FirebaseFirestore? firestore,
     AnimalRecordRepository? animalRecordRepository,
     RescueCaseRepository? rescueCaseRepository,
+    AuditLogRepository? auditLogRepository,
   })  : _db = firestore ?? FirebaseFirestore.instance,
         _animalRepo = animalRecordRepository ?? AnimalRecordRepository(firestore: firestore),
-        _caseRepo = rescueCaseRepository ?? RescueCaseRepository(firestore: firestore);
+        _caseRepo = rescueCaseRepository ?? RescueCaseRepository(firestore: firestore),
+        _auditLog = auditLogRepository ?? AuditLogRepository(firestore: firestore);
 
   final FirebaseFirestore _db;
   final AnimalRecordRepository _animalRepo;
   final RescueCaseRepository _caseRepo;
+  final AuditLogRepository _auditLog;
 
   CollectionReference<Map<String, dynamic>> get _adoptions => _db.collection('adoptions');
   CollectionReference<Map<String, dynamic>> get _animals => _db.collection('animals');
@@ -369,6 +374,17 @@ class AdoptionApplicationRepository {
         {'status': 'Application approved by $actorName.', 'timestamp': Timestamp.now()}
       ]),
     });
+    // Best-effort, after the real write — an audit-log failure must never
+    // roll back or block the actual approval.
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Application approved',
+      actorId: actorUid,
+      actorName: actorName,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      newValues: const {'status': 'approved'},
+    );
   }
 
   Future<void> reject({
@@ -388,6 +404,16 @@ class AdoptionApplicationRepository {
         {'status': 'Application rejected: ${reasons.join(', ')}.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Application rejected',
+      actorId: actorUid,
+      actorName: actorName,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      newValues: {'status': 'rejected', 'reasons': reasons},
+      metadata: notes != null && notes.isNotEmpty ? {'notes': notes} : null,
+    );
   }
 
   // ---- Reserve / Unreserve / Release (transactional) ---------------------
@@ -453,6 +479,16 @@ class AdoptionApplicationRepository {
         'timestamp': FieldValue.serverTimestamp(),
       });
     });
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Animal reserved',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      metadata: {'animalId': animalId},
+    );
   }
 
   /// Clears only the reservation that matches [applicationId] — never
@@ -767,6 +803,16 @@ class AdoptionApplicationRepository {
         'timestamp': FieldValue.serverTimestamp(),
       });
     });
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Adoption completed / animal released',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      metadata: {'animalId': animalId, 'noFollowUpsPlanned': noFollowUpsPlanned},
+    );
   }
 
   /// Admin-side counterpart to the adopter's own Request Reschedule action

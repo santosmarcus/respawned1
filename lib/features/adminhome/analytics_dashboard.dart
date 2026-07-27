@@ -357,7 +357,15 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
       q = q.where('organizationId', isEqualTo: widget.orgId);
     }
     final snap = await q.get();
-    return snap.docs.map(RescueCase.fromFirestore).toList();
+    final cases = <RescueCase>[];
+    for (final doc in snap.docs) {
+      try {
+        cases.add(RescueCase.fromFirestore(doc));
+      } catch (e) {
+        debugPrint('[AnalyticsDashboard] Skipping unparseable case ${doc.id}: $e');
+      }
+    }
+    return cases;
   }
 
   // Dashboard Improvement spec — the "Pet Transporter Response Rate"/
@@ -560,7 +568,14 @@ class _ShelterAnalyticsView extends StatelessWidget {
     Query<Map<String, dynamic>> caseQuery = FirebaseFirestore.instance.collection('cases');
     if (orgId != null) caseQuery = caseQuery.where('organizationId', isEqualTo: orgId);
     final caseSnap = await caseQuery.get();
-    final cases = caseSnap.docs.map(RescueCase.fromFirestore).toList();
+    final cases = <RescueCase>[];
+    for (final doc in caseSnap.docs) {
+      try {
+        cases.add(RescueCase.fromFirestore(doc));
+      } catch (e) {
+        debugPrint('[AnalyticsDashboard] Skipping unparseable case ${doc.id}: $e');
+      }
+    }
 
     final transferred =
     cases.where((c) => c.status == RescueStatus.referred || c.status == RescueStatus.merged);

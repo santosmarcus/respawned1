@@ -1,0 +1,318 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/features/admin/audit/state/audit_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+
+/// Read-only audit trail across six categories. Admin-only: gated the same
+/// way every other org-role check in this codebase currently is (see
+/// OrgMembershipService's own TODO — no `organizations/{id}/members/{uid}`
+/// docs exist for real users yet, so a membership lookup resolving to null
+/// fails OPEN here too, matching every existing OrgRole gate elsewhere;
+/// only an EXPLICIT staff membership blocks access). Nothing in this page
+/// can edit or delete an entry — every row is plain, non-interactive text.
+class AuditPage extends ConsumerStatefulWidget {
+  const AuditPage({super.key});
+
+  @override
+  ConsumerState<AuditPage> createState() => _AuditPageState();
+}
+
+class _AuditPageState extends ConsumerState<AuditPage> {
+  bool _loading = true;
+  bool _allowed = true;
+  String? _organizationId;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveAccess();
+  }
+
+  Future<void> _resolveAccess() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      final service = OrgMembershipService();
+      final membership = await service.getMembership(uid);
+      final orgId = membership?.organizationId ?? await service.resolveOrganizationId(uid);
+      if (!mounted) return;
+      setState(() {
+        _organizationId = orgId;
+        // Fails OPEN only when membership is unresolved (matches every
+        // other OrgRole gate in this codebase today) — an EXPLICIT staff
+        // role is the one case that actually blocks access.
+        _allowed = membership == null || membership.role == OrgRole.admin;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      drawer: const AdminDrawer(active: AdminModule.audit),
+      appBar: AppBar(
+        backgroundColor: AppColors.textPrimary,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: AppColors.background),
+            tooltip: 'Menu',
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+        title: Text('Audit', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
+          : !_allowed
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'You do not have permission to view Audit. Only organization admins can access this page.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                    ),
+                  ),
+                )
+              : DefaultTabController(
+                  length: AuditCategory.values.length,
+                  child: Column(
+                    children: [
+                      Material(
+                        color: AppColors.textPrimary,
+                        child: TabBar(
+                          isScrollable: true,
+                          labelColor: AppColors.background,
+                          unselectedLabelColor: AppColors.background.withValues(alpha: 0.6),
+                          indicatorColor: AppColors.yellowrspwn,
+                          labelStyle: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700),
+                          tabs: [for (final c in AuditCategory.values) Tab(text: c.label)],
+                        ),
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            for (final c in AuditCategory.values) _AuditCategoryTab(category: c, organizationId: _organizationId),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+    );
+  }
+}
+
+class _AuditCategoryTab extends ConsumerStatefulWidget {
+  final AuditCategory category;
+  final String? organizationId;
+  const _AuditCategoryTab({required this.category, required this.organizationId});
+
+  @override
+  ConsumerState<_AuditCategoryTab> createState() => _AuditCategoryTabState();
+}
+
+class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
+  @override
+  Widget build(BuildContext context) {
+    // Donations has no real write path anywhere in this codebase (no
+    // Donation model/repository, nothing ever writes a `donations` doc —
+    // confirmed by inspection) — shown as an honest empty state rather
+    // than fabricated entries, same convention admin_adoption_page.dart
+    // already uses for the same reason.
+    if (widget.category == AuditCategory.donations) {
+      return _EmptyState(
+        message: 'No donation events recorded yet. Donations does not have a data-writing workflow in this build.',
+      );
+    }
+    if (widget.category == AuditCategory.animalRecords) {
+      final rowsAsync = ref.watch(animalRecordAuditProvider);
+      return _RowListView(rowsAsync: rowsAsync);
+    }
+    if (widget.category == AuditCategory.rescueCases) {
+      final rowsAsync = ref.watch(rescueCaseAuditProvider);
+      return _RowListView(rowsAsync: rowsAsync);
+    }
+    final entriesAsync = ref.watch(
+      auditCategoryLogsProvider((category: widget.category, organizationId: widget.organizationId)),
+    );
+    return entriesAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
+      error: (e, _) => _ErrorState(
+        message: 'Could not load ${widget.category.label}.',
+        onRetry: () => ref.invalidate(
+          auditCategoryLogsProvider((category: widget.category, organizationId: widget.organizationId)),
+        ),
+      ),
+      data: (entries) {
+        if (entries.isEmpty) {
+          return const _EmptyState(message: 'No audit entries yet.');
+        }
+        return _RowListView(rowsAsync: AsyncValue.data(entries.map(AuditDisplayRow.fromAuditLog).toList()));
+      },
+    );
+  }
+}
+
+class _RowListView extends StatelessWidget {
+  final AsyncValue<List<AuditDisplayRow>> rowsAsync;
+  const _RowListView({required this.rowsAsync});
+
+  @override
+  Widget build(BuildContext context) {
+    return rowsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
+      error: (e, _) => _ErrorState(message: 'Could not load these entries.', onRetry: () {}),
+      data: (rows) {
+        if (rows.isEmpty) return const _EmptyState(message: 'No audit entries yet.');
+        return ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: rows.length,
+          separatorBuilder: (_, __) => const Divider(height: 20),
+          itemBuilder: (context, i) => _AuditRowTile(row: rows[i]),
+        );
+      },
+    );
+  }
+}
+
+class _AuditRowTile extends StatefulWidget {
+  final AuditDisplayRow row;
+  const _AuditRowTile({required this.row});
+
+  @override
+  State<_AuditRowTile> createState() => _AuditRowTileState();
+}
+
+class _AuditRowTileState extends State<_AuditRowTile> {
+  bool _expanded = false;
+
+  static const _months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+
+  String _fmt(DateTime? d) {
+    if (d == null) return 'Undated';
+    final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    final minute = d.minute.toString().padLeft(2, '0');
+    return '${_months[d.month - 1]} ${d.day}, ${d.year}, $hour12:$minute $ampm';
+  }
+
+  String? get _actorLine {
+    final r = widget.row;
+    final name = r.actorName?.trim();
+    final email = r.actorEmail?.trim();
+    final hasName = name != null && name.isNotEmpty;
+    final hasEmail = email != null && email.isNotEmpty;
+    if (hasName && hasEmail) return '$name · $email';
+    if (hasName) return name;
+    if (hasEmail) return email;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.row;
+    final hasValues = (r.oldValues?.isNotEmpty ?? false) || (r.newValues?.isNotEmpty ?? false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(r.action, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  if ((r.description ?? '').isNotEmpty)
+                    Text(r.description!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  if (_actorLine != null)
+                    Text(_actorLine!, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                  if ((r.targetLabel ?? '').isNotEmpty)
+                    Text(r.targetLabel!, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(_fmt(r.createdAt), style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+          ],
+        ),
+        if (hasValues)
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(_expanded ? 'Hide details' : 'View details',
+                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.greenrspwn, decoration: TextDecoration.underline)),
+            ),
+          ),
+        if (_expanded && hasValues)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (r.oldValues?.isNotEmpty ?? false)
+                  Text('Before — ${r.oldValues!.entries.map((e) => '${e.key}: ${e.value}').join('  ·  ')}',
+                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                if (r.newValues?.isNotEmpty ?? false)
+                  Text('After — ${r.newValues!.entries.map((e) => '${e.key}: ${e.value}').join('  ·  ')}',
+                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final String message;
+  const _EmptyState({required this.message});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(message, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+        ),
+      );
+}
+
+class _ErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorState({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 12),
+              OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
+            ],
+          ),
+        ),
+      );
+}

@@ -106,21 +106,43 @@ class RescueCaseRepository {
     );
     // Firestore whereIn supports up to 30 values; our alias lists are well
     // under that even for the broadest status (ongoing).
-    return _cases
-        .where('status', whereIn: values)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map(RescueCase.fromFirestore)
-              .where(_isPrimaryGroupMember)
-              .where(
-                (c) =>
-                    !isReviewQueueQuery ||
-                    c.raw['sourceType'] != 'animalRecordAdmission',
-              )
-              .toList(),
-        );
+    //
+    // Deliberately NO `.orderBy('createdAt', ...)` on the query itself —
+    // Firestore silently EXCLUDES any document missing the ordered field
+    // from the result set entirely (not an error, just a permanent
+    // disappearance). A legacy/hand-migrated/Cloud-Function-written case
+    // doc with no `createdAt` would vanish from every tab with zero
+    // signal. Sorting is done client-side below instead, after parsing,
+    // so a missing/null createdAt only affects where a case SORTS
+    // (falls last), never whether it appears at all.
+    return _cases.where('status', whereIn: values).snapshots().map((snap) {
+      debugPrint('[RescueCaseRepository] streamCasesByStatuses(${statuses.map((s) => s.name).join(",")}): '
+          '${snap.docs.length} doc(s) returned, ids=${snap.docs.map((d) => d.id).toList()}');
+      final cases = <RescueCase>[];
+      for (final doc in snap.docs) {
+        try {
+          cases.add(RescueCase.fromFirestore(doc));
+        } catch (e, st) {
+          // One malformed document must never take down the whole tab —
+          // it's skipped and logged, every other case still loads.
+          debugPrint('[RescueCaseRepository] Skipping unparseable case ${doc.id}: $e\n$st\nraw=${doc.data()}');
+        }
+      }
+      final filtered = <RescueCase>[];
+      for (final c in cases) {
+        if (!_isPrimaryGroupMember(c)) {
+          debugPrint('[RescueCaseRepository] Dropping case ${c.id} — not the primary member of '
+              'groupId=${c.raw['groupId']} (legacy grouped-submission collapsing).');
+          continue;
+        }
+        if (isReviewQueueQuery && c.raw['sourceType'] == 'animalRecordAdmission') {
+          continue;
+        }
+        filtered.add(c);
+      }
+      filtered.sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+      return filtered;
+    });
   }
 
   /// Creates a `cases` doc directly in the "needs a clinic + transporter"
@@ -1944,7 +1966,7 @@ class RescueCaseRepository {
     String? clinicUnavailableDetails,
     String? serviceTypeNeeded,
     // Which animals this closure applies to (spec §13/§2) — only ever
-    // meaningful for [ClosureReason.diedDuringRescue] (see
+    // meaningful for [ClosureReason.died] (see
     // ClosureReason.isDeathReason); null means "the whole case", matching
     // every prior caller's behavior exactly. For a death reason with a
     // genuine SUBSET of a multi-animal case's animals, only those animals
@@ -2683,15 +2705,17 @@ class RescueCaseRepository {
   /// case with no `activeAnimalStages` written yet (every case predating
   /// this round) still appears via its scalar `status` exactly as before.
   Stream<List<RescueCase>> streamCasesByActiveStage(String stage) {
-    return _cases
-        .where('activeAnimalStages', arrayContains: stage)
-        .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map(RescueCase.fromFirestore)
-              .where(_isPrimaryGroupMember)
-              .toList(),
-        );
+    return _cases.where('activeAnimalStages', arrayContains: stage).snapshots().map((snap) {
+      final cases = <RescueCase>[];
+      for (final doc in snap.docs) {
+        try {
+          cases.add(RescueCase.fromFirestore(doc));
+        } catch (e, st) {
+          debugPrint('[RescueCaseRepository] Skipping unparseable case ${doc.id} (stage=$stage): $e\n$st');
+        }
+      }
+      return cases.where(_isPrimaryGroupMember).toList();
+    });
   }
 
   Future<void> closeDeceasedCase({required String caseId}) async {

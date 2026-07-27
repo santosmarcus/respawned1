@@ -10,7 +10,9 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/constants/service_areas.dart';
+import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/repos/audit_log_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
@@ -504,6 +506,14 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
           avatarUrl = await ref.getDownloadURL();
           await _repo.updateProfile(organizationId: orgId, avatarUrl: avatarUrl);
         }
+        await AuditLogRepository().log(
+          category: AuditCategory.organizationStaff,
+          action: 'Organization profile created',
+          actorId: uid,
+          organizationId: orgId,
+          targetType: 'Organization',
+          targetId: orgId,
+        );
         if (mounted) {
           setState(() {
             _organizationId = orgId;
@@ -535,6 +545,17 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         website: _websiteController.text.trim(),
         serviceAreas: _serviceAreas,
         acceptedSpecies: _acceptedSpecies.toList(),
+      );
+      await AuditLogRepository().log(
+        category: AuditCategory.organizationStaff,
+        action: 'Organization profile edited',
+        actorId: FirebaseAuth.instance.currentUser?.uid,
+        organizationId: _organizationId,
+        targetType: 'Organization',
+        targetId: _organizationId,
+        metadata: _isOrgAdmin && (clearCapacity || capacityValue != null)
+            ? {'shelterCapacityChanged': true}
+            : null,
       );
 
       if (mounted) {

@@ -225,7 +225,13 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
       }
     }
     try {
-      await _repo.changeMemberRole(organizationId: widget.organizationId, uid: uid, role: role);
+      await _repo.changeMemberRole(
+        organizationId: widget.organizationId,
+        uid: uid,
+        role: role,
+        actorId: FirebaseAuth.instance.currentUser?.uid,
+        actorName: FirebaseAuth.instance.currentUser?.displayName,
+      );
       _snack('Role updated.');
     } catch (e) {
       _snack('Could not update role: $e', error: true);
@@ -255,7 +261,12 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     );
     if (confirmed != true) return;
     try {
-      await _repo.removeMember(organizationId: widget.organizationId, uid: uid);
+      await _repo.removeMember(
+        organizationId: widget.organizationId,
+        uid: uid,
+        actorId: FirebaseAuth.instance.currentUser?.uid,
+        actorName: FirebaseAuth.instance.currentUser?.displayName,
+      );
       _snack('Member removed.');
     } catch (e) {
       _snack('Could not remove member: $e', error: true);

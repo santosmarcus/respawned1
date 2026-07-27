@@ -99,8 +99,6 @@ Future<CloseCaseOutcome> performCloseCase(
         actorName: actorName,
         actorRole: actorRole,
         organizationId: organizationId,
-        lastKnownLocation: result.lastKnownLocation,
-        clinicUnavailableDetails: result.clinicUnavailableDetails,
         serviceTypeNeeded: result.serviceTypeNeeded,
         animalIndexes: animalIndexes?.toList(),
       );

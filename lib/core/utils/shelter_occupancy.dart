@@ -22,3 +22,29 @@ Future<int> currentShelterOccupancy() async {
   final snap = await FirebaseFirestore.instance.collection('animals').get();
   return snap.docs.map(AnimalRecord.fromFirestore).where(isCurrentlyHoused).length;
 }
+
+/// The default Animal Records list wants "will this animal remain relevant
+/// to ongoing shelter operations" — narrower than [isCurrentlyHoused],
+/// which deliberately still counts a pending transfer as physically
+/// occupying a spot (correct for capacity math, wrong for this list: a
+/// transfer in progress belongs at the bottom with Released/Deceased, not
+/// mixed in with animals actively in the shelter's care). Adoptable,
+/// unadoptable ("not ready"), reserved, in-treatment, and quarantined
+/// animals are all still "in shelter" — only adopted (released),
+/// transferred, and deceased animals are excluded.
+bool isInShelter(AnimalRecord a) => isCurrentlyHoused(a) && !a.isTransferredOut;
+
+/// The date this animal most recently left the shelter's active care, for
+/// sorting the "outgoing" (adopted/transferred/deceased) group newest-
+/// first. Falls back to updatedAt/createdAt for a legacy record missing
+/// the specific terminal-event timestamp, so a record never crashes or
+/// sorts as if it had no date at all.
+DateTime? terminalDateOf(AnimalRecord a) {
+  if (a.isDeceased) return a.deceasedAt ?? a.updatedAt ?? a.createdAt;
+  if (a.isAdopted) return a.adoptedAt ?? a.updatedAt ?? a.createdAt;
+  if (a.isTransferredOut) {
+    final ts = a.raw['transferredAt'];
+    return (ts is Timestamp ? ts.toDate() : null) ?? a.updatedAt ?? a.createdAt;
+  }
+  return a.updatedAt ?? a.createdAt;
+}

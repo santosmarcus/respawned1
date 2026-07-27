@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
@@ -15,6 +16,12 @@ import 'create_animal_record_page.dart';
 // ultimately read createdAt for most records, since updatedAt is only set
 // on later edits) and added a confusing second "newest-first" option.
 enum _SortOption {
+  // Default — in-shelter animals first (newest intake first), then
+  // released/transferred/deceased animals last (newest terminal update
+  // first). Distinct from [newestIntake], which is a plain flat sort with
+  // no in-shelter partitioning — both stay available since a manual
+  // "just show newest first, don't group" option is still useful.
+  defaultOrder,
   nameAsc,
   nameDesc,
   newestIntake,
@@ -26,6 +33,7 @@ enum _SortOption {
 
 extension on _SortOption {
   String get label => switch (this) {
+        _SortOption.defaultOrder => 'Default (In Shelter First)',
         _SortOption.nameAsc => 'Name A–Z',
         _SortOption.nameDesc => 'Name Z–A',
         _SortOption.newestIntake => 'Newest Intake',
@@ -48,7 +56,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   String _statusFilter = 'All';
   String _searchQuery = '';
   final _searchController = TextEditingController();
-  _SortOption _sort = _SortOption.newestIntake;
+  _SortOption _sort = _SortOption.defaultOrder;
 
   // Extra filters — surfaced inside the Filter & Sort sheet, along with
   // _statusFilter (the old standalone "All ▾" dropdown next to the species
@@ -182,6 +190,23 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     final list = [...records];
     int byDateDesc(DateTime? a, DateTime? b) => (b ?? DateTime(0)).compareTo(a ?? DateTime(0));
     switch (_sort) {
+      case _SortOption.defaultOrder:
+        // 1. In-shelter animals first (adoptable, unadoptable/"not ready",
+        //    reserved, in-treatment, quarantined — anything isInShelter
+        //    still counts as here), newest intake first.
+        // 2. Released (adopted)/transferred/deceased last, newest
+        //    terminal-status update first.
+        // A deterministic id-based tie-break guards against Dart's
+        // unstable List.sort reordering equal-date entries between builds.
+        list.sort((a, b) {
+          final aIn = isInShelter(a);
+          final bIn = isInShelter(b);
+          if (aIn != bIn) return aIn ? -1 : 1;
+          final dateCompare =
+              aIn ? byDateDesc(a.createdAt, b.createdAt) : byDateDesc(terminalDateOf(a), terminalDateOf(b));
+          return dateCompare != 0 ? dateCompare : a.id.compareTo(b.id);
+        });
+        break;
       case _SortOption.nameAsc:
         list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         break;
@@ -259,6 +284,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           _specialNeedsOnly = null;
                           _ageGroups.clear();
                           _recordStatus = 'Active';
+                          _sort = _SortOption.defaultOrder;
                         }),
                         child: const Text('Clear'),
                       ),
@@ -466,10 +492,14 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
-        title: _selecting
-            ? Text('${_selectedIds.length} selected',
-                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.background))
-            : null,
+        // Page title restored to the top header (spec) — same typography/
+        // placement as Volunteers/Collar Tags. The selection-mode "N
+        // selected" title takes over exactly as before. The body's own
+        // smaller title is removed below so it's never shown twice.
+        title: Text(
+          _selecting ? '${_selectedIds.length} selected' : 'Animal Records',
+          style: GoogleFonts.tiltWarp(fontSize: _selecting ? 16 : 18, color: AppColors.background),
+        ),
         actions: [
           if (_selecting)
             // Visible text label, not just a close icon — an icon alone
@@ -489,14 +519,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       ),
       body: Column(
         children: [
-          const SizedBox(height: 20),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Animal Records',
-                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-          ),
-
           const SizedBox(height: 16),
 
           // Search + filter — same styling as Rescue Reports (white

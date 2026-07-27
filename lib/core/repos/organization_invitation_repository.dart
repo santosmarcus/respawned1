@@ -2,7 +2,9 @@ import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/repos/audit_log_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 
 enum InvitationStatus {
@@ -73,9 +75,12 @@ class OrganizationInvitation {
 /// development-only mechanism, not a production-secure invite link. See
 /// this session's final report for exactly what a real deployment needs.
 class OrganizationInvitationRepository {
-  OrganizationInvitationRepository({FirebaseFirestore? firestore}) : _db = firestore ?? FirebaseFirestore.instance;
+  OrganizationInvitationRepository({FirebaseFirestore? firestore, AuditLogRepository? auditLogRepository})
+      : _db = firestore ?? FirebaseFirestore.instance,
+        _auditLog = auditLogRepository ?? AuditLogRepository(firestore: firestore);
 
   final FirebaseFirestore _db;
+  final AuditLogRepository _auditLog;
   static final _rng = Random.secure();
 
   CollectionReference<Map<String, dynamic>> get _invitations => _db.collection('organizationInvitations');
@@ -284,6 +289,16 @@ class OrganizationInvitationRepository {
         if (!preserveAccountRole) 'role': 'organization',
       }, SetOptions(merge: true));
     });
+    await _auditLog.log(
+      category: AuditCategory.organizationStaff,
+      action: 'Staff added',
+      actorId: uid,
+      actorEmail: signedInEmail,
+      organizationId: organizationId,
+      targetType: 'OrgMember',
+      targetId: uid,
+      newValues: {'role': grantedRole.name},
+    );
   }
 
   /// Blocks removing the final active Admin — every organization must keep
@@ -293,14 +308,45 @@ class OrganizationInvitationRepository {
     return admins.docs.length <= 1 && admins.docs.any((d) => d.id == uid);
   }
 
-  Future<void> removeMember({required String organizationId, required String uid}) async {
+  Future<void> removeMember({
+    required String organizationId,
+    required String uid,
+    String? actorId,
+    String? actorName,
+  }) async {
     await _db.collection('organizations').doc(organizationId).collection('members').doc(uid).delete();
     // Clears the account's org association so access is revoked on the
     // next auth/provider refresh — never deletes the Firebase Auth account
     // itself.
     await _users.doc(uid).update({'organizationId': FieldValue.delete()});
+    await _auditLog.log(
+      category: AuditCategory.organizationStaff,
+      action: 'Staff removed',
+      actorId: actorId,
+      actorName: actorName,
+      organizationId: organizationId,
+      targetType: 'OrgMember',
+      targetId: uid,
+    );
   }
 
-  Future<void> changeMemberRole({required String organizationId, required String uid, required OrgRole role}) =>
-      OrgMembershipService(firestore: _db).setMember(organizationId: organizationId, uid: uid, role: role);
+  Future<void> changeMemberRole({
+    required String organizationId,
+    required String uid,
+    required OrgRole role,
+    String? actorId,
+    String? actorName,
+  }) async {
+    await OrgMembershipService(firestore: _db).setMember(organizationId: organizationId, uid: uid, role: role);
+    await _auditLog.log(
+      category: AuditCategory.organizationStaff,
+      action: 'Staff role changed',
+      actorId: actorId,
+      actorName: actorName,
+      organizationId: organizationId,
+      targetType: 'OrgMember',
+      targetId: uid,
+      newValues: {'role': role.name},
+    );
+  }
 }
