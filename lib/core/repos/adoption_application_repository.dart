@@ -44,6 +44,7 @@ class AdoptionApplicationRepository {
   DocumentReference<Map<String, dynamic>> _adoptionDoc(String id) => _adoptions.doc(id);
   CollectionReference<Map<String, dynamic>> _notesOf(String id) => _adoptionDoc(id).collection('notesLog');
   CollectionReference<Map<String, dynamic>> _followUpsOf(String id) => _adoptionDoc(id).collection('followUps');
+  CollectionReference<Map<String, dynamic>> _warningsOf(String id) => _adoptionDoc(id).collection('warnings');
 
   // ---- Reads --------------------------------------------------------
 
@@ -206,6 +207,27 @@ class AdoptionApplicationRepository {
       'createdBy': actorName,
       'createdByUid': actorUid,
       'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Same append-only pattern as [addNote], but explicitly flagged private
+  /// so it's unambiguous in the audit trail that this was never surfaced
+  /// to the adopter (the Post-Adoption Details "Add Note" action, spec
+  /// §4). Reads back from the same `notesLog` subcollection/[streamNotes]
+  /// as [addNote] — callers distinguish private notes via the `private`
+  /// flag, not a separate collection.
+  Future<void> addPrivateNote({
+    required String applicationId,
+    required String text,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _notesOf(applicationId).add({
+      'text': text,
+      'createdBy': actorName,
+      'createdByUid': actorUid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'private': true,
     });
   }
 
@@ -675,6 +697,61 @@ class AdoptionApplicationRepository {
     });
   }
 
+  // ---- Post-adoption warnings (adoptions/{id}/warnings) ------------------
+
+  /// Writes the warning doc `_WarningsSection`/`_WarningRow` in
+  /// PostAdoptionDetailsPage stream directly (`orderBy('sentAt', descending:
+  /// true)`) — field names below must match exactly what those widgets
+  /// read: `category`, `message`, `requiredAction`, `responseDeadline`,
+  /// `sentAt`, `sentBy`, `resolved` (spec §4/Send Warning sheet).
+  Future<void> sendWarning({
+    required String applicationId,
+    required String category,
+    required String message,
+    String? requiredAction,
+    DateTime? responseDeadline,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final now = Timestamp.now();
+    await _warningsOf(applicationId).add({
+      'category': category,
+      'message': message,
+      if (requiredAction != null && requiredAction.isNotEmpty) 'requiredAction': requiredAction,
+      if (responseDeadline != null) 'responseDeadline': Timestamp.fromDate(responseDeadline),
+      'sentAt': now,
+      'sentBy': actorName,
+      'sentByUid': actorUid,
+      'resolved': false,
+    });
+    await _adoptionDoc(applicationId).update({
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Warning sent: $category.', 'timestamp': now}
+      ]),
+    });
+  }
+
+  /// Marks a warning resolved — does not notify the adopter (per the
+  /// confirmation dialog copy in PostAdoptionDetailsPage._resolveWarning),
+  /// purely an internal record-keeping action.
+  Future<void> resolveWarning({
+    required String applicationId,
+    required String warningId,
+    required String actorName,
+  }) async {
+    final now = Timestamp.now();
+    await _warningsOf(applicationId).doc(warningId).update({
+      'resolved': true,
+      'resolvedAt': now,
+      'resolvedBy': actorName,
+    });
+    await _adoptionDoc(applicationId).update({
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Warning marked resolved by $actorName.', 'timestamp': now}
+      ]),
+    });
+  }
+
   // ---- Animal Return --------------------------------------------------
 
   /// Ports the write AdoptionReturnForm (post_adoption_page.dart) already
@@ -702,9 +779,51 @@ class AdoptionApplicationRepository {
         'requestedBy': actorUid,
         'requestedAt': Timestamp.now(),
         'status': ReturnRequestStatus.pendingReview.name,
+        // Adopter-initiated is the default source; see [adminInitiateReturn]
+        // for the organization-initiated counterpart. Explicit here so a
+        // return request document is never ambiguous about its origin.
+        'source': 'adopter',
       },
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Return requested.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+  }
+
+  /// Starts the exact same `returnRequest` state machine [requestReturn]
+  /// uses, just tagged `source: 'organization'` (so `ReturnRequest.
+  /// isOrgInitiated` reads true) plus the admin-only fields the Initiate
+  /// Return sheet collects (spec §4). Status still opens at pendingReview —
+  /// this is the same workflow an adopter-requested return goes through,
+  /// not a fast-tracked one, and it flows through approve/schedule/
+  /// retrieve/intake exactly the same way afterward.
+  Future<void> adminInitiateReturn({
+    required String applicationId,
+    required String reason,
+    required String explanation,
+    required String urgency,
+    DateTime? proposedRetrievalDateTime,
+    String? internalNotes,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final now = Timestamp.now();
+    await _adoptionDoc(applicationId).update({
+      'returnRequest': {
+        'reason': reason,
+        'explanation': explanation,
+        'urgency': urgency,
+        'images': <String>[],
+        if (proposedRetrievalDateTime != null)
+          'proposedRetrievalDateTime': Timestamp.fromDate(proposedRetrievalDateTime),
+        if (internalNotes != null && internalNotes.isNotEmpty) 'internalNotes': internalNotes,
+        'source': 'organization',
+        'requestedBy': actorUid,
+        'requestedAt': now,
+        'status': ReturnRequestStatus.pendingReview.name,
+      },
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Return initiated by organization ($actorName).', 'timestamp': now}
       ]),
     });
   }
