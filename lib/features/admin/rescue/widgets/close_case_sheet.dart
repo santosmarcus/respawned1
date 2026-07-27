@@ -6,10 +6,11 @@ import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 
 typedef CloseCaseResult = ({
-  ClosureReason reason,
-  String details,
-  String? lastKnownLocation,
-  String? clinicUnavailableDetails,
+ClosureReason reason,
+String details,
+String? lastKnownLocation,
+String? clinicUnavailableDetails,
+String? serviceTypeNeeded,
 });
 
 /// Shared Close Case confirmation form (spec §2/§10) — every exception
@@ -19,10 +20,10 @@ typedef CloseCaseResult = ({
 /// RescueCaseRepository.closeCase, called by the caller with this
 /// sheet's result, once. Returns null if dismissed without confirming.
 Future<CloseCaseResult?> showCloseCaseSheet(
-  BuildContext context, {
-  required RescueCase rescueCase,
-  ClosureReason? initialReason,
-}) {
+    BuildContext context, {
+      required RescueCase rescueCase,
+      ClosureReason? initialReason,
+    }) {
   return showModalBottomSheet<CloseCaseResult>(
     context: context,
     backgroundColor: AppColors.background,
@@ -46,12 +47,26 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
   final _detailsController = TextEditingController();
   final _locationController = TextEditingController();
   final _clinicDetailsController = TextEditingController();
+  final _serviceTypeOtherController = TextEditingController();
+  String? _serviceType;
+
+  // Common specialized-transport needs — kept short and concrete so the
+  // next transporter (or the admin re-assigning one) knows exactly what to
+  // bring/arrange, rather than a vague free-text guess.
+  static const _serviceTypeOptions = [
+    'Larger enclosed vehicle (van/truck)',
+    'Secure crate/cage required',
+    'Two-person handling required',
+    'Climate-controlled transport',
+    'Other',
+  ];
 
   @override
   void dispose() {
     _detailsController.dispose();
     _locationController.dispose();
     _clinicDetailsController.dispose();
+    _serviceTypeOtherController.dispose();
     super.dispose();
   }
 
@@ -59,6 +74,10 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
     if (_reason == null || _detailsController.text.trim().isEmpty) return false;
     if (_reason!.needsLastKnownLocation && _locationController.text.trim().isEmpty) return false;
     if (_reason!.needsClinicDetails && _clinicDetailsController.text.trim().isEmpty) return false;
+    if (_reason!.needsServiceType) {
+      if (_serviceType == null) return false;
+      if (_serviceType == 'Other' && _serviceTypeOtherController.text.trim().isEmpty) return false;
+    }
     return true;
   }
 
@@ -110,14 +129,14 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
             Text('Closure Reason', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
             const SizedBox(height: 6),
             ...ClosureReason.values.map((reason) => RadioListTile<ClosureReason>(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  value: reason,
-                  groupValue: _reason,
-                  activeColor: AppColors.textPrimary,
-                  title: Text(reason.label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-                  onChanged: (v) => setState(() => _reason = v),
-                )),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              value: reason,
+              groupValue: _reason,
+              activeColor: AppColors.textPrimary,
+              title: Text(reason.label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              onChanged: (v) => setState(() => _reason = v),
+            )),
 
             const SizedBox(height: 8),
             Text('Detailed Explanation', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
@@ -152,6 +171,35 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
               ),
             ],
 
+            if (_reason?.needsServiceType ?? false) ...[
+              const SizedBox(height: 12),
+              Text('What kind of service does this animal need?',
+                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              Text(
+                'Shown on the case so whoever handles it next (or a re-assigned transporter) knows what to arrange.',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 6),
+              ..._serviceTypeOptions.map((option) => RadioListTile<String>(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: option,
+                groupValue: _serviceType,
+                activeColor: AppColors.textPrimary,
+                title: Text(option, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                onChanged: (v) => setState(() => _serviceType = v),
+              )),
+              if (_serviceType == 'Other') ...[
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _serviceTypeOtherController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(hintText: 'Describe the service needed'),
+                ),
+              ],
+            ],
+
             const SizedBox(height: 16),
             Row(
               children: [
@@ -166,16 +214,21 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
                   child: ElevatedButton(
                     onPressed: _canConfirm
                         ? () => Navigator.pop(
-                              context,
-                              (
-                                reason: _reason!,
-                                details: _detailsController.text.trim(),
-                                lastKnownLocation:
-                                    _reason!.needsLastKnownLocation ? _locationController.text.trim() : null,
-                                clinicUnavailableDetails:
-                                    _reason!.needsClinicDetails ? _clinicDetailsController.text.trim() : null,
-                              ),
-                            )
+                      context,
+                      (
+                      reason: _reason!,
+                      details: _detailsController.text.trim(),
+                      lastKnownLocation:
+                      _reason!.needsLastKnownLocation ? _locationController.text.trim() : null,
+                      clinicUnavailableDetails:
+                      _reason!.needsClinicDetails ? _clinicDetailsController.text.trim() : null,
+                      serviceTypeNeeded: _reason!.needsServiceType
+                          ? (_serviceType == 'Other'
+                          ? _serviceTypeOtherController.text.trim()
+                          : _serviceType)
+                          : null,
+                      ),
+                    )
                         : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFE05353),
@@ -196,12 +249,12 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
   }
 
   Widget _summaryRow(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
-          children: [
-            SizedBox(width: 130, child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
-            Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      children: [
+        SizedBox(width: 130, child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
+        Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+      ],
+    ),
+  );
 }

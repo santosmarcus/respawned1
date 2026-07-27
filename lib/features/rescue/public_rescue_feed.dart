@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
 import 'package:respawnd1/core/utils/geo.dart';
@@ -45,6 +46,14 @@ class _PublicRescueFeedState extends State<PublicRescueFeed> {
   void initState() {
     super.initState();
     _listenUserLocation();
+    // Firestore's users/{uid}.lastLat/lastLng is only ever written when the
+    // Explore Map has been opened at least once (see explore_reports_map.dart
+    // _saveLastLocation) — a user who opens "See All Reports" without ever
+    // visiting the map would otherwise never get a known location, so the
+    // nearby/farther-away categorization would silently never activate.
+    // This direct device fetch guarantees a location is available on this
+    // page regardless of prior navigation.
+    _resolveDeviceLocation();
   }
 
   void _listenUserLocation() {
@@ -65,6 +74,41 @@ class _PublicRescueFeedState extends State<PublicRescueFeed> {
         _userLng = lng;
       });
     }, onError: (_) {});
+  }
+
+  Future<void> _resolveDeviceLocation() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition()
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        // Timed out or failed — fall back to whatever was last known.
+        pos = await Geolocator.getLastKnownPosition();
+      }
+      if (pos == null || !mounted) return;
+      final resolved = pos;
+      // Only fill in if the Firestore listener hasn't already supplied a
+      // location — whichever arrives first wins, neither overwrites a
+      // still-fresh value from the other source.
+      if (_userLat != null && _userLng != null) return;
+      setState(() {
+        _userLat = resolved.latitude;
+        _userLng = resolved.longitude;
+      });
+    } catch (_) {
+      // Non-fatal — the feed just falls back to unsorted/all-items display.
+    }
   }
 
   @override

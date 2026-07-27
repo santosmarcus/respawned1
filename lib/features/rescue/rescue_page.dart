@@ -201,15 +201,15 @@ class _RescuePageState extends State<RescuePage> {
       'urgency': 'Low',
     },
     {
-      'label': 'Illness',
-      'description':
-      'Appears weak, vomiting, coughing, skin disease; suspected illness',
-      'urgency': 'Medium',
-    },
-    {
       'label': 'Abandonment',
       'description': 'Animal left without care',
       'urgency': 'Medium',
+    },
+    {
+      'label': 'Illness',
+      'description':
+      'Appears weak, vomiting, coughing, skin disease; suspected illness',
+      'urgency': 'Critical',
     },
     {
       'label': 'Injury',
@@ -1789,10 +1789,10 @@ class _RescuePageState extends State<RescuePage> {
                           Expanded(
                             child: Text(
                               'By agreeing to this, you confirm that you are '
-                              'willing to cover any necessary veterinary '
-                              'expenses, participate in the adoption interview '
-                              'process, comply with the adoption agreement, and '
-                              'provide post-adoption updates as required.',
+                                  'willing to cover any necessary veterinary '
+                                  'expenses, participate in the adoption interview '
+                                  'process, comply with the adoption agreement, and '
+                                  'provide post-adoption updates as required.',
                               style: GoogleFonts.zain(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 16,
@@ -1810,8 +1810,8 @@ class _RescuePageState extends State<RescuePage> {
                       const SizedBox(height: 4),
                       Text(
                         'Once the animal is in treatment, the organization will '
-                        'visit you at the veterinary clinic to discuss the '
-                        'adoption process with you.',
+                            'visit you at the veterinary clinic to discuss the '
+                            'adoption process with you.',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                       ),
                       const SizedBox(height: 8),
@@ -3262,6 +3262,7 @@ class _RescuePageState extends State<RescuePage> {
                 : _addressController.text.trim(),
             'lat': _pinnedLocation.latitude,
             'lng': _pinnedLocation.longitude,
+            'scannedTagId': _scannedTagId,
             'status': 'pending',
             'statusHistory': [
               {
@@ -3490,7 +3491,7 @@ class _EnvironmentSafetySectionState extends State<_EnvironmentSafetySection> {
                       style: GoogleFonts.zain(
                           fontSize: 12,
                           fontWeight:
-                              entry.environmentSafety.contains(option) ? FontWeight.w700 : FontWeight.w500,
+                          entry.environmentSafety.contains(option) ? FontWeight.w700 : FontWeight.w500,
                           color: AppColors.textPrimary)),
                 ),
               ),
@@ -3547,7 +3548,7 @@ class _EnvironmentSafetySectionState extends State<_EnvironmentSafetySection> {
                     hintText: 'Enter a custom value',
                     hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
                     enabledBorder:
-                        const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+                    const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
                   ),
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
                 ),

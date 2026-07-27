@@ -9,6 +9,11 @@ class ActivityItem{
   final String animalType;
   final String urgency;
   final DateTime? createdAt;
+  // Timestamp of the most recent status update (falls back to createdAt
+  // when there's no history yet) — Activity sorts by this, not createdAt
+  // alone, so an older report that just received a new update resurfaces
+  // to the top instead of staying buried at its original creation slot.
+  final DateTime? lastUpdatedAt;
   final String docId;
   final String alertKind;
   final String? photoUrl;
@@ -31,6 +36,7 @@ class ActivityItem{
     required this.animalType,
     required this.urgency,
     required this.createdAt,
+    DateTime? lastUpdatedAt,
     required this.docId,
     this.alertKind = '',
     this.photoUrl,
@@ -38,6 +44,6 @@ class ActivityItem{
     this.rejectionReasonLabel,
     this.rejectedAt,
     this.communityAdoptionEligible = false,
-  });
+  }) : lastUpdatedAt = lastUpdatedAt ?? createdAt;
 
 }

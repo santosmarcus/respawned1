@@ -108,14 +108,15 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     setState(() => _isLoading = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).closeCase(
-            caseId: c.id,
-            reason: result.reason,
-            details: result.details,
-            actorUid: _actorUid,
-            actorName: _actorName,
-            lastKnownLocation: result.lastKnownLocation,
-            clinicUnavailableDetails: result.clinicUnavailableDetails,
-          );
+        caseId: c.id,
+        reason: result.reason,
+        details: result.details,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        lastKnownLocation: result.lastKnownLocation,
+        clinicUnavailableDetails: result.clinicUnavailableDetails,
+        serviceTypeNeeded: result.serviceTypeNeeded,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
       }
@@ -141,15 +142,15 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     if (result == null || !mounted) return;
     try {
       await ref.read(rescueCaseRepositoryProvider).updateOwnershipInfo(
-            caseId: c.id,
-            ownershipStatus: result.ownershipStatus,
-            ownedAnimalCategory: result.ownedAnimalCategory,
-            ownerName: result.ownerName,
-            ownerContact: result.ownerContact,
-            ownershipNotes: result.ownershipNotes,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        ownershipStatus: result.ownershipStatus,
+        ownedAnimalCategory: result.ownedAnimalCategory,
+        ownerName: result.ownerName,
+        ownerContact: result.ownerContact,
+        ownershipNotes: result.ownershipNotes,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -195,8 +196,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         title: const Text('Acknowledge Safety Warning'),
         content: Text(
           'A previous transporter reported that this animal may be aggressive.'
-          '${notes != null && notes.isNotEmpty ? '\n\n"$notes"' : ''}'
-          '\n\nDo you acknowledge this before selecting another transporter?',
+              '${notes != null && notes.isNotEmpty ? '\n\n"$notes"' : ''}'
+              '\n\nDo you acknowledge this before selecting another transporter?',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -213,10 +214,10 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     setState(() => _isLoading = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).resumeAssignmentAfterSafetyReport(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (mounted) {
         Navigator.push(context, MaterialPageRoute(builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)));
       }
@@ -251,11 +252,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     if (note == null || note.isEmpty || !mounted) return;
     try {
       await ref.read(rescueCaseRepositoryProvider).addSafetyResponseNote(
-            caseId: c.id,
-            note: note,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        note: note,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save instructions: $e'), backgroundColor: Colors.redAccent));
@@ -922,28 +923,49 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               ),
             ] else if (c.status == RescueStatus.needsSpecializedAssistance) ...[
               // Set by the real transporter app's own End Reason flow
-              // (transit_progress_page.dart) — endReason/endReasonNotes are
-              // read here, never re-derived or guessed.
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: const Color(0xFFE05353).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Safety warning', style: GoogleFonts.tiltWarp(fontSize: 14, color: const Color(0xFFE05353))),
-                    const SizedBox(height: 6),
-                    Text(
-                      'A previous transporter reported that the animal may be aggressive. Review the incident before assigning another transporter.',
-                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-                    ),
-                    if ((c.raw['endReasonNotes'] as String?)?.isNotEmpty ?? false) ...[
+              // (transit_progress_page.dart) — endReason/endReasonNotes/
+              // endReasonServiceType are read here, never re-derived or
+              // guessed. Two different escalation causes share this
+              // status (aggressive animal vs. a transport-capability
+              // mismatch), so the panel picks its copy/actions based on
+              // which one actually happened.
+              Builder(builder: (context) {
+                final endReason = c.raw['endReason'] as String?;
+                final isSpecializedTransport = endReason ==
+                    'Animal requires specialized transport that I cannot provide';
+                final serviceType = c.raw['endReasonServiceType'] as String?;
+
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: const Color(0xFFE05353).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isSpecializedTransport ? 'Specialized Transport Needed' : 'Safety warning',
+                        style: GoogleFonts.tiltWarp(fontSize: 14, color: const Color(0xFFE05353)),
+                      ),
                       const SizedBox(height: 6),
-                      Text('Reported: ${c.raw['endReasonNotes']}', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      Text(
+                        isSpecializedTransport
+                            ? 'The assigned transporter could not provide the transport this animal needs. Arrange the right vehicle/service before assigning a new transporter.'
+                            : 'A previous transporter reported that the animal may be aggressive. Review the incident before assigning another transporter.',
+                        style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                      ),
+                      if (isSpecializedTransport && (serviceType?.isNotEmpty ?? false)) ...[
+                        const SizedBox(height: 6),
+                        Text('Service needed: $serviceType',
+                            style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      ],
+                      if ((c.raw['endReasonNotes'] as String?)?.isNotEmpty ?? false) ...[
+                        const SizedBox(height: 6),
+                        Text('Reported: ${c.raw['endReasonNotes']}', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      ],
                     ],
-                  ],
-                ),
-              ),
+                  ),
+                );
+              }),
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -993,14 +1015,27 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => _closeCase(c, initialReason: ClosureReason.aggressiveAnimal),
+                  onPressed: _isLoading
+                      ? null
+                      : () => _closeCase(
+                    c,
+                    initialReason: (c.raw['endReason'] as String?) ==
+                        'Animal requires specialized transport that I cannot provide'
+                        ? ClosureReason.requiresSpecializedTransport
+                        : ClosureReason.aggressiveAnimal,
+                  ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFFE05353),
                     side: const BorderSide(color: Color(0xFFE05353)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: const Text('Close Case — Aggressive Animal / Unsafe Rescue'),
+                  child: Text(
+                    (c.raw['endReason'] as String?) ==
+                        'Animal requires specialized transport that I cannot provide'
+                        ? 'Close Case — Specialized Transport Unavailable'
+                        : 'Close Case — Aggressive Animal / Unsafe Rescue',
+                  ),
                 ),
               ),
             ] else if (c.status == RescueStatus.rejected) ...[
@@ -1122,22 +1157,22 @@ class _RejectionDetailsCard extends ConsumerWidget {
   }
 
   Widget _rejectionRow(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 100,
-              child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-            ),
-            Expanded(
-              child: Text(value,
-                  style: GoogleFonts.zain(
-                      fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 100,
+          child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
         ),
-      );
+        Expanded(
+          child: Text(value,
+              style: GoogleFonts.zain(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Owner-identification section (spec §1) — always visible (not just once

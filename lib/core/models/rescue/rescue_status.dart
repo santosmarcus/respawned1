@@ -121,6 +121,14 @@ enum RescueStatus {
       'in_transit_shelter',
       'dropoff',
       'treatment',
+      // Treatment accepted, but the case has an interested adopter (the
+      // reporter, per the report form's `interestedToAdopt`) — the
+      // transporter waits at the clinic instead of proceeding to the
+      // shelter (transit_progress_page.dart _acceptTreatment /
+      // _buildAwaitingAdopterPanel). Still an active, in-progress trip
+      // from the admin's point of view, same bucket as the other transit
+      // sub-states above.
+      'awaiting_adopter_pickup',
     ],
     RescueStatus.treatment: ['in_treatment'],
     RescueStatus.intake: ['intake'],

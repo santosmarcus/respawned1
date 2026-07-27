@@ -23,6 +23,11 @@ class CaseSummaryPage extends StatelessWidget {
     return s == 'closed' || s.contains('ended');
   }
 
+  bool get _isRejected {
+    final s = (caseData['status'] as String? ?? '').toLowerCase();
+    return s == 'rejected';
+  }
+
 
   Future<void> _close(BuildContext context) async {
     try {
@@ -257,7 +262,8 @@ class CaseSummaryPage extends StatelessWidget {
           icon: const Icon(Icons.close),
           onPressed: () => _close(context),
         ),
-        title: Text(_isClosed ? 'Case Closed' : 'Case Completed',
+        title: Text(
+            _isRejected ? 'Report Reviewed' : (_isClosed ? 'Case Closed' : 'Case Completed'),
             style: Theme.of(context).textTheme.displaySmall),
         centerTitle: true,
       ),

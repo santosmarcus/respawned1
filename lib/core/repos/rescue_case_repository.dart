@@ -90,7 +90,7 @@ class RescueCaseRepository {
     // includes them — those views are meant to show every case in motion,
     // regardless of source.
     final isReviewQueueQuery = statuses.every((s) =>
-        s == RescueStatus.pendingReview || s == RescueStatus.accepted || s == RescueStatus.awaitingAssignment);
+    s == RescueStatus.pendingReview || s == RescueStatus.accepted || s == RescueStatus.awaitingAssignment);
     // Firestore whereIn supports up to 30 values; our alias lists are well
     // under that even for the broadest status (ongoing).
     return _cases
@@ -98,10 +98,10 @@ class RescueCaseRepository {
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snap) => snap.docs
-            .map(RescueCase.fromFirestore)
-            .where(_isPrimaryGroupMember)
-            .where((c) => !isReviewQueueQuery || c.raw['sourceType'] != 'animalRecordAdmission')
-            .toList());
+        .map(RescueCase.fromFirestore)
+        .where(_isPrimaryGroupMember)
+        .where((c) => !isReviewQueueQuery || c.raw['sourceType'] != 'animalRecordAdmission')
+        .toList());
   }
 
   /// Creates a `cases` doc directly in the "needs a clinic + transporter"
@@ -252,7 +252,7 @@ class RescueCaseRepository {
   Stream<RescueCase?> streamCase(String caseId) {
     return _caseDoc(caseId).snapshots().map(
           (doc) => doc.exists ? RescueCase.fromFirestore(doc) : null,
-        );
+    );
   }
 
   /// Chronological (oldest first) treatment history for a case — merges the
@@ -283,7 +283,7 @@ class RescueCaseRepository {
   Stream<List<Expense>> streamExpenses(String caseId) {
     return _expensesOf(caseId).orderBy('incurredAt', descending: true).snapshots().map(
           (snap) => snap.docs.map((d) => Expense.fromFirestore(d, caseId)).toList(),
-        );
+    );
   }
 
   /// Which animal-array indexes already have a created record for this
@@ -294,34 +294,34 @@ class RescueCaseRepository {
   Stream<Set<int>> streamCompletedAnimalRecordIndexes(String caseId) {
     return _animals.where('linkedCaseId', isEqualTo: caseId).snapshots().map(
           (snap) => snap.docs
-              .map((d) => (d.data()['sourceAnimalIndex'] as num?)?.toInt())
-              .whereType<int>()
-              .toSet(),
-        );
+          .map((d) => (d.data()['sourceAnimalIndex'] as num?)?.toInt())
+          .whereType<int>()
+          .toSet(),
+    );
   }
 
   Stream<List<RescueReport>> streamReports(String caseId) {
     return _reportsOf(caseId).orderBy('submittedAt').snapshots().map(
           (snap) => snap.docs.map((d) => RescueReport.fromFirestore(d, caseId)).toList(),
-        );
+    );
   }
 
   Stream<List<Referral>> streamReferrals(String caseId) {
     return _referralsOf(caseId).orderBy('createdAt', descending: true).snapshots().map(
           (snap) => snap.docs.map((d) => Referral.fromFirestore(d, caseId)).toList(),
-        );
+    );
   }
 
   Stream<List<ActivityLogEntry>> streamActivityLogs(String caseId) {
     return _activityLogsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
           (snap) => snap.docs.map((d) => ActivityLogEntry.fromFirestore(d, caseId)).toList(),
-        );
+    );
   }
 
   Stream<List<CommunityReport>> streamCommunityReports(String caseId) {
     return _communityReportsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
           (snap) => snap.docs.map(CommunityReport.fromFirestore).toList(),
-        );
+    );
   }
 
   /// Every account with role == 'pet_transporter' — the exact string
@@ -333,7 +333,7 @@ class RescueCaseRepository {
   Stream<List<PetTransporter>> streamPetTransporters() {
     return _users.where('role', isEqualTo: 'pet_transporter').snapshots().map(
           (snap) => snap.docs.map(PetTransporter.fromFirestore).toList(),
-        );
+    );
   }
 
   /// Every account with role == 'rescue_volunteer' — the other real
@@ -347,9 +347,9 @@ class RescueCaseRepository {
   Stream<List<PetTransporter>> streamRescueVolunteers() {
     return _users.where('role', isEqualTo: 'rescue_volunteer').snapshots().map(
           (snap) => snap.docs
-              .map((doc) => PetTransporter.fromFirestore(doc, unnamedLabel: 'Unnamed Volunteer'))
-              .toList(),
-        );
+          .map((doc) => PetTransporter.fromFirestore(doc, unnamedLabel: 'Unnamed Volunteer'))
+          .toList(),
+    );
   }
 
   /// Resolves display-ready transporter details (vehicle/plate/photo/phone)
@@ -371,7 +371,7 @@ class RescueCaseRepository {
           ? 'Yamaha NMAX'
           : (uid == 'demo-rider-b' ? 'Honda Click' : 'Not provided');
       final plate =
-          uid == 'demo-rider-a' ? 'DEMO-001' : (uid == 'demo-rider-b' ? 'DEMO-002' : 'Not provided');
+      uid == 'demo-rider-a' ? 'DEMO-001' : (uid == 'demo-rider-b' ? 'DEMO-002' : 'Not provided');
       return TransporterProfile(
           uid: uid, name: fallbackName, type: type, vehicle: vehicle, plate: plate, isDemo: true);
     }
@@ -457,9 +457,9 @@ class RescueCaseRepository {
         .where('status', isEqualTo: TransportAssignmentStatus.pending.name)
         .snapshots()
         .map((snap) => snap.docs
-            .map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id))
-            .where((a) => a.isStalePending)
-            .toList());
+        .map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id))
+        .where((a) => a.isStalePending)
+        .toList());
   }
 
   /// Naive possible-duplicate lookup: other active cases (pending/awaiting
@@ -468,10 +468,10 @@ class RescueCaseRepository {
   /// pulls a bounded window of same-species active cases and computes
   /// distance client-side rather than doing a true geo query.
   Future<List<RescueCase>> findPossibleDuplicates(
-    RescueCase source, {
-    double radiusKm = 1.0,
-    int limit = 20,
-  }) async {
+      RescueCase source, {
+        double radiusKm = 1.0,
+        int limit = 20,
+      }) async {
     final sourceSpecies = source.allSpecies.toSet();
     if (sourceSpecies.isEmpty || source.lat == null || source.lng == null) {
       return const [];
@@ -1584,6 +1584,7 @@ class RescueCaseRepository {
     required String actorName,
     String? lastKnownLocation,
     String? clinicUnavailableDetails,
+    String? serviceTypeNeeded,
   }) async {
     final caseRef = _caseDoc(caseId);
     final preSnap = await caseRef.get();
@@ -1627,6 +1628,11 @@ class RescueCaseRepository {
         'closedFromStatus': closedFromStatus,
         if (lastKnownLocation != null) 'closureLastKnownLocation': lastKnownLocation,
         if (clinicUnavailableDetails != null) 'closureClinicDetails': clinicUnavailableDetails,
+        // Read by assign_rider_page.dart / rescue_detail_page.dart so the
+        // requested service type actually shows up wherever the case is
+        // presented as a service request afterward, instead of only living
+        // inside the free-text closureDetails.
+        if (serviceTypeNeeded != null) 'closureServiceType': serviceTypeNeeded,
         'statusHistory': FieldValue.arrayUnion([
           {'status': 'Case closed: ${reason.label}.', 'timestamp': Timestamp.now()}
         ]),
@@ -1738,7 +1744,7 @@ class RescueCaseRepository {
     final anyUnactioned = animals.any((a) => a['outcome'] != 'deceased' && a['postTreatmentAction'] == null);
     if (anyUnactioned) return RescueStatus.treatment.firestoreValue;
     final anyIntakePending =
-        animals.any((a) => a['postTreatmentAction'] == 'intake' && a['intakeCompletedAt'] == null);
+    animals.any((a) => a['postTreatmentAction'] == 'intake' && a['intakeCompletedAt'] == null);
     if (anyIntakePending) return RescueStatus.intake.firestoreValue;
     return RescueStatus.completed.firestoreValue;
   }
@@ -1782,11 +1788,11 @@ class RescueCaseRepository {
     final summary = entry.notes.trim().isNotEmpty
         ? entry.notes
         : entry.vaccineName ??
-            entry.procedurePerformed ??
-            entry.medicationName ??
-            entry.finalCondition ??
-            entry.causeOfDeath ??
-            entry.type;
+        entry.procedurePerformed ??
+        entry.medicationName ??
+        entry.finalCondition ??
+        entry.causeOfDeath ??
+        entry.type;
 
     // Which animals THIS entry targets — every animal for a null/empty
     // animalIndexes ("All Animals", spec §5), otherwise only the selected
@@ -1795,8 +1801,8 @@ class RescueCaseRepository {
     final targetIndexes = animals.isEmpty
         ? const <int>[]
         : (entry.animalIndexes != null && entry.animalIndexes!.isNotEmpty
-            ? entry.animalIndexes!
-            : List<int>.generate(animals.length, (i) => i));
+        ? entry.animalIndexes!
+        : List<int>.generate(animals.length, (i) => i));
 
     if (isDischarge) {
       for (final i in targetIndexes) {
@@ -2324,10 +2330,10 @@ class RescueCaseRepository {
   /// guard against the freshest doc, so calling this redundantly from both
   /// places (or twice in a race) is always harmless.
   Future<void> checkAndCompleteIntakeIfDue(
-    RescueCase c, {
-    required int totalAnimalsExpected,
-    required int completedCount,
-  }) async {
+      RescueCase c, {
+        required int totalAnimalsExpected,
+        required int completedCount,
+      }) async {
     if (c.intakeReceivedAt == null) return;
     if (completedCount < totalAnimalsExpected) return;
     if (c.status == RescueStatus.completed) return;

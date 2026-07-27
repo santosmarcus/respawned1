@@ -12,25 +12,34 @@ enum ClosureReason {
   clinicUnavailable,
   duplicateReport,
   resolvedWithoutTransport,
+  requiresSpecializedTransport,
   other;
 
   String get label => switch (this) {
-        ClosureReason.hasOwner => 'Animal has an owner',
-        ClosureReason.reunitedWithOwner => 'Animal reunited with owner',
-        ClosureReason.aggressiveAnimal => 'Aggressive animal / unsafe rescue',
-        ClosureReason.diedDuringRescue => 'Animal died during rescue',
-        ClosureReason.animalMoved => 'Animal moved / could not be located',
-        ClosureReason.clinicUnavailable => 'Clinic unavailable',
-        ClosureReason.duplicateReport => 'Duplicate report',
-        ClosureReason.resolvedWithoutTransport => 'Resolved without transport',
-        ClosureReason.other => 'Other',
-      };
+    ClosureReason.hasOwner => 'Animal has an owner',
+    ClosureReason.reunitedWithOwner => 'Animal reunited with owner',
+    ClosureReason.aggressiveAnimal => 'Aggressive animal / unsafe rescue',
+    ClosureReason.diedDuringRescue => 'Animal died during rescue',
+    ClosureReason.animalMoved => 'Animal moved / could not be located',
+    ClosureReason.clinicUnavailable => 'Clinic unavailable',
+    ClosureReason.duplicateReport => 'Duplicate report',
+    ClosureReason.resolvedWithoutTransport => 'Resolved without transport',
+    ClosureReason.requiresSpecializedTransport =>
+    'Animal requires specialized transport we cannot provide',
+    ClosureReason.other => 'Other',
+  };
 
   /// Reasons where the closure form asks for a specific extra field beyond
   /// the always-required detailed explanation (spec §2 "Conditionally
   /// require additional information depending on the reason").
   bool get needsLastKnownLocation => this == ClosureReason.animalMoved;
   bool get needsClinicDetails => this == ClosureReason.clinicUnavailable;
+  /// The org must say exactly what kind of transport the animal actually
+  /// needs (e.g. a van/enclosed vehicle, a secure crate, two-person
+  /// handling) — this is what later shows up on the case's service
+  /// request so whoever picks it up next (Assign Transporter) knows what's
+  /// required instead of finding out on-site again.
+  bool get needsServiceType => this == ClosureReason.requiresSpecializedTransport;
 
   static ClosureReason fromName(String? value) =>
       ClosureReason.values.firstWhere((v) => v.name == value, orElse: () => ClosureReason.other);

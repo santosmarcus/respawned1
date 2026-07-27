@@ -26,6 +26,18 @@ String get _directionsApiKey => MapsConfig.directionsApiKey;
 
 const double _arrivalThresholdMeters = 150;
 
+// Temporary default shelter — used whenever
+// OrganizationDirectoryRepository.resolveShelterLocation comes back null,
+// which per that method's own doc comment is still the common case today
+// (org-membership backfill hasn't happened for most test accounts). Without
+// this, a case with no org-registered shelter would show "Shelter address
+// not available" and have no coordinates to route/verify arrival against.
+// Remove once every organization has a real shelter location configured.
+const String _fallbackShelterName = 'LGARI Shelter - Tanza';
+const String _fallbackShelterAddress = 'LGARI Shelter, Tanza, Cavite, Philippines';
+const double _fallbackShelterLat = 14.3860;
+const double _fallbackShelterLng = 120.8283;
+
 class DirectionsRoute {
   final List<LatLng> points;
   final double distanceMeters;
@@ -564,19 +576,34 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       final shelter = await OrganizationDirectoryRepository()
           .resolveShelterLocation(data['organizationId'] as String?);
 
+      // The reporter answered "yes" to "interested to adopt" on the
+      // original report form (see rescue_page.dart's `interestedToAdopt`)
+      // — that reporter is the intended adopter, so instead of continuing
+      // on to the shelter, the transporter's job pauses here at the
+      // clinic/treatment location until that adopter shows up in person
+      // (see _buildAwaitingAdopterPanel / TrackCasePage's own "Arrived at
+      // Treatment" button, which is what unlocks the "Adopter Arrived"
+      // action below).
+      final hasInterestedAdopter = data['interestedToAdopt'] == 'yes';
+      final nextStatus =
+      hasInterestedAdopter ? 'awaiting_adopter_pickup' : 'in_transit_shelter';
+      final nextStatusLabel = hasInterestedAdopter
+          ? 'Treatment accepted. Awaiting the interested adopter to arrive at the treatment location.'
+          : 'Treatment accepted. On the way to shelter.';
+
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
           .update({
-        'status': 'in_transit_shelter',
+        'status': nextStatus,
         'clinicVerificationUrls': urls,
-        if (shelter != null) 'shelterName': shelter.name,
-        if (shelter?.address != null) 'shelterAddress': shelter!.address,
-        if (shelter?.lat != null) 'shelterLat': shelter!.lat,
-        if (shelter?.lng != null) 'shelterLng': shelter!.lng,
+        'shelterName': shelter?.name ?? _fallbackShelterName,
+        'shelterAddress': shelter?.address ?? _fallbackShelterAddress,
+        'shelterLat': shelter?.lat ?? _fallbackShelterLat,
+        'shelterLng': shelter?.lng ?? _fallbackShelterLng,
         'statusHistory': FieldValue.arrayUnion([
           {
-            'status': 'Treatment accepted. On the way to shelter.',
+            'status': nextStatusLabel,
             'timestamp': Timestamp.now()
           }
         ]),
@@ -839,6 +866,82 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 
 
+  // Triggered by the "Adopter Arrived" action in _buildAwaitingAdopterPanel
+  // — only reachable once the reporter has already tapped their own
+  // "Arrived at Treatment" button in TrackCasePage (adopterArrivedAtTreatment
+  // == true). This is the transporter's own in-person check: the reporter
+  // tapping a button on their phone doesn't prove they're actually there,
+  // so this asks the transporter — who can see with their own eyes — to
+  // confirm before the case concludes. Answering "not yet" is a pure no-op:
+  // the case stays at 'awaiting_adopter_pickup' exactly as it was, i.e.
+  // "the pet transporter remains in progress with the transit".
+  Future<void> _confirmAdopterPresent() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Confirm Adopter Pickup',
+            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        content: Text(
+          'Is the interested adopter actually here, in person, ready to take the animal?',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Not yet',
+                style: GoogleFonts.zain(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.greenrspwn,
+              foregroundColor: AppColors.textPrimary,
+            ),
+            child: const Text('Yes, confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return; // "Not yet" — stay exactly as is.
+
+    setState(() => _isActing = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .update({
+        'status': 'completed',
+        'adopterPickupConfirmedAt': Timestamp.now(),
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status':
+            'Animal handed off directly to the interested adopter at the treatment location. Rescue completed.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+      _positionSub?.cancel();
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (_) => const TransitResultPage(completed: true)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
+  }
+
   Future<List<String>> _uploadVerificationImages(
       List<File?> images, String type) async {
     final urls = <String>[];
@@ -871,6 +974,18 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   static const _reasonBreakdown = 'Vehicle breakdown';
   static const _reasonOther = 'Other';
 
+  // Options offered when _reasonSpecializedTransport is picked — shown to
+  // the admin (and factored into vehicle-compatibility ranking) so
+  // whoever's re-assigned next knows exactly what to bring, instead of
+  // finding out on-site the same way this transporter just did.
+  static const _serviceTypeOptions = [
+    'Larger enclosed vehicle (van/truck)',
+    'Secure crate/cage required',
+    'Two-person handling required',
+    'Climate-controlled transport',
+    'Other',
+  ];
+
   Future<void> _showCloseTransitDialog() async {
     final reasons = [
       _reasonNotFound,
@@ -883,8 +998,10 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     ];
     String? selectedReason;
     String? other;
+    String? serviceType;
     bool searchedTenMinutes = false;
     final notesCtrl = TextEditingController();
+    final serviceTypeOtherCtrl = TextEditingController();
     bool submitting = false;
 
     await showDialog(
@@ -893,17 +1010,18 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlg) {
           final needsSearchConfirm = selectedReason == _reasonNotFound;
-          // Only the fully free-text reason needs its own describe-box —
-          // Specialized Transport is self-explanatory like Deceased/
-          // Breakdown and previously had an erroneous duplicate of this
-          // block that captured text nothing ever read back out.
           final needsOtherText = selectedReason == _reasonOther;
+          final needsServiceType = selectedReason == _reasonSpecializedTransport;
           final needsNotes = selectedReason == _reasonNotFound ||
               selectedReason == _reasonReporterUnreachable ||
               selectedReason == _reasonAggressive;
           final canConfirm = !submitting &&
               selectedReason != null &&
-              (!needsSearchConfirm || searchedTenMinutes);
+              (!needsSearchConfirm || searchedTenMinutes) &&
+              (!needsServiceType ||
+                  (serviceType != null &&
+                      (serviceType != 'Other' ||
+                          serviceTypeOtherCtrl.text.trim().isNotEmpty)));
 
           return Dialog(
             backgroundColor: AppColors.background,
@@ -1030,6 +1148,59 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                       ),
                     ),
                   ],
+                  if (needsServiceType) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      'What kind of service does this animal need?',
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'This is shown to the org so they can arrange the right transporter or vehicle.',
+                      style: GoogleFonts.zain(
+                          fontSize: 11, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 6),
+                    ..._serviceTypeOptions.map((option) => RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      value: option,
+                      groupValue: serviceType,
+                      activeColor: AppColors.textPrimary,
+                      title: Text(option,
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: AppColors.textPrimary)),
+                      onChanged: (v) => setDlg(() => serviceType = v),
+                    )),
+                    if (serviceType == 'Other') ...[
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: serviceTypeOtherCtrl,
+                        onChanged: (_) => setDlg(() {}),
+                        style: GoogleFonts.zain(
+                            fontSize: 14, color: AppColors.textPrimary),
+                        decoration: InputDecoration(
+                          hintText: 'Describe the service needed…',
+                          hintStyle: GoogleFonts.zain(
+                              fontSize: 12, color: AppColors.textSecondary),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: AppColors.slaterspwn),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: AppColors.textPrimary),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                   const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
@@ -1041,11 +1212,17 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                         final reasonSnapshot = selectedReason!;
                         final otherSnapshot = other;
                         final notesSnapshot = notesCtrl.text.trim();
+                        final serviceTypeSnapshot = needsServiceType
+                            ? (serviceType == 'Other'
+                            ? serviceTypeOtherCtrl.text.trim()
+                            : serviceType)
+                            : null;
                         Navigator.pop(ctx);
                         await _resolveEndReason(
                           selectedReason: reasonSnapshot,
                           otherText: otherSnapshot,
                           notes: notesSnapshot,
+                          serviceType: serviceTypeSnapshot,
                         );
                       },
                       child: submitting
@@ -1078,15 +1255,21 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   //   reporter can supply a new location or confirm they're reachable.
   //   expireStaleReporterResponses (functions/index.js) auto-closes it if
   //   they never respond.
-  // - Aggressive: escalates to needsSpecializedAssistance instead of ending
-  //   the case as a failure — "the original rescue report remains active"
-  //   and the transporter is explicitly not penalized for this outcome.
-  // - Deceased / Vehicle breakdown / Specialized transport / Other: these
-  //   remain a straightforward transit-ended outcome, same as before.
+  // - Aggressive / Specialized Transport: both escalate to
+  //   needsSpecializedAssistance instead of ending the case as a failure —
+  //   "the original rescue report remains active" and the transporter is
+  //   explicitly not penalized for either outcome. Specialized Transport
+  //   additionally carries the reported service type forward so it's
+  //   visible wherever the case shows up as a service request afterward
+  //   (assign_rider_page.dart, rescue_detail_page.dart) instead of a new
+  //   transporter having to rediscover the same requirement on-site.
+  // - Deceased / Vehicle breakdown / Other: remain a straightforward
+  //   transit-ended outcome, same as before.
   Future<void> _resolveEndReason({
     required String selectedReason,
     required String? otherText,
     required String notes,
+    String? serviceType,
   }) async {
     setState(() => _isActing = true);
     try {
@@ -1104,6 +1287,16 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           'Pickup postponed — animal could not be safely handled. '
               'Escalated for specialized assistance.';
           break;
+        case _reasonSpecializedTransport:
+        // Escalate — same as Aggressive, this is a capability mismatch
+        // with THIS transporter/vehicle, not a failed rescue.
+          status = RescueStatus.needsSpecializedAssistance.firestoreValue;
+          statusLabel = serviceType != null && serviceType.isNotEmpty
+              ? 'Pickup postponed — requires specialized transport ($serviceType). '
+              'Escalated for reassignment.'
+              : 'Pickup postponed — requires specialized transport. '
+              'Escalated for reassignment.';
+          break;
         case _reasonNotFound:
           status = RescueStatus.unableToLocate.firestoreValue;
           statusLabel = 'Animal not found at reported location. Awaiting reporter response.';
@@ -1120,10 +1313,17 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       final notFound = selectedReason == _reasonNotFound;
       final unreachable = selectedReason == _reasonReporterUnreachable;
       final aggressive = selectedReason == _reasonAggressive;
+      final specializedTransport = selectedReason == _reasonSpecializedTransport;
 
       final extra = <String, dynamic>{
         'endReason': reasonStr,
         if (notes.isNotEmpty) 'endReasonNotes': notes,
+        // The specific service type the animal needs — this is what
+        // assign_rider_page.dart reads to show the org what to arrange
+        // and to weight vehicle-compatibility ranking for the next
+        // transporter offered the case.
+        if (specializedTransport && serviceType != null && serviceType.isNotEmpty)
+          'endReasonServiceType': serviceType,
         // Consumed by expireStaleReporterResponses; cleared automatically
         // once the reporter replies (see TrackCasePage's reporter-response
         // handling) or the case is manually resolved by staff.
@@ -1131,8 +1331,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           'awaitingReporterSince': FieldValue.serverTimestamp(),
         // So a future reliability-score feature can exclude this pickup
         // from counting against the transporter — verified here as an
-        // animal-safety escalation, not a no-show or missed job.
-        if (aggressive) 'transporterFaultVerified': false,
+        // animal-safety/capability escalation, not a no-show or missed job.
+        if (aggressive || specializedTransport) 'transporterFaultVerified': false,
       };
 
       await FirebaseFirestore.instance
@@ -1401,7 +1601,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             status == 'treatment' ||
             status == 'dropoff' ||
             status == 'searching_clinic' ||
-            status == 'in_transit_shelter') &&
+            status == 'in_transit_shelter' ||
+            status == 'awaiting_adopter_pickup') &&
             _positionSub == null) {
           WidgetsBinding.instance
               .addPostFrameCallback((_) => _beginLocationStreaming());
@@ -1423,6 +1624,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           currentDestination = _latLngFrom(data, 'lat', 'lng');
           currentDestinationLabel = 'Pick up location';
         } else if (status == 'treatment' || status == 'dropoff') {
+          currentDestination = _clinicLatLngFrom(data);
+          currentDestinationLabel = 'Clinic';
+        } else if (status == 'awaiting_adopter_pickup') {
+          // Waiting at the clinic for the interested adopter — same
+          // location as 'dropoff', just a later phase of the same stop.
           currentDestination = _clinicLatLngFrom(data);
           currentDestinationLabel = 'Clinic';
         } else if (status == 'in_transit_shelter') {
@@ -1545,6 +1751,13 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     // A clinic just rejected treatment — auto-searching for the next one
     if (status == 'searching_clinic') {
       return _buildSearchingClinicPanel(data);
+    }
+
+    // Treatment accepted, and the reporter marked interest to adopt on the
+    // original report — waiting at the clinic for that adopter instead of
+    // heading to the shelter.
+    if (status == 'awaiting_adopter_pickup') {
+      return _buildAwaitingAdopterPanel(data);
     }
 
     // Treatment accepted — final leg to the shelter
@@ -1762,6 +1975,90 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               label: 'Treatment Rejected',
               onSwiped: null, // locked — reflects the last decision made
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Treatment accepted, interested adopter expected — waits at the clinic.
+  // The "Adopter Arrived" action only appears once the reporter has
+  // already tapped their own "Arrived at Treatment" button in
+  // TrackCasePage (adopterArrivedAtTreatment == true); before that, this
+  // just shows a waiting state so the transporter knows why they're not
+  // moving toward the shelter yet.
+  Widget _buildAwaitingAdopterPanel(Map<String, dynamic> data) {
+    final address = _clinicAddressFrom(data);
+    final adopterArrived = data['adopterArrivedAtTreatment'] == true;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Awaiting adopter pickup',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 15, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.circle, size: 8, color: AppColors.textPrimary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(address.isEmpty ? 'Clinic' : address,
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.lavenderrspwn.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'The reporter expressed interest in adopting this animal. '
+                    'Stay at the treatment location — the animal goes home with '
+                    'them directly instead of continuing to the shelter.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (!adopterArrived) ...[
+              Row(
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Waiting for the adopter to mark their arrival on their end.',
+                      style: GoogleFonts.zain(
+                          fontSize: 13, color: AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+            ] else ...[
+              _SwipeButton(
+                label: 'Adopter Arrived',
+                onSwiped: _isActing ? null : _confirmAdopterPresent,
+              ),
+            ],
           ],
         ),
       ),

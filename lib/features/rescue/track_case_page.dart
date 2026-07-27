@@ -98,7 +98,17 @@ class _TrackCasePageState extends State<TrackCasePage> {
             normalizedStatus.contains('completed') ||
             normalizedStatus.contains('ended');
 
-        if (isReporter && isFinalStatus) {
+        // A rejected report gets the same one-time success/acknowledgment
+        // screen as a closed/completed case — but only until the reporter
+        // has actually acknowledged it (tapped Close there, which sets
+        // hiddenFromExplore, same flag CaseSummaryPage._close already
+        // uses). After that, re-opening it from History goes straight to
+        // the normal read-only Track Case view below instead of looping
+        // back to this screen every time.
+        final isUnacknowledgedRejection =
+            normalizedStatus == 'rejected' && data?['hiddenFromExplore'] != true;
+
+        if (isReporter && (isFinalStatus || isUnacknowledgedRejection)) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             Navigator.pushReplacement(
               context,
@@ -659,9 +669,13 @@ class _TrackingTabState extends State<_TrackingTab> {
       ),
     );
   }
-  Widget _buildTimelineItem(int index) {
-    final item = widget.statusHistory[index];
-    final isLast = index == widget.statusHistory.length - 1;
+  // Displayed newest-first (see build() below) — [displayIndex] indexes
+  // into that reversed list, so index 0 is always the most recent update
+  // and gets the checkmark, matching "latest update at the top" spec.
+  Widget _buildTimelineItem(
+      List<Map<String, dynamic>> displayList, int displayIndex) {
+    final item = displayList[displayIndex];
+    final isNewest = displayIndex == 0;
     final ts = item['timestamp'];
     final date = ts is Timestamp ? ts.toDate() : null;
     final timeStr = date != null ? _formatTime(date) : '';
@@ -680,11 +694,11 @@ class _TrackingTabState extends State<_TrackingTab> {
                 shape: BoxShape.circle,
                 border: Border.all(color: AppColors.textPrimary, width: 2),
               ),
-              child: isLast
+              child: isNewest
                   ? const Icon(Icons.check, size: 12, color: Colors.white)
                   : null,
             ),
-            if (index < widget.statusHistory.length - 1)
+            if (displayIndex < displayList.length - 1)
               Container(width: 2, height: 40, color: AppColors.textPrimary),
           ],
         ),
@@ -788,7 +802,8 @@ class _TrackingTabState extends State<_TrackingTab> {
             for (int i = 0; i < widget.statusHistory.length; i++)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _buildTimelineItem(i),
+                child: _buildTimelineItem(
+                    widget.statusHistory.reversed.toList(), i),
               ),
 
           const SizedBox(height: 12),
@@ -971,6 +986,7 @@ class _CaseDetailTab extends StatefulWidget {
 
 class _CaseDetailTabState extends State<_CaseDetailTab> {
   bool _isSubmitting = false;
+  bool _isMarkingArrival = false;
 
   Map<String, dynamic> get data => widget.data;
 
@@ -1112,11 +1128,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.message_outlined,
-                  color: AppColors.textPrimary),
-              onPressed: widget.onMessageOrg,
-            ),
-            IconButton(
               icon: const Icon(Icons.call, color: AppColors.textPrimary),
               onPressed: () => _showCallSheet(context, name),
             ),
@@ -1147,7 +1158,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
       final name =
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
           .trim();
-      final label = type == 'foster' ? 'foster' : 'adopt';
+      final label = type == 'adopt';
 
       await FirebaseFirestore.instance
           .collection('cases')
@@ -1165,16 +1176,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
         ]),
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(type == 'foster'
-                ? 'Thanks! Your interest to foster has been noted.'
-                : 'Thanks! Your interest to adopt has been noted.'),
-            backgroundColor: AppColors.greenrspwn,
-          ),
-        );
-      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1188,6 +1189,44 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
+
+  Future<void> _markArrivedAtTreatment() async {
+    setState(() => _isMarkingArrival = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .update({
+        'adopterArrivedAtTreatment': true,
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Interested adopter reported arrival at the treatment location.',
+            'timestamp': Timestamp.now(),
+          }
+        ]),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Thanks! Let the transporter know you\'re there in person.'),
+            backgroundColor: AppColors.greenrspwn,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isMarkingArrival = false);
+    }
+  }
+
 
   void _showFullImage(BuildContext context, String url) {
     showDialog(
@@ -1318,7 +1357,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Address', data['address']),
           _DetailRow('Description', data['condition']),
-          _DetailRow('Type of Animal', data['animalType']),
+          _AnimalGroupSection(caseId: widget.caseId, data: data),
           _DetailRow('Containment', data['containmentStatus']),
           _DetailRow('Approachability', data['strayTemperament']),
           _DetailRow('Urgency', data['urgency']),
@@ -1330,6 +1369,70 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           _DetailRow('Interest to adopt', data['interestedToAdopt']),
           const SizedBox(height: 12),
 
+          if (widget.isReporter &&
+              data['interestedToAdopt'] == 'yes' &&
+              (data['status'] as String?) == 'awaiting_adopter_pickup') ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.lavenderrspwn.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data['adopterArrivedAtTreatment'] == true
+                        ? 'You\'ve let the transporter know you\'re there.'
+                        : 'The animal is at the treatment location, ready for pickup.',
+                    style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    data['adopterArrivedAtTreatment'] == true
+                        ? 'The transporter will confirm once they see you in person.'
+                        : 'Once you\'ve arrived in person, let the transporter know.',
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: (data['adopterArrivedAtTreatment'] == true ||
+                          _isMarkingArrival)
+                          ? null
+                          : _markArrivedAtTreatment,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.yellowrspwn,
+                        foregroundColor: AppColors.textPrimary,
+                        disabledBackgroundColor: AppColors.slaterspwn,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      ),
+                      child: _isMarkingArrival
+                          ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
+                      )
+                          : Text(
+                        data['adopterArrivedAtTreatment'] == true
+                            ? 'Arrived ✓'
+                            : 'Arrived at Treatment',
+                        style: GoogleFonts.zain(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           if (!_hasWillingAdopter) ...[
             Container(
@@ -1340,7 +1443,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                'This rescue is available for adoption or temporary foster.',
+                'This rescue is available for adoption.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.zain(
                   fontSize: 13,
@@ -1375,40 +1478,137 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                         style: GoogleFonts.zain(fontSize: 13)),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                    _isSubmitting ? null : () => _registerInterest('foster'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: _isSubmitting
-                        ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.textPrimary),
-                    )
-                        : Text('Interest to Foster',
-                        style: GoogleFonts.zain(fontSize: 13)),
-                  ),
-                ),
-              ],
+               ],
             ),
           ] else
             _DetailRow(
-              'Willing adopter/foster',
+              'Willing adopter',
               '${data['willingAdopterName'] ?? '-'}'
                   '${data['willingAdopterType'] != null ? ' (${data['willingAdopterType']})' : ''}',
             ),
 
           const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+// Restores each animal's own detail block from the rescue form's
+// `animals[]` array — mirrors case_summary_page.dart's _AnimalGroupSection
+// so Track Case and the post-completion summary always agree on the
+// latest rescue-form data instead of falling back to legacy singular
+// fields only.
+class _AnimalGroupSection extends StatelessWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _AnimalGroupSection({required this.caseId, required this.data});
+
+  Map<String, dynamic> _animalMap(Map raw) => {
+    'animalType': raw['species'],
+    'breed': raw['breed'],
+    'sex': raw['sex'],
+    'size': raw['size'],
+    'colorMarkings': raw['colorMarkings'],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final animals = data['animals'] as List?;
+    if (animals != null && animals.isNotEmpty) {
+      final total = animals.length;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _DetailRow('No. of Animals', '$total'),
+          for (var i = 0; i < animals.length; i++)
+            _AnimalDetailBlock(
+              data: _animalMap(animals[i] as Map),
+              index: i + 1,
+              total: total,
+            ),
+        ],
+      );
+    }
+
+    final groupId = data['groupId'] as String?;
+    if (groupId == null || groupId.isEmpty) {
+      return _AnimalDetailBlock(data: data, index: 1, total: 1);
+    }
+
+    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance
+          .collection('cases')
+          .where('groupId', isEqualTo: groupId)
+          .get(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return _AnimalDetailBlock(data: data, index: 1, total: 1);
+        }
+        final docs = snapshot.data!.docs;
+        final total = docs.length;
+        if (total <= 1) {
+          return _AnimalDetailBlock(data: data, index: 1, total: 1);
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _DetailRow('No. of Animals', '$total'),
+            for (var i = 0; i < docs.length; i++)
+              _AnimalDetailBlock(
+                data: docs[i].data(),
+                index: i + 1,
+                total: total,
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AnimalDetailBlock extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final int index;
+  final int total;
+  const _AnimalDetailBlock(
+      {required this.data, required this.index, required this.total});
+
+  List<Widget> _fields() => [
+    _DetailRow('Species', data['animalType']),
+    _DetailRow('Breed / Mixed', data['breed']),
+    _DetailRow('Sex', data['sex']),
+    _DetailRow('Size', data['size']),
+    _DetailRow('Color / Distinguishing Markings', data['colorMarkings']),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (total <= 1) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: _fields(),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Animal $index of $total',
+              style: GoogleFonts.zain(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          ..._fields(),
         ],
       ),
     );
@@ -1440,4 +1640,3 @@ class _DetailRow extends StatelessWidget {
     );
   }
 }
-

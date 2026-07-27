@@ -83,14 +83,15 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     setState(() => _closingCase = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).closeCase(
-            caseId: c.id,
-            reason: result.reason,
-            details: result.details,
-            actorUid: _actorUid,
-            actorName: _actorName,
-            lastKnownLocation: result.lastKnownLocation,
-            clinicUnavailableDetails: result.clinicUnavailableDetails,
-          );
+        caseId: c.id,
+        reason: result.reason,
+        details: result.details,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        lastKnownLocation: result.lastKnownLocation,
+        clinicUnavailableDetails: result.clinicUnavailableDetails,
+        serviceTypeNeeded: result.serviceTypeNeeded,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
         Navigator.pop(context);
@@ -172,18 +173,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     if (_selectedType == null || _treatmentDate == null) return false;
     return switch (_selectedType!) {
       TreatmentUpdateType.deathReport => _selectedCauseOfDeath != null,
-      // Discharge Notes is optional now — Final Condition (discharge
-      // condition) is the one thing that actually gates completion, same
-      // as Post-Treatment Instructions already being optional.
+    // Discharge Notes is optional now — Final Condition (discharge
+    // condition) is the one thing that actually gates completion, same
+    // as Post-Treatment Instructions already being optional.
       TreatmentUpdateType.discharge => _finalCondition != null,
       TreatmentUpdateType.vaccination =>
-        _effectiveVaccineName.isNotEmpty && _vaccineDoseController.text.trim().isNotEmpty,
+      _effectiveVaccineName.isNotEmpty && _vaccineDoseController.text.trim().isNotEmpty,
       TreatmentUpdateType.procedure => _procedureController.text.trim().isNotEmpty,
       TreatmentUpdateType.medication =>
-        _medicationNameController.text.trim().isNotEmpty && _medicationDoseController.text.trim().isNotEmpty,
+      _medicationNameController.text.trim().isNotEmpty && _medicationDoseController.text.trim().isNotEmpty,
       TreatmentUpdateType.assessment ||
       TreatmentUpdateType.followUpCheck =>
-        _selectedCondition != null && _notesController.text.trim().isNotEmpty,
+      _selectedCondition != null && _notesController.text.trim().isNotEmpty,
     };
   }
 
@@ -274,18 +275,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           ? 'Deceased'
           : (_isDischarge ? _finalCondition : _selectedCondition),
       medicationName:
-          _selectedType == TreatmentUpdateType.medication ? _medicationNameController.text.trim() : null,
+      _selectedType == TreatmentUpdateType.medication ? _medicationNameController.text.trim() : null,
       medicationDose:
-          _selectedType == TreatmentUpdateType.medication ? _medicationDoseController.text.trim() : null,
+      _selectedType == TreatmentUpdateType.medication ? _medicationDoseController.text.trim() : null,
       procedurePerformed:
-          _selectedType == TreatmentUpdateType.procedure ? _procedureController.text.trim() : null,
+      _selectedType == TreatmentUpdateType.procedure ? _procedureController.text.trim() : null,
       vaccineName: _selectedType == TreatmentUpdateType.vaccination ? _effectiveVaccineName : null,
       vaccineDose: _selectedType == TreatmentUpdateType.vaccination ? _vaccineDoseController.text.trim() : null,
       nextScheduleAt: _selectedType == TreatmentUpdateType.vaccination ? _nextVaccineSchedule : null,
       dischargeNotes: _isDischarge ? _dischargeNotesController.text.trim() : null,
       finalCondition: _isDischarge ? _finalCondition : null,
       postTreatmentInstructions:
-          _isDischarge ? _postTreatmentInstructionsController.text.trim() : null,
+      _isDischarge ? _postTreatmentInstructionsController.text.trim() : null,
       dateOfDeath: _isDeathReport ? _treatmentDate : null,
       causeOfDeath: _isDeathReport ? _selectedCauseOfDeath : null,
       treatmentDate: _treatmentDate,
@@ -344,11 +345,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   // assignIntakeAction for intake), so a stale disabled-button state can
   // never be bypassed by tapping through anyway.
   Future<void> _startPostTreatmentAction(
-    RescueCase c,
-    String action, // 'intake' | 'transfer' | 'release'
-    Map<String, dynamic> data,
-    List<CaseAnimalOption> animalOptions,
-  ) async {
+      RescueCase c,
+      String action, // 'intake' | 'transfer' | 'release'
+      Map<String, dynamic> data,
+      List<CaseAnimalOption> animalOptions,
+      ) async {
     if (_isActingOnNextStep) return;
     setState(() => _isActingOnNextStep = true);
     try {
@@ -628,22 +629,22 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                       : 'No treatment logs for this animal yet.',
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
             else ...[
-              ...(_showAllLogs ? logs : logs.take(2).toList())
-                  .map((log) => TreatmentLogCard(log: log, animalLabel: logAnimalLabel(log))),
-              if (logs.length > 2)
-                Center(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _showAllLogs = !_showAllLogs),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Icon(
-                        _showAllLogs ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                        color: AppColors.textPrimary,
+                ...(_showAllLogs ? logs : logs.take(2).toList())
+                    .map((log) => TreatmentLogCard(log: log, animalLabel: logAnimalLabel(log))),
+                if (logs.length > 2)
+                  Center(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _showAllLogs = !_showAllLogs),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Icon(
+                          _showAllLogs ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                          color: AppColors.textPrimary,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
 
             const SizedBox(height: 24),
 
@@ -785,8 +786,8 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final vaccineSpecies = _updateAnimalIndexes.length == 1
         ? speciesOf(_updateAnimalIndexes.first)
         : (_updateAnimalIndexes.isEmpty && _selectedAnimalIndex != null)
-            ? speciesOf(_selectedAnimalIndex!)
-            : null;
+        ? speciesOf(_selectedAnimalIndex!)
+        : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1063,9 +1064,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             ),
             child: _isSaving
                 ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                 : Text(_mediaError != null ? 'Retry' : 'Add', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
           ),
         ),
@@ -1075,9 +1076,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
 }
 
 String _monthName(int month) => const [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
-    ][month - 1];
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+][month - 1];
 
 /// Replaces the "Add Update" button once `readyForDischarge == true` —
 /// disabled rather than hidden, so it's clear the option existed and is now
@@ -1215,10 +1216,10 @@ class _CostTrackingSection extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                         builder: (_) => ExpenseListPage(
-                              caseId: caseId,
-                              animalOptions: animalOptions,
-                              initialAnimalIndex: selectedAnimalIndex,
-                            ))),
+                          caseId: caseId,
+                          animalOptions: animalOptions,
+                          initialAnimalIndex: selectedAnimalIndex,
+                        ))),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.textPrimary),
@@ -1252,13 +1253,13 @@ class _CostTrackingSection extends StatelessWidget {
                 onPressed: outstandingBalance <= 0
                     ? null
                     : () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => CreateFundraiserDraftPage(
-                            rescueCase: rescueCase,
-                            outstandingBalance: outstandingBalance,
-                          ),
-                        )),
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => CreateFundraiserDraftPage(
+                        rescueCase: rescueCase,
+                        outstandingBalance: outstandingBalance,
+                      ),
+                    )),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.textPrimary),
@@ -1351,7 +1352,7 @@ class _TextInput extends StatelessWidget {
         hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
         enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
         focusedBorder:
-            const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+        const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
         isDense: true,
         contentPadding: const EdgeInsets.only(bottom: 8),
       ),
@@ -1425,8 +1426,8 @@ class _Dropdown<T> extends StatelessWidget {
       ),
       items: items
           .map((item) => DropdownMenuItem(
-              value: item,
-              child: Text(labelOf(item), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))))
+          value: item,
+          child: Text(labelOf(item), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))))
           .toList(),
       onChanged: onChanged,
     );

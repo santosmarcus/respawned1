@@ -11,9 +11,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
 import 'package:respawnd1/core/utils/community_adoption_eligibility.dart'
-    as community_adoption_util;
+as community_adoption_util;
 import 'package:respawnd1/core/utils/public_case_visibility.dart';
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
@@ -47,6 +50,13 @@ double _hueForUrgency(String? urgency) {
       return BitmapDescriptor.hueAzure;
   }
 }
+
+/// Converts any rescue-type category color into the nearest Google Maps
+/// default-marker hue — used as the instant fallback pin before the
+/// custom-colored ring icon (which can render any exact color) finishes
+/// loading, so even that brief placeholder follows the rescue-type color
+/// instead of urgency.
+double _hueForColor(Color color) => HSVColor.fromColor(color).hue;
 
 /// Report categories shown on the map. Each one gets its own pin color +
 /// icon so a report's type is readable at a glance, e.g. red = Illness,
@@ -98,6 +108,14 @@ class ReportMapEntry {
   final List<String> photoUrls;
   final String? rawStatus;
   final String? rejectionReason;
+  final String? collarTagId;
+  // True for entries sourced from the `petAlerts` collection (the owner
+  // "report my pet lost" flow) rather than `cases` — the map previously
+  // only ever queried `cases`, so a lost-pet alert (and its collar tag)
+  // had no path onto the Explore Map at all, regardless of filter. This
+  // flag lets the preview sheet route "View Details" to the correct
+  // tracking page for whichever collection the entry actually came from.
+  final bool isPetAlert;
 
   const ReportMapEntry({
     required this.caseId,
@@ -115,7 +133,17 @@ class ReportMapEntry {
     required this.photoUrls,
     this.rawStatus,
     this.rejectionReason,
+    this.collarTagId,
+    this.isPetAlert = false,
   });
+
+  /// True only for a Lost Pet report that's linked to a registered collar
+  /// tag (`scannedTagId` on the case doc) — used to surface the collar tag
+  /// badge/link on the map and report preview, and only for that report
+  /// type per spec.
+  bool get hasLostPetCollarTag =>
+      rescueType.toLowerCase() == 'lost pet' &&
+          (collarTagId != null && collarTagId!.trim().isNotEmpty);
 
   /// True while a transporter is actively en route — the pin should follow
   /// their live position instead of sitting at the original report location.
@@ -126,10 +154,10 @@ class ReportMapEntry {
   /// keeps this pin visible and offers the Community Adoption listing
   /// action instead of hiding it like any other rejected case.
   bool get isCommunityAdoptionEligible => community_adoption_util.isCommunityAdoptionEligible(
-        status: rawStatus,
-        rejectionReason: rejectionReason,
-        rescueType: rescueType,
-      );
+    status: rawStatus,
+    rejectionReason: rejectionReason,
+    rescueType: rescueType,
+  );
 
   static ReportMapEntry? fromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
@@ -174,6 +202,50 @@ class ReportMapEntry {
       photoUrls: List<String>.from(data['photoUrls'] ?? []),
       rawStatus: data['status'] as String?,
       rejectionReason: data['rejectionReason'] as String?,
+      collarTagId: data['scannedTagId'] as String?,
+    );
+  }
+
+  /// Builds a map entry from a `petAlerts` doc — only ever called for
+  /// `type: 'lost'` alerts (the owner-reported "my pet is missing" flow).
+  /// Tagged with `rescueType: 'Lost Pet'` so it automatically picks up the
+  /// same color/icon/filter-chip behavior as any other Lost Pet entry.
+  static ReportMapEntry? fromPetAlertDoc(
+      QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data();
+    final lat = (data['lat'] as num?)?.toDouble();
+    final lng = (data['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null) return null;
+
+    final ts = data['createdAt'] as Timestamp?;
+    final reporterName = (data['reporterName'] as String? ?? '').trim();
+    final reporterTag = reporterName.isNotEmpty
+        ? 'Reported by $reporterName'
+        : 'Reported by a community member';
+
+    final status = (data['status'] as String? ?? 'open').toLowerCase();
+    final statusLabel = switch (status) {
+      'verified' => 'Match verified — coordinating handover',
+      'resolved' => 'Resolved',
+      _ => 'Searching for possible matches',
+    };
+
+    return ReportMapEntry(
+      caseId: doc.id,
+      lat: lat,
+      lng: lng,
+      rescueType: 'Lost Pet',
+      address: (data['address'] as String? ?? '').trim().isEmpty
+          ? '-'
+          : data['address'] as String,
+      urgency: '',
+      animalType: data['species'] as String? ?? '',
+      statusLabel: statusLabel,
+      reporterTag: reporterTag,
+      createdAt: ts?.toDate(),
+      photoUrls: List<String>.from(data['photoUrls'] ?? []),
+      collarTagId: data['scannedTagId'] as String?,
+      isPetAlert: true,
     );
   }
 }
@@ -210,9 +282,9 @@ List<ReportMapEntry> extractPublicReports(
 /// *because* they're the viewer's own, not despite it. Reuses the one
 /// shared visibility predicate rather than a second implementation.
 List<ReportMapEntry> extractMyReports(
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  String uid,
-) {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    String uid,
+    ) {
   final out = <ReportMapEntry>[];
   for (final doc in docs) {
     final data = doc.data();
@@ -231,6 +303,63 @@ List<ReportMapEntry> extractMyReports(
 
     final report = ReportMapEntry.fromDoc(doc);
     if (report != null) out.add(report);
+  }
+  return out;
+}
+
+// Statuses that mean an alert is no longer active — same set
+// activity_feed.dart already uses for petAlerts, kept consistent here.
+const Set<String> _kAlertDismissedStatuses = {
+  'dismissed',
+  'cancelled',
+  'withdrawn',
+  'rejected',
+};
+
+/// Public lost-pet alerts for the Explore Map — the `petAlerts` counterpart
+/// of [extractPublicReports]. Only `type: 'lost'` alerts are included
+/// (found-pet alerts aren't "reports" in the rescue-map sense); the
+/// viewer's own alerts are excluded here for the same reason their own
+/// `cases` docs are excluded from the public pool — they see those via
+/// "My Reports" instead.
+List<ReportMapEntry> extractPublicLostPetAlerts(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    ) {
+  final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+  final out = <ReportMapEntry>[];
+  for (final doc in docs) {
+    final data = doc.data();
+    if ((data['type'] as String? ?? '') != 'lost') continue;
+    if (data['reporterId'] == currentUserId) continue;
+    final status = (data['status'] as String? ?? 'open').toLowerCase();
+    if (_kAlertDismissedStatuses.contains(status)) continue;
+    final groupId = data['groupId'] as String?;
+    if (groupId != null && groupId.isNotEmpty && groupId != doc.id) continue;
+
+    final entry = ReportMapEntry.fromPetAlertDoc(doc);
+    if (entry != null) out.add(entry);
+  }
+  return out;
+}
+
+/// The viewer's own lost-pet alerts, for the "My Reports" map filter —
+/// the `petAlerts` counterpart of [extractMyReports].
+List<ReportMapEntry> extractMyLostPetAlerts(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    String uid,
+    ) {
+  final out = <ReportMapEntry>[];
+  for (final doc in docs) {
+    final data = doc.data();
+    if ((data['type'] as String? ?? '') != 'lost') continue;
+    if (data['reporterId'] != uid) continue;
+    final status = (data['status'] as String? ?? 'open').toLowerCase();
+    if (_kAlertDismissedStatuses.contains(status)) continue;
+    final groupId = data['groupId'] as String?;
+    if (groupId != null && groupId.isNotEmpty && groupId != doc.id) continue;
+
+    final entry = ReportMapEntry.fromPetAlertDoc(doc);
+    if (entry != null) out.add(entry);
   }
   return out;
 }
@@ -261,12 +390,34 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
   LatLng _initialCamera = const LatLng(14.5416, 121.0644); // Pateros, Metro Manila fallback
 
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
-  List<ReportMapEntry> _allReports = [];
+  // Separate subscription for "My Reports" — deliberately NOT sourced from
+  // the global top-150-by-recency `_sub` query above. That query is scoped
+  // to the most recently created cases app-wide, so a viewer's own report
+  // silently drops out of it (and therefore out of "My Reports", even with
+  // the chip selected) once enough other people's newer reports push it
+  // past position 150. Querying `reporterId == uid` directly guarantees
+  // every one of the viewer's own reports is always considered, regardless
+  // of how much other public traffic exists. No `orderBy` here since it's
+  // paired with a `where` and ordering doesn't matter for map pins.
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _myReportsSub;
+  // Lost-pet alerts live in a wholly separate `petAlerts` collection (the
+  // owner "report my pet lost" flow writes there, not to `cases`) — two
+  // more subscriptions merge that source in so those reports (and their
+  // collar tags) actually have a path onto the map at all.
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _alertsSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _myAlertsSub;
+
+  List<ReportMapEntry> _caseReports = [];
+  List<ReportMapEntry> _alertReports = [];
+  List<ReportMapEntry> _caseMyReports = [];
+  List<ReportMapEntry> _alertMyReports = [];
+
+  List<ReportMapEntry> get _allReports => [..._caseReports, ..._alertReports];
   // The viewer's own reports — only computed/used when the My Reports
   // filter is active; kept as a separate list rather than folded into
   // _allReports since the two use different visibility rules (see
   // extractMyReports's doc comment).
-  List<ReportMapEntry> _myReports = [];
+  List<ReportMapEntry> get _myReports => [..._caseMyReports, ..._alertMyReports];
   bool _loadingReports = true;
   Object? _loadError;
 
@@ -280,6 +431,9 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
   @override
   void dispose() {
     _sub?.cancel();
+    _myReportsSub?.cancel();
+    _alertsSub?.cancel();
+    _myAlertsSub?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -292,10 +446,8 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      final uid = FirebaseAuth.instance.currentUser?.uid;
       setState(() {
-        _allReports = extractPublicReports(snap.docs);
-        _myReports = uid == null ? const [] : extractMyReports(snap.docs, uid);
+        _caseReports = extractPublicReports(snap.docs);
         _loadingReports = false;
         _loadError = null;
       });
@@ -306,6 +458,52 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         _loadError = e;
       });
     });
+
+    // Public lost-pet alerts (petAlerts, type: 'lost') — single equality
+    // `where`, no `orderBy`, so no composite index is needed.
+    _alertsSub = FirebaseFirestore.instance
+        .collection('petAlerts')
+        .where('type', isEqualTo: 'lost')
+        .limit(150)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() {
+        _alertReports = extractPublicLostPetAlerts(snap.docs);
+      });
+    }, onError: (_) {
+      // Non-fatal — the map still works off cases-derived reports.
+    });
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _myReportsSub = FirebaseFirestore.instance
+          .collection('cases')
+          .where('reporterId', isEqualTo: uid)
+          .snapshots()
+          .listen((snap) {
+        if (!mounted) return;
+        setState(() {
+          _caseMyReports = extractMyReports(snap.docs, uid);
+        });
+      }, onError: (_) {
+        // Non-fatal — "My Reports" simply stays empty; the rest of the map
+        // keeps working off _allReports.
+      });
+
+      _myAlertsSub = FirebaseFirestore.instance
+          .collection('petAlerts')
+          .where('reporterId', isEqualTo: uid)
+          .snapshots()
+          .listen((snap) {
+        if (!mounted) return;
+        setState(() {
+          _alertMyReports = extractMyLostPetAlerts(snap.docs, uid);
+        });
+      }, onError: (_) {
+        // Non-fatal — same fallback as above.
+      });
+    }
   }
 
   Future<void> _centerOnUser() async {
@@ -364,15 +562,20 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       return;
     }
     _iconRequestsInFlight.add(r.caseId);
-    // Community-Adoption-eligible cases get a distinct ring color instead
-    // of the usual urgency color — the animal was assessed healthy, so an
-    // urgency-red/yellow ring would be misleading at this point; lavender
-    // marks it as "up for community adoption" instead, distinct from every
-    // urgency color so the two are never confused on the map.
-    final ringColor = r.isCommunityAdoptionEligible ? AppColors.lavenderrspwn : urgencyRingColor(r.urgency);
+    // Ring color AND icon glyph follow the same rescue-type styling used
+    // on the filter chips (kReportCategories is the single source of
+    // truth) — Community-Adoption-eligible cases get a distinct lavender
+    // + heart look instead, since the animal was assessed healthy and its
+    // original rescue-type styling would be misleading at this point.
+    final ringColor = r.isCommunityAdoptionEligible
+        ? AppColors.lavenderrspwn
+        : categoryForRescueType(r.rescueType).color;
+    final glyph = r.isCommunityAdoptionEligible
+        ? Icons.favorite
+        : categoryForRescueType(r.rescueType).icon;
 
     try {
-      final quick = await _buildRingIcon(ringColor, photoBytes: null);
+      final quick = await _buildRingIcon(ringColor, icon: glyph, photoBytes: null);
       if (mounted) setState(() => _iconCache[r.caseId] = quick);
     } catch (_) {
       // Leave it to fall back to a default hued marker in _markerFor.
@@ -385,7 +588,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
             .timeout(const Duration(seconds: 8));
         if (resp.statusCode == 200) {
           final upgraded =
-          await _buildRingIcon(ringColor, photoBytes: resp.bodyBytes);
+          await _buildRingIcon(ringColor, icon: glyph, photoBytes: resp.bodyBytes);
           if (mounted) setState(() => _iconCache[r.caseId] = upgraded);
         }
       } catch (_) {
@@ -396,7 +599,11 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     _iconRequestsInFlight.remove(r.caseId);
   }
 
-  Future<BitmapDescriptor> _buildRingIcon(Color ringColor, {Uint8List? photoBytes}) async {
+  Future<BitmapDescriptor> _buildRingIcon(
+      Color ringColor, {
+        required IconData icon,
+        Uint8List? photoBytes,
+      }) async {
     const double size = 112;
     const double ringWidth = 8;
     final recorder = ui.PictureRecorder();
@@ -436,15 +643,44 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         );
         canvas.restore();
       } catch (_) {
-        canvas.drawCircle(center, innerRadius, Paint()..color = ringColor.withOpacity(0.25));
+        // Photo failed to decode — same solid-color + icon look as the
+        // no-photo case below, so it still reads as "this rescue type".
+        canvas.drawCircle(center, innerRadius, Paint()..color = ringColor);
+        _paintIcon(canvas, icon, center, innerRadius);
       }
     } else {
-      canvas.drawCircle(center, innerRadius, Paint()..color = ringColor.withOpacity(0.25));
+      // No photo yet — solid rescue-type color with the exact same icon
+      // glyph shown on the matching filter chip, so the pin reads the
+      // same way the chip does at a glance instead of just a bare ring.
+      canvas.drawCircle(center, innerRadius, Paint()..color = ringColor);
+      _paintIcon(canvas, icon, center, innerRadius);
     }
 
     final image = await recorder.endRecording().toImage(size.toInt(), size.toInt());
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
+  // Renders a Material icon glyph directly onto the marker canvas, white on
+  // the rescue-type color fill — mirrors how _FilterChip shows the same
+  // icon in white against its selected/colored background.
+  void _paintIcon(Canvas canvas, IconData icon, Offset center, double innerRadius) {
+    final iconSize = innerRadius * 1.15;
+    final textPainter = TextPainter(textDirection: TextDirection.ltr)
+      ..text = TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          fontSize: iconSize,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+          color: Colors.white,
+        ),
+      )
+      ..layout();
+    textPainter.paint(
+      canvas,
+      Offset(center.dx - textPainter.width / 2, center.dy - textPainter.height / 2),
+    );
   }
 
   @override
@@ -665,10 +901,21 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       position: position,
       icon: _iconCache[r.caseId] ??
           BitmapDescriptor.defaultMarkerWithHue(
-            r.isCommunityAdoptionEligible ? BitmapDescriptor.hueViolet : _hueForUrgency(r.urgency),
+            r.isCommunityAdoptionEligible
+                ? BitmapDescriptor.hueViolet
+                : _hueForColor(category.color),
           ),
       onTap: () => _showReportPreview(r, category),
     );
+  }
+
+  Future<void> _openCollarTag(String tagId) async {
+    final uri = Uri.parse(AppLinks.tagUrl(tagId));
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // Non-fatal — worst case the tap silently does nothing.
+    }
   }
 
   void _showReportPreview(ReportMapEntry r, ReportCategory category) {
@@ -784,6 +1031,34 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                 ),
               ]),
             ],
+            if (r.hasLostPetCollarTag) ...[
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () => _openCollarTag(r.collarTagId!),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.lavenderrspwn.withOpacity(0.25),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.qr_code, size: 14, color: AppColors.textPrimary),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Registered collar tag — tap to view',
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (r.isCommunityAdoptionEligible) ...[
               const SizedBox(height: 10),
               Container(
@@ -814,9 +1089,11 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => r.isCommunityAdoptionEligible
+                      builder: (_) => r.isPetAlert
+                          ? LostFoundTrackCasePage(alertId: r.caseId)
+                          : (r.isCommunityAdoptionEligible
                           ? CommunityAdoptionTrackPage(caseId: r.caseId)
-                          : TrackCasePage(caseId: r.caseId, initialTabIndex: 0),
+                          : TrackCasePage(caseId: r.caseId, initialTabIndex: 0)),
                     ),
                   );
                 },

@@ -147,14 +147,15 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     setState(() => _closing = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).closeCase(
-            caseId: c.id,
-            reason: result.reason,
-            details: result.details,
-            actorUid: _actorUid,
-            actorName: _actorName,
-            lastKnownLocation: result.lastKnownLocation,
-            clinicUnavailableDetails: result.clinicUnavailableDetails,
-          );
+        caseId: c.id,
+        reason: result.reason,
+        details: result.details,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        lastKnownLocation: result.lastKnownLocation,
+        clinicUnavailableDetails: result.clinicUnavailableDetails,
+        serviceTypeNeeded: result.serviceTypeNeeded,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
         Navigator.pop(context);
@@ -200,9 +201,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     _routeDestination = caseLocation;
     _hasFitCamera = false; // a genuinely new route deserves a fresh camera fit
     _routeFuture = ref.read(directionsRepositoryProvider).fetchRoute(
-          origin: riderLocation,
-          destination: caseLocation,
-        );
+      origin: riderLocation,
+      destination: caseLocation,
+    );
     return _routeFuture!;
   }
 
@@ -268,9 +269,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       final assignment = ref.read(currentAssignmentProvider(widget.caseId)).asData?.value;
       if (assignment != null && assignment.status == TransportAssignmentStatus.accepted) {
         await ref.read(rescueCaseRepositoryProvider).completeAssignment(
-              caseId: widget.caseId,
-              assignmentId: assignment.id,
-            );
+          caseId: widget.caseId,
+          assignmentId: assignment.id,
+        );
       }
 
       if (mounted) {
@@ -399,9 +400,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   Future<void> _confirmAnimalReceived(TransportAssignment? assignment) async {
     try {
       await ref.read(rescueCaseRepositoryProvider).confirmAnimalReceived(
-            caseId: widget.caseId,
-            currentAssignmentId: assignment?.id,
-          );
+        caseId: widget.caseId,
+        currentAssignmentId: assignment?.id,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Animal received — transport complete.'), backgroundColor: Colors.green),
@@ -478,60 +479,60 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       // fields) — show a visible warning instead of silently routing back
       // to the rescue case, which the rider has already left.
       return SizedBox(
-            height: 180,
-            child: Stack(
-              children: [
-                GoogleMap(
-                  gestureRecognizers: {
-                    Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-                  },
-                  initialCameraPosition: CameraPosition(target: rider.location, zoom: 13),
-                  markers: {
-                    if (caseLocation != null)
-                      Marker(
-                        markerId: const MarkerId('rescue_case'),
-                        position: caseLocation,
-                        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-                        infoWindow: InfoWindow(title: _originMarkerLabel),
-                      ),
-                    Marker(
-                      markerId: const MarkerId('rider'),
-                      position: rider.location,
-                      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                      infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
-                    ),
-                  },
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  mapToolbarEnabled: false,
-                ),
-                Positioned(
-                  left: 10,
-                  right: 10,
-                  bottom: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE05353),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(destination.label,
-                              style: GoogleFonts.zain(
-                                  fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
-                        ),
-                      ],
-                    ),
+        height: 180,
+        child: Stack(
+          children: [
+            GoogleMap(
+              gestureRecognizers: {
+                Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+              },
+              initialCameraPosition: CameraPosition(target: rider.location, zoom: 13),
+              markers: {
+                if (caseLocation != null)
+                  Marker(
+                    markerId: const MarkerId('rescue_case'),
+                    position: caseLocation,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+                    infoWindow: InfoWindow(title: _originMarkerLabel),
                   ),
+                Marker(
+                  markerId: const MarkerId('rider'),
+                  position: rider.location,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                  infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
                 ),
-              ],
+              },
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
             ),
-          );
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE05353),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(destination.label,
+                          style: GoogleFonts.zain(
+                              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
     final destinationLocation = destination.location!;
@@ -547,47 +548,47 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     return FutureBuilder<RouteResult>(
       future: _routeFor(rider.location, destinationLocation),
       builder: (context, snapshot) {
-          final route = snapshot.data;
-          final markers = {
+        final route = snapshot.data;
+        final markers = {
+          Marker(
+            markerId: const MarkerId('destination'),
+            position: destinationLocation,
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            infoWindow: InfoWindow(title: destination.label),
+          ),
+          if (showSeparateCaseMarker)
             Marker(
-              markerId: const MarkerId('destination'),
-              position: destinationLocation,
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-              infoWindow: InfoWindow(title: destination.label),
+              markerId: const MarkerId('rescue_case'),
+              position: caseLocation,
+              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+              infoWindow: InfoWindow(title: _originMarkerLabel),
             ),
-            if (showSeparateCaseMarker)
-              Marker(
-                markerId: const MarkerId('rescue_case'),
-                position: caseLocation,
-                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-                infoWindow: InfoWindow(title: _originMarkerLabel),
-              ),
-            Marker(
-              markerId: const MarkerId('rider'),
-              position: rider.location,
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-              infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
-            ),
-          };
+          Marker(
+            markerId: const MarkerId('rider'),
+            position: rider.location,
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+            infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
+          ),
+        };
 
-          // Distance prefers the route's own (road) distance; only the
-          // straight-line fallback falls back to haversine, and RouteResult
-          // already encodes that — this is never recomputed here.
-          final distanceKm = route?.distanceKm ??
-              haversineDistanceKm(rider.location.latitude, rider.location.longitude,
-                  destinationLocation.latitude, destinationLocation.longitude);
-          final isRoadFollowing = route?.isRoadFollowing ?? false;
+        // Distance prefers the route's own (road) distance; only the
+        // straight-line fallback falls back to haversine, and RouteResult
+        // already encodes that — this is never recomputed here.
+        final distanceKm = route?.distanceKm ??
+            haversineDistanceKm(rider.location.latitude, rider.location.longitude,
+                destinationLocation.latitude, destinationLocation.longitude);
+        final isRoadFollowing = route?.isRoadFollowing ?? false;
 
-          // Covers the ordering where the route resolves *after* the map
-          // controller already exists (onMapCreated already fired with
-          // route == null at that time) — this call is idempotent (guarded
-          // by _hasFitCamera/_mapController in _fitTrackingCameraToRoute),
-          // so it's harmless to also attempt it here on every rebuild.
-          if (route != null) _fitTrackingCameraToRoute(route.polylinePoints);
+        // Covers the ordering where the route resolves *after* the map
+        // controller already exists (onMapCreated already fired with
+        // route == null at that time) — this call is idempotent (guarded
+        // by _hasFitCamera/_mapController in _fitTrackingCameraToRoute),
+        // so it's harmless to also attempt it here on every rebuild.
+        if (route != null) _fitTrackingCameraToRoute(route.polylinePoints);
 
-          return SizedBox(
-                height: 180,
-                child: Stack(
+        return SizedBox(
+          height: 180,
+          child: Stack(
             children: [
               GoogleMap(
                 gestureRecognizers: {
@@ -624,8 +625,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   ),
                   child: Text(
                     '${distanceKm.toStringAsFixed(1)} km to ${destination.label}'
-                    '${!isRoadFollowing ? ' (straight-line estimate)' : ''}'
-                    '${rider.isDemo ? ' · demo transporter location' : ''}',
+                        '${!isRoadFollowing ? ' (straight-line estimate)' : ''}'
+                        '${rider.isDemo ? ' · demo transporter location' : ''}',
                     style: GoogleFonts.zain(
                         fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                   ),
@@ -662,10 +663,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   ),
                 ),
             ],
-                ),
-              );
-        },
-      );
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -824,7 +825,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                           onSend: _sendMessage,
                           isIntakeMode: widget.mode == TrackingMode.intakeTransfer,
                           transporterHasReachedClinic:
-                              _kArrivedAtClinicStatuses.contains(data['status']),
+                          _kArrivedAtClinicStatuses.contains(data['status']),
                           isProceedingToTreatment: _isProceedingToTreatment,
                           onProceedToTreatment: () => _proceedToTreatment(data),
                           onFastForward: _fastForwardToClinic,
@@ -1113,36 +1114,36 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
                     height: 200,
                     child: docs.isEmpty
                         ? Center(
-                            child: Text('No messages yet.',
-                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                          )
+                      child: Text('No messages yet.',
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                    )
                         : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            itemCount: docs.length,
-                            itemBuilder: (context, i) {
-                              final msg = docs[i].data() as Map<String, dynamic>;
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 4),
-                                child: Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 12,
-                                      backgroundColor: AppColors.slaterspwn,
-                                      child: Text((msg['senderName'] ?? 'U')[0],
-                                          style: GoogleFonts.zain(fontSize: 10)),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        '${msg['senderName']}: ${msg['text']}',
-                                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
-                                      ),
-                                    ),
-                                  ],
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: docs.length,
+                      itemBuilder: (context, i) {
+                        final msg = docs[i].data() as Map<String, dynamic>;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 12,
+                                backgroundColor: AppColors.slaterspwn,
+                                child: Text((msg['senderName'] ?? 'U')[0],
+                                    style: GoogleFonts.zain(fontSize: 10)),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${msg['senderName']}: ${msg['text']}',
+                                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
                                 ),
-                              );
-                            },
+                              ),
+                            ],
                           ),
+                        );
+                      },
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.all(12),
@@ -1199,28 +1200,28 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: widget.hasReceivedIntake
                 ? Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.greenrspwn.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    child: Center(
-                      child: Text('Animal received at the shelter.',
-                          style: GoogleFonts.zain(
-                              fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                    ),
-                  )
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.greenrspwn.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Center(
+                child: Text('Animal received at the shelter.',
+                    style: GoogleFonts.zain(
+                        fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              ),
+            )
                 : ElevatedButton(
-                    onPressed: widget.onConfirmAnimalReceived,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      minimumSize: const Size(double.infinity, 48),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
-                    child: Text('Confirm Animal Received',
-                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                  ),
+              onPressed: widget.onConfirmAnimalReceived,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                minimumSize: const Size(double.infinity, 48),
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              ),
+              child: Text('Confirm Animal Received',
+                  style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+            ),
           )
         // Proceed to Treatment — only enabled once the transporter has
         // actually reached the clinic (status 'dropoff'/'in_transit_shelter').
@@ -1240,12 +1241,12 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
               ),
               child: widget.isProceedingToTreatment
                   ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                   : Text('Proceed to Treatment',
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 15, color: AppColors.textPrimary)),
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 15, color: AppColors.textPrimary)),
             ),
           )
         else
@@ -1380,18 +1381,18 @@ class _CollapsibleTransporterCard extends StatelessWidget {
       child: collapsed
           ? _CompactTransporterRow(assignment: assignment, onTap: onToggle)
           : Column(
-              children: [
-                TransporterDetailsCard(assignment: assignment),
-                GestureDetector(
-                  onTap: onToggle,
-                  behavior: HitTestBehavior.opaque,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 4),
-                    child: Icon(Icons.keyboard_arrow_up, size: 18, color: AppColors.textSecondary),
-                  ),
-                ),
-              ],
+        children: [
+          TransporterDetailsCard(assignment: assignment),
+          GestureDetector(
+            onTap: onToggle,
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Icon(Icons.keyboard_arrow_up, size: 18, color: AppColors.textSecondary),
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1406,10 +1407,10 @@ class _CompactTransporterRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(transporterProfileProvider((
-      uid: assignment.riderId,
-      fallbackName: assignment.riderName,
-      type: assignment.riderType,
-      isDemo: assignment.isDemo,
+    uid: assignment.riderId,
+    fallbackName: assignment.riderName,
+    type: assignment.riderType,
+    isDemo: assignment.isDemo,
     )));
     final profile = profileAsync.asData?.value ??
         TransporterProfile(
@@ -1442,17 +1443,17 @@ class _CompactTransporterRow extends ConsumerWidget {
               borderRadius: BorderRadius.circular(8),
               child: (profile.photoUrl != null && profile.photoUrl!.isNotEmpty)
                   ? Image.network(profile.photoUrl!,
-                      width: 32,
-                      height: 32,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                          width: 32, height: 32, color: AppColors.tearspwn,
-                          child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)))
+                  width: 32,
+                  height: 32,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                      width: 32, height: 32, color: AppColors.tearspwn,
+                      child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)))
                   : Container(
-                      width: 32,
-                      height: 32,
-                      color: AppColors.tearspwn,
-                      child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)),
+                  width: 32,
+                  height: 32,
+                  color: AppColors.tearspwn,
+                  child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -1507,9 +1508,9 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
     // here. A no-op if it hasn't actually expired.
     if (widget.assignment.isStalePending) {
       ref.read(rescueCaseRepositoryProvider).reconcileStaleOffer(
-            caseId: widget.caseId,
-            assignmentId: widget.assignment.id,
-          );
+        caseId: widget.caseId,
+        assignmentId: widget.assignment.id,
+      );
     }
   }
 
@@ -1556,10 +1557,10 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
     setState(() => _cancelling = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
-            caseId: widget.caseId,
-            assignmentId: widget.assignment.id,
-            reason: 'Cancelled by organization while waiting',
-          );
+        caseId: widget.caseId,
+        assignmentId: widget.assignment.id,
+        reason: 'Cancelled by organization while waiting',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Offer cancelled. You may select another transporter.')),
@@ -1615,7 +1616,7 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
               ),
               child: _cancelling
                   ? const SizedBox(
-                      width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
                   : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
             ),
           ],

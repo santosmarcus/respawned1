@@ -86,6 +86,12 @@ class ActivityFeed extends StatelessWidget {
                   if (rescueDismissedStatuses.contains(rawStatus)) continue;
 
                   final isRejected = rawStatus == 'rejected';
+                  // Once the reporter has opened a rejected report's
+                  // one-time success screen and tapped Close, it's marked
+                  // hiddenFromExplore (same flag CaseSummaryPage._close
+                  // already sets) — from that point it belongs in History
+                  // only, not in the active Activity list.
+                  if (isRejected && data['hiddenFromExplore'] == true) continue;
                   final isEndedRescue = !isRejected &&
                       (rawStatus == 'closed' ||
                           rawStatus.contains('completed') ||
@@ -102,6 +108,13 @@ class ActivityFeed extends StatelessWidget {
                       : 'Pending';
                   final ts = data['createdAt'] as Timestamp?;
                   final createdAt = ts is Timestamp ? ts.toDate() : null;
+                  DateTime? lastUpdatedAt = createdAt;
+                  if (history.isNotEmpty) {
+                    final lastHistoryTs = history.last['timestamp'];
+                    if (lastHistoryTs is Timestamp) {
+                      lastUpdatedAt = lastHistoryTs.toDate();
+                    }
+                  }
 
                   final animals = data['animals'] as List?;
                   final animalSummary = (animals != null && animals.isNotEmpty)
@@ -143,6 +156,7 @@ class ActivityFeed extends StatelessWidget {
                     animalType: animalSummary,
                     urgency: data['urgency'] as String? ?? '',
                     createdAt: createdAt,
+                    lastUpdatedAt: lastUpdatedAt,
                     docId: doc.id,
                     photoUrl: photoList.isNotEmpty ? photoList.first : null,
                     isRejected: isRejected,
@@ -225,8 +239,8 @@ class ActivityFeed extends StatelessWidget {
                 }
 
                 items.sort((a, b) =>
-                    (b.createdAt ?? DateTime(0))
-                        .compareTo(a.createdAt ?? DateTime(0)));
+                    (b.lastUpdatedAt ?? b.createdAt ?? DateTime(0))
+                        .compareTo(a.lastUpdatedAt ?? a.createdAt ?? DateTime(0)));
 
                 if (items.isEmpty) {
                   return _emptyState(

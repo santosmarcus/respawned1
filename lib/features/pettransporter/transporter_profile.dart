@@ -404,6 +404,7 @@ class _StatsRow extends StatelessWidget {
     'dropoff',
     'searching_clinic',
     'in_transit_shelter',
+    'awaiting_adopter_pickup',
   };
 
   @override

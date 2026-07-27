@@ -18,6 +18,11 @@ class CaseCompletedPage extends StatelessWidget {
     return s == 'closed' || s.contains('ended');
   }
 
+  bool get _isRejected {
+    final s = (caseData['status'] as String? ?? '').toLowerCase();
+    return s == 'rejected';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -60,7 +65,9 @@ class CaseCompletedPage extends StatelessWidget {
                     const SizedBox(height: 20),
 
                     Text(
-                      _isClosed ? 'Case Closed' : 'Case Completed!',
+                      _isRejected
+                          ? 'Report Reviewed'
+                          : (_isClosed ? 'Case Closed' : 'Case Completed!'),
                       style: GoogleFonts.tiltWarp(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -70,9 +77,11 @@ class CaseCompletedPage extends StatelessWidget {
                     const SizedBox(height: 12),
 
                     Text(
-                      _isClosed
+                      _isRejected
+                          ? 'Thank you for reporting this. Our team reviewed it and determined it doesn\'t require rescue intervention at this time.'
+                          : (_isClosed
                           ? 'With heavy hearts, we share that this animal passed away despite everyone\'s rescue efforts.'
-                          : 'The animal is now in treatment and in the care of our partner organization. Thank you for your compassion and for helping make this rescue possible.',
+                          : 'The animal is now in treatment and in the care of our partner organization. Thank you for your compassion and for helping make this rescue possible.'),
                       textAlign: TextAlign.center,
                       style: GoogleFonts.zain(
                           fontSize: 14,
@@ -83,9 +92,11 @@ class CaseCompletedPage extends StatelessWidget {
                     const SizedBox(height: 8),
 
                     Text(
-                      _isClosed
+                      _isRejected
+                          ? 'You can review the reason and full details any time from your report history.'
+                          : (_isClosed
                           ? 'We\'re grateful for your compassion and support, which gave this animal a chance at care, comfort, and dignity in its final moments. Thank you for helping make this rescue possible — we hope you\'ll continue supporting future efforts.'
-                          : 'Please stand by for the progress of this animal or contact the organization if you\'re interested in adopting or sponsoring this animal.',
+                          : 'Please stand by for the progress of this animal or contact the organization if you\'re interested in adopting or sponsoring this animal.'),
                       textAlign: TextAlign.center,
                       style: GoogleFonts.zain(
                           fontSize: 13, color: AppColors.textSecondary),

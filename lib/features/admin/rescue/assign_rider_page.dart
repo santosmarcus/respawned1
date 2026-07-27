@@ -124,20 +124,20 @@ class _RiderVm {
   });
 
   _RiderVm copyWith({bool? isPreferred}) => _RiderVm(
-        uid: uid,
-        name: name,
-        type: type,
-        position: position,
-        vehicle: vehicle,
-        plate: plate,
-        photoUrl: photoUrl,
-        isDemo: isDemo,
-        availability: availability,
-        distanceKm: distanceKm,
-        vehicleCategory: vehicleCategory,
-        compatibilityScore: compatibilityScore,
-        isPreferred: isPreferred ?? this.isPreferred,
-      );
+    uid: uid,
+    name: name,
+    type: type,
+    position: position,
+    vehicle: vehicle,
+    plate: plate,
+    photoUrl: photoUrl,
+    isDemo: isDemo,
+    availability: availability,
+    distanceKm: distanceKm,
+    vehicleCategory: vehicleCategory,
+    compatibilityScore: compatibilityScore,
+    isPreferred: isPreferred ?? this.isPreferred,
+  );
 }
 
 class AssignRiderPage extends ConsumerStatefulWidget {
@@ -202,9 +202,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     if (_reconcilingAssignmentIds.contains(assignment.id)) return;
     _reconcilingAssignmentIds.add(assignment.id);
     ref.read(rescueCaseRepositoryProvider).reconcileStaleOffer(
-          caseId: widget.caseId,
-          assignmentId: assignment.id,
-        );
+      caseId: widget.caseId,
+      assignmentId: assignment.id,
+    );
   }
 
   Future<void> _cancelExistingOffer(TransportAssignment assignment) async {
@@ -242,10 +242,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     setState(() => _cancellingOffer = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
-            caseId: widget.caseId,
-            assignmentId: assignment.id,
-            reason: 'Cancelled by organization while waiting',
-          );
+        caseId: widget.caseId,
+        assignmentId: assignment.id,
+        reason: 'Cancelled by organization while waiting',
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -266,8 +266,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     final pendingFor = offeredAt == null
         ? ''
         : DateTime.now().difference(offeredAt).inMinutes < 1
-            ? 'Pending for ${DateTime.now().difference(offeredAt).inSeconds}s'
-            : 'Pending for ${DateTime.now().difference(offeredAt).inMinutes}m';
+        ? 'Pending for ${DateTime.now().difference(offeredAt).inSeconds}s'
+        : 'Pending for ${DateTime.now().difference(offeredAt).inMinutes}m';
     return Expanded(
       child: Center(
         child: Padding(
@@ -298,7 +298,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     ),
                     child: _cancellingOffer
                         ? const SizedBox(
-                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
                   ),
                   const SizedBox(width: 12),
@@ -360,11 +360,11 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// outside kDebugMode, regardless of any online concept (they don't have
   /// real presence data at all).
   List<_RiderVm> _buildRiderVms(
-    LatLng center,
-    List<PetTransporter> transporters,
-    Map<String, TransportAssignmentStatus> activeByRider,
-    AnimalTransportProfile animalProfile,
-  ) {
+      LatLng center,
+      List<PetTransporter> transporters,
+      Map<String, TransportAssignmentStatus> activeByRider,
+      AnimalTransportProfile animalProfile,
+      ) {
     final onlineTransporters = transporters.where((t) => t.isOnline).toList();
     double distanceFor(LatLng pos) =>
         haversineDistanceKm(center.latitude, center.longitude, pos.latitude, pos.longitude);
@@ -397,19 +397,19 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // outside a debug build, regardless of any online concept.
     final demoA = kDebugMode
         ? demoRider(
-            uid: _demoAcceptingRiderUid,
-            name: _demoAcceptingRiderName,
-            vehicle: _demoAcceptingRiderVehicle,
-            plate: _demoAcceptingRiderPlate,
-          )
+      uid: _demoAcceptingRiderUid,
+      name: _demoAcceptingRiderName,
+      vehicle: _demoAcceptingRiderVehicle,
+      plate: _demoAcceptingRiderPlate,
+    )
         : null;
     final demoB = kDebugMode
         ? demoRider(
-            uid: _demoRejectingRiderUid,
-            name: _demoRejectingRiderName,
-            vehicle: _demoRejectingRiderVehicle,
-            plate: _demoRejectingRiderPlate,
-          )
+      uid: _demoRejectingRiderUid,
+      name: _demoRejectingRiderName,
+      vehicle: _demoRejectingRiderVehicle,
+      plate: _demoRejectingRiderPlate,
+    )
         : null;
 
     final realRiders = onlineTransporters.map((t) {
@@ -531,39 +531,39 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     switch (outcome) {
       case _DialogOutcome.accepted:
       case _DialogOutcome.viewExisting:
-        // Assignment is confirmed accepted (persisted, not just local
-        // state), or the admin chose to view an existing pending/accepted
-        // assignment instead of creating a new one — either way, Track
-        // Case now shows the live tracking map directly (or its own
-        // pending/declined inline view), in whichever mode this page was
-        // opened for (rescue pickup, or intake transport when this was a
-        // reassignment from Intake Details).
+      // Assignment is confirmed accepted (persisted, not just local
+      // state), or the admin chose to view an existing pending/accepted
+      // assignment instead of creating a new one — either way, Track
+      // Case now shows the live tracking map directly (or its own
+      // pending/declined inline view), in whichever mode this page was
+      // opened for (rescue pickup, or intake transport when this was a
+      // reassignment from Intake Details).
         Navigator.pushReplacement(context, MaterialPageRoute(
             builder: (_) => AdminTrackCasePage(
                 caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode)));
         break;
       case _DialogOutcome.acceptedStayHere:
-        // Assignment is accepted/persisted, but the admin chose to stay on
-        // this list (spec §6) — never navigate automatically. Keep the
-        // rider selected so its card highlight/Accepted state stays visible;
-        // the "Continue to Tracking" banner (build()) is the deliberate,
-        // manual next step from here.
+      // Assignment is accepted/persisted, but the admin chose to stay on
+      // this list (spec §6) — never navigate automatically. Keep the
+      // rider selected so its card highlight/Accepted state stays visible;
+      // the "Continue to Tracking" banner (build()) is the deliberate,
+      // manual next step from here.
         break;
       case _DialogOutcome.declined:
       case _DialogOutcome.offerCancelled:
-        // Stay here; clear the selection so the admin can pick someone
-        // else. A declined transporter shows as Busy and drops to the
-        // bottom of the list automatically; an org-cancelled offer simply
-        // frees the transporter back to Available (its most-recent
-        // assignment is now 'cancelled', not 'accepted'/'pending') — no
-        // extra state to manage in either case.
+      // Stay here; clear the selection so the admin can pick someone
+      // else. A declined transporter shows as Busy and drops to the
+      // bottom of the list automatically; an org-cancelled offer simply
+      // frees the transporter back to Available (its most-recent
+      // assignment is now 'cancelled', not 'accepted'/'pending') — no
+      // extra state to manage in either case.
         setState(() => _selectedRiderUid = null);
         break;
       case _DialogOutcome.cancelled:
       case null:
-        // Cancelled before any offer was created, or dismissed some other
-        // way — keep the selection, stay on Assign Transporter, nothing
-        // was written.
+      // Cancelled before any offer was created, or dismissed some other
+      // way — keep the selection, stay on Assign Transporter, nothing
+      // was written.
         break;
     }
   }
@@ -600,10 +600,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             rider.uid == _selectedRiderUid
                 ? BitmapDescriptor.hueGreen
                 : switch (rider.availability) {
-                    _RiderAvailability.pending => BitmapDescriptor.hueOrange,
-                    _RiderAvailability.busy => BitmapDescriptor.hueViolet,
-                    _RiderAvailability.available => BitmapDescriptor.hueRed,
-                  },
+              _RiderAvailability.pending => BitmapDescriptor.hueOrange,
+              _RiderAvailability.busy => BitmapDescriptor.hueViolet,
+              _RiderAvailability.available => BitmapDescriptor.hueRed,
+            },
           ),
           infoWindow: InfoWindow(
             title: rider.name,
@@ -632,14 +632,23 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ref.watch(activeAssignmentsByRiderProvider).asData?.value ?? const <String, TransportAssignmentStatus>{};
 
     final animals = (d['animals'] as List?) ?? const [];
+    // A transporter's own "requires specialized transport" End Reason
+    // (transit_progress_page.dart) means this case needs a bigger/better-
+    // equipped vehicle even if the animals[] data alone wouldn't suggest
+    // it — factored into ranking the same way a large animal or high-risk
+    // behavior already is, so a van/truck transporter is preferred for
+    // the reassignment.
+    final requiresSpecializedTransport =
+        (d['endReasonServiceType'] as String?)?.isNotEmpty ?? false;
     final animalProfile = AnimalTransportProfile(
       hasLargeAnimal: animals.any((a) => a is Map && a['size'] == 'Large'),
       animalCount: animals.isEmpty ? 1 : animals.length,
-      needsSpecialHandling: highRiskAnimalsIn(
-        animals: d['animals'] as List?,
-        legacyBiteRisk: d['biteRisk'] as String?,
-        legacyEscapeRisk: d['escapeRisk'] as String?,
-      ).isNotEmpty,
+      needsSpecialHandling: requiresSpecializedTransport ||
+          highRiskAnimalsIn(
+            animals: d['animals'] as List?,
+            legacyBiteRisk: d['biteRisk'] as String?,
+            legacyEscapeRisk: d['escapeRisk'] as String?,
+          ).isNotEmpty,
     );
     final riders = _buildRiderVms(riderCenter, transporters, activeByRider, animalProfile);
 
@@ -676,9 +685,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // View Pending / Cancel Offer are available until it resolves.
     final currentAssignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
     final blockingOffer =
-        currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.pending
-            ? currentAssignment
-            : null;
+    currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.pending
+        ? currentAssignment
+        : null;
     if (blockingOffer != null) {
       if (blockingOffer.isStalePending) {
         _reconcileIfStale(blockingOffer);
@@ -689,9 +698,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // "View Transport Tracking" (spec §6) — shows a persistent, explicit
     // "Continue to Tracking" banner instead of ever auto-navigating there.
     final acceptedAssignment =
-        currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.accepted
-            ? currentAssignment
-            : null;
+    currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.accepted
+        ? currentAssignment
+        : null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -764,6 +773,37 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
             ),
           ),
+          if (requiresSpecializedTransport)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.lavenderrspwn.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.lavenderrspwn),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.local_shipping_outlined, color: AppColors.textPrimary, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Specialized transport required',
+                              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          Text(d['endReasonServiceType'] as String,
+                              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           // Real map: case marker + transporter markers (real-or-demo positions).
           Padding(
@@ -774,27 +814,27 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 height: 200,
                 child: caseLocation == null
                     ? Container(
-                        color: AppColors.slaterspwn,
-                        child: Center(
-                          child: Text('No coordinates saved for this case.',
-                              style: GoogleFonts.zain(
-                                  fontSize: 12, color: AppColors.textSecondary)),
-                        ),
-                      )
+                  color: AppColors.slaterspwn,
+                  child: Center(
+                    child: Text('No coordinates saved for this case.',
+                        style: GoogleFonts.zain(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                  ),
+                )
                     : GoogleMap(
-                        gestureRecognizers: {
-                          Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-                        },
-                        initialCameraPosition: CameraPosition(target: caseLocation, zoom: 13),
-                        markers: _buildMarkers(caseLocation, visibleRiders),
-                        onMapCreated: (ctrl) {
-                          _mapController = ctrl;
-                          _fitCameraOnce(caseLocation, visibleRiders);
-                        },
-                        myLocationButtonEnabled: false,
-                        zoomControlsEnabled: false,
-                        mapToolbarEnabled: false,
-                      ),
+                  gestureRecognizers: {
+                    Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                  },
+                  initialCameraPosition: CameraPosition(target: caseLocation, zoom: 13),
+                  markers: _buildMarkers(caseLocation, visibleRiders),
+                  onMapCreated: (ctrl) {
+                    _mapController = ctrl;
+                    _fitCameraOnce(caseLocation, visibleRiders);
+                  },
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
+                ),
               ),
             ),
           ),
@@ -883,13 +923,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                       Text(
                         atMaxRadius
                             ? (hasAvailableAnywhere
-                                // Shouldn't happen (max radius should contain
-                                // everyone), kept only as a safe fallback.
-                                ? 'No available transporters in range.'
-                                : 'No compatible transporters are currently available. Try again later or use manual assignment.')
+                        // Shouldn't happen (max radius should contain
+                        // everyone), kept only as a safe fallback.
+                            ? 'No available transporters in range.'
+                            : 'No compatible transporters are currently available. Try again later or use manual assignment.')
                             : hasAvailableAnywhere
-                                ? 'No available transporters nearby. Expanding the search radius…'
-                                : 'No available transporters nearby.',
+                            ? 'No available transporters nearby. Expanding the search radius…'
+                            : 'No available transporters nearby.',
                         style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       ),
                       if (atMaxRadius)
@@ -942,31 +982,31 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             Expanded(
               child: visibleRiders.isEmpty
                   ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'No online transporters are currently available.',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-                        ),
-                      ),
-                    )
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'No online transporters are currently available.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                  ),
+                ),
+              )
                   : ListView.separated(
-                      key: const PageStorageKey('assign_rider_list'),
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: visibleRiders.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final rider = visibleRiders[index];
-                        final isSelected = _selectedRiderUid == rider.uid;
-                        return _RiderCard(
-                          rider: rider,
-                          isSelected: isSelected,
-                          onSelect: () => _selectRider(rider),
-                          animalProfile: animalProfile,
-                        );
-                      },
-                    ),
+                key: const PageStorageKey('assign_rider_list'),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: visibleRiders.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  final rider = visibleRiders[index];
+                  final isSelected = _selectedRiderUid == rider.uid;
+                  return _RiderCard(
+                    rider: rider,
+                    isSelected: isSelected,
+                    onSelect: () => _selectRider(rider),
+                    animalProfile: animalProfile,
+                  );
+                },
+              ),
             ),
 
             // Fixed bottom action — always visible; "Next" is simply disabled
@@ -991,15 +1031,15 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                   ),
                   child: _isAssigning
                       ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                       : Text('Next',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 15,
-                              color: _selectedRiderUid == null
-                                  ? AppColors.textSecondary
-                                  : AppColors.textPrimary)),
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 15,
+                          color: _selectedRiderUid == null
+                              ? AppColors.textSecondary
+                              : AppColors.textPrimary)),
                 ),
               ),
             ),
@@ -1024,10 +1064,10 @@ class _RiderCard extends StatelessWidget {
   });
 
   (String, Color, Color) _statusChip() => switch (rider.availability) {
-        _RiderAvailability.available => ('Available', AppColors.greenrspwn, AppColors.textPrimary),
-        _RiderAvailability.pending => ('Pending', AppColors.yellowrspwn, AppColors.textPrimary),
-        _RiderAvailability.busy => ('Busy', AppColors.slaterspwn, AppColors.textSecondary),
-      };
+    _RiderAvailability.available => ('Available', AppColors.greenrspwn, AppColors.textPrimary),
+    _RiderAvailability.pending => ('Pending', AppColors.yellowrspwn, AppColors.textPrimary),
+    _RiderAvailability.busy => ('Busy', AppColors.slaterspwn, AppColors.textSecondary),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -1210,14 +1250,14 @@ class _Avatar extends StatelessWidget {
   }
 
   Widget _placeholder() => Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: AppColors.tearspwn,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: const Icon(Icons.directions_car, color: AppColors.textSecondary),
-      );
+    width: 56,
+    height: 56,
+    decoration: BoxDecoration(
+      color: AppColors.tearspwn,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: const Icon(Icons.directions_car, color: AppColors.textSecondary),
+  );
 }
 
 /// What the modal resolved to, once it closes — drives what
@@ -1310,15 +1350,15 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
 
     try {
       final assignmentId = await ref.read(rescueCaseRepositoryProvider).createAssignmentOffer(
-            caseId: widget.caseId,
-            riderId: widget.rider.uid,
-            riderName: widget.rider.name,
-            riderType: widget.rider.type,
-            isDemo: widget.rider.isDemo,
-            allowReassign: allowReassign,
-            vehicle: widget.rider.vehicle,
-            plate: widget.rider.plate,
-          );
+        caseId: widget.caseId,
+        riderId: widget.rider.uid,
+        riderName: widget.rider.name,
+        riderType: widget.rider.type,
+        isDemo: widget.rider.isDemo,
+        allowReassign: allowReassign,
+        vehicle: widget.rider.vehicle,
+        plate: widget.rider.plate,
+      );
       if (!mounted) return;
 
       _assignmentId = assignmentId;
@@ -1384,7 +1424,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         .doc(assignmentId)
         .snapshots()
         .listen(
-      (snap) {
+          (snap) {
         if (!mounted) return;
         final data = snap.data();
         if (data == null) return;
@@ -1423,15 +1463,15 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         });
         break;
       case 'cancelled':
-        // Normally only reached via our own _back() — handled defensively
-        // in case the offer is ever cancelled by some other path. Stays
-        // open until the admin presses OK below — never auto-closes.
+      // Normally only reached via our own _back() — handled defensively
+      // in case the offer is ever cancelled by some other path. Stays
+      // open until the admin presses OK below — never auto-closes.
         if (_phase == _ModalPhase.cancelled) return;
         _elapsedTimer?.cancel();
         setState(() => _phase = _ModalPhase.cancelled);
         break;
       case 'pending':
-        // Nothing to do — already showing the pending UI (or about to).
+      // Nothing to do — already showing the pending UI (or about to).
         break;
     }
   }
@@ -1490,10 +1530,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     setState(() => _phase = _ModalPhase.cancelling);
     try {
       await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
-            caseId: widget.caseId,
-            assignmentId: _assignmentId!,
-            reason: 'Cancelled by organization while waiting',
-          );
+        caseId: widget.caseId,
+        assignmentId: _assignmentId!,
+        reason: 'Cancelled by organization while waiting',
+      );
       // Cancellation is confirmed written — show the cancelled state and
       // wait for the admin to press OK (below) before closing. Never
       // auto-closes, and never leaves the modal in a loading state.
@@ -1568,29 +1608,29 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   }
 
   String get _title => switch (_phase) {
-        _ModalPhase.confirmation ||
-        _ModalPhase.creating ||
-        _ModalPhase.pending =>
-          'Confirm Transporter Assignment',
-        _ModalPhase.cancelling => 'Cancelling Offer',
-        _ModalPhase.accepted => 'Assignment Accepted',
-        _ModalPhase.declined => 'Assignment Declined',
-        _ModalPhase.cancelled => 'Offer Cancelled',
-        _ModalPhase.error => 'Could Not Check Response',
-        _ModalPhase.conflict => 'Active Transporter Assignment',
-      };
+    _ModalPhase.confirmation ||
+    _ModalPhase.creating ||
+    _ModalPhase.pending =>
+    'Confirm Transporter Assignment',
+    _ModalPhase.cancelling => 'Cancelling Offer',
+    _ModalPhase.accepted => 'Assignment Accepted',
+    _ModalPhase.declined => 'Assignment Declined',
+    _ModalPhase.cancelled => 'Offer Cancelled',
+    _ModalPhase.error => 'Could Not Check Response',
+    _ModalPhase.conflict => 'Active Transporter Assignment',
+  };
 
   Widget _content(BuildContext context) => switch (_phase) {
-        _ModalPhase.confirmation => _confirmationContent(),
-        _ModalPhase.creating => _loadingContent('Creating assignment…'),
-        _ModalPhase.cancelling => _loadingContent('Cancelling the pending offer…'),
-        _ModalPhase.pending => _pendingContent(),
-        _ModalPhase.accepted => _acceptedContent(),
-        _ModalPhase.declined => _declinedContent(),
-        _ModalPhase.cancelled => _cancelledContent(),
-        _ModalPhase.error => _errorContent(),
-        _ModalPhase.conflict => _conflictContent(),
-      };
+    _ModalPhase.confirmation => _confirmationContent(),
+    _ModalPhase.creating => _loadingContent('Creating assignment…'),
+    _ModalPhase.cancelling => _loadingContent('Cancelling the pending offer…'),
+    _ModalPhase.pending => _pendingContent(),
+    _ModalPhase.accepted => _acceptedContent(),
+    _ModalPhase.declined => _declinedContent(),
+    _ModalPhase.cancelled => _cancelledContent(),
+    _ModalPhase.error => _errorContent(),
+    _ModalPhase.conflict => _conflictContent(),
+  };
 
   /// Replaces the old generic "This case already has an active rider
   /// assignment." error with the actual transporter's identity/status when
@@ -1647,61 +1687,61 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   }
 
   Widget _loadingContent(String message) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-              width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3)),
-          const SizedBox(height: 16),
-          Text(message, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const SizedBox(
+          width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3)),
+      const SizedBox(height: 16),
+      Text(message, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+    ],
+  );
 
   Widget _pendingContent() => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-              width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.yellowrspwn)),
-          const SizedBox(height: 16),
-          Text(widget.rider.name,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-            decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(20)),
-            child: Text('Pending',
-                style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const SizedBox(
+          width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.yellowrspwn)),
+      const SizedBox(height: 16),
+      Text(widget.rider.name,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+      const SizedBox(height: 8),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(20)),
+        child: Text('Pending',
+            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+      ),
+      const SizedBox(height: 16),
+      Text('Waiting for the transporter to respond…',
+          textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+      if (_pendingSince != null) ...[
+        const SizedBox(height: 6),
+        Text('Waiting for ${_formatElapsed(_elapsed)}',
+            textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+      ],
+      // Purely informational — this never rejects anything on its own,
+      // it just tells the org their options instead of leaving them
+      // guessing behind an indefinite spinner.
+      if (_showTimeoutMessage) ...[
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE0A353).withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE0A353)),
           ),
-          const SizedBox(height: 16),
-          Text('Waiting for the transporter to respond…',
-              textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-          if (_pendingSince != null) ...[
-            const SizedBox(height: 6),
-            Text('Waiting for ${_formatElapsed(_elapsed)}',
-                textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-          ],
-          // Purely informational — this never rejects anything on its own,
-          // it just tells the org their options instead of leaving them
-          // guessing behind an indefinite spinner.
-          if (_showTimeoutMessage) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE0A353).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE0A353)),
-              ),
-              child: Text(
-                'The transporter has not responded yet.\n'
+          child: Text(
+            'The transporter has not responded yet.\n'
                 'You may continue waiting, retry, or go back and select another transporter.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 12, color: const Color(0xFF9C6B10)),
-              ),
-            ),
-          ],
-        ],
-      );
+            textAlign: TextAlign.center,
+            style: GoogleFonts.zain(fontSize: 12, color: const Color(0xFF9C6B10)),
+          ),
+        ),
+      ],
+    ],
+  );
 
   String _formatElapsed(Duration d) {
     if (d.inMinutes < 1) return '${d.inSeconds}s';
@@ -1709,211 +1749,211 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   }
 
   Widget _cancelledContent() => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.cancel_outlined, color: AppColors.textSecondary, size: 40),
-          const SizedBox(height: 12),
-          Text('The pending offer to ${widget.rider.name} was cancelled.',
-              textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(Icons.cancel_outlined, color: AppColors.textSecondary, size: 40),
+      const SizedBox(height: 12),
+      Text('The pending offer to ${widget.rider.name} was cancelled.',
+          textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+    ],
+  );
 
   Widget _acceptedContent() => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 40),
-          const SizedBox(height: 12),
-          Text('Transporter accepted the assignment.',
-              textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 40),
+      const SizedBox(height: 12),
+      Text('Transporter accepted the assignment.',
+          textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+    ],
+  );
 
   Widget _declinedContent() => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('${widget.rider.name} declined the assignment.',
-              style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          const SizedBox(height: 10),
-          _infoRow('Reason', _rejectionReason ?? 'No reason given'),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('${widget.rider.name} declined the assignment.',
+          style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+      const SizedBox(height: 10),
+      _infoRow('Reason', _rejectionReason ?? 'No reason given'),
+    ],
+  );
 
   Widget _errorContent() => Text(
-        _errorMessage ?? 'Could not check transporter response.',
-        style: GoogleFonts.zain(fontSize: 13, color: Colors.redAccent),
-      );
+    _errorMessage ?? 'Could not check transporter response.',
+    style: GoogleFonts.zain(fontSize: 13, color: Colors.redAccent),
+  );
 
   Widget _infoRow(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: GoogleFonts.zain(
-                    fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-            Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: GoogleFonts.zain(
+                fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+        Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+      ],
+    ),
+  );
 
   List<Widget> _actions(BuildContext context) => switch (_phase) {
-        _ModalPhase.confirmation => [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
-              child: Text('Cancel',
-                  style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-            ),
-            ElevatedButton(
-              onPressed: _confirm,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-          ],
-        // No dismiss affordance while a write is actually in flight — this
-        // is what "disable dismissal while the assignment write is being
-        // created" means in practice, alongside barrierDismissible:false
-        // at the call site.
-        _ModalPhase.creating || _ModalPhase.cancelling => const [],
-        // Accepted/cancelled never auto-close (see _applyAssignmentStatus/
-        // _back) — the admin closes them explicitly here, which is also
-        // the one moment the caller is allowed to navigate to Track Case.
-        _ModalPhase.accepted => [
-            // "Close" keeps the admin on Assign Transporter — the accepted
-            // card/state stays visible there, and continuing to tracking
-            // becomes a separate, deliberate next step instead of automatic.
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(_DialogOutcome.acceptedStayHere),
-              child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('View Transport Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-          ],
-        _ModalPhase.cancelled => [
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(_DialogOutcome.offerCancelled),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('OK', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-          ],
-        _ModalPhase.pending => [
-            OutlinedButton(
-              onPressed: _back,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.textPrimary,
-                side: const BorderSide(color: AppColors.textPrimary),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-            ElevatedButton(
-              onPressed: _isRetrying ? null : _retry,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                disabledBackgroundColor: AppColors.slaterspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-          ],
-        _ModalPhase.declined => [
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(_DialogOutcome.declined),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('Choose Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-          ],
-        _ModalPhase.error => [
-            OutlinedButton(
-              onPressed: _back,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.textPrimary,
-                side: const BorderSide(color: AppColors.textPrimary),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-            ElevatedButton(
-              onPressed: _isRetrying ? null : _retry,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                disabledBackgroundColor: AppColors.slaterspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-            ),
-          ],
-        // Never sends the admin back to an assign screen that will only
-        // fail the same way again: Pending offers only offer "View
-        // Pending"; Accepted assignments offer "Track Case" (bail out) and
-        // "Reassign Transporter" (the one path allowed to supersede it).
-        _ModalPhase.conflict => [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
-              child: Text('Cancel',
-                  style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-            ),
-            if (_conflict!.status == TransportAssignmentStatus.pending)
-              ElevatedButton(
-                onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-                child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-              )
-            else ...[
-              OutlinedButton(
-                onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-                child: Text('Track Case', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-              ),
-              ElevatedButton(
-                onPressed: _reassign,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-                child: Text('Reassign Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ],
-      };
+    _ModalPhase.confirmation => [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
+        child: Text('Cancel',
+            style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+      ),
+      ElevatedButton(
+        onPressed: _confirm,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.yellowrspwn,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+    ],
+  // No dismiss affordance while a write is actually in flight — this
+  // is what "disable dismissal while the assignment write is being
+  // created" means in practice, alongside barrierDismissible:false
+  // at the call site.
+    _ModalPhase.creating || _ModalPhase.cancelling => const [],
+  // Accepted/cancelled never auto-close (see _applyAssignmentStatus/
+  // _back) — the admin closes them explicitly here, which is also
+  // the one moment the caller is allowed to navigate to Track Case.
+    _ModalPhase.accepted => [
+      // "Close" keeps the admin on Assign Transporter — the accepted
+      // card/state stays visible there, and continuing to tracking
+      // becomes a separate, deliberate next step instead of automatic.
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(_DialogOutcome.acceptedStayHere),
+        child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+      ),
+      ElevatedButton(
+        onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.yellowrspwn,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('View Transport Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+    ],
+    _ModalPhase.cancelled => [
+      ElevatedButton(
+        onPressed: () => Navigator.of(context).pop(_DialogOutcome.offerCancelled),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.yellowrspwn,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('OK', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+    ],
+    _ModalPhase.pending => [
+      OutlinedButton(
+        onPressed: _back,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.textPrimary,
+          side: const BorderSide(color: AppColors.textPrimary),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+      ElevatedButton(
+        onPressed: _isRetrying ? null : _retry,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.yellowrspwn,
+          disabledBackgroundColor: AppColors.slaterspwn,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+    ],
+    _ModalPhase.declined => [
+      ElevatedButton(
+        onPressed: () => Navigator.of(context).pop(_DialogOutcome.declined),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.yellowrspwn,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('Choose Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+    ],
+    _ModalPhase.error => [
+      OutlinedButton(
+        onPressed: _back,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.textPrimary,
+          side: const BorderSide(color: AppColors.textPrimary),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+      ElevatedButton(
+        onPressed: _isRetrying ? null : _retry,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.yellowrspwn,
+          disabledBackgroundColor: AppColors.slaterspwn,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      ),
+    ],
+  // Never sends the admin back to an assign screen that will only
+  // fail the same way again: Pending offers only offer "View
+  // Pending"; Accepted assignments offer "Track Case" (bail out) and
+  // "Reassign Transporter" (the one path allowed to supersede it).
+    _ModalPhase.conflict => [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
+        child: Text('Cancel',
+            style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+      ),
+      if (_conflict!.status == TransportAssignmentStatus.pending)
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.yellowrspwn,
+            foregroundColor: AppColors.textPrimary,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+          child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+        )
+      else ...[
+        OutlinedButton(
+          onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.textPrimary,
+            side: const BorderSide(color: AppColors.textPrimary),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+          child: Text('Track Case', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+        ),
+        ElevatedButton(
+          onPressed: _reassign,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.yellowrspwn,
+            foregroundColor: AppColors.textPrimary,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+          child: Text('Reassign Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+        ),
+      ],
+    ],
+  };
 
   @override
   Widget build(BuildContext context) {
