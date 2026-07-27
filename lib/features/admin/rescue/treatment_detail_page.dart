@@ -11,6 +11,7 @@ import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
+import 'package:respawnd1/core/utils/animal_treatment_state.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
@@ -18,6 +19,7 @@ import 'package:respawnd1/features/admin/rescue/expenses/create_fundraiser_draft
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/animal_action_selection_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
@@ -34,10 +36,6 @@ const List<String> _causesOfDeath = [
   'Malnutrition',
   'Other',
 ];
-
-const _kNextStepIntake = 'Intake';
-const _kNextStepTransfer = 'Transfer';
-const _kNextStepRelease = 'Release';
 
 class TreatmentDetailPage extends ConsumerStatefulWidget {
   final String caseId;
@@ -136,9 +134,6 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   final List<XFile> _pickedMedia = [];
   bool _isUploadingMedia = false;
   String? _mediaError;
-
-  // Post-treatment disposition
-  String? _selectedNextStep;
 
   @override
   void initState() {
@@ -336,28 +331,80 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     }
   }
 
-  Future<void> _confirmNextStep(RescueCase c, Map<String, dynamic> data) async {
-    if (_isActingOnNextStep || _selectedNextStep == null) return;
+  // Post-treatment actions (Intake/Transfer/Release, spec §2/§3) stay
+  // visible at all times on this page — only their enabled state depends
+  // on caseHasAnyEligibleAnimal (spec: never hide them entirely before
+  // discharge). For a multi-animal case, each action opens an
+  // animal-selection step first (spec §8) so it only ever applies to the
+  // discharged animal(s) the admin actually picked — a legacy single-
+  // animal case (no `animals[]` array) skips the selection step entirely
+  // and falls through to the exact original whole-case flow. Each action
+  // still revalidates eligibility at the repository level
+  // (RescueCaseRepository._ensureAnimalsEligible for transfer/release;
+  // assignIntakeAction for intake), so a stale disabled-button state can
+  // never be bypassed by tapping through anyway.
+  Future<void> _startPostTreatmentAction(
+    RescueCase c,
+    String action, // 'intake' | 'transfer' | 'release'
+    Map<String, dynamic> data,
+    List<CaseAnimalOption> animalOptions,
+  ) async {
+    if (_isActingOnNextStep) return;
     setState(() => _isActingOnNextStep = true);
+    try {
+      List<int>? selectedIndexes;
+      if (c.animals.isNotEmpty) {
+        final actionLabel = switch (action) {
+          'intake' => 'Intake',
+          'transfer' => 'Transfer',
+          _ => 'Release',
+        };
+        final selected = await showAnimalActionSelectionSheet(
+          context,
+          rescueCase: c,
+          actionLabel: actionLabel,
+          animalOptions: animalOptions,
+        );
+        if (selected == null || selected.isEmpty || !mounted) return;
+        selectedIndexes = selected.toList()..sort();
+      }
+      if (!mounted) return;
 
-    switch (_selectedNextStep) {
-      case _kNextStepIntake:
-        if (mounted) {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => IntakeDetailPage(caseId: widget.caseId, data: data)),
-          );
-        }
-        break;
-      case _kNextStepTransfer:
-        if (mounted) await showTransferAnimalSheet(context, rescueCase: c);
-        break;
-      case _kNextStepRelease:
-        if (mounted) await showReleaseAnimalSheet(context, rescueCase: c);
-        break;
+      switch (action) {
+        case 'intake':
+          if (selectedIndexes != null) {
+            try {
+              await ref
+                  .read(rescueCaseRepositoryProvider)
+                  .assignIntakeAction(caseId: widget.caseId, animalIndexes: selectedIndexes);
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not start intake: $e'), backgroundColor: Colors.redAccent),
+                );
+              }
+              return;
+            }
+          }
+          if (mounted) {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => IntakeDetailPage(caseId: widget.caseId, data: data, animalIndexes: selectedIndexes),
+              ),
+            );
+          }
+          break;
+        case 'transfer':
+          await showTransferAnimalSheet(context, rescueCase: c, animalIndexes: selectedIndexes);
+          break;
+        case 'release':
+          await showReleaseAnimalSheet(context, rescueCase: c, animalIndexes: selectedIndexes);
+          break;
+      }
+    } finally {
+      if (mounted) setState(() => _isActingOnNextStep = false);
     }
-
-    if (mounted) setState(() => _isActingOnNextStep = false);
   }
 
   Future<void> _closeDeceasedCase(RescueCase c, double outstandingBalance) async {
@@ -410,6 +457,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final selectedAnimalIndex = _selectedAnimalIndex != null && _selectedAnimalIndex! < animalOptions.length
         ? _selectedAnimalIndex
         : null;
+    // Gates the three post-treatment action buttons (spec §2/§6) — true
+    // once at least one animal has a completed Discharge update AND isn't
+    // already committed to a different action, never the old case-wide
+    // "the whole case seems ready" flag.
+    final hasEligibleAnimal = caseHasAnyEligibleAnimal(c);
 
     final logs = selectedAnimalIndex == null
         ? allLogs
@@ -463,6 +515,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         ],
       ),
       body: SingleChildScrollView(
+        key: PageStorageKey('treatment_detail_${widget.caseId}'),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -516,6 +569,46 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               ),
             ],
 
+            // Latest Condition (spec §5) — each animal's condition derived
+            // independently from its own latest applicable treatment log,
+            // never another animal's. Only shown for a genuinely
+            // multi-animal case; a single-animal case already has this in
+            // the info grid above.
+            if (animalOptions.length > 1) ...[
+              const SizedBox(height: 16),
+              Text('Latest Condition', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.slaterspwn),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final o in animalOptions)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(o.label,
+                                  style: GoogleFonts.zain(
+                                      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                            ),
+                            Text(latestConditionFor(c, o.index, allLogs),
+                                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 16),
 
             // Treatment Logs
@@ -559,7 +652,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             // the old layout where tapping "Add Update" revealed a form the
             // admin had already scrolled past.
             if (!c.isDeceased) ...[
-              if (c.readyForDischarge)
+              if (caseAllAnimalsResolved(c))
                 const _DischargedNotice()
               else ...[
                 SizedBox(
@@ -586,7 +679,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 ),
                 if (_showUpdateForm) ...[
                   const SizedBox(height: 16),
-                  _buildUpdateForm(animalOptions),
+                  _buildUpdateForm(animalOptions, c.animals),
                 ],
               ],
               const SizedBox(height: 24),
@@ -620,39 +713,56 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                       style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
                 ),
               )
-            // The post-treatment dropdown only becomes available once a
-            // Discharge update has actually been saved — never enabled just
-            // because the animal "seems" ready.
-            else if (c.readyForDischarge) ...[
-              Text('Post-Treatment Disposition',
+            // Intake/Transfer/Release stay visible at all times (spec §2:
+            // never hidden entirely) — only their enabled state depends on
+            // at least one animal having a completed Discharge update,
+            // never the whole case "seeming" ready (spec §6's fixed bug).
+            else ...[
+              Text('Post-Treatment Actions',
                   style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-              const SizedBox(height: 8),
-              _NextStepDropdown(
-                value: _selectedNextStep,
-                allowRelease: (c.interestedToAdopt ?? '').toLowerCase() == 'yes',
-                onChanged: (v) => setState(() => _selectedNextStep = v),
-              ),
-              const SizedBox(height: 12),
+              if (!hasEligibleAnimal) ...[
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.slaterspwn.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text('Available once at least one animal has a Discharge update.',
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                ),
+              ],
+              const SizedBox(height: 10),
+              // Three full-width vertical buttons, in this fixed order
+              // (spec §2/§3) — Transfer collapses what used to be three
+              // separate top-level buttons (Clinic/Organization/Volunteer)
+              // into one, which opens the existing shared bottom sheet for
+              // the admin to choose the destination type inside it.
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: (_selectedNextStep == null || _isActingOnNextStep)
-                      ? null
-                      : () => _confirmNextStep(c, data),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    disabledBackgroundColor: AppColors.slaterspwn,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: _isActingOnNextStep
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                      : Text(_nextStepButtonLabel(),
-                          style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                child: _VerticalActionButton(
+                  label: 'Intake',
+                  enabled: hasEligibleAnimal && !_isActingOnNextStep,
+                  onTap: () => _startPostTreatmentAction(c, 'intake', data, animalOptions),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: _VerticalActionButton(
+                  label: 'Transfer',
+                  enabled: hasEligibleAnimal && !_isActingOnNextStep,
+                  onTap: () => _startPostTreatmentAction(c, 'transfer', data, animalOptions),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: _VerticalActionButton(
+                  label: 'Release',
+                  enabled: hasEligibleAnimal && !_isActingOnNextStep,
+                  onTap: () => _startPostTreatmentAction(c, 'release', data, animalOptions),
                 ),
               ),
             ],
@@ -664,14 +774,19 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     );
   }
 
-  String _nextStepButtonLabel() => switch (_selectedNextStep) {
-        _kNextStepIntake => 'Proceed to Intake',
-        _kNextStepTransfer => 'Transfer Animal',
-        _kNextStepRelease => 'Release Animal',
-        _ => 'Choose Next Step',
-      };
-
-  Widget _buildUpdateForm(List<CaseAnimalOption> animalOptions) {
+  Widget _buildUpdateForm(List<CaseAnimalOption> animalOptions, List<Map<String, dynamic>> animals) {
+    String? speciesOf(int index) =>
+        (index >= 0 && index < animals.length) ? (animals[index]['species'] as String?)?.trim() : null;
+    // Which single animal's species should drive the vaccine list: whoever
+    // this specific update applies to (if exactly one), else the page-level
+    // animal filter. A genuinely mixed "All Animals" update with no single
+    // animal in view falls back to the case's legacy top-level animalType
+    // (VaccineTemplate.forSpecies' own dog-list default beyond that).
+    final vaccineSpecies = _updateAnimalIndexes.length == 1
+        ? speciesOf(_updateAnimalIndexes.first)
+        : (_updateAnimalIndexes.isEmpty && _selectedAnimalIndex != null)
+            ? speciesOf(_selectedAnimalIndex!)
+            : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -768,7 +883,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final t in VaccineTemplate.forSpecies(widget.data['animalType'] as String?))
+              for (final t in VaccineTemplate.forSpecies(vaccineSpecies ?? widget.data['animalType'] as String?))
                 ChoiceChip(
                   label: Text(t.name),
                   selected: _selectedVaccineTemplate?.name == t.name,
@@ -996,37 +1111,28 @@ class _DischargedNotice extends StatelessWidget {
   }
 }
 
-class _NextStepDropdown extends StatelessWidget {
-  final String? value;
-  final bool allowRelease;
-  final ValueChanged<String?> onChanged;
-  const _NextStepDropdown({required this.value, required this.allowRelease, required this.onChanged});
+/// One full-width vertical post-treatment action button (Intake, Transfer,
+/// Release, spec §2) — always rendered, [enabled] toggles
+/// interactivity/opacity rather than the button disappearing, so the admin
+/// always sees every path this case can eventually take.
+class _VerticalActionButton extends StatelessWidget {
+  final String label;
+  final bool enabled;
+  final VoidCallback onTap;
+  const _VerticalActionButton({required this.label, required this.enabled, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final items = [
-      _kNextStepIntake,
-      _kNextStepTransfer,
-      // Only offered when the reporter indicated adoption interest at
-      // submission time — see RescueCase.interestedToAdopt.
-      if (allowRelease) _kNextStepRelease,
-    ];
-    return DropdownButtonFormField<String>(
-      value: items.contains(value) ? value : null,
-      hint: Text('Choose Next Step',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-      decoration: const InputDecoration(
-        isDense: true,
-        contentPadding: EdgeInsets.only(bottom: 8),
-        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
-        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+    return OutlinedButton(
+      onPressed: enabled ? onTap : null,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.textPrimary,
+        disabledForegroundColor: AppColors.textSecondary,
+        side: BorderSide(color: enabled ? AppColors.textPrimary : AppColors.slaterspwn),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+        padding: const EdgeInsets.symmetric(vertical: 14),
       ),
-      items: items
-          .map((i) => DropdownMenuItem(
-              value: i, child: Text(i, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))))
-          .toList(),
-      onChanged: onChanged,
+      child: Text(label, style: GoogleFonts.tiltWarp(fontSize: 15)),
     );
   }
 }

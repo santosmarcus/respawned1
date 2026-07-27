@@ -1,10 +1,12 @@
 /// Per-animal health/condition assessment vocabulary — shared by the
-/// Rescue Report form (rescue_page.dart) and Track Case (track_case_page.dart)
-/// so a reporter fills these in per animal and later sees the exact same
-/// values reflected back. Kept as plain string constants, matching how
-/// rescue_risk.dart already stores urgency/bite-risk/escape-risk vocabulary,
-/// rather than a new enum — so raw-map readers can keep working directly
-/// off `animals[i]['bodyCondition']` etc. without a parsing layer.
+/// Rescue Report form (rescue_page.dart) and every read-only viewer that
+/// displays it back (admin Rescue Details, reporter Track Case) so a
+/// reporter fills these in per animal and later sees the exact same values
+/// reflected back. Kept as plain string constants, matching how
+/// rescue_risk.dart already stores urgency/bite-risk/escape-risk
+/// vocabulary, rather than a new enum — so raw-map readers can keep
+/// working directly off `animals[i]['bodyCondition']` etc. without a
+/// parsing layer.
 library;
 
 /// Single-select.
@@ -29,7 +31,11 @@ const List<String> kAlertnessOptions = [
   'Unresponsive/collapsed/disoriented',
 ];
 
-/// Multi-select.
+/// Multi-select. Kept as two genuinely separate options — a prior revision
+/// of this list had 'Distress/Anxious' and 'Aggressive' as adjacent string
+/// literals with no comma between them, which Dart silently concatenates
+/// into one malformed option ('Distress/AnxiousAggressive'). They must
+/// remain distinct entries.
 const List<String> kBehaviorOptions = [
   'Friendly/Approachable',
   'Calm',
@@ -41,6 +47,12 @@ const List<String> kBehaviorOptions = [
   'Hard to approach',
 ];
 
+/// Selecting a key in this map deselects any of its listed values (and vice
+/// versa) — a behavior can't be both calm and aggressive at once, for
+/// example. Applied by the multi-select chip UI, not enforced at the
+/// storage layer (an old report saved before this existed may still have a
+/// "conflicting" combination on file; that's read as-is, never silently
+/// edited).
 const Map<String, Set<String>> kBehaviorConflicts = {
   'Calm': {'Aggressive', 'Fearful', 'Hard to approach', 'Distress/Anxious'},
   'Friendly/Approachable': {'Aggressive', 'Fearful', 'Hard to approach'},
@@ -72,11 +84,10 @@ const List<String> kAppetiteHydrationOptions = [
 ];
 
 /// Multi-select, plus the reporter may add their own additional entries
-/// beyond this predefined list (see _EnvironmentSafetySection in
-/// rescue_page.dart) — so any value outside this list found on a saved
-/// case is a custom entry, not an error.
+/// beyond this predefined list — so any value outside this list found on a
+/// saved case is a custom entry, not an error.
 const List<String> kEnvironmentSafetyOptions = [
-  'Safe location',
+  'Safe Location',
   'Around busy roads',
   'In dirty cages',
 ];

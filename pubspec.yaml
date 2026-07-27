@@ -81,6 +81,8 @@ dependencies:
   #File sharing
   share_plus: ^13.1.0
   path_provider: ^2.1.6
+  pdf: ^3.12.0
+  printing: ^5.14.3
 
 dev_dependencies:
   flutter_test:

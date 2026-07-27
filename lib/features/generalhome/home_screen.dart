@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/donation/donation_page.dart';
@@ -139,9 +140,14 @@ class HomeScreen extends StatelessWidget {
                           );
                         },
                       ),
+                      // Temporarily disabled (FeatureFlags.
+                      // organizationsFeatureEnabled) — route, page, models,
+                      // and repositories all stay in the codebase; only
+                      // this user-facing entry point is hidden/disabled.
                       _QuickActionCard(
                         label: 'Organization',
                         color: AppColors.lavenderrspwn,
+                        disabled: !FeatureFlags.organizationsFeatureEnabled,
                         onTap: (){
                           Navigator.push(context, MaterialPageRoute(
                             builder: (context) => OrganizationsListPage(),
@@ -230,39 +236,59 @@ class _QuickActionCard extends StatelessWidget {
   final String label;
   final Color color;
   final VoidCallback? onTap;
+  // Feature-flagged entries (e.g. Organizations) render dimmed with a
+  // "Coming soon" line instead of a silently-inert active-looking button —
+  // never show a button that looks tappable but does nothing.
+  final bool disabled;
 
   const _QuickActionCard({required this.label, required this.color, this.onTap,
+    this.disabled = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 111,
-        height: 139,
-        margin: const EdgeInsets.only(right: 12),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsetsGeometry.all(12),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Spacer(),
-                  Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 13,
-                      fontWeight: FontWeight.normal,
-                      color: AppColors.textPrimary,
+      onTap: disabled ? null : onTap,
+      child: Opacity(
+        opacity: disabled ? 0.5 : 1,
+        child: Container(
+          width: 111,
+          height: 139,
+          margin: const EdgeInsets.only(right: 12),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsetsGeometry.all(12),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Spacer(),
+                    Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 13,
+                        fontWeight: FontWeight.normal,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
-                  ),
-                ]),
+                    if (disabled) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Coming soon',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.zain(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ]),
+            ),
           ),
         ),
       ),

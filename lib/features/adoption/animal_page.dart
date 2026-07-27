@@ -8,6 +8,7 @@ import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
 import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart' show genderIconFor;
 import 'adoption_page.dart';
+import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 
@@ -73,6 +74,31 @@ class _AnimalPageState extends State<AnimalPage> {
     _favorited = widget.animal.favorited;
   }
 
+  void _showUnavailableDialog({required String title, required String message}) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: Text(title,
+            style: GoogleFonts.tiltWarp(fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+        content: Text(message, style: GoogleFonts.zain(color: AppColors.textPrimary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK', style: GoogleFonts.zain(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Multiple people may have a pending/interview/under-review application
+  /// for the same animal at once — that alone must never block anyone else
+  /// from applying. Only the animal's own reserved/adopted state (see
+  /// AdoptionApplicationRepository.checkAvailability) can do that. The
+  /// current user's OWN application (any status) always takes priority:
+  /// a completed one routes to post-adoption monitoring, an in-progress
+  /// one resumes directly — neither ever shows an availability dialog.
   Future<void> _handleAdoptTap() async {
     if (_checkingAdoption) return;
     setState(() => _checkingAdoption = true);
@@ -84,12 +110,14 @@ class _AnimalPageState extends State<AnimalPage> {
       final legacySnap = await FirebaseFirestore.instance
           .collection('adoptions')
           .where('personal.animalId', isEqualTo: '${animal.id}')
+          .where('personal.adopterId', isEqualTo: uid)
           .get();
       final byRecordIdSnap = animal.animalRecordId.isEmpty
           ? null
           : await FirebaseFirestore.instance
           .collection('adoptions')
           .where('personal.animalRecordId', isEqualTo: animal.animalRecordId)
+          .where('personal.adopterId', isEqualTo: uid)
           .get();
 
       final docsById = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
@@ -102,28 +130,18 @@ class _AnimalPageState extends State<AnimalPage> {
         }
       }
 
-      QueryDocumentSnapshot? blockingDoc;
       QueryDocumentSnapshot? myActiveDoc;
       QueryDocumentSnapshot? myCompletedDoc;
 
       for (final doc in docsById.values) {
         final data = doc.data() as Map<String, dynamic>;
         final status = data['status'] as String? ?? '';
-        if (status == 'rejected') continue; // doesn't block re-adoption
+        if (status == 'rejected' || status == 'withdrawn') continue;
 
-        final personal = (data['personal'] as Map?) ?? {};
-        final adopterId = personal['adopterId'] as String?;
-
-        if (adopterId == uid) {
-          if (status == 'completed' ||
-              status == 'return_requested' ||
-              status == 'return_approved') {
-            myCompletedDoc = doc;
-          } else {
-            myActiveDoc = doc;
-          }
+        if (status == 'completed' || status == 'return_requested' || status == 'return_approved') {
+          myCompletedDoc = doc;
         } else {
-          blockingDoc = doc;
+          myActiveDoc = doc;
         }
       }
 
@@ -140,42 +158,53 @@ class _AnimalPageState extends State<AnimalPage> {
         return;
       }
 
-      if (blockingDoc != null) {
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            backgroundColor: AppColors.background,
-            title: Text('Not Available',
-                style: GoogleFonts.tiltWarp(
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary)),
-            content: Text(
-              '${animal.name} already has an ongoing or completed adoption and isn\'t available right now.',
-              style: GoogleFonts.zain(color: AppColors.textPrimary),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('OK',
-                    style: GoogleFonts.zain(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
-              ),
-            ],
+      if (myActiveDoc != null) {
+        // Already have an in-progress application of my own — resume it
+        // directly, never a blocking dialog.
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => AdoptionProcess(animal: animal, existingAdoptionId: myActiveDoc!.id),
           ),
         );
         return;
       }
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => AdoptionProcess(
-            animal: animal,
-            existingAdoptionId: myActiveDoc?.id,
-          ),
-        ),
+      // No application of my own — the only thing that can stop a fresh
+      // one is the animal's own reserved/adopted state.
+      final result = await AdoptionApplicationRepository().checkAvailability(
+        legacyAnimalId: '${animal.id}',
+        animalRecordId: animal.animalRecordId,
+        uid: uid ?? '',
       );
+      if (!mounted) return;
+
+      switch (result.availability) {
+        case AnimalAdoptionAvailability.reservedForOther:
+          _showUnavailableDialog(
+            title: 'Reserved',
+            message: 'This animal is currently reserved for another approved applicant.',
+          );
+          break;
+        case AnimalAdoptionAvailability.adopted:
+          _showUnavailableDialog(title: 'Adopted', message: 'This animal has already been adopted.');
+          break;
+        case AnimalAdoptionAvailability.unavailable:
+          _showUnavailableDialog(
+            title: 'Unavailable',
+            message: 'This animal is not currently accepting applications.',
+          );
+          break;
+        case AnimalAdoptionAvailability.available:
+        case AnimalAdoptionAvailability.ownApplicationActive:
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AdoptionProcess(animal: animal),
+            ),
+          );
+          break;
+      }
     } catch (_) {
       if (mounted) {
         Navigator.push(

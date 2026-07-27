@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/adminhome/admin_dashboard_home_widgets.dart';
 import 'package:respawnd1/features/adminhome/analytics_dashboard.dart';
 
 class AdminHomeScreen extends StatefulWidget {
@@ -105,80 +106,20 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
             const SizedBox(height: 16),
 
-            // Gauge / capacity chart placeholder
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 8,
-                  )
-                ],
-              ),
-              child: Column(
-                children: [
-                  // Semicircle gauge placeholder
-                  CustomPaint(
-                    size: const Size(160, 80),
-                    painter: _GaugePainter(value: 0.65),
-                  ),
-                  const SizedBox(height: 8),
-                  Text('232',
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary)),
-                  Text('Total Capacity',
-                      style: GoogleFonts.zain(
-                          fontSize: 12, color: AppColors.textSecondary)),
-                ],
-              ),
-            ),
+            // Admin Information Priority spec — "what needs attention right
+            // now" comes first, ahead of any lifetime/platform statistics.
+            // Replaces the old hardcoded gauge ("232 Total Capacity") and
+            // fake Pending Requests breakdown (Rescue 30 / Pet Transporter
+            // 14 / Rescue Volunteer 30) — none of that was backed by a
+            // Firestore query. Wrapped in a ProviderScope-aware Consumer
+            // tree via ActionRequiredSection/CurrentOperationsSection
+            // themselves (ConsumerWidgets), so this screen doesn't need to
+            // become a ConsumerStatefulWidget itself just to host them.
+            const ActionRequiredSection(),
 
             const SizedBox(height: 16),
 
-            // Pending Requests card
-            _SectionCard(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.timer_outlined,
-                          size: 18, color: AppColors.textPrimary),
-                      const SizedBox(width: 8),
-                      Text('Pending Requests',
-                          style: GoogleFonts.zain(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary)),
-                    ],
-                  ),
-                  const Icon(Icons.chevron_right,
-                      color: AppColors.textSecondary),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            // Pending breakdown
-            _SectionCard(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _StatItem(label: 'Rescue', value: '30'),
-                  _Divider(),
-                  _StatItem(label: 'Pet\nTransporter', value: '14'),
-                  _Divider(),
-                  _StatItem(label: 'Rescue\nVolunteer', value: '30'),
-                ],
-              ),
-            ),
+            const CurrentOperationsSection(),
 
             const SizedBox(height: 16),
 
@@ -237,101 +178,4 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 }
 
-// Gauge painter
-class _GaugePainter extends CustomPainter {
-  final double value; // 0.0 to 1.0
-
-  _GaugePainter({required this.value});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..strokeWidth = 18
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
-    final center = Offset(size.width / 2, size.height);
-    final radius = size.width / 2 - 10;
-
-    // Background arc
-    paint.color = AppColors.slaterspwn;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      3.14159, // start at left (π)
-      3.14159, // sweep half circle
-      false,
-      paint,
-    );
-
-    // Filled arc
-    paint.color = AppColors.textPrimary;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      3.14159,
-      3.14159 * value,
-      false,
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-// Reusable widgets
-class _SectionCard extends StatelessWidget {
-  final Widget child;
-  const _SectionCard({required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-          )
-        ],
-      ),
-      child: child,
-    );
-  }
-}
-
-class _StatItem extends StatelessWidget {
-  final String label;
-  final String value;
-  const _StatItem({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(value,
-            style: GoogleFonts.tiltWarp(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary)),
-        const SizedBox(height: 4),
-        Text(label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.zain(
-                fontSize: 11, color: AppColors.textSecondary)),
-      ],
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-        width: 1, height: 40, color: AppColors.slaterspwn);
-  }
-}
 

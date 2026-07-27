@@ -957,38 +957,25 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               const SizedBox(height: 16),
             ],
 
-            // QR + NFC — not functional yet. Disabled rather than a silent
+            // QR — not functional yet. Disabled rather than a silent
             // no-op, so tapping it is honest about the current state
             // instead of doing nothing. See the class doc comment's TODO.
-            // Never saves fake/placeholder QR data.
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _showTagNotAvailable,
-                    icon: const Icon(Icons.qr_code, size: 18, color: AppColors.textSecondary),
-                    label: Text('Add QR', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.slaterspwn),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
+            // Never saves fake/placeholder QR data. NFC tag assignment was
+            // removed from this form entirely (QR/NFC generation stays
+            // deferred; a legacy record's own scanned tag, if any, is
+            // still shown read-only above).
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _showTagNotAvailable,
+                icon: const Icon(Icons.qr_code, size: 18, color: AppColors.textSecondary),
+                label: Text('Add QR', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppColors.slaterspwn),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _showTagNotAvailable,
-                    icon: const Icon(Icons.nfc, size: 18, color: AppColors.textSecondary),
-                    label: Text('Add NFC tag', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.slaterspwn),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
 
             const SizedBox(height: 32),

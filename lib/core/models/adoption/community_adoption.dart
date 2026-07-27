@@ -4,30 +4,30 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 ///
 /// A Community Adoption is deliberately lighter-weight than the org-run
 /// shelter pipeline (create_animal_record_page.dart -> adoption_page.dart /
-/// adoption_application.dart): it is created directly from a rescue report
-/// that was rejected for being healthy/low-urgency (see
+/// adoption_process.dart): it is created directly from a rescue report that
+/// was rejected for being healthy/low-urgency (see
 /// community_adoption_eligibility.dart), the animal never enters the
 /// Animal Records module, and there is no vet intake, application review,
 /// or reservation flow attached to it.
 ///
 /// Unlike an org-run adoption listing, submitting this doc IS the adoption
-/// — see community_adoption_listing_page.dart's doc comment. There's no
-/// separate "active listing awaiting an adopter" state: the only person
-/// who can ever create one is the specific community member who's
-/// physically at the animal's last known location (gated in
-/// community_adoption_track_page.dart before this screen is even
-/// reachable), and doing so immediately finalizes them as the adopter.
+/// — see community_adoption_listing.dart's doc comment. There's no separate
+/// "active listing awaiting an adopter" state: the only person who can ever
+/// create one is the specific community member who's physically at the
+/// animal's last known location (gated in community_adoption_track_page.dart
+/// before this screen is even reachable), and doing so immediately
+/// finalizes them as the adopter.
 class CommunityAdoption {
   final String id;
   final String? sourceCaseId; // the rescue `cases/{id}` this came from
   // Which entry in the source case's `animals[]` array this adoption
-  // claims (0 for a legacy single-animal case, or the first/only animal
-  // in a case with no `animals` array at all). Lets a multi-animal case
-  // be adopted out one animal at a time, by different people, without two
+  // claims (0 for a legacy single-animal case, or the first/only animal in
+  // a case with no `animals` array at all). Lets a multi-animal case be
+  // adopted out one animal at a time, by different people, without two
   // adopters ever both claiming the same one — see
   // CommunityAdoptionRepository.claimedAnimalIndexes.
   final int animalIndex;
-  final List<String> photoUrls; // carried over from the source case
+  final List<String> photoUrls; // carried over from the source case/animal
   final String name;
   final String species; // 'Dog' | 'Cat'
   final String? breed;
@@ -45,7 +45,7 @@ class CommunityAdoption {
   final String? adopterContact;
   // True once they've checked the post-adoption participation agreement —
   // required before submission is allowed (see
-  // community_adoption_listing_page.dart's validation).
+  // community_adoption_listing.dart's validation).
   final bool agreementAccepted;
 
   final DateTime? createdAt;
@@ -77,8 +77,7 @@ class CommunityAdoption {
     this.status = 'adopted',
   });
 
-  factory CommunityAdoption.fromFirestore(
-      DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory CommunityAdoption.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
     final createdTs = data['createdAt'];
     final adoptedTs = data['adoptedAt'];

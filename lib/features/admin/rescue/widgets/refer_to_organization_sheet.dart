@@ -137,7 +137,7 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
                 directory: widget.directory,
                 sourceLat: source.lat,
                 sourceLng: source.lng,
-                species: source.animalType,
+                species: source.allSpecies,
                 selectedOrgId: _selected?.id,
                 scrollController: scrollController,
                 onSelect: (org) => setState(() => _selected = org),

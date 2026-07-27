@@ -22,18 +22,36 @@ class PickedLostLocation {
   });
 }
 
-/// Tap-to-pin picker used by the collar tag's "Mark as Lost" action so the
-/// owner can drop a pin on exactly where the pet was last seen — that pin is
-/// what other users then see on the Explore Reports map. Mirrors the same
-/// map + address-search pattern already used for pinning a rescue location
-/// in rescue_page.dart, so the interaction feels familiar across the app.
+/// Tap-to-pin picker — originally built for the collar tag's "Mark as Lost"
+/// action so the owner can drop a pin on exactly where the pet was last
+/// seen, and now the shared source of truth for any "confirm a real map
+/// location" flow (Community Reports' "Animal moved" update reuses this
+/// exact widget rather than a second copy — see community_report_section.
+/// dart). Mirrors the same map + address-search pattern already used for
+/// pinning a rescue location in rescue_page.dart, so the interaction feels
+/// familiar across the app.
+///
+/// [title]/[instructionText]/[pinLabel]/[confirmLabel] default to the
+/// original collar-tag copy so that call site needs no changes; other
+/// callers override them for their own context.
 ///
 /// Returns a [PickedLostLocation] via Navigator.pop if the person confirms a
 /// location, or `null` if they back out.
 class LastSeenLocationPicker extends StatefulWidget {
   final String petName;
+  final String? title;
+  final String? instructionText;
+  final String pinLabel;
+  final String? confirmLabel;
 
-  const LastSeenLocationPicker({super.key, this.petName = 'your pet'});
+  const LastSeenLocationPicker({
+    super.key,
+    this.petName = 'your pet',
+    this.title,
+    this.instructionText,
+    this.pinLabel = 'Pinned location',
+    this.confirmLabel,
+  });
 
   @override
   State<LastSeenLocationPicker> createState() => _LastSeenLocationPickerState();
@@ -266,7 +284,7 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Where was ${widget.petName} last seen?',
+          widget.title ?? 'Where was ${widget.petName} last seen?',
           style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
         ),
       ),
@@ -277,9 +295,10 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'Tap anywhere on the map to drop a pin, or search an address '
-                  'below. This pin is what other users will see on the Explore '
-                  'Reports map.',
+              widget.instructionText ??
+                  'Tap anywhere on the map to drop a pin, or search an address '
+                      'below. This pin is what other users will see on the Explore '
+                      'Reports map.',
               style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
             ),
           ),
@@ -409,7 +428,7 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Pinned location',
+                Text(widget.pinLabel,
                     style: GoogleFonts.tiltWarp(fontSize: 13, color: AppColors.textPrimary)),
                 const SizedBox(height: 6),
                 Container(
@@ -457,7 +476,7 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
                   elevation: 0,
                 ),
                 child: Text(
-                  'Confirm Last Seen Location',
+                  widget.confirmLabel ?? 'Confirm Last Seen Location',
                   style: GoogleFonts.tiltWarp(
                       fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                 ),

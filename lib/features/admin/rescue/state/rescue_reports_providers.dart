@@ -70,6 +70,14 @@ final caseDetailProvider = StreamProvider.family<RescueCase?, String>((ref, case
   return ref.watch(rescueCaseRepositoryProvider).streamCase(caseId);
 });
 
+/// Cases with at least one animal currently in [stage] per the
+/// denormalized `activeAnimalStages` field (spec §7) — see
+/// RescueCaseRepository.streamCasesByActiveStage's own doc comment for why
+/// this is needed alongside [casesByStatusesProvider].
+final casesByActiveStageProvider = StreamProvider.family.autoDispose<List<RescueCase>, String>((ref, stage) {
+  return ref.watch(rescueCaseRepositoryProvider).streamCasesByActiveStage(stage);
+});
+
 final caseReportsProvider = StreamProvider.family<List<RescueReport>, String>((ref, caseId) {
   return ref.watch(rescueCaseRepositoryProvider).streamReports(caseId);
 });
@@ -153,14 +161,15 @@ final transporterProfileProvider =
 
 // ---- List filter state --------------------------------------------------
 
-/// The five primary pipeline tabs already used by rescue_reports_page.dart,
+/// The six primary pipeline tabs already used by rescue_reports_page.dart,
 /// each mapped onto the RescueStatus values that belong in that tab.
 enum RescuePipelineTab {
   review,
   assign,
   ongoing,
   treatment,
-  intake;
+  intake,
+  rejected;
 
   String get label => switch (this) {
         RescuePipelineTab.review => 'Review',
@@ -168,6 +177,7 @@ enum RescuePipelineTab {
         RescuePipelineTab.ongoing => 'Ongoing',
         RescuePipelineTab.treatment => 'In Treatment',
         RescuePipelineTab.intake => 'Intake',
+        RescuePipelineTab.rejected => 'Rejected',
       };
 
   // Deliberately `const` — casesByStatusesProvider is a StreamProvider.family
@@ -186,16 +196,56 @@ enum RescuePipelineTab {
         RescuePipelineTab.ongoing => const [RescueStatus.ongoing],
         RescuePipelineTab.treatment => const [RescueStatus.treatment],
         RescuePipelineTab.intake => const [RescueStatus.intake],
+        // RescueStatus.rejected's own queryValues/_legacyAliases are just
+        // ['rejected'] — no 'dismissed'/'cancelled'/'withdrawn' writer for
+        // rescue cases exists anywhere in this codebase today (traced every
+        // writer of RescueCaseRepository before adding this tab), so this
+        // tab intentionally shows only true rejections, not those other
+        // terminal buckets.
+        RescuePipelineTab.rejected => const [RescueStatus.rejected],
       };
 }
 
+/// Cases belonging under [tab] — merges the existing status-based query
+/// with a denormalized `activeAnimalStages` match (spec §7) for tabs that
+/// can be affected by a mixed-stage case whose scalar `status` no longer
+/// reflects every animal (currently just Intake: a case with one animal
+/// moved to Intake while another is still in_treatment keeps
+/// `status: 'in_treatment'` — see RescueCaseRepository's
+/// `_deriveCaseStatusOverride` — so the plain status query alone would
+/// miss it under Intake). Every other tab is untouched, degrading to
+/// exactly [casesByStatusesProvider]'s own result. De-duplicates by case
+/// id so a case matching both queries (e.g. status already flipped to
+/// 'intake' AND still carrying the stage tag) is never listed twice.
+final casesForTabProvider =
+    Provider.autoDispose.family<AsyncValue<List<RescueCase>>, RescuePipelineTab>((ref, tab) {
+  final byStatus = ref.watch(casesByStatusesProvider(tab.statuses));
+  if (tab != RescuePipelineTab.intake) return byStatus;
+
+  final byStage = ref.watch(casesByActiveStageProvider('intake'));
+  if (byStatus.isLoading || byStage.isLoading) return const AsyncValue.loading();
+  if (byStatus.hasError) return byStatus;
+  if (byStage.hasError) return byStage;
+
+  final merged = <String, RescueCase>{};
+  for (final c in byStatus.asData?.value ?? const <RescueCase>[]) {
+    merged[c.id] = c;
+  }
+  for (final c in byStage.asData?.value ?? const <RescueCase>[]) {
+    merged[c.id] = c;
+  }
+  return AsyncValue.data(merged.values.toList());
+});
+
 /// Extra statuses reachable only through the status filter (not one of the
-/// five pipeline tabs above) — referral/duplicate/terminal states.
+/// six pipeline tabs above) — referral/duplicate/terminal states. Rejected
+/// is deliberately NOT listed here anymore now that it's its own pipeline
+/// tab (RescuePipelineTab.rejected) — keeping it in both places would just
+/// make the filter-sheet override redundant with the tab.
 const List<RescueStatus> kSecondaryStatuses = [
   RescueStatus.referred,
   RescueStatus.possibleDuplicate,
   RescueStatus.merged,
-  RescueStatus.rejected,
   RescueStatus.completed,
   RescueStatus.cancelled,
 ];
@@ -209,8 +259,8 @@ class RescueFilters {
   final String? locationQuery;
 
   /// When set, overrides the active pipeline tab's status list — lets the
-  /// filter bar reach referred/possibleDuplicate/merged/rejected/completed/
-  /// cancelled cases that the five quick tabs don't cover.
+  /// filter bar reach referred/possibleDuplicate/merged/completed/cancelled
+  /// cases that the six quick tabs don't cover (rejected has its own tab).
   final RescueStatus? statusOverride;
 
   const RescueFilters({
@@ -348,13 +398,21 @@ final effectiveStatusesProvider = Provider<List<RescueStatus>>((ref) {
 /// Cases for the effective status selection, with all client-side filters
 /// from [rescueFilterProvider] applied.
 ///
+/// The filter bar's explicit status override (referred/possibleDuplicate/
+/// merged/completed/cancelled — [kSecondaryStatuses], none of
+/// which are affected by per-animal stage splitting) still queries
+/// directly by status. Otherwise this follows the active pipeline tab via
+/// [casesForTabProvider], which is stage-aware for Intake (spec §7).
+///
 /// autoDispose to match [casesByStatusesProvider] — otherwise, as a
 /// permanently-alive Provider watching an autoDispose family member, it
 /// would itself hold that family instance's listen count above zero
 /// forever, defeating the point of the family being autoDispose.
 final filteredCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((ref) {
-  final statuses = ref.watch(effectiveStatusesProvider);
-  final casesAsync = ref.watch(casesByStatusesProvider(statuses));
+  final override = ref.watch(rescueFilterProvider).statusOverride;
+  final casesAsync = override != null
+      ? ref.watch(casesByStatusesProvider([override]))
+      : ref.watch(casesForTabProvider(ref.watch(rescuePipelineTabProvider)));
   final filters = ref.watch(rescueFilterProvider);
   return casesAsync.whenData((cases) => cases.where(filters.matches).toList());
 });

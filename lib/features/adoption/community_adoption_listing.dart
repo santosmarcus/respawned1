@@ -15,10 +15,11 @@ import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
 ///
 /// This is NOT a "list an animal for adoption" form — submitting this
 /// screen directly finalizes the current user as adopter for whichever
-/// animal(s) they select. Everything about each animal
-/// (species/breed/sex/size/description/photos/location) is read-only,
-/// carried over from the source rescue report; the adopter only fills in
-/// a name per animal they're adopting, their own contact number, and the
+/// animal(s) they select. Species/breed/sex/size/description/photos/
+/// location are all read-only, carried over from the source rescue report
+/// (per-animal fields first, legacy case-level fields as fallback — see
+/// _fieldsFor); the adopter only fills in a name per animal (when the
+/// report didn't already give it one), their own contact number, and the
 /// post-adoption participation agreement.
 ///
 /// Handles a case with more than one animal (rescue_page.dart's
@@ -32,8 +33,7 @@ class CommunityAdoptionListingPage extends StatefulWidget {
   const CommunityAdoptionListingPage({super.key, required this.caseId});
 
   @override
-  State<CommunityAdoptionListingPage> createState() =>
-      _CommunityAdoptionListingPageState();
+  State<CommunityAdoptionListingPage> createState() => _CommunityAdoptionListingPageState();
 }
 
 class _AnimalOption {
@@ -42,6 +42,9 @@ class _AnimalOption {
   final String? breed;
   final String? sex;
   final String? size;
+  final String? description;
+  final List<String> photoUrls;
+  final String defaultName;
   final bool claimedByOther;
   const _AnimalOption({
     required this.index,
@@ -49,12 +52,14 @@ class _AnimalOption {
     this.breed,
     this.sex,
     this.size,
+    this.description,
+    this.photoUrls = const [],
+    required this.defaultName,
     required this.claimedByOther,
   });
 }
 
-class _CommunityAdoptionListingPageState
-    extends State<CommunityAdoptionListingPage> {
+class _CommunityAdoptionListingPageState extends State<CommunityAdoptionListingPage> {
   final _repo = CommunityAdoptionRepository();
 
   bool _loading = true;
@@ -89,28 +94,57 @@ class _CommunityAdoptionListingPageState
     return null;
   }
 
+  /// Per-animal field priority (spec §7): the animal's own `animals[i]`
+  /// entry first (species/breed/sex/size/name/description/photoUrls —
+  /// added to the Rescue Report form's "Community Adoption Details"
+  /// section), then the case's legacy top-level fields (pre-`animals[]`
+  /// single-animal reports), then a safe generated fallback. `name` is
+  /// never defaulted to a shared literal "Unnamed" for every animal — each
+  /// gets its own species-ordinal label ("Dog 1", "Dog 2", "Cat 1") so a
+  /// multi-animal case stays distinguishable even with no reporter-entered
+  /// names at all.
+  List<_AnimalOption> _buildOptions(Map<String, dynamic> caseData, Set<int> claimed) {
+    final animalsRaw = (caseData['animals'] as List?)?.whereType<Map>().toList() ?? const [];
+    final total = _repo.totalAnimalCount(caseData);
+    final speciesOrdinal = <String, int>{};
+    final options = <_AnimalOption>[];
+    for (var i = 0; i < total; i++) {
+      final raw = _rawAnimalAt(animalsRaw, i);
+      final species = (raw?['species'] as String?) ?? (i == 0 ? caseData['animalType'] as String? : null);
+      final key = (species == null || species.trim().isEmpty) ? 'Animal' : species.trim();
+      final ordinal = (speciesOrdinal[key] ?? 0) + 1;
+      speciesOrdinal[key] = ordinal;
+
+      final photoUrls = List<String>.from(raw?['photoUrls'] ?? const []).where((s) => s.isNotEmpty).toList();
+      final caseWidePhotos = List<String>.from(caseData['photoUrls'] ?? const []);
+
+      options.add(_AnimalOption(
+        index: i,
+        species: species,
+        breed: (raw?['breed'] as String?) ?? (i == 0 ? caseData['breed'] as String? : null),
+        sex: (raw?['sex'] as String?) ?? (i == 0 ? caseData['sex'] as String? : null),
+        size: (raw?['size'] as String?) ?? (i == 0 ? caseData['size'] as String? : null),
+        description: (raw?['description'] as String?)?.trim().isNotEmpty == true
+            ? raw!['description'] as String
+            : (i == 0 ? (caseData['condition'] as String?) : null),
+        // Only a genuinely per-animal photo list, or (for a legacy
+        // single-animal case with no such list) the case-wide photos —
+        // never every case photo copied onto every animal in a
+        // multi-animal report.
+        photoUrls: photoUrls.isNotEmpty ? photoUrls : (total == 1 ? caseWidePhotos : const []),
+        defaultName: '$key $ordinal',
+        claimedByOther: claimed.contains(i),
+      ));
+    }
+    return options;
+  }
+
   Future<void> _load() async {
     try {
-      final caseSnap =
-      await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).get();
+      final caseSnap = await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).get();
       final caseData = caseSnap.data() ?? {};
-
-      final animalsRaw = (caseData['animals'] as List?)?.whereType<Map>().toList() ?? const [];
-      final total = _repo.totalAnimalCount(caseData);
       final claimed = await _repo.claimedAnimalIndexes(widget.caseId);
-
-      final options = <_AnimalOption>[];
-      for (var i = 0; i < total; i++) {
-        final raw = _rawAnimalAt(animalsRaw, i);
-        options.add(_AnimalOption(
-          index: i,
-          species: (raw?['species'] as String?) ?? (i == 0 ? caseData['animalType'] as String? : null),
-          breed: (raw?['breed'] as String?) ?? (i == 0 ? caseData['breed'] as String? : null),
-          sex: (raw?['sex'] as String?) ?? (i == 0 ? caseData['sex'] as String? : null),
-          size: (raw?['size'] as String?) ?? (i == 0 ? caseData['size'] as String? : null),
-          claimedByOther: claimed.contains(i),
-        ));
-      }
+      final options = _buildOptions(caseData, claimed);
 
       final uid = FirebaseAuth.instance.currentUser?.uid;
       String adopterName = 'You';
@@ -118,8 +152,7 @@ class _CommunityAdoptionListingPageState
       if (uid != null) {
         final userSnap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
         final userData = userSnap.data();
-        final fullName =
-        '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
+        final fullName = '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
         if (fullName.isNotEmpty) adopterName = fullName;
         adopterContact = userData?['phone'] as String?;
       }
@@ -159,13 +192,19 @@ class _CommunityAdoptionListingPageState
     });
   }
 
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _submit() async {
     if (_selectedIndexes.isEmpty) {
       _showSnack('Please select at least one animal to adopt.');
       return;
     }
     for (final index in _selectedIndexes) {
-      if ((_nameControllers[index]?.text.trim() ?? '').isEmpty) {
+      final option = _animalOptions.firstWhere((o) => o.index == index);
+      final entered = _nameControllers[index]?.text.trim() ?? '';
+      if (entered.isEmpty && option.defaultName.isEmpty) {
         _showSnack('Please enter a name for every animal you\'re adopting.');
         return;
       }
@@ -182,32 +221,28 @@ class _CommunityAdoptionListingPageState
     setState(() => _submitting = true);
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final photoUrls = List<String>.from(_caseData['photoUrls'] ?? const []);
       final rescuedBy = (_caseData['reporterName'] as String?)?.trim().isNotEmpty == true
           ? _caseData['reporterName'] as String
           : 'A community member';
-      final address = (_caseData['address'] as String?)?.trim().isNotEmpty == true
-          ? _caseData['address'] as String
-          : null;
+      final address =
+          (_caseData['address'] as String?)?.trim().isNotEmpty == true ? _caseData['address'] as String : null;
       final lat = (_caseData['lat'] as num?)?.toDouble();
       final lng = (_caseData['lng'] as num?)?.toDouble();
-      final description = (_caseData['condition'] as String?)?.trim().isNotEmpty == true
-          ? _caseData['condition'] as String
-          : null;
 
       final adoptions = _selectedIndexes.map((index) {
         final option = _animalOptions.firstWhere((o) => o.index == index);
+        final enteredName = _nameControllers[index]!.text.trim();
         return CommunityAdoption(
           id: '',
           sourceCaseId: widget.caseId,
           animalIndex: index,
-          photoUrls: photoUrls,
-          name: _nameControllers[index]!.text.trim(),
+          photoUrls: option.photoUrls,
+          name: enteredName.isNotEmpty ? enteredName : option.defaultName,
           species: option.species ?? '',
           breed: option.breed,
           size: option.size,
           sex: option.sex,
-          description: description,
+          description: option.description,
           rescuedBy: rescuedBy,
           address: address,
           lat: lat,
@@ -224,11 +259,15 @@ class _CommunityAdoptionListingPageState
       if (!mounted) return;
 
       if (createdIds.length < adoptions.length) {
+        final skippedNames = adoptions
+            .where((a) => !createdIds.contains(a.id))
+            .map((a) => a.name)
+            .join(', ');
         await showSuccessDialog(
           context,
           title: 'Some Animals Already Claimed',
-          message:
-          'One or more of the animals you selected were just adopted by someone else. '
+          message: 'One or more of the animals you selected were just adopted by someone else '
+              '(${skippedNames.isEmpty ? 'unavailable' : skippedNames}). '
               '${createdIds.length} of ${adoptions.length} were adopted successfully.',
         );
       } else {
@@ -236,8 +275,7 @@ class _CommunityAdoptionListingPageState
         await showSuccessDialog(
           context,
           title: 'Adoption Confirmed',
-          message:
-          '$names ${adoptions.length > 1 ? 'are' : 'is'} now adopted through Community Adoption. '
+          message: '$names ${adoptions.length > 1 ? 'are' : 'is'} now adopted through Community Adoption. '
               'Thank you for giving ${adoptions.length > 1 ? 'them' : 'it'} a home.',
         );
       }
@@ -249,10 +287,6 @@ class _CommunityAdoptionListingPageState
     }
   }
 
-  void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -261,160 +295,149 @@ class _CommunityAdoptionListingPageState
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Text(
-                        'Community Adoption',
-                        style: GoogleFonts.tiltWarp(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Center(
-                      child: Text(
-                        'Submitting this confirms you as adopter for the animal(s) you select.',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    _PhotoGallery(
-                      photoUrls: List<String>.from(_caseData['photoUrls'] ?? const []),
-                    ),
-
-                    const SizedBox(height: 20),
-                    _FieldLabel('Reported by'),
-                    _ReadOnlyValue(
-                      (_caseData['reporterName'] as String?)?.trim().isNotEmpty == true
-                          ? _caseData['reporterName'] as String
-                          : 'A community member',
-                    ),
-
-                    const SizedBox(height: 14),
-                    _FieldLabel('Location'),
-                    _ReadOnlyValue(
-                      (_caseData['address'] as String?)?.trim().isNotEmpty == true
-                          ? _caseData['address'] as String
-                          : 'Not available',
-                    ),
-
-                    const SizedBox(height: 14),
-                    _FieldLabel('Description'),
-                    _ReadOnlyValue(
-                      (_caseData['condition'] as String?)?.trim().isNotEmpty == true
-                          ? _caseData['condition'] as String
-                          : 'Not specified',
-                    ),
-
-                    const SizedBox(height: 20),
-                    const Divider(color: AppColors.slaterspwn),
-                    const SizedBox(height: 20),
-
-                    if (_animalOptions.length == 1)
-                      _buildSingleAnimalSection(_animalOptions.first)
-                    else
-                      _buildMultiAnimalSection(),
-
-                    const SizedBox(height: 20),
-                    const Divider(color: AppColors.slaterspwn),
-                    const SizedBox(height: 20),
-
-                    _FieldLabel('Adopter'),
-                    _ReadOnlyValue(_adopterName),
-
-                    const SizedBox(height: 14),
-                    _FieldLabel('Your Contact Number', required: true),
-                    const SizedBox(height: 6),
-                    _UnderlineField(
-                      controller: _contactController,
-                      hint: 'Mobile number',
-                      keyboardType: TextInputType.phone,
-                    ),
-
-                    const SizedBox(height: 24),
-                    GestureDetector(
-                      onTap: () => setState(() => _agreementAccepted = !_agreementAccepted),
-                      child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildHeader(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: Checkbox(
-                              value: _agreementAccepted,
-                              onChanged: (v) => setState(() => _agreementAccepted = v ?? false),
-                              activeColor: AppColors.textPrimary,
-                              side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          Center(
+                            child: Text(
+                              'Community Adoption',
+                              style: GoogleFonts.tiltWarp(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
+                          const SizedBox(height: 4),
+                          Center(
                             child: Text(
-                              'By agreeing to this, you confirm that you are adopting the '
-                                  'selected animal(s) through Community Adoption and will '
-                                  'participate in post-adoption follow-up, providing updates on '
-                                  'their wellbeing as requested by the organization.',
-                              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                              'Submitting this confirms you as adopter for the animal(s) you select.',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          _PhotoGallery(
+                            photoUrls: List<String>.from(_caseData['photoUrls'] ?? const []),
+                          ),
+
+                          const SizedBox(height: 20),
+                          _FieldLabel('Reported by'),
+                          _ReadOnlyValue(
+                            (_caseData['reporterName'] as String?)?.trim().isNotEmpty == true
+                                ? _caseData['reporterName'] as String
+                                : 'A community member',
+                          ),
+
+                          const SizedBox(height: 14),
+                          _FieldLabel('Location'),
+                          _ReadOnlyValue(
+                            (_caseData['address'] as String?)?.trim().isNotEmpty == true
+                                ? _caseData['address'] as String
+                                : 'Not available',
+                          ),
+
+                          const SizedBox(height: 20),
+                          const Divider(color: AppColors.slaterspwn),
+                          const SizedBox(height: 20),
+
+                          if (_animalOptions.length == 1)
+                            _buildSingleAnimalSection(_animalOptions.first)
+                          else
+                            _buildMultiAnimalSection(),
+
+                          const SizedBox(height: 20),
+                          const Divider(color: AppColors.slaterspwn),
+                          const SizedBox(height: 20),
+
+                          _FieldLabel('Adopter'),
+                          _ReadOnlyValue(_adopterName),
+
+                          const SizedBox(height: 14),
+                          _FieldLabel('Your Contact Number', required: true),
+                          const SizedBox(height: 6),
+                          _UnderlineField(
+                            controller: _contactController,
+                            hint: 'Mobile number',
+                            keyboardType: TextInputType.phone,
+                          ),
+
+                          const SizedBox(height: 24),
+                          GestureDetector(
+                            onTap: () => setState(() => _agreementAccepted = !_agreementAccepted),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: Checkbox(
+                                    value: _agreementAccepted,
+                                    onChanged: (v) => setState(() => _agreementAccepted = v ?? false),
+                                    activeColor: AppColors.textPrimary,
+                                    side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'By agreeing to this, you confirm that you are adopting the '
+                                    'selected animal(s) through Community Adoption and will '
+                                    'participate in post-adoption follow-up, providing updates on '
+                                    'their wellbeing as requested by the organization.',
+                                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 32),
+                          Center(
+                            child: SizedBox(
+                              width: 260,
+                              child: ElevatedButton(
+                                onPressed: _submitting ? null : _submit,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.yellowrspwn,
+                                  foregroundColor: AppColors.textPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                                ),
+                                child: _submitting
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
+                                      )
+                                    : Text(
+                                        _selectedIndexes.length > 1
+                                            ? 'Adopt ${_selectedIndexes.length} Animals'
+                                            : 'Adopt This Animal',
+                                        style: GoogleFonts.zain(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.textPrimary,
+                                        ),
+                                      ),
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
-
-                    const SizedBox(height: 32),
-                    Center(
-                      child: SizedBox(
-                        width: 260,
-                        child: ElevatedButton(
-                          onPressed: _submitting ? null : _submit,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.yellowrspwn,
-                            foregroundColor: AppColors.textPrimary,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                          ),
-                          child: _submitting
-                              ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.textPrimary,
-                            ),
-                          )
-                              : Text(
-                            _selectedIndexes.length > 1
-                                ? 'Adopt ${_selectedIndexes.length} Animals'
-                                : 'Adopt This Animal',
-                            style: GoogleFonts.zain(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -424,10 +447,7 @@ class _CommunityAdoptionListingPageState
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.slaterspwn,
-          borderRadius: BorderRadius.circular(10),
-        ),
+        decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(10)),
         child: Text(
           'This animal has already been adopted by someone else.',
           textAlign: TextAlign.center,
@@ -438,6 +458,10 @@ class _CommunityAdoptionListingPageState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (option.photoUrls.isNotEmpty) ...[
+          _PhotoGallery(photoUrls: option.photoUrls),
+          const SizedBox(height: 14),
+        ],
         _FieldLabel('Species'),
         _ReadOnlyValue(option.species ?? 'Not specified'),
         const SizedBox(height: 14),
@@ -447,20 +471,14 @@ class _CommunityAdoptionListingPageState
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _FieldLabel('Breed'),
-                  _ReadOnlyValue(option.breed ?? 'Not specified'),
-                ],
+                children: [_FieldLabel('Breed'), _ReadOnlyValue(option.breed ?? 'Not specified')],
               ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _FieldLabel('Sex'),
-                  _ReadOnlyValue(option.sex ?? 'Not specified'),
-                ],
+                children: [_FieldLabel('Sex'), _ReadOnlyValue(option.sex ?? 'Not specified')],
               ),
             ),
           ],
@@ -468,10 +486,15 @@ class _CommunityAdoptionListingPageState
         const SizedBox(height: 14),
         _FieldLabel('Size'),
         _ReadOnlyValue(option.size ?? 'Not specified'),
+        if ((option.description ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _FieldLabel('Description'),
+          _ReadOnlyValue(option.description!),
+        ],
         const SizedBox(height: 20),
         _FieldLabel('Name this animal', required: true),
         const SizedBox(height: 6),
-        _UnderlineField(controller: _nameControllers[option.index]!, hint: 'Enter'),
+        _UnderlineField(controller: _nameControllers[option.index]!, hint: option.defaultName),
       ],
     );
   }
@@ -501,7 +524,7 @@ class _CommunityAdoptionListingPageState
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: option.claimedByOther ? AppColors.slaterspwn.withOpacity(0.4) : Colors.white,
+        color: option.claimedByOther ? AppColors.slaterspwn.withValues(alpha: 0.4) : Colors.white,
         border: Border.all(color: AppColors.slaterspwn),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -510,6 +533,13 @@ class _CommunityAdoptionListingPageState
         children: [
           Row(
             children: [
+              if (option.photoUrls.isNotEmpty) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(option.photoUrls.first, width: 44, height: 44, fit: BoxFit.cover),
+                ),
+                const SizedBox(width: 8),
+              ],
               if (!option.claimedByOther)
                 SizedBox(
                   width: 22,
@@ -527,26 +557,25 @@ class _CommunityAdoptionListingPageState
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Animal ${option.index + 1}${option.species != null ? ' — ${option.species}' : ''}',
-                  style: GoogleFonts.zain(
-                      fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  '${option.defaultName}${option.species != null ? ' — ${option.species}' : ''}',
+                  style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                 ),
               ),
               if (option.claimedByOther)
                 Text('Already adopted',
-                    style: GoogleFonts.zain(
-                        fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
             ],
           ),
           const SizedBox(height: 8),
           if ((option.breed ?? '').isNotEmpty) _MiniInfoRow('Breed', option.breed!),
           if ((option.sex ?? '').isNotEmpty) _MiniInfoRow('Sex', option.sex!),
           if ((option.size ?? '').isNotEmpty) _MiniInfoRow('Size', option.size!),
+          if ((option.description ?? '').trim().isNotEmpty) _MiniInfoRow('About', option.description!),
           if (selected && !option.claimedByOther) ...[
             const SizedBox(height: 10),
             _FieldLabel('Name this animal', required: true),
             const SizedBox(height: 6),
-            _UnderlineField(controller: _nameControllers[option.index]!, hint: 'Enter'),
+            _UnderlineField(controller: _nameControllers[option.index]!, hint: option.defaultName),
           ],
         ],
       ),
@@ -566,11 +595,7 @@ class _CommunityAdoptionListingPageState
           ),
           Text(
             'Community Adoptions',
-            style: GoogleFonts.tiltWarp(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
+            style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
           ),
         ],
       ),
@@ -588,13 +613,8 @@ class _PhotoGallery extends StatelessWidget {
       return Container(
         height: 180,
         width: double.infinity,
-        decoration: BoxDecoration(
-          color: AppColors.tearspwn,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Center(
-          child: Icon(Icons.image_not_supported_outlined, size: 44, color: AppColors.textSecondary),
-        ),
+        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(12)),
+        child: const Center(child: Icon(Icons.image_not_supported_outlined, size: 44, color: AppColors.textSecondary)),
       );
     }
     return SizedBox(
@@ -628,15 +648,9 @@ class _FieldLabel extends StatelessWidget {
     return RichText(
       text: TextSpan(
         children: [
-          TextSpan(
-            text: text,
-            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-          ),
+          TextSpan(text: text, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           if (required)
-            TextSpan(
-              text: ' *',
-              style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: const Color(0xFFE05353)),
-            ),
+            TextSpan(text: ' *', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: const Color(0xFFE05353))),
         ],
       ),
     );
@@ -652,9 +666,7 @@ class _ReadOnlyValue extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 6),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.slaterspwn)),
-      ),
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.slaterspwn))),
       child: Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
     );
   }
@@ -671,13 +683,8 @@ class _MiniInfoRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 2),
       child: Row(
         children: [
-          SizedBox(
-            width: 60,
-            child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          ),
-          Expanded(
-            child: Text(value, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-          ),
+          SizedBox(width: 60, child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
+          Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary))),
         ],
       ),
     );

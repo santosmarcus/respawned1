@@ -238,6 +238,15 @@ class AdoptionApplication {
 
   ReturnRequest? get returnRequest => ReturnRequest.fromMap(raw['returnRequest'] as Map<String, dynamic>?);
 
+  /// Safe Zoom meeting metadata only (zoomMeetingId/zoomJoinUrl/
+  /// zoomCreatedAt/zoomUpdatedAt/zoomMeetingStatus/
+  /// zoomProviderOrganizationId) — written by the createOrUpdateZoomMeeting
+  /// Cloud Function, never the host start URL (kept server-side only, see
+  /// functions/index.js). Null until an online interview has actually had
+  /// a meeting created for it.
+  Map<String, dynamic>? get zoom => raw['zoom'] as Map<String, dynamic>?;
+  bool get hasActiveZoomMeeting => zoom != null && zoom!['zoomMeetingStatus'] == 'active';
+
   factory AdoptionApplication.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     final personal = (data['personal'] as Map?) ?? const {};

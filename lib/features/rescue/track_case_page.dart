@@ -1,24 +1,16 @@
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
-import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
-
-const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
+import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 
 
 class TrackCasePage extends StatefulWidget {
@@ -758,62 +750,68 @@ class _TrackingTabState extends State<_TrackingTab> {
     );
   }
 
+  // Everything (tracking timeline, community reports, org messages, and
+  // the message input) lives in ONE ListView instead of the previous
+  // Column([Expanded(ListView), fixed-height messages block]) — that split
+  // meant the messages header/list/input had a non-shrinkable minimum
+  // height that didn't fit once the keyboard ate most of the remaining
+  // space below the fixed 232px map, producing "BOTTOM OVERFLOWED BY 146
+  // PIXELS". A single scrollable never overflows regardless of available
+  // height, and a focused TextField inside it is auto-scrolled above the
+  // keyboard by Flutter's own EditableText behavior — so the input stays
+  // reachable without resizing the map or nesting a second unbounded
+  // scroll view.
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return ListView(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       children: [
-        Expanded(
-          child: ListView(
-            children: [
-              _collapsibleHeader(
-                title: 'Tracking Progress',
-                expanded: _trackingExpanded,
-                onToggle: () => setState(() => _trackingExpanded = !_trackingExpanded),
-              ),
-              const SizedBox(height: 8),
-
-              if (_trackingExpanded) ...[
-                if (widget.statusHistory.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 24),
-                    child: Center(
-                      child: Text('No status updates yet.',
-                          style: GoogleFonts.zain(
-                              fontSize: 13, color: AppColors.textSecondary)),
-                    ),
-                  )
-                else
-                  for (int i = 0; i < widget.statusHistory.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _buildTimelineItem(i),
-                    ),
-
-                const SizedBox(height: 12),
-                _buildMediaSection(
-                  context,
-                  'Pickup Verification',
-                  List<String>.from(widget.data['pickupVerificationUrls'] ?? []),
-                ),
-                const SizedBox(height: 12),
-                _buildMediaSection(
-                  context,
-                  'Dropoff Verification',
-                  List<String>.from(widget.data['dropoffVerificationUrls'] ?? []),
-                ),
-              ],
-              const SizedBox(height: 16),
-
-              // Community Reports — visible to the reporter (for
-              // situational awareness) and to every other user (who can
-              // submit sighting reports to help verify/update the case).
-              _CommunityReportSection(caseId: widget.caseId),
-              const SizedBox(height: 8),
-              const Divider(color: AppColors.slaterspwn),
-            ],
-          ),
+        _collapsibleHeader(
+          title: 'Tracking Progress',
+          expanded: _trackingExpanded,
+          onToggle: () => setState(() => _trackingExpanded = !_trackingExpanded),
         ),
+        const SizedBox(height: 8),
+
+        if (_trackingExpanded) ...[
+          if (widget.statusHistory.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 24),
+              child: Center(
+                child: Text('No status updates yet.',
+                    style: GoogleFonts.zain(
+                        fontSize: 13, color: AppColors.textSecondary)),
+              ),
+            )
+          else
+            for (int i = 0; i < widget.statusHistory.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildTimelineItem(i),
+              ),
+
+          const SizedBox(height: 12),
+          _buildMediaSection(
+            context,
+            'Pickup Verification',
+            List<String>.from(widget.data['pickupVerificationUrls'] ?? []),
+          ),
+          const SizedBox(height: 12),
+          _buildMediaSection(
+            context,
+            'Dropoff Verification',
+            List<String>.from(widget.data['dropoffVerificationUrls'] ?? []),
+          ),
+        ],
+        const SizedBox(height: 16),
+
+        // Community Reports — visible to the reporter (for
+        // situational awareness) and to every other user (who can
+        // submit sighting reports to help verify/update the case).
+        CommunityReportSection(caseId: widget.caseId),
+        const SizedBox(height: 8),
+        const Divider(color: AppColors.slaterspwn),
 
         // Messages to the Organization — reporter-only private channel.
         if (widget.isReporter) ...[
@@ -1135,15 +1133,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
         (willingAdopterId != null && willingAdopterId.isNotEmpty);
   }
 
-  bool get _viewerIsInterestedParty {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return false;
-    if (widget.isReporter && data['interestedToAdopt'] == 'yes') return true;
-    return data['willingAdopterId'] == uid;
-  }
-
-  // Foster removed for now — only adoption interest is registered here.
-  Future<void> _registerInterest() async {
+  Future<void> _registerInterest(String type) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
@@ -1157,6 +1147,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
       final name =
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
           .trim();
+      final label = type == 'foster' ? 'foster' : 'adopt';
 
       await FirebaseFirestore.instance
           .collection('cases')
@@ -1164,11 +1155,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           .update({
         'willingAdopterId': uid,
         'willingAdopterName': name.isEmpty ? 'A general user' : name,
-        'willingAdopterType': 'adopt',
+        'willingAdopterType': type,
         'statusHistory': FieldValue.arrayUnion([
           {
             'status':
-            '${name.isEmpty ? 'A general user' : name} expressed interest to adopt.',
+            '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
             'timestamp': Timestamp.now(),
           }
         ]),
@@ -1176,9 +1167,10 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                "Thanks! We'll notify you here once this animal is ready for adoption."),
+          SnackBar(
+            content: Text(type == 'foster'
+                ? 'Thanks! Your interest to foster has been noted.'
+                : 'Thanks! Your interest to adopt has been noted.'),
             backgroundColor: AppColors.greenrspwn,
           ),
         );
@@ -1326,8 +1318,9 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Address', data['address']),
           _DetailRow('Description', data['condition']),
-          _AnimalGroupSection(data: data),
-          const SizedBox(height: 4),
+          _DetailRow('Type of Animal', data['animalType']),
+          _DetailRow('Containment', data['containmentStatus']),
+          _DetailRow('Approachability', data['strayTemperament']),
           _DetailRow('Urgency', data['urgency']),
           _DetailRow('Coordination', data['coordinateWithShelter']),
           if (data['coordinateWithShelter'] == 'no') ...[
@@ -1347,7 +1340,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                'This rescue is available for adoption.',
+                'This rescue is available for adoption or temporary foster.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.zain(
                   fontSize: 13,
@@ -1357,66 +1350,62 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
               ),
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: _isSubmitting ? null : _registerInterest,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                ),
-                child: _isSubmitting
-                    ? const SizedBox(
-                  height: 16,
-                  width: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.textPrimary),
-                )
-                    : Text('Interest to Adopt',
-                    style: GoogleFonts.zain(fontSize: 13)),
-              ),
-            ),
-          ] else if (_viewerIsInterestedParty) ...[
-            // Confirms to the specific person who registered interest
-            // (reporter or otherwise) that they don't need to keep
-            // checking back — see create_animal_record_page.dart's
-            // _notifyInterestedAdopter and notifications_screen.dart's
-            // willingAdopterId-scoped feed for how that notification
-            // actually reaches them once the animal is marked adoptable.
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-              decoration: BoxDecoration(
-                color: AppColors.greenrspwn.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.notifications_active_outlined,
-                      size: 18, color: AppColors.greenrspwn),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      "You've expressed interest in adopting this animal. "
-                          "We'll notify you here once it's ready for adoption.",
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                    _isSubmitting ? null : () => _registerInterest('adopt'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
                       ),
                     ),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.textPrimary),
+                    )
+                        : Text('Interest to Adopt',
+                        style: GoogleFonts.zain(fontSize: 13)),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                    _isSubmitting ? null : () => _registerInterest('foster'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.textPrimary),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.textPrimary),
+                    )
+                        : Text('Interest to Foster',
+                        style: GoogleFonts.zain(fontSize: 13)),
+                  ),
+                ),
+              ],
             ),
           ] else
             _DetailRow(
-              'Willing adopter',
-              '${data['willingAdopterName'] ?? '-'}',
+              'Willing adopter/foster',
+              '${data['willingAdopterName'] ?? '-'}'
+                  '${data['willingAdopterType'] != null ? ' (${data['willingAdopterType']})' : ''}',
             ),
 
           const SizedBox(height: 24),
@@ -1452,1007 +1441,3 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
-/// Per-animal breakdown for multi-animal group reports — mirrors
-/// _AnimalGroupSection in rescue_detail_page.dart / case_summary_page.dart
-/// so a reporter tracking their own case sees every animal in the report,
-/// not just the legacy single `animalType` field. Prefers the case's own
-/// `animals` array (current submissions — see rescue_page.dart); falls
-/// back to the case's single animalType/breed/sex/size/colorMarkings
-/// fields for older reports saved before that array existed, or a legacy
-/// shared `groupId` for reports saved before `animals` was introduced at
-/// all.
-class _AnimalGroupSection extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _AnimalGroupSection({required this.data});
-
-  Map<String, dynamic> _animalMap(Map raw) => {
-    'animalType': raw['species'],
-    'breed': raw['breed'],
-    'sex': raw['sex'],
-    'size': raw['size'],
-    'colorMarkings': raw['colorMarkings'],
-    'biteRisk': raw['biteRisk'],
-    'escapeRisk': raw['escapeRisk'],
-    'handlingNotes': raw['handlingNotes'],
-    'bodyCondition': raw['bodyCondition'],
-    'mobility': raw['mobility'],
-    'alertness': raw['alertness'],
-    'behavior': raw['behavior'],
-    'eyesNoseMouth': raw['eyesNoseMouth'],
-    'skinAndCoat': raw['skinAndCoat'],
-    'appetiteHydration': raw['appetiteHydration'],
-    'environmentSafety': raw['environmentSafety'],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final animals = (data['animals'] as List?)?.whereType<Map>().toList() ?? const [];
-
-    if (animals.isNotEmpty) {
-      final total = animals.length;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (total > 1) _DetailRow('No. of Animals', '$total'),
-          for (var i = 0; i < animals.length; i++)
-            _AnimalDetailBlock(
-              data: _animalMap(animals[i]),
-              index: i + 1,
-              total: total,
-            ),
-        ],
-      );
-    }
-
-    final groupId = data['groupId'] as String?;
-    if (groupId == null || groupId.isEmpty) {
-      // Legacy single-animal case — just this case's own fields.
-      return _AnimalDetailBlock(data: data, index: 1, total: 1);
-    }
-
-    // Legacy multi-animal reports (pre-`animals` array): one case doc per
-    // animal, linked only by a shared groupId — see rescue_page.dart's
-    // prior submission logic and rescue_case_repository.dart's own
-    // _isPrimaryGroupMember doc comment for the same backward-compat path.
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('cases')
-          .where('groupId', isEqualTo: groupId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1);
-        }
-        final docs = snapshot.data!.docs;
-        final total = docs.isEmpty ? 1 : docs.length;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (total > 1) _DetailRow('No. of Animals', '$total'),
-            for (var i = 0; i < docs.length; i++)
-              _AnimalDetailBlock(
-                data: docs[i].data(),
-                index: i + 1,
-                total: total,
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// A single animal's full breakdown — Species/Breed/Sex/Size/Color, Bite
-/// Risk/Escape Risk/Handling Notes, and the Health &
-/// Behavior Assessment (Body Condition, Mobility, Alertness, Behavior,
-/// Eyes/Nose/Mouth, Skin and Coat, Appetite and Hydration, Environment and
-/// Safety — see core/utils/animal_health_assessment.dart). Containment and
-/// Approachability are deliberately not shown — rescue_page.dart no longer
-/// has any UI control that sets them, so they'd always read "-".
-///
-/// Collapsible independently per animal, mirroring the same minimize
-/// ability each animal's card has in rescue_page.dart's report form.
-class _AnimalDetailBlock extends StatefulWidget {
-  final Map<String, dynamic> data;
-  final int index;
-  final int total;
-  const _AnimalDetailBlock({
-    required this.data,
-    required this.index,
-    required this.total,
-  });
-
-  @override
-  State<_AnimalDetailBlock> createState() => _AnimalDetailBlockState();
-}
-
-class _AnimalDetailBlockState extends State<_AnimalDetailBlock> {
-  bool _expanded = true;
-
-  static String? _str(Map data, String key) => data[key] as String?;
-  static List<String> _list(Map data, String key) =>
-      (data[key] as List?)?.whereType<String>().toList() ?? const [];
-
-  @override
-  Widget build(BuildContext context) {
-    final data = widget.data;
-    final species = _str(data, 'animalType');
-    final breed = _str(data, 'breed');
-    final sex = _str(data, 'sex');
-    final size = _str(data, 'size');
-    final colorMarkings = _str(data, 'colorMarkings');
-    final biteRisk = _str(data, 'biteRisk');
-    final escapeRisk = _str(data, 'escapeRisk');
-    final handlingNotes = _str(data, 'handlingNotes');
-    final bodyCondition = _str(data, 'bodyCondition');
-    final mobility = _str(data, 'mobility');
-    final alertness = _str(data, 'alertness');
-    final behavior = _list(data, 'behavior');
-    final eyesNoseMouth = _str(data, 'eyesNoseMouth');
-    final skinAndCoat = _str(data, 'skinAndCoat');
-    final appetiteHydration = _str(data, 'appetiteHydration');
-    final environmentSafety = _list(data, 'environmentSafety');
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.slaterspwn),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  widget.total > 1 ? 'Animal ${widget.index} of ${widget.total}' : 'Animal Details',
-                  style: GoogleFonts.zain(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary),
-                ),
-                Icon(
-                  _expanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: AppColors.textPrimary,
-                ),
-              ],
-            ),
-          ),
-          if (_expanded) const SizedBox(height: 6),
-          if (_expanded) ...[
-            if ((species ?? '').isNotEmpty) _MiniDetailRow('Species', species!),
-            if ((breed ?? '').isNotEmpty) _MiniDetailRow('Breed', breed!),
-            if ((sex ?? '').isNotEmpty) _MiniDetailRow('Sex', sex!),
-            if ((size ?? '').isNotEmpty) _MiniDetailRow('Size', size!),
-            if ((colorMarkings ?? '').isNotEmpty)
-              _MiniDetailRow('Color/Markings', colorMarkings!),
-            if ((biteRisk ?? '').isNotEmpty) _MiniDetailRow('Bite Risk', biteRisk!),
-            if ((escapeRisk ?? '').isNotEmpty) _MiniDetailRow('Escape Risk', escapeRisk!),
-            if ((handlingNotes ?? '').isNotEmpty)
-              _MiniDetailRow('Handling Notes', handlingNotes!),
-            if ((bodyCondition ?? '').isNotEmpty)
-              _MiniDetailRow('Body Condition', bodyCondition!),
-            if ((mobility ?? '').isNotEmpty) _MiniDetailRow('Mobility', mobility!),
-            if ((alertness ?? '').isNotEmpty) _MiniDetailRow('Alertness', alertness!),
-            if (behavior.isNotEmpty) _MiniDetailRow('Behavior', behavior.join(', ')),
-            if ((eyesNoseMouth ?? '').isNotEmpty)
-              _MiniDetailRow('Eyes, Nose, Mouth', eyesNoseMouth!),
-            if ((skinAndCoat ?? '').isNotEmpty)
-              _MiniDetailRow('Skin and Coat', skinAndCoat!),
-            if ((appetiteHydration ?? '').isNotEmpty)
-              _MiniDetailRow('Appetite and Hydration', appetiteHydration!),
-            if (environmentSafety.isNotEmpty)
-              _MiniDetailRow('Environment and Safety', environmentSafety.join(', ')),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniDetailRow extends StatelessWidget {
-  final String label;
-  final String value;
-  const _MiniDetailRow(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(label,
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          ),
-          Expanded(
-            child: Text(value,
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-
-class _CommunityReportSection extends StatefulWidget {
-  final String caseId;
-  const _CommunityReportSection({required this.caseId});
-
-  @override
-  State<_CommunityReportSection> createState() =>
-      _CommunityReportSectionState();
-}
-
-class _CommunityReportSectionState extends State<_CommunityReportSection> {
-  bool _expanded = false;
-  String? _selectedType;
-  XFile? _pickedImage;
-  bool _submitting = false;
-  bool _detectingLocation = false;
-  // Captured alongside _locationController's resolved address text whenever
-  // detection succeeds via GPS — lets a "moved" report carry real
-  // coordinates, not just a display string, so anything that needs to
-  // measure distance to the animal's latest known location (e.g. the
-  // Community Adoption track page's location-gated adopt button) has
-  // something precise to compare against instead of only the original
-  // report's lat/lng.
-  double? _detectedLat;
-  double? _detectedLng;
-  final _commentController = TextEditingController();
-  final _locationController = TextEditingController();
-  final _picker = ImagePicker();
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    _locationController.dispose();
-    super.dispose();
-  }
-
-  CollectionReference<Map<String, dynamic>> get _reportsRef =>
-      FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .collection('communityReports');
-
-  String _typeLabel(String? t) => switch (t) {
-    'still_here' => 'Animal still here',
-    'moved' => 'Animal moved',
-    'rescued' => 'Animal rescued',
-    'no_animal' => 'No animal present',
-    _ => 'Update',
-  };
-
-  String _typeIconAsset(String? t) => switch (t) {
-    'still_here' => 'assets/icons/animalstillhere.png',
-    'moved' => 'assets/icons/animalmoved.png',
-    'rescued' => 'assets/icons/animalrescued.png',
-    'no_animal' => 'assets/icons/noanimal.png',
-    _ => 'assets/icons/info.png',
-  };
-
-  String _typeDescription(String? t) => switch (t) {
-    'still_here' =>
-    'Upload a recent photo to confirm the animal is still at the reported location.',
-    'moved' =>
-    'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
-    'rescued' =>
-    'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
-    'no_animal' =>
-    'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
-    _ => '',
-  };
-
-  Future<void> _pickImage() async {
-    final file = await _picker.pickImage(
-        source: ImageSource.gallery, imageQuality: 80);
-    if (file != null && mounted) {
-      setState(() => _pickedImage = file);
-    }
-  }
-
-  Future<void> _autoDetectLocation() async {
-    if (_detectingLocation) return;
-    setState(() {
-      _detectingLocation = true;
-      _locationController.text = 'Detecting your location…';
-    });
-
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          setState(() {
-            _locationController.clear();
-            _detectedLat = null;
-            _detectedLng = null;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text(
-                  'Please enable location services to auto-detect.'),
-              action: SnackBarAction(
-                label: 'Settings',
-                onPressed: () => Geolocator.openLocationSettings(),
-              ),
-            ),
-          );
-        }
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          setState(() {
-            _locationController.clear();
-            _detectedLat = null;
-            _detectedLng = null;
-          });
-        }
-        return;
-      }
-
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      ).timeout(
-        const Duration(seconds: 12),
-        onTimeout: () => Geolocator.getLastKnownPosition().then(
-              (p) =>
-          p ??
-              Position(
-                latitude: 14.5416,
-                longitude: 121.0644,
-                timestamp: DateTime.now(),
-                accuracy: 0,
-                altitude: 0,
-                altitudeAccuracy: 0,
-                heading: 0,
-                headingAccuracy: 0,
-                speed: 0,
-                speedAccuracy: 0,
-              ),
-        ),
-      );
-
-      String resolvedAddress =
-          '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
-      try {
-        final url = Uri.parse(
-          'https://maps.googleapis.com/maps/api/geocode/json'
-              '?latlng=${pos.latitude},${pos.longitude}'
-              '&key=$_geocodingApiKey',
-        );
-        final res = await http.get(url).timeout(const Duration(seconds: 10));
-        final data = jsonDecode(res.body);
-        if (res.statusCode == 200 &&
-            data['status'] == 'OK' &&
-            (data['results'] as List).isNotEmpty) {
-          resolvedAddress = data['results'][0]['formatted_address'];
-        }
-      } catch (_) {
-
-      }
-
-      if (mounted) {
-        setState(() {
-          _locationController.text = resolvedAddress;
-          _detectedLat = pos.latitude;
-          _detectedLng = pos.longitude;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _locationController.clear();
-          _detectedLat = null;
-          _detectedLng = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content:
-              Text('Could not detect your location — please type it in.')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _detectingLocation = false);
-    }
-  }
-
-  Future<void> _submit() async {
-    if (_selectedType == null || _submitting) return;
-    if (_selectedType == 'moved' && _locationController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter the new location.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _submitting = true);
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final userDoc =
-      await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      final name =
-      '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
-          .trim();
-
-      final reportRef = _reportsRef.doc();
-
-      String? photoUrl;
-      if (_pickedImage != null) {
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('cases/${widget.caseId}/communityReports/${reportRef.id}.jpg');
-        await ref.putFile(
-          File(_pickedImage!.path),
-          SettableMetadata(contentType: 'image/jpeg'),
-        );
-        photoUrl = await ref.getDownloadURL();
-      }
-
-      await reportRef.set({
-        'reporterId': uid,
-        'reporterName': name.isEmpty ? 'A community member' : name,
-        'type': _selectedType,
-        'comment': _commentController.text.trim(),
-        'newAddress':
-        _selectedType == 'moved' ? _locationController.text.trim() : null,
-        'newLat': _selectedType == 'moved' ? _detectedLat : null,
-        'newLng': _selectedType == 'moved' ? _detectedLng : null,
-        'photoUrl': photoUrl,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .collection('activityLogs')
-          .add({
-        'action': 'community_report_submitted',
-        'actorUid': uid,
-        'actorName': name.isEmpty ? 'A community member' : name,
-        'actorRole': null,
-        'details': {
-          'type': _selectedType,
-        },
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      // Once a case has been rejected as healthy/low-urgency and moved to
-      // Community Adoption, the org is no longer actively tracking it —
-      // any single community sighting update (whichever type) is treated
-      // as enough signal to close the loop, since it means someone in the
-      // community has eyes on the animal. Ordinary active cases (still in
-      // the rescue pipeline) are untouched by this — this only applies to
-      // the Community Adoption carve-out.
-      final caseSnap =
-      await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).get();
-      final caseData = caseSnap.data();
-      if (caseData != null &&
-          isCommunityAdoptionEligible(
-            status: caseData['status'] as String?,
-            rejectionReason: caseData['rejectionReason'] as String?,
-            rescueType: caseData['rescueType'] as String?,
-          )) {
-        await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).update({
-          'status': 'closed',
-          'statusHistory': FieldValue.arrayUnion([
-            {
-              'status':
-              'Case closed after a community update — this animal is now tracked through Community Adoption.',
-              'timestamp': Timestamp.now(),
-            }
-          ]),
-        });
-      }
-
-      if (mounted) {
-        setState(() {
-          _selectedType = null;
-          _pickedImage = null;
-          _expanded = false;
-        });
-        _commentController.clear();
-        _locationController.clear();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Thanks! Your report has been submitted.'),
-            backgroundColor: AppColors.greenrspwn,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not submit report: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
-  Widget _optionButton(String type, String iconAsset, String label) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          setState(() => _selectedType = type);
-          if (type == 'moved') _autoDetectLocation();
-        },
-        child: Column(
-          children: [
-            Container(
-                width: 40,
-                height: 40,
-                decoration: const BoxDecoration(
-                  color: AppColors.textPrimary,
-                  shape: BoxShape.circle,
-                ),
-                child: Image.asset(
-                  iconAsset,
-                  width: 10,
-                  height: 10,
-                )
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.zain(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildForm() {
-    return Stack(
-      children: [
-        Column(
-          children: [
-            const SizedBox(height: 4),
-            Container(
-              width: 48,
-              height: 48,
-              decoration: const BoxDecoration(
-                color: AppColors.textPrimary,
-                shape: BoxShape.circle,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Image.asset(
-                  _typeIconAsset(_selectedType),
-                  fit: BoxFit.contain,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(_typeLabel(_selectedType),
-                style: GoogleFonts.tiltWarp(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 6),
-            Text(
-              _typeDescription(_selectedType),
-              textAlign: TextAlign.center,
-              style: GoogleFonts.zain(
-                  fontSize: 12, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 14),
-            GestureDetector(
-              onTap: _pickImage,
-              child: Container(
-                width: 90,
-                height: 90,
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.slaterspwn),
-                  borderRadius: BorderRadius.circular(10),
-                  color: AppColors.background,
-                ),
-                child: _pickedImage != null
-                    ? ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.file(File(_pickedImage!.path),
-                      fit: BoxFit.cover),
-                )
-                    : const Icon(Icons.add_a_photo_outlined,
-                    color: AppColors.textSecondary, size: 26),
-              ),
-            ),
-
-            const SizedBox(height: 14),
-
-            if (_selectedType == 'moved') ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                          text: 'Location Found',
-                          style: GoogleFonts.zain(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary)),
-                      const TextSpan(
-                          text: ' *',
-                          style: TextStyle(color: Colors.redAccent)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _locationController,
-                enabled: !_detectingLocation,
-                onChanged: (_) {
-                  // A manual edit means the text no longer necessarily
-                  // matches _detectedLat/_detectedLng — drop them rather
-                  // than silently submitting stale coordinates alongside
-                  // different address text.
-                  if (_detectedLat != null || _detectedLng != null) {
-                    setState(() {
-                      _detectedLat = null;
-                      _detectedLng = null;
-                    });
-                  }
-                },
-                style: GoogleFonts.zain(fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: 'Enter the new location',
-                  hintStyle: GoogleFonts.zain(
-                      fontSize: 12, color: AppColors.textSecondary),
-                  prefixIcon: const Icon(Icons.search,
-                      size: 18, color: AppColors.textSecondary),
-                  suffixIcon: _detectingLocation
-                      ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                      : IconButton(
-                    icon: const Icon(Icons.my_location,
-                        size: 18, color: AppColors.textSecondary),
-                    tooltip: 'Use current location',
-                    onPressed: _autoDetectLocation,
-                  ),
-                  contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: AppColors.slaterspwn),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Auto-detected from your current location — you can edit it if needed.',
-                style: GoogleFonts.zain(
-                    fontSize: 10.5, color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 10),
-            ],
-            TextField(
-              controller: _commentController,
-              maxLines: 2,
-              style: GoogleFonts.zain(fontSize: 13),
-              decoration: InputDecoration(
-                hintText: 'Comment',
-                hintStyle: GoogleFonts.zain(
-                    fontSize: 14, color: AppColors.textSecondary),
-                contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.slaterspwn),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _submitting ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                ),
-                child: _submitting
-                    ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.textPrimary),
-                )
-                    : Text('Report',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary)),
-              ),
-            ),
-          ],
-        ),
-        Positioned(
-          top: 0,
-          right: 0,
-          child: GestureDetector(
-            onTap: () => setState(() => _selectedType = null),
-            child: const Icon(Icons.close,
-                size: 20, color: AppColors.textSecondary),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _formatTime(DateTime d) {
-    final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    final min = d.minute.toString().padLeft(2, '0');
-    final ampm = d.hour >= 12 ? 'PM' : 'AM';
-    return '$h:$min $ampm';
-  }
-
-  String _formatDate(DateTime d) {
-    const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${months[d.month]} ${d.day}, ${d.year}';
-  }
-
-  Widget _reportTile(Map<String, dynamic> r) {
-    final ts = r['timestamp'] as Timestamp?;
-    final date = ts?.toDate();
-    final newAddress = r['newAddress'] as String?;
-    final comment = r['comment'] as String?;
-    final photoUrl = r['photoUrl'] as String?;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: AppColors.textPrimary,
-            child: Padding(
-              padding: const EdgeInsets.all(9),
-              child: Image.asset(
-                _typeIconAsset(r['type'] as String?),
-                fit: BoxFit.contain,
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${r['reporterName'] ?? 'Someone'} · ${_typeLabel(r['type'] as String?)}',
-                        style: GoogleFonts.zain(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary),
-                      ),
-                    ),
-                    if (date != null)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(_formatTime(date),
-                              style: GoogleFonts.zain(
-                                  fontSize: 10,
-                                  color: AppColors.textSecondary)),
-                          Text(_formatDate(date),
-                              style: GoogleFonts.zain(
-                                  fontSize: 10,
-                                  color: AppColors.textSecondary)),
-                        ],
-                      ),
-                  ],
-                ),
-                if (newAddress != null && newAddress.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.location_on_outlined,
-                            size: 20, color: AppColors.textSecondary),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(newAddress,
-                              style: GoogleFonts.zain(
-                                  fontSize: 13, color: AppColors.textPrimary)),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (comment != null && comment.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(comment,
-                        style: GoogleFonts.zain(
-                            fontSize: 14, color: AppColors.textSecondary)),
-                  ),
-              ],
-            ),
-          ),
-          if (photoUrl != null && photoUrl.isNotEmpty) ...[
-            const SizedBox(width: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Image.network(
-                photoUrl,
-                width: 36,
-                height: 36,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 36,
-                  height: 36,
-                  color: AppColors.slaterspwn,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text('Community Report',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary), textAlign: TextAlign.center,),
-                ),
-                GestureDetector(
-                  onTap: () => setState(() => _expanded = !_expanded),
-                  child: Icon(
-                    _expanded ? Icons.expand_less : Icons.add_circle_outline,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ],
-            ),
-            if (_expanded) ...[
-              const SizedBox(height: 10),
-              if (_selectedType == null) ...[
-                Text('What is happening?',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
-                const SizedBox(height: 4),
-                Text(
-                  'Help keep rescue reports accurate by sharing timely updates on the animal\'s location, condition, and safety.',
-                  style: GoogleFonts.zain(
-                      fontSize: 14, color: AppColors.textSecondary),
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    _optionButton(
-                      'still_here',
-                      'assets/icons/animalstillhere.png',
-                      'Animal still here',
-                    ),
-
-                    _optionButton(
-                      'moved',
-                      'assets/icons/animalmoved.png',
-                      'Animal moved',
-                    ),
-
-                    _optionButton(
-                      'rescued',
-                      'assets/icons/animalrescued.png',
-                      'Animal rescued',
-                    ),
-
-                    _optionButton(
-                      'no_animal',
-                      'assets/icons/noanimal.png',
-                      'No Animal Present',
-                    ),
-                  ],
-                ),
-              ] else
-                _buildForm(),
-            ],
-            const SizedBox(height: 12),
-            const Divider(color: AppColors.slaterspwn),
-            const SizedBox(height: 4),
-            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _reportsRef
-                  .orderBy('timestamp', descending: true)
-                  .limit(20)
-                  .snapshots(),
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  );
-                }
-                final docs = snap.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text('No community reports yet.',
-                        style: GoogleFonts.zain(
-                            fontSize: 12, color: AppColors.textSecondary)),
-                  );
-                }
-                return Column(
-                  children:
-                  docs.map((d) => _reportTile(d.data())).toList(),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

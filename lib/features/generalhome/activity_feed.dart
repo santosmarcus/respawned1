@@ -3,7 +3,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'activity_card.dart';
 import 'activity_item.dart';
 
@@ -69,16 +71,25 @@ class ActivityFeed extends StatelessWidget {
 
                 final items = <ActivityItem>[];
 
+                // Rejected is deliberately NOT in this set (Rejected Rescue
+                // Reports spec §2) — a rejected report must keep showing up
+                // in the reporter's own Activity feed instead of vanishing,
+                // even though it's still hidden from everyone else's public
+                // Explore feed by the separate isCasePublic predicate. Only
+                // used for petAlerts below, which this round doesn't touch.
                 const dismissedStatuses = {'dismissed', 'cancelled', 'withdrawn', 'rejected'};
+                const rescueDismissedStatuses = {'dismissed', 'cancelled', 'withdrawn'};
 
                 for (final doc in caseSnap.data?.docs ?? []) {
                   final data = doc.data() as Map<String, dynamic>;
                   final rawStatus = (data['status'] as String? ?? '').toLowerCase();
-                  if (dismissedStatuses.contains(rawStatus)) continue;
+                  if (rescueDismissedStatuses.contains(rawStatus)) continue;
 
-                  final isEndedRescue = rawStatus == 'closed' ||
-                      rawStatus.contains('completed') ||
-                      rawStatus.contains('ended');
+                  final isRejected = rawStatus == 'rejected';
+                  final isEndedRescue = !isRejected &&
+                      (rawStatus == 'closed' ||
+                          rawStatus.contains('completed') ||
+                          rawStatus.contains('ended'));
                   if (isEndedRescue) continue;
 
                   final caseGroupId = data['groupId'] as String?;
@@ -99,6 +110,30 @@ class ActivityFeed extends StatelessWidget {
 
                   final photoList = (data['photoUrls'] as List?)?.cast<String>() ?? [];
 
+                  String? rejectionReasonLabel;
+                  DateTime? rejectedAt;
+                  bool communityAdoptionEligible = false;
+                  if (isRejected) {
+                    final reasonName = data['rejectionReason'] as String?;
+                    final reason = RejectionReason.fromName(reasonName);
+                    final otherText = data['rejectionReasonOther'] as String?;
+                    rejectionReasonLabel = reason == RejectionReason.other
+                        ? ((otherText?.trim().isNotEmpty ?? false) ? otherText! : 'Other')
+                        : reason.label;
+                    for (final h in history) {
+                      final s = h['status'] as String? ?? '';
+                      final hts = h['timestamp'];
+                      if (s.startsWith('Case rejected') && hts is Timestamp) {
+                        rejectedAt = hts.toDate();
+                      }
+                    }
+                    communityAdoptionEligible = isCommunityAdoptionEligible(
+                      status: rawStatus,
+                      rejectionReason: reasonName,
+                      rescueType: data['rescueType'] as String?,
+                    );
+                  }
+
                   items.add(ActivityItem(
                     id: doc.id,
                     type: ActivityType.rescue,
@@ -110,6 +145,10 @@ class ActivityFeed extends StatelessWidget {
                     createdAt: createdAt,
                     docId: doc.id,
                     photoUrl: photoList.isNotEmpty ? photoList.first : null,
+                    isRejected: isRejected,
+                    rejectionReasonLabel: rejectionReasonLabel,
+                    rejectedAt: rejectedAt,
+                    communityAdoptionEligible: communityAdoptionEligible,
                   ));
                 }
 
@@ -196,6 +235,10 @@ class ActivityFeed extends StatelessWidget {
 
                 if (standalone) {
                   return ListView.separated(
+                    // Navigation State spec §11 — preserves scroll offset
+                    // when the admin opens an item's detail page and backs
+                    // out to this list.
+                    key: const PageStorageKey('activity_feed_list'),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: items.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -268,15 +311,23 @@ class _ActivityCarouselState extends State<_ActivityCarousel> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Activity Card Overflow spec §12 — PageView forces every page to
+        // exactly this height, so it must safely fit the tallest supported
+        // card (a rejected rescue report, now trimmed to a compact
+        // single-line reason/date block in ActivityCard). Raised from the
+        // original 190 to fit that content with margin, and each page is
+        // additionally wrapped in a SingleChildScrollView as a safety net
+        // against any remaining overflow under larger text-scale factors —
+        // vertical scroll doesn't conflict with PageView's horizontal swipe.
         SizedBox(
-          height: 190,
+          height: 260,
           child: PageView.builder(
             controller: _controller,
             onPageChanged: (i) => setState(() => _page = i),
             itemCount: widget.items.length,
             itemBuilder: (context, i) => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: ActivityCard(item: widget.items[i]),
+              child: SingleChildScrollView(child: ActivityCard(item: widget.items[i])),
             ),
           ),
         ),

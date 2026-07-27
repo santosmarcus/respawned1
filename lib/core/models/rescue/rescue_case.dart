@@ -103,6 +103,22 @@ class RescueCase {
   final DateTime? treatmentUpdatedAt;
   final String? latestTreatmentUpdateType;
 
+  // ---- Per-animal stage summary (denormalized — spec §7/§12) ---------
+  // Firestore can't query "does any entry in this array-of-maps have
+  // stage X" against `animals[i]` directly, so this flat array is kept in
+  // sync by RescueCaseRepository any time per-animal discharge/action
+  // state changes (see core/utils/animal_treatment_state.dart's
+  // activeStagesOf) and queried with `array-contains` — see
+  // streamCasesByActiveStage. Never the only source of truth: every reader
+  // that needs the real per-animal state reads `animals[i]` itself via
+  // animal_treatment_state.dart, this is purely a query-time index.
+  final List<String> activeAnimalStages;
+
+  /// How many animals currently sit in each active stage, e.g.
+  /// `{'in_treatment': 1, 'intake': 1}` — display-only convenience
+  /// alongside [activeAnimalStages], kept in sync the same way.
+  final Map<String, int> animalStageCounts;
+
   // ---- Intake -------------------------------------------------------
   final String? intakeDestinationName;
   final String? intakeDestinationAddress;
@@ -177,6 +193,8 @@ class RescueCase {
     this.causeOfDeath,
     this.treatmentUpdatedAt,
     this.latestTreatmentUpdateType,
+    this.activeAnimalStages = const [],
+    this.animalStageCounts = const {},
     this.intakeDestinationName,
     this.intakeDestinationAddress,
     this.intakeDestinationPlaceId,
@@ -266,6 +284,10 @@ class RescueCase {
       treatmentUpdatedAt:
       data['treatmentUpdatedAt'] is Timestamp ? (data['treatmentUpdatedAt'] as Timestamp).toDate() : null,
       latestTreatmentUpdateType: data['latestTreatmentUpdateType'] as String?,
+      activeAnimalStages: List<String>.from(data['activeAnimalStages'] ?? const []),
+      animalStageCounts: Map<String, int>.from(
+        (data['animalStageCounts'] as Map? ?? const {}).map((k, v) => MapEntry(k as String, (v as num).toInt())),
+      ),
       intakeDestinationName: data['intakeDestinationName'] as String?,
       intakeDestinationAddress: data['intakeDestinationAddress'] as String?,
       intakeDestinationPlaceId: data['intakeDestinationPlaceId'] as String?,
@@ -293,9 +315,19 @@ class RescueCase {
 
   bool get hasSavedClinic => vetClinicName != null && vetClinicName!.isNotEmpty;
 
-  /// True only for elevated bite/escape risk levels — 'Unknown'/null never
-  /// counts, so an unassessed animal is never treated as aggressive.
-  bool get hasHighRisk => rescue_risk_util.hasHighRescueRisk(biteRisk: biteRisk, escapeRisk: escapeRisk);
+  /// Every animal in this case with an elevated bite/escape risk — checks
+  /// each entry in [animals] (a case now covers one or more animals), not
+  /// just the legacy case-level [biteRisk]/[escapeRisk] fields, which are
+  /// only consulted as a fallback for single-animal reports saved before
+  /// the `animals` array existed. 'Unknown'/null never counts, so an
+  /// unassessed animal is never treated as aggressive.
+  List<rescue_risk_util.HighRiskAnimal> get highRiskAnimals => rescue_risk_util.highRiskAnimalsIn(
+        animals: animals,
+        legacyBiteRisk: biteRisk,
+        legacyEscapeRisk: escapeRisk,
+      );
+
+  bool get hasHighRisk => highRiskAnimals.isNotEmpty;
 
   /// e.g. "Dog ×2, Cat" — prefers [animals], falls back to [animalType].
   String get speciesSummary =>

@@ -12,6 +12,11 @@ class CommunityReport {
   final String type; // still_here | moved | rescued | no_animal
   final String? comment;
   final String? newAddress; // only set when type == 'moved'
+  // Only set for reports submitted after Community Location Validation
+  // (spec §4) started requiring a confirmed map pin — legacy 'moved'
+  // reports may have newAddress with no coordinates; tolerate both.
+  final double? newLat;
+  final double? newLng;
   final String? photoUrl;
   final DateTime? timestamp;
 
@@ -22,6 +27,8 @@ class CommunityReport {
     required this.type,
     this.comment,
     this.newAddress,
+    this.newLat,
+    this.newLng,
     this.photoUrl,
     this.timestamp,
   });
@@ -36,6 +43,8 @@ class CommunityReport {
       type: data['type'] as String? ?? '',
       comment: data['comment'] as String?,
       newAddress: data['newAddress'] as String?,
+      newLat: (data['newLat'] as num?)?.toDouble(),
+      newLng: (data['newLng'] as num?)?.toDouble(),
       photoUrl: data['photoUrl'] as String?,
       timestamp: ts is Timestamp ? ts.toDate() : null,
     );

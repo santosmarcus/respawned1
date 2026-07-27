@@ -19,6 +19,7 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
+import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 
 /// Firestore access for the admin rescue module. Reads/writes the existing
 /// `cases` collection (shared with the reporter and pet-transporter apps —
@@ -440,6 +441,27 @@ class RescueCaseRepository {
     });
   }
 
+  /// Every still-`pending` offer across every case whose own [expiresAt] has
+  /// already passed (see [TransportAssignment.isStalePending]) — this is a
+  /// genuine "needs attention" signal (spec's "Rejected, expired, or
+  /// unanswered transporter offers" Action Required item), not a fabricated
+  /// threshold: staleness is judged against the offer's own already-recorded
+  /// `expiresAt`/`kTransportOfferTtl`, never an admin-configurable cutoff
+  /// invented here. Filters `status == pending` server-side, then
+  /// `isStalePending` client-side (Firestore can't compare two fields), so
+  /// the read stays bounded to the (normally small) set of open offers
+  /// rather than every assignment doc ever created.
+  Stream<List<TransportAssignment>> streamStalePendingAssignments() {
+    return _db
+        .collectionGroup('transportAssignments')
+        .where('status', isEqualTo: TransportAssignmentStatus.pending.name)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id))
+            .where((a) => a.isStalePending)
+            .toList());
+  }
+
   /// Naive possible-duplicate lookup: other active cases (pending/awaiting
   /// assignment/ongoing) of the same species, ranked by distance from
   /// [source]. There's no geohashing index on this collection, so this
@@ -450,7 +472,8 @@ class RescueCaseRepository {
     double radiusKm = 1.0,
     int limit = 20,
   }) async {
-    if (source.animalType == null || source.lat == null || source.lng == null) {
+    final sourceSpecies = source.allSpecies.toSet();
+    if (sourceSpecies.isEmpty || source.lat == null || source.lng == null) {
       return const [];
     }
     final activeStatuses = [
@@ -460,23 +483,39 @@ class RescueCaseRepository {
       RescueStatus.ongoing,
     ].expand((s) => s.queryValues).toSet().toList();
 
-    final snap = await _cases
-        .where('animalType', isEqualTo: source.animalType)
-        .where('status', whereIn: activeStatuses)
-        .limit(50)
-        .get();
+    // A case's animals live in an `animals[]` array — Firestore can't do
+    // an "any of these species" match against a sub-field of an array of
+    // maps, so this runs one query per distinct species the source report
+    // covers (never just its first/legacy animalType) and merges the
+    // results, so a duplicate that only shares the source's second animal
+    // still gets found. Each query still only matches a *candidate* case's
+    // own top-level `animalType` (that candidate's first/legacy species) —
+    // a true match against every one of a candidate's own animals would
+    // need a denormalized queryable field this collection doesn't have yet.
+    final seenIds = <String>{};
+    final docs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+    for (final species in sourceSpecies) {
+      final snap = await _cases
+          .where('animalType', isEqualTo: species)
+          .where('status', whereIn: activeStatuses)
+          .limit(50)
+          .get();
+      for (final doc in snap.docs) {
+        if (seenIds.add(doc.id)) docs.add(doc);
+      }
+    }
 
     // Pairs the admin already explicitly reviewed and dismissed via "Keep
     // Separate" (see keepSeparate) are never re-suggested — unless the
     // source case's own location/species changed since (a coarse "did
     // meaningful data change" signal: this whole method already re-derives
-    // candidates from the CURRENT source.animalType/lat/lng every call, so
+    // candidates from the CURRENT source animals/lat/lng every call, so
     // a source that moved or was re-typed naturally produces a different
     // candidate set anyway; the dismissed-id list itself is never
     // invalidated automatically beyond that).
     final dismissed = (source.raw['dismissedDuplicateCaseIds'] as List?)?.cast<String>().toSet() ?? const {};
 
-    final candidates = snap.docs
+    final candidates = docs
         .map(RescueCase.fromFirestore)
         .where((c) => c.id != source.id && c.lat != null && c.lng != null && !dismissed.contains(c.id))
         .toList();
@@ -662,7 +701,11 @@ class RescueCaseRepository {
         'address': duplicateData['address'],
         'lat': duplicateData['lat'],
         'lng': duplicateData['lng'],
-        'species': duplicateData['animalType'],
+        // Full species summary (e.g. "Dog ×2, Cat"), not just the
+        // duplicate's first/legacy animalType — a merged multi-animal
+        // report should still show every species it covered.
+        'species': species_summary_util.summarizeSpecies(
+            animals: duplicateData['animals'] as List?, legacyAnimalType: duplicateData['animalType'] as String?),
         'urgency': duplicateData['urgency'],
         'submittedAt': duplicateData['createdAt'] ?? FieldValue.serverTimestamp(),
         'isPrimary': false,
@@ -1453,6 +1496,7 @@ class RescueCaseRepository {
       final animalLabel = (animals[animalIndex]['species'] as String?) ?? 'Animal';
       tx.update(caseRef, {
         'animals': animals,
+        ..._stageSummaryUpdate(animals),
         'statusHistory': FieldValue.arrayUnion([
           {'status': 'Animal death reported during rescue: $animalLabel.', 'timestamp': Timestamp.now()}
         ]),
@@ -1656,6 +1700,49 @@ class RescueCaseRepository {
     }
   }
 
+  /// Recomputes `activeAnimalStages`/`animalStageCounts` (spec §7) from a
+  /// fresh `animals` array — raw-map twin of core/utils/
+  /// animal_treatment_state.dart's `activeStagesOf`, used here because
+  /// every write site below already has a freshly-read/mutated `animals`
+  /// list mid-update rather than a constructed RescueCase. Returns an empty
+  /// map for a legacy case with no `animals[]` entries at all — that case's
+  /// single scalar `status` field alone still drives its one tab, exactly
+  /// as before this round.
+  Map<String, dynamic> _stageSummaryUpdate(List<Map<String, dynamic>> animals) {
+    if (animals.isEmpty) return const {};
+    final counts = <String, int>{};
+    for (final a in animals) {
+      if (a['outcome'] == 'deceased') continue;
+      final action = a['postTreatmentAction'] as String?;
+      String? stage;
+      if (action == null) {
+        stage = 'in_treatment';
+      } else if (action == 'intake' && a['intakeCompletedAt'] == null) {
+        stage = 'intake';
+      }
+      if (stage != null) counts[stage] = (counts[stage] ?? 0) + 1;
+    }
+    return {'activeAnimalStages': counts.keys.toList()..sort(), 'animalStageCounts': counts};
+  }
+
+  /// The case-level `status` a multi-animal case's `animals[]` state
+  /// implies (spec §12) — 'in_treatment' while any animal is still
+  /// un-actioned (never removed from Treatment until no active animal
+  /// remains there, per spec §7), else 'intake' while any animal's
+  /// assigned action is Intake and not yet complete, else 'completed' once
+  /// every animal has resolved (transferred/released/intake-completed/
+  /// deceased). Returns null for a legacy case with no `animals[]` — the
+  /// caller keeps whatever explicit status write it already had.
+  String? _deriveCaseStatusOverride(List<Map<String, dynamic>> animals) {
+    if (animals.isEmpty) return null;
+    final anyUnactioned = animals.any((a) => a['outcome'] != 'deceased' && a['postTreatmentAction'] == null);
+    if (anyUnactioned) return RescueStatus.treatment.firestoreValue;
+    final anyIntakePending =
+        animals.any((a) => a['postTreatmentAction'] == 'intake' && a['intakeCompletedAt'] == null);
+    if (anyIntakePending) return RescueStatus.intake.firestoreValue;
+    return RescueStatus.completed.firestoreValue;
+  }
+
   Future<void> addTreatmentLog({
     required String caseId,
     required TreatmentLogEntry entry,
@@ -1663,7 +1750,23 @@ class RescueCaseRepository {
   }) async {
     _validateTreatmentLogEntry(entry);
     final caseSnap = await _caseDoc(caseId).get();
-    if (caseSnap.data()?['readyForDischarge'] == true) {
+    final data = caseSnap.data();
+    final animals = List<Map<String, dynamic>>.from(
+      (data?['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+    );
+
+    // ROOT CAUSE FIX (spec §6): this used to be a single case-wide
+    // `readyForDischarge == true` gate that blocked every further
+    // treatment update for the whole case the moment ANY one animal was
+    // discharged — so discharging Animal 1 also silently locked Animal 2
+    // out of further logging. The gate now only fires once EVERY animal on
+    // the case has actually resolved (discharged+actioned, or deceased) —
+    // for a legacy single-animal case (no `animals[]`) that's still just
+    // the old scalar `readyForDischarge` flag, unchanged.
+    final allResolved = animals.isNotEmpty
+        ? animals.every((a) => a['outcome'] == 'deceased' || a['dischargedAt'] != null)
+        : (data?['readyForDischarge'] == true);
+    if (allResolved) {
       throw StateError('No further treatment updates can be added after discharge.');
     }
 
@@ -1685,6 +1788,34 @@ class RescueCaseRepository {
             entry.causeOfDeath ??
             entry.type;
 
+    // Which animals THIS entry targets — every animal for a null/empty
+    // animalIndexes ("All Animals", spec §5), otherwise only the selected
+    // ones. Only meaningful (and only ever applied) when the case actually
+    // has an `animals[]` array to stamp.
+    final targetIndexes = animals.isEmpty
+        ? const <int>[]
+        : (entry.animalIndexes != null && entry.animalIndexes!.isNotEmpty
+            ? entry.animalIndexes!
+            : List<int>.generate(animals.length, (i) => i));
+
+    if (isDischarge) {
+      for (final i in targetIndexes) {
+        if (i < 0 || i >= animals.length) continue;
+        animals[i] = {...animals[i], 'dischargedAt': now, 'dischargeLogId': logRef.id};
+      }
+    } else if (isDeath) {
+      for (final i in targetIndexes) {
+        if (i < 0 || i >= animals.length) continue;
+        animals[i] = {
+          ...animals[i],
+          'outcome': 'deceased',
+          'deceasedAt': now,
+          'deceasedReason': entry.causeOfDeath ?? 'Unknown',
+          'deceasedConfirmedBy': entry.createdBy,
+        };
+      }
+    }
+
     await _caseDoc(caseId).update({
       if (entry.condition != null) 'currentCondition': entry.condition,
       'latestTreatmentUpdateType': entry.type,
@@ -1692,6 +1823,14 @@ class RescueCaseRepository {
       'statusHistory': FieldValue.arrayUnion([
         {'status': '${entry.type}: $summary', 'timestamp': now},
       ]),
+      if (animals.isNotEmpty && (isDischarge || isDeath)) 'animals': animals,
+      if (animals.isNotEmpty && (isDischarge || isDeath)) ..._stageSummaryUpdate(animals),
+      // Legacy case-wide fields — kept exactly as before for a case with no
+      // `animals[]` array, and also kept (informationally) alongside the
+      // new per-animal fields above so any older reader that only looks at
+      // these flat fields (e.g. IntakeDetailPage's discharge-date display)
+      // keeps working: they reflect the FIRST discharge/death recorded,
+      // never re-gate anything by themselves anymore.
       if (isDischarge) 'readyForDischarge': true,
       if (isDischarge) 'dischargedAt': now,
       if (isDeath) 'deceasedAt': now,
@@ -1708,6 +1847,54 @@ class RescueCaseRepository {
   /// (targetName/targetContact/targetAddress/reason/date/notes) — a
   /// Volunteer destination has no queryable directory in this app yet, so
   /// it only ever fills the common fields (see transfer_animal_sheet.dart).
+  /// Transfer/Release stay visible on Treatment Details before discharge
+  /// (spec: disabled with an explanation, never hidden) — the UI disables
+  /// the buttons, but that alone is never trusted; this is the actual
+  /// enforcement, so a stale page or a direct call can't bypass it.
+  /// Per-animal eligibility gate for Transfer/Release (spec §8/§10/§11) —
+  /// replaces the old case-wide `_ensureReadyForDischarge`. When
+  /// [animalIndexes] is null/empty (every call site that predates this
+  /// round, and any legacy single-animal case with no `animals[]` array),
+  /// this falls back to the original single scalar `readyForDischarge`
+  /// check, unchanged. Otherwise every named index must be discharged, not
+  /// deceased, and not already committed to a different post-treatment
+  /// action — trusted from the animal-selection sheet but revalidated here
+  /// so a stale sheet or a direct call can't bypass it. Returns the
+  /// freshly-read `animals` array so the caller can mutate it in the same
+  /// read without a second round-trip.
+  Future<List<Map<String, dynamic>>> _ensureAnimalsEligible(String caseId, List<int>? animalIndexes) async {
+    final snap = await _caseDoc(caseId).get();
+    final data = snap.data();
+    final animals = List<Map<String, dynamic>>.from(
+      (data?['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+    );
+    if (animals.isEmpty || animalIndexes == null || animalIndexes.isEmpty) {
+      final ready = data?['readyForDischarge'] as bool? ?? false;
+      if (!ready) {
+        throw StateError('A Discharge update is required before this action is available.');
+      }
+      return animals;
+    }
+    for (final i in animalIndexes) {
+      if (i < 0 || i >= animals.length) continue;
+      final a = animals[i];
+      if (a['outcome'] == 'deceased' || a['dischargedAt'] == null || a['postTreatmentAction'] != null) {
+        throw StateError('One or more selected animals are not eligible for this action.');
+      }
+    }
+    return animals;
+  }
+
+  /// [animalIndexes] — the specific discharged animals this transfer
+  /// applies to (spec §10). Null/empty (every pre-existing call site) keeps
+  /// the original whole-case behavior exactly: the entire case moves to
+  /// [RescueStatus.completed]. When provided (and the case actually has an
+  /// `animals[]` array), only those animals are stamped
+  /// transferred/`postTreatmentAction: 'transfer'` and the case-level
+  /// `status` is safely re-derived from every animal's own state instead of
+  /// being forced to `completed` — a case with animals left behind in
+  /// Treatment stays visible there (spec §7/§10's "keep the case visible in
+  /// Treatment for any animals left behind").
   Future<void> transferAnimal({
     required String caseId,
     required String targetType,
@@ -1723,14 +1910,34 @@ class RescueCaseRepository {
     String? notes,
     required String actorUid,
     required String actorName,
+    List<int>? animalIndexes,
   }) async {
+    final animals = await _ensureAnimalsEligible(caseId, animalIndexes);
     final now = Timestamp.now();
+    final perAnimal = animals.isNotEmpty && animalIndexes != null && animalIndexes.isNotEmpty;
+    if (perAnimal) {
+      for (final i in animalIndexes) {
+        if (i < 0 || i >= animals.length) continue;
+        animals[i] = {
+          ...animals[i],
+          'postTreatmentAction': 'transfer',
+          'postTreatmentStartedAt': now,
+          'transferDestinationType': targetType,
+          'transferDestinationName': targetName,
+          'transferCompletedAt': now,
+        };
+      }
+    }
     await _caseDoc(caseId).update({
-      'status': RescueStatus.completed.firestoreValue,
+      'status': perAnimal ? (_deriveCaseStatusOverride(animals) ?? RescueStatus.completed.firestoreValue) : RescueStatus.completed.firestoreValue,
       'transferType': targetType,
       'targetName': targetName,
       // Legacy field names, kept so any existing reader of a
-      // pre-this-round transfer keeps working unmodified.
+      // pre-this-round transfer keeps working unmodified. These reflect
+      // the MOST RECENT transfer recorded on the case (this app has no
+      // per-transfer-event subcollection yet); per-animal destination
+      // fields above are the source of truth once several separate
+      // transfers happen for different animals over time.
       if (targetType == 'organization') 'targetOrganizationName': targetName,
       if (targetContact != null && targetContact.isNotEmpty) 'targetContact': targetContact,
       if (targetAddress != null && targetAddress.isNotEmpty) 'targetAddress': targetAddress,
@@ -1746,6 +1953,8 @@ class RescueCaseRepository {
       // receiving-organization/clinic/volunteer acceptance workflow yet.
       // 'pending' here just means "handed off, not yet acknowledged."
       'transferStatus': 'pending',
+      if (perAnimal) 'animals': animals,
+      if (perAnimal) ..._stageSummaryUpdate(animals),
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Animal transferred to $targetName ($targetType).', 'timestamp': now}
       ]),
@@ -1761,7 +1970,8 @@ class RescueCaseRepository {
 
   /// Temporary handoff record only — this is NOT a completed adoption. See
   /// the TODO on the release UI: formal adoption approval/forms are a
-  /// separate, not-yet-built feature.
+  /// separate, not-yet-built feature. [animalIndexes] follows the exact
+  /// same null-means-legacy-whole-case convention as [transferAnimal].
   Future<void> releaseToReporter({
     required String caseId,
     required String reporterId,
@@ -1769,15 +1979,32 @@ class RescueCaseRepository {
     String? notes,
     required String actorUid,
     required String actorName,
+    List<int>? animalIndexes,
   }) async {
+    final animals = await _ensureAnimalsEligible(caseId, animalIndexes);
+    final now = Timestamp.now();
+    final perAnimal = animals.isNotEmpty && animalIndexes != null && animalIndexes.isNotEmpty;
+    if (perAnimal) {
+      for (final i in animalIndexes) {
+        if (i < 0 || i >= animals.length) continue;
+        animals[i] = {
+          ...animals[i],
+          'postTreatmentAction': 'release',
+          'postTreatmentStartedAt': now,
+          'releaseCompletedAt': now,
+        };
+      }
+    }
     await _caseDoc(caseId).update({
-      'status': RescueStatus.completed.firestoreValue,
+      'status': perAnimal ? (_deriveCaseStatusOverride(animals) ?? RescueStatus.completed.firestoreValue) : RescueStatus.completed.firestoreValue,
       'releasedToReporterId': reporterId,
       'releasedToReporterName': reporterName,
-      'releasedAt': Timestamp.now(),
+      'releasedAt': now,
       'releaseNotes': notes,
+      if (perAnimal) 'animals': animals,
+      if (perAnimal) ..._stageSummaryUpdate(animals),
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Release confirmed — handed off to $reporterName.', 'timestamp': Timestamp.now()}
+        {'status': 'Release confirmed — handed off to $reporterName.', 'timestamp': now}
       ]),
     });
     await addActivityLog(
@@ -1787,6 +2014,107 @@ class RescueCaseRepository {
       actorName: actorName,
       details: {'reporterId': reporterId, 'reporterName': reporterName},
     );
+  }
+
+  /// Marks the given animals as committed to the Intake path (spec §8/§9)
+  /// — called the moment the admin confirms their animal selection on
+  /// Treatment Details' Intake action, before IntakeDetailPage even opens,
+  /// so the case immediately shows up under the Intake tab for these
+  /// animals (via `activeAnimalStages`) while any other animal stays under
+  /// Treatment (spec §7). A no-op for a legacy case with no `animals[]`
+  /// array — that flow never shows the animal-selection step at all (see
+  /// TreatmentDetailPage), so this is never called for one.
+  Future<void> assignIntakeAction({
+    required String caseId,
+    required List<int> animalIndexes,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) throw StateError('This case no longer exists.');
+      final animals = List<Map<String, dynamic>>.from(
+        (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      );
+      if (animals.isEmpty) return;
+      final now = Timestamp.now();
+      for (final i in animalIndexes) {
+        if (i < 0 || i >= animals.length) continue;
+        final a = animals[i];
+        if (a['outcome'] == 'deceased' || a['dischargedAt'] == null || a['postTreatmentAction'] != null) {
+          throw StateError('One or more selected animals are not eligible for this action.');
+        }
+        animals[i] = {...a, 'postTreatmentAction': 'intake', 'postTreatmentStartedAt': now};
+      }
+      tx.update(caseRef, {
+        'animals': animals,
+        ..._stageSummaryUpdate(animals),
+        'status': _deriveCaseStatusOverride(animals) ?? (data['status'] as String? ?? RescueStatus.treatment.firestoreValue),
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Selected animal(s) moved to Intake.', 'timestamp': now}
+        ]),
+      });
+    });
+  }
+
+  /// Per-animal Intake completion (spec §9) — sibling to
+  /// [checkAndCompleteIntakeIfDue], for a case that has an `animals[]`
+  /// array and therefore may have OTHER animals still active elsewhere
+  /// (still in Treatment, or on a separate Intake/Transfer/Release path) —
+  /// completing this subset's Intake must never require or wait on any
+  /// other animal's own treatment/record to finish, and must never mark
+  /// animals outside [animalIndexes] complete. Only touches animals that
+  /// are actually mid-Intake (`postTreatmentAction == 'intake'`, not
+  /// already completed) — safe to call redundantly. A no-op for a legacy
+  /// case with no `animals[]` array; callers keep using
+  /// [checkAndCompleteIntakeIfDue] for that case shape.
+  Future<void> completeIntakeForAnimals({
+    required String caseId,
+    required List<int> animalIndexes,
+  }) async {
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      final animals = List<Map<String, dynamic>>.from(
+        (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      );
+      if (animals.isEmpty) return;
+      final now = Timestamp.now();
+      var changed = false;
+      for (final i in animalIndexes) {
+        if (i < 0 || i >= animals.length) continue;
+        if (animals[i]['postTreatmentAction'] != 'intake' || animals[i]['intakeCompletedAt'] != null) continue;
+        animals[i] = {...animals[i], 'intakeCompletedAt': now};
+        changed = true;
+      }
+      if (!changed) return;
+      tx.update(caseRef, {
+        'animals': animals,
+        ..._stageSummaryUpdate(animals),
+        'status': _deriveCaseStatusOverride(animals) ?? (data['status'] as String? ?? RescueStatus.intake.firestoreValue),
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Intake completed for the selected animal(s).', 'timestamp': now}
+        ]),
+      });
+    });
+  }
+
+  /// Cases with at least one animal currently in [stage] according to the
+  /// denormalized `activeAnimalStages` field (spec §7) — catches a
+  /// mixed-stage case whose scalar `status` no longer reflects every
+  /// animal's own state (e.g. one animal already moved to Intake while
+  /// another is still in_treatment, so `status` stays 'in_treatment' — see
+  /// [_deriveCaseStatusOverride]). Callers merge this with the existing
+  /// [streamCasesByStatuses] result and de-duplicate by id, so a legacy
+  /// case with no `activeAnimalStages` written yet (every case predating
+  /// this round) still appears via its scalar `status` exactly as before.
+  Stream<List<RescueCase>> streamCasesByActiveStage(String stage) {
+    return _cases
+        .where('activeAnimalStages', arrayContains: stage)
+        .snapshots()
+        .map((snap) => snap.docs.map(RescueCase.fromFirestore).where(_isPrimaryGroupMember).toList());
   }
 
   Future<void> closeDeceasedCase({required String caseId}) async {
@@ -1846,11 +2174,23 @@ class RescueCaseRepository {
     await _db.runTransaction((tx) async {
       final caseSnap = await tx.get(caseRef);
       if (!caseSnap.exists) throw StateError('Case not found.');
-      if (caseSnap.data()?['intakeConfirmedAt'] != null) return; // already confirmed
+      final caseData = caseSnap.data();
+      if (caseData?['intakeConfirmedAt'] != null) return; // already confirmed
+
+      // A mixed-stage case (spec §7) may still have another animal active
+      // in Treatment while this Intake leg is confirmed — status must not
+      // be forced to 'intake' in that case, or the case would wrongly
+      // disappear from the Treatment tab's status-based query. Falls back
+      // to the original unconditional 'intake' write for a legacy case
+      // with no `animals[]` array.
+      final animalsRaw = List<Map<String, dynamic>>.from(
+        (caseData?['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      );
+      final statusOverride = _deriveCaseStatusOverride(animalsRaw) ?? RescueStatus.intake.firestoreValue;
 
       final now = Timestamp.now();
       tx.update(caseRef, {
-        'status': RescueStatus.intake.firestoreValue,
+        'status': statusOverride,
         'intakeDestinationName': destinationName,
         'intakeDestinationAddress': destinationAddress,
         'intakeDestinationPlaceId': destinationPlaceId,

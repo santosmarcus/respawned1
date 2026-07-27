@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
@@ -130,9 +131,15 @@ class ActivityCard extends StatelessWidget{
     return  GestureDetector(
       onTap: () {
         if(item.type == ActivityType.rescue){
+          // A Community-Adoption-eligible rejection routes to the CA
+          // tracking page instead of the normal (now read-only) Track Case
+          // page — an ordinary rejection just opens Track Case, which has
+          // no admin-only actions for the reporter to begin with.
           Navigator.push(context,
             MaterialPageRoute(
-              builder: (_) => TrackCasePage(caseId: item.docId),
+              builder: (_) => item.isRejected && item.communityAdoptionEligible
+                  ? CommunityAdoptionTrackPage(caseId: item.docId)
+                  : TrackCasePage(caseId: item.docId),
             ),
           );
         } else if (item.type == ActivityType.adoption){
@@ -250,6 +257,57 @@ class ActivityCard extends StatelessWidget{
                           ]),
                         ],
 
+                        // Rejected Rescue Reports spec §2 — a clear
+                        // "Rejected" state plus reason/date. Deliberately
+                        // compact (single-line reason, no reviewer line, no
+                        // duplicate CA chip — the status row below already
+                        // becomes "View Community Adoption →" when
+                        // eligible) so this block has a bounded height and
+                        // never overflows the fixed-height Home carousel
+                        // card (Activity Card Overflow spec §12). The full
+                        // reason/reviewer/date detail still lives on
+                        // History's rejected card and admin Rescue Details.
+                        if (item.isRejected) ...[
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE05353).withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(children: [
+                                  const Icon(Icons.block, size: 14, color: Color(0xFFE05353)),
+                                  const SizedBox(width: 6),
+                                  Text('Rejected',
+                                      style: GoogleFonts.zain(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFFE05353))),
+                                ]),
+                                if (item.rejectionReasonLabel != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text('Reason: ${item.rejectionReasonLabel}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                                ],
+                                if (item.rejectedAt != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text('Rejected on ${_formatDate(item.rejectedAt!)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+
                         const SizedBox(height: 8),
 
                         // Status row
@@ -258,7 +316,7 @@ class ActivityCard extends StatelessWidget{
                           children: [
                             Expanded(
                               child: Text(
-                                item.status,
+                                item.isRejected ? 'Rejected' : item.status,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.zain(
@@ -272,7 +330,9 @@ class ActivityCard extends StatelessWidget{
                                 item.type == ActivityType.adoption ||
                                 item.type == ActivityType.lostFoundPet)
                               Text(
-                                'View details →',
+                                item.isRejected && item.communityAdoptionEligible
+                                    ? 'View Community Adoption →'
+                                    : 'View details →',
                                 style: GoogleFonts.zain(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
@@ -296,4 +356,12 @@ class ActivityCard extends StatelessWidget{
 
 
 
+}
+
+String _formatDate(DateTime d) {
+  const months = [
+    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
+    'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  return '${months[d.month]} ${d.day}, ${d.year}';
 }

@@ -15,6 +15,8 @@ import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/core/utils/transporter_ranking.dart';
+import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
@@ -101,6 +103,9 @@ class _RiderVm {
   final bool isDemo;
   final _RiderAvailability availability;
   final double distanceKm;
+  final VehicleCategory vehicleCategory;
+  final int compatibilityScore;
+  final bool isPreferred;
 
   const _RiderVm({
     required this.uid,
@@ -113,7 +118,26 @@ class _RiderVm {
     required this.isDemo,
     required this.availability,
     required this.distanceKm,
+    required this.vehicleCategory,
+    required this.compatibilityScore,
+    this.isPreferred = false,
   });
+
+  _RiderVm copyWith({bool? isPreferred}) => _RiderVm(
+        uid: uid,
+        name: name,
+        type: type,
+        position: position,
+        vehicle: vehicle,
+        plate: plate,
+        photoUrl: photoUrl,
+        isDemo: isDemo,
+        availability: availability,
+        distanceKm: distanceKm,
+        vehicleCategory: vehicleCategory,
+        compatibilityScore: compatibilityScore,
+        isPreferred: isPreferred ?? this.isPreferred,
+      );
 }
 
 class AssignRiderPage extends ConsumerStatefulWidget {
@@ -149,6 +173,23 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
   GoogleMapController? _mapController;
   bool _hasFitCamera = false;
+
+  // Progressive Search Radius spec — no organization-settings model exists
+  // yet to source a real configured starting/max radius from (see
+  // organization_model.dart, which has no settings sub-object at all), so
+  // these are the documented defaults to migrate to org config later.
+  static const List<double> _radiusStepsKm = [3, 5, 10, 20];
+  double _currentRadiusKm = _radiusStepsKm.first;
+  double get _maxRadiusKm => _radiusStepsKm.last;
+  bool _autoExpanding = false;
+
+  void _expandRadius() {
+    final next = _radiusStepsKm.firstWhere((r) => r > _currentRadiusKm, orElse: () => _maxRadiusKm);
+    if (next == _currentRadiusKm) return;
+    setState(() => _currentRadiusKm = next);
+  }
+
+  void _resetRadius() => setState(() => _currentRadiusKm = _radiusStepsKm.first);
 
   /// Guards reconcileStaleOffer against being fired again on every rebuild
   /// while its own write is still in flight (the write itself is already
@@ -322,6 +363,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     LatLng center,
     List<PetTransporter> transporters,
     Map<String, TransportAssignmentStatus> activeByRider,
+    AnimalTransportProfile animalProfile,
   ) {
     final onlineTransporters = transporters.where((t) => t.isOnline).toList();
     double distanceFor(LatLng pos) =>
@@ -334,6 +376,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       required String plate,
     }) {
       final pos = _positionFor(center, uid);
+      final category = classifyVehicle(vehicle);
       return _RiderVm(
         uid: uid,
         name: name,
@@ -345,6 +388,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         isDemo: true,
         availability: _availabilityFor(uid, activeByRider),
         distanceKm: distanceFor(pos),
+        vehicleCategory: category,
+        compatibilityScore: vehicleCompatibilityScore(category, animalProfile),
       );
     }
 
@@ -369,6 +414,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
     final realRiders = onlineTransporters.map((t) {
       final pos = _positionFor(center, t.uid);
+      final category = classifyVehicle(t.vehicleType);
       return _RiderVm(
         uid: t.uid,
         name: t.name,
@@ -380,10 +426,20 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         isDemo: false,
         availability: _availabilityFor(t.uid, activeByRider),
         distanceKm: distanceFor(pos),
+        vehicleCategory: category,
+        compatibilityScore: vehicleCompatibilityScore(category, animalProfile),
       );
     }).toList();
 
     int byDistance(_RiderVm a, _RiderVm b) => a.distanceKm.compareTo(b.distanceKm);
+    // Transporter Ranking spec — within the Available bucket, the best
+    // vehicle/capacity match ranks first; distance only breaks ties within
+    // the same compatibility score, never overriding it (a compatible
+    // transporter farther away still outranks an incompatible closer one).
+    int byCompatibilityThenDistance(_RiderVm a, _RiderVm b) {
+      final byScore = b.compatibilityScore.compareTo(a.compatibilityScore);
+      return byScore != 0 ? byScore : byDistance(a, b);
+    }
 
     // Demo transporters are only pinned above the real-available group
     // while they themselves are Available. The moment one goes Pending or
@@ -396,8 +452,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
     final demoAvailable = demoRiders.where((r) => r.availability == _RiderAvailability.available).toList()
       ..sort(byDistance);
-    final available = realRiders.where((r) => r.availability == _RiderAvailability.available).toList()
-      ..sort(byDistance);
+    var available = realRiders.where((r) => r.availability == _RiderAvailability.available).toList()
+      ..sort(byCompatibilityThenDistance);
+    // The single top-ranked real, available transporter is labeled
+    // Preferred — every other eligible transporter stays listed below it,
+    // never hidden.
+    if (available.isNotEmpty) {
+      available = [available.first.copyWith(isPreferred: true), ...available.skip(1)];
+    }
     final pending = allRiders.where((r) => r.availability == _RiderAvailability.pending).toList()
       ..sort(byDistance);
     final busy = allRiders.where((r) => r.availability == _RiderAvailability.busy).toList()
@@ -442,14 +504,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     }
 
     final caseData = _currentCaseData();
-    final caseBiteRisk = caseData['biteRisk'] as String?;
-    final caseEscapeRisk = caseData['escapeRisk'] as String?;
-    if (hasHighRescueRisk(biteRisk: caseBiteRisk, escapeRisk: caseEscapeRisk)) {
-      final acknowledged = await confirmHighRiskAcknowledgment(
-        context,
-        biteRisk: caseBiteRisk,
-        escapeRisk: caseEscapeRisk,
-      );
+    final caseHighRiskAnimals = highRiskAnimalsIn(
+      animals: caseData['animals'] as List?,
+      legacyBiteRisk: caseData['biteRisk'] as String?,
+      legacyEscapeRisk: caseData['escapeRisk'] as String?,
+    );
+    if (caseHighRiskAnimals.isNotEmpty) {
+      final acknowledged = await confirmHighRiskAcknowledgment(context, highRiskAnimals: caseHighRiskAnimals);
       if (!acknowledged || !mounted) return;
     }
 
@@ -480,6 +541,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         Navigator.pushReplacement(context, MaterialPageRoute(
             builder: (_) => AdminTrackCasePage(
                 caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode)));
+        break;
+      case _DialogOutcome.acceptedStayHere:
+        // Assignment is accepted/persisted, but the admin chose to stay on
+        // this list (spec §6) — never navigate automatically. Keep the
+        // rider selected so its card highlight/Accepted state stays visible;
+        // the "Continue to Tracking" banner (build()) is the deliberate,
+        // manual next step from here.
         break;
       case _DialogOutcome.declined:
       case _DialogOutcome.offerCancelled:
@@ -563,7 +631,43 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     final activeByRider =
         ref.watch(activeAssignmentsByRiderProvider).asData?.value ?? const <String, TransportAssignmentStatus>{};
 
-    final riders = _buildRiderVms(riderCenter, transporters, activeByRider);
+    final animals = (d['animals'] as List?) ?? const [];
+    final animalProfile = AnimalTransportProfile(
+      hasLargeAnimal: animals.any((a) => a is Map && a['size'] == 'Large'),
+      animalCount: animals.isEmpty ? 1 : animals.length,
+      needsSpecialHandling: highRiskAnimalsIn(
+        animals: d['animals'] as List?,
+        legacyBiteRisk: d['biteRisk'] as String?,
+        legacyEscapeRisk: d['escapeRisk'] as String?,
+      ).isNotEmpty,
+    );
+    final riders = _buildRiderVms(riderCenter, transporters, activeByRider, animalProfile);
+
+    // Progressive Search Radius spec — only riders within the current
+    // radius are actually shown/selectable; the underlying compatibility/
+    // availability ordering from _buildRiderVms is preserved by filtering
+    // rather than re-sorting.
+    final visibleRiders = riders.where((r) => r.distanceKm <= _currentRadiusKm).toList();
+    final hasAvailableInRadius = visibleRiders.any((r) => r.availability == _RiderAvailability.available);
+    final hasAvailableAnywhere = riders.any((r) => r.availability == _RiderAvailability.available);
+    final atMaxRadius = _currentRadiusKm >= _maxRadiusKm;
+
+    // Auto-expand one step at a time whenever nothing compatible/available
+    // is in range yet but something is further out — never past the
+    // configured maximum, and it stops the moment an available transporter
+    // is found in range. Scheduled after the frame (not during build) so
+    // this triggers a clean, separate rebuild rather than mutating state
+    // mid-build.
+    if (!hasAvailableInRadius && hasAvailableAnywhere && !atMaxRadius && !_autoExpanding) {
+      _autoExpanding = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _autoExpanding = false;
+        _expandRadius();
+      });
+    } else if (hasAvailableInRadius || atMaxRadius) {
+      _autoExpanding = false;
+    }
 
     // Startup / reopen resolution (spec §4): this case may already have a
     // valid pending offer outstanding (e.g. the admin backgrounded the app
@@ -580,6 +684,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         _reconcileIfStale(blockingOffer);
       }
     }
+
+    // Set once the admin closes the accepted dialog with "Close" instead of
+    // "View Transport Tracking" (spec §6) — shows a persistent, explicit
+    // "Continue to Tracking" banner instead of ever auto-navigating there.
+    final acceptedAssignment =
+        currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.accepted
+            ? currentAssignment
+            : null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -613,7 +725,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(d['animalType'] ?? 'Animal',
+                    Text(
+                        species_summary_util.summarizeSpecies(
+                            animals: d['animals'] as List?, legacyAnimalType: d['animalType'] as String?),
                         style: GoogleFonts.tiltWarp(
                             fontSize: 22, color: AppColors.textPrimary)),
                     Text(
@@ -643,10 +757,11 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: RescueRiskBanner(
-              biteRisk: d['biteRisk'] as String?,
-              escapeRisk: d['escapeRisk'] as String?,
-              safetyIndicators: List<String>.from(d['safetyIndicators'] ?? const []),
-              handlingNotes: d['handlingNotes'] as String?,
+              highRiskAnimals: highRiskAnimalsIn(
+                animals: d['animals'] as List?,
+                legacyBiteRisk: d['biteRisk'] as String?,
+                legacyEscapeRisk: d['escapeRisk'] as String?,
+              ),
             ),
           ),
 
@@ -671,10 +786,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                           Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
                         },
                         initialCameraPosition: CameraPosition(target: caseLocation, zoom: 13),
-                        markers: _buildMarkers(caseLocation, riders),
+                        markers: _buildMarkers(caseLocation, visibleRiders),
                         onMapCreated: (ctrl) {
                           _mapController = ctrl;
-                          _fitCameraOnce(caseLocation, riders);
+                          _fitCameraOnce(caseLocation, visibleRiders);
                         },
                         myLocationButtonEnabled: false,
                         zoomControlsEnabled: false,
@@ -686,18 +801,133 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
           const SizedBox(height: 16),
 
+          if (acceptedAssignment != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.greenrspwn.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.check_circle, size: 18, color: AppColors.greenrspwn),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Accepted — ${acceptedAssignment.riderName}',
+                            style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      ),
+                    ]),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(
+                            builder: (_) => AdminTrackCasePage(
+                                caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode))),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.yellowrspwn,
+                          foregroundColor: AppColors.textPrimary,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        ),
+                        child: Text('Continue to Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          if (acceptedAssignment != null) const SizedBox(height: 16),
+
           if (blockingOffer != null)
             _pendingOfferPanel(blockingOffer)
           else ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Transporters',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 16, color: AppColors.textPrimary)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Transporters',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 16, color: AppColors.textPrimary)),
+                  Text('${_currentRadiusKm.toStringAsFixed(0)} km radius · ${visibleRiders.length} found',
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                ],
               ),
             ),
+
+            // Progressive Search Radius spec — status/manual controls.
+            // Shown whenever nothing available is in range yet, so the
+            // admin always knows why the list looks thin and can act
+            // (expand sooner, or refresh) without waiting for auto-expand.
+            if (!hasAvailableInRadius) ...[
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.yellowrspwn.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        atMaxRadius
+                            ? (hasAvailableAnywhere
+                                // Shouldn't happen (max radius should contain
+                                // everyone), kept only as a safe fallback.
+                                ? 'No available transporters in range.'
+                                : 'No compatible transporters are currently available. Try again later or use manual assignment.')
+                            : hasAvailableAnywhere
+                                ? 'No available transporters nearby. Expanding the search radius…'
+                                : 'No available transporters nearby.',
+                        style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                      ),
+                      if (atMaxRadius)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text('Maximum search radius reached (${_maxRadiusKm.toStringAsFixed(0)} km).',
+                              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if (!atMaxRadius)
+                            OutlinedButton(
+                              onPressed: _expandRadius,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text('Expand Now', style: TextStyle(fontSize: 12)),
+                            ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                            onPressed: _resetRadius,
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: const Text('Refresh', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
 
             const SizedBox(height: 8),
 
@@ -705,9 +935,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             // transporters pinned above the real-Available group only while
             // they're Available themselves, then real transporters grouped
             // available -> pending -> busy, each by distance. Pending/busy
-            // transporters stay visible, just not selectable.
+            // transporters stay visible, just not selectable. Filtered to
+            // the current search radius (Progressive Search Radius spec) —
+            // scroll position/list identity otherwise untouched by radius
+            // changes since this is the same ListView, just fewer/more items.
             Expanded(
-              child: riders.isEmpty
+              child: visibleRiders.isEmpty
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.all(24),
@@ -719,16 +952,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                       ),
                     )
                   : ListView.separated(
+                      key: const PageStorageKey('assign_rider_list'),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: riders.length,
+                      itemCount: visibleRiders.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, index) {
-                        final rider = riders[index];
+                        final rider = visibleRiders[index];
                         final isSelected = _selectedRiderUid == rider.uid;
                         return _RiderCard(
                           rider: rider,
                           isSelected: isSelected,
                           onSelect: () => _selectRider(rider),
+                          animalProfile: animalProfile,
                         );
                       },
                     ),
@@ -746,7 +981,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(riders),
+                  onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(visibleRiders),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.yellowrspwn,
                     disabledBackgroundColor: AppColors.slaterspwn,
@@ -779,11 +1014,13 @@ class _RiderCard extends StatelessWidget {
   final _RiderVm rider;
   final bool isSelected;
   final VoidCallback onSelect;
+  final AnimalTransportProfile animalProfile;
 
   const _RiderCard({
     required this.rider,
     required this.isSelected,
     required this.onSelect,
+    required this.animalProfile,
   });
 
   (String, Color, Color) _statusChip() => switch (rider.availability) {
@@ -871,15 +1108,37 @@ class _RiderCard extends StatelessWidget {
                       ],
                     ],
                   ),
+                  // Transporter Ranking spec — "Preferred" is shown as an
+                  // explicit reason, never a silent reordering; every other
+                  // eligible transporter is still listed (and tappable)
+                  // below, just without this badge.
+                  if (rider.isPreferred) ...[
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.greenrspwn.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text('Preferred',
+                          style: GoogleFonts.zain(
+                              fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.greenrspwn)),
+                    ),
+                  ],
                   const SizedBox(height: 2),
-                  Text('${rider.distanceKm.toStringAsFixed(1)} km',
+                  Text('${rider.distanceKm.toStringAsFixed(1)} km away',
+                      style: GoogleFonts.zain(
+                          fontSize: 12, color: AppColors.textSecondary)),
+                  Text(compatibilityReason(rider.vehicleCategory, animalProfile),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.zain(
                           fontSize: 12, color: AppColors.textSecondary)),
                   Text('${rider.plate}  ${rider.vehicle}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.zain(
-                          fontSize: 12, color: AppColors.textSecondary)),
+                          fontSize: 11, color: AppColors.textSecondary)),
                 ],
               ),
             ),
@@ -974,7 +1233,13 @@ class _Avatar extends StatelessWidget {
 /// without writing anything new here — "View Pending" (an existing pending
 /// offer) and "Track Case" (an existing accepted assignment) both just open
 /// Track Case, which already renders the right pending/accepted view.
-enum _DialogOutcome { cancelled, accepted, declined, offerCancelled, viewExisting }
+// [acceptedStayHere] (Keep Assign Transporter on the list screen spec §6) —
+// the assignment IS accepted/persisted exactly like [accepted], but the
+// admin chose "Close" instead of "View Transport Tracking": the caller must
+// NOT navigate away, staying on this same list with the accepted card shown
+// in its own clear state, so continuing to tracking is always a separate,
+// manual action rather than automatic.
+enum _DialogOutcome { cancelled, accepted, acceptedStayHere, declined, offerCancelled, viewExisting }
 
 enum _ModalPhase { confirmation, creating, cancelling, pending, accepted, declined, cancelled, error, conflict }
 
@@ -1519,6 +1784,13 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         // _back) — the admin closes them explicitly here, which is also
         // the one moment the caller is allowed to navigate to Track Case.
         _ModalPhase.accepted => [
+            // "Close" keeps the admin on Assign Transporter — the accepted
+            // card/state stays visible there, and continuing to tracking
+            // becomes a separate, deliberate next step instead of automatic.
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(_DialogOutcome.acceptedStayHere),
+              child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+            ),
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
               style: ElevatedButton.styleFrom(

@@ -3,9 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/utils/animal_treatment_state.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -46,6 +50,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     RescuePipelineTab.ongoing: Icons.local_shipping_outlined,
     RescuePipelineTab.treatment: Icons.medical_services_outlined,
     RescuePipelineTab.intake: Icons.pets_outlined,
+    RescuePipelineTab.rejected: Icons.block_outlined,
   };
 
   @override
@@ -54,7 +59,23 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     super.dispose();
   }
 
-  void _navigateToDetail(BuildContext context, RescueCase c) {
+  void _navigateToDetail(BuildContext context, RescueCase c, {String? stageFilter}) {
+    // A case reached via the Intake tab (spec §7) may still carry
+    // `status: 'in_treatment'` if another animal on it is still active
+    // there (see RescueCaseRepository's `_deriveCaseStatusOverride`) — the
+    // admin tapped it from Intake, so it must open Intake Details for
+    // exactly the animals in that stage, not fall through to Treatment
+    // Details via the plain status switch below.
+    if (stageFilter == 'intake' && c.animals.isNotEmpty) {
+      final indexes = animalIndexesInStage(c, 'intake');
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => IntakeDetailPage(caseId: c.id, data: c.raw, animalIndexes: indexes.isEmpty ? null : indexes),
+        ),
+      );
+      return;
+    }
     // The dedicated pipeline screens still take (caseId, Map<String,dynamic>
     // data) — `c.raw` is the full original document, so this stays a
     // drop-in for all of their existing logic.
@@ -147,7 +168,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
               itemBuilder: (context, index) {
                 final tab = RescuePipelineTab.values[index];
                 final isSelected = selectedTab == tab && filters.statusOverride == null;
-                final badgeAsync = ref.watch(casesByStatusesProvider(tab.statuses));
+                final badgeAsync = ref.watch(casesForTabProvider(tab));
                 final badgeCount = badgeAsync.asData?.value.length ?? 0;
 
                 return GestureDetector(
@@ -338,6 +359,10 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   );
                 }
                 return ListView.separated(
+                  // Navigation State spec §11 — keyed per tab/status-filter
+                  // so each pipeline tab keeps its own scroll offset instead
+                  // of sharing one position across differently-scoped lists.
+                  key: PageStorageKey('rescue_reports_list_${filters.statusOverride?.name ?? selectedTab.name}'),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: cases.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -348,12 +373,78 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                     // AssignRiderPage, reached once status is
                     // awaitingAssignment.
                     final canHavePendingOffer = c.status == RescueStatus.awaitingAssignment;
+                    // Stage-filtered card display (spec §7) — only for the
+                    // two tabs a case can appear under via
+                    // activeAnimalStages while its own animals sit in
+                    // different phases.
+                    final stageFilter = filters.statusOverride == null
+                        ? switch (selectedTab) {
+                            RescuePipelineTab.treatment => 'in_treatment',
+                            RescuePipelineTab.intake => 'intake',
+                            _ => null,
+                          }
+                        : null;
+                    if (c.status == RescueStatus.rejected) {
+                      // Rejected-tab only: rejected-by comes from the
+                      // per-case activityLogs subcollection, so this is the
+                      // one card variant with its own listener (same
+                      // reasoning as the Assign-tab's pending-offer watch
+                      // below) — every other tab avoids it entirely.
+                      return Consumer(
+                        builder: (context, ref, _) {
+                          final logs =
+                              ref.watch(caseActivityLogsProvider(c.id)).asData?.value ?? const <ActivityLogEntry>[];
+                          ActivityLogEntry? rejectionLog;
+                          for (final l in logs) {
+                            if (l.action != 'rejected') continue;
+                            final current = rejectionLog;
+                            final lTimestamp = l.timestamp;
+                            final currentTimestamp = current?.timestamp;
+                            if (current == null ||
+                                (lTimestamp != null &&
+                                    (currentTimestamp == null || lTimestamp.isAfter(currentTimestamp)))) {
+                              rejectionLog = l;
+                            }
+                          }
+                          final reason = c.rejectionReason;
+                          final reasonLabel = reason == RejectionReason.other
+                              ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false
+                                  ? c.rejectionReasonOther!
+                                  : 'Other')
+                              : (reason?.label ?? 'Not specified');
+                          DateTime? rejectedDate;
+                          for (final h in c.statusHistory) {
+                            if (h.status.startsWith('Case rejected') && h.timestamp != null) {
+                              rejectedDate = h.timestamp;
+                            }
+                          }
+                          final eligible = isCommunityAdoptionEligible(
+                            status: c.status.firestoreValue,
+                            rejectionReason: reason?.name,
+                            rescueType: c.raw['rescueType'] as String?,
+                          );
+                          return RescueCaseCard(
+                            rescueCase: c,
+                            showStatusChip: filters.statusOverride != null,
+                            rejectionInfo: RejectionCardInfo(
+                              reporterName: c.reporterName,
+                              reasonLabel: reasonLabel,
+                              rejectedDate: rejectedDate,
+                              rejectedBy: rejectionLog?.actorName,
+                              communityAdoptionEligible: eligible,
+                            ),
+                            onTap: () => _navigateToDetail(context, c),
+                          );
+                        },
+                      );
+                    }
                     if (!canHavePendingOffer) {
                       return RescueCaseCard(
                         rescueCase: c,
                         showStatusChip: filters.statusOverride != null,
                         highlightBorder: c.status == RescueStatus.pendingReview,
-                        onTap: () => _navigateToDetail(context, c),
+                        stageFilter: stageFilter,
+                        onTap: () => _navigateToDetail(context, c, stageFilter: stageFilter),
                       );
                     }
                     // Assign-tab cases only: watch the current offer so the

@@ -188,6 +188,7 @@ class _PublicRescueFeedState extends State<PublicRescueFeed> {
                     ? 'No reports within ${_kNearbyRadiusKm.toStringAsFixed(0)}km right now.'
                     : 'No reports match this filter.')
                     : ListView.separated(
+                  key: const PageStorageKey('public_rescue_feed_list'),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: visible.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),

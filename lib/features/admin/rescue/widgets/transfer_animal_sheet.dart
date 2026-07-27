@@ -11,18 +11,18 @@ import 'package:respawnd1/features/admin/rescue/widgets/clinic_picker_body.dart'
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/organization_picker_list.dart';
 
-enum _TransferDestinationType { organization, clinic, volunteer }
+enum TransferDestinationType { organization, clinic, volunteer }
 
-extension on _TransferDestinationType {
+extension on TransferDestinationType {
   String get label => switch (this) {
-        _TransferDestinationType.organization => 'Organization',
-        _TransferDestinationType.clinic => 'Clinic',
-        _TransferDestinationType.volunteer => 'Volunteer',
+        TransferDestinationType.organization => 'Organization',
+        TransferDestinationType.clinic => 'Clinic',
+        TransferDestinationType.volunteer => 'Volunteer',
       };
   String get firestoreValue => switch (this) {
-        _TransferDestinationType.organization => 'organization',
-        _TransferDestinationType.clinic => 'clinic',
-        _TransferDestinationType.volunteer => 'volunteer',
+        TransferDestinationType.organization => 'organization',
+        TransferDestinationType.clinic => 'clinic',
+        TransferDestinationType.volunteer => 'volunteer',
       };
 }
 
@@ -49,27 +49,35 @@ extension on _TransferDestinationType {
 /// decline workflow yet — see RescueCaseRepository.transferAnimal's own
 /// TODO. Selecting a destination alone never marks the transfer complete —
 /// that still requires the (not-yet-built) acknowledgement step.
-Future<bool> showTransferAnimalSheet(BuildContext context, {required RescueCase rescueCase}) async {
+Future<bool> showTransferAnimalSheet(
+  BuildContext context, {
+  required RescueCase rescueCase,
+  TransferDestinationType initialType = TransferDestinationType.organization,
+  List<int>? animalIndexes,
+}) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.background,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (_) => _TransferAnimalSheetBody(rescueCase: rescueCase),
+    builder: (_) =>
+        _TransferAnimalSheetBody(rescueCase: rescueCase, initialType: initialType, animalIndexes: animalIndexes),
   );
   return result ?? false;
 }
 
 class _TransferAnimalSheetBody extends ConsumerStatefulWidget {
   final RescueCase rescueCase;
-  const _TransferAnimalSheetBody({required this.rescueCase});
+  final TransferDestinationType initialType;
+  final List<int>? animalIndexes;
+  const _TransferAnimalSheetBody({required this.rescueCase, required this.initialType, this.animalIndexes});
 
   @override
   ConsumerState<_TransferAnimalSheetBody> createState() => _TransferAnimalSheetBodyState();
 }
 
 class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBody> {
-  _TransferDestinationType _type = _TransferDestinationType.organization;
+  late TransferDestinationType _type = widget.initialType;
 
   // Organization branch
   OrgReferralCandidate? _selectedOrg;
@@ -103,22 +111,28 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
       title: 'Select Transfer Clinic',
       confirmLabel: 'Select Clinic',
       initialClinic: _selectedClinic,
+      // The animal's current/admitting clinic must never be selectable as
+      // its own transfer destination (spec §12).
+      excludeClinicPlaceId: source.vetClinicPlaceId,
+      excludeClinicName: source.vetClinicName,
+      excludeClinicLat: source.vetClinicLat,
+      excludeClinicLng: source.vetClinicLng,
     );
     if (picked != null && mounted) setState(() => _selectedClinic = picked);
   }
 
   bool get _hasDestination => switch (_type) {
-        _TransferDestinationType.organization => _selectedOrg != null,
-        _TransferDestinationType.clinic => _selectedClinic != null,
+        TransferDestinationType.organization => _selectedOrg != null,
+        TransferDestinationType.clinic => _selectedClinic != null,
         // No volunteer directory exists yet (spec §5) — never selectable,
         // so this destination type can never be submitted.
-        _TransferDestinationType.volunteer => false,
+        TransferDestinationType.volunteer => false,
       };
 
   String get _destinationName => switch (_type) {
-        _TransferDestinationType.organization => _selectedOrg?.name ?? '',
-        _TransferDestinationType.clinic => _selectedClinic?.name ?? '',
-        _TransferDestinationType.volunteer => '',
+        TransferDestinationType.organization => _selectedOrg?.name ?? '',
+        TransferDestinationType.clinic => _selectedClinic?.name ?? '',
+        TransferDestinationType.volunteer => '',
       };
 
   bool get _canSubmit => _hasDestination && _reasonController.text.trim().isNotEmpty && !_sending;
@@ -141,16 +155,17 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
             targetType: _type.firestoreValue,
             targetName: _destinationName,
             targetContact: _selectedClinic?.phone,
-            targetAddress: _type == _TransferDestinationType.clinic ? _selectedClinic?.address : null,
-            targetOrganizationId: _type == _TransferDestinationType.organization ? _selectedOrg?.id : null,
-            targetClinicPlaceId: _type == _TransferDestinationType.clinic ? _selectedClinic?.placeId : null,
-            targetLat: _type == _TransferDestinationType.clinic ? _selectedClinic?.lat : null,
-            targetLng: _type == _TransferDestinationType.clinic ? _selectedClinic?.lng : null,
+            targetAddress: _type == TransferDestinationType.clinic ? _selectedClinic?.address : null,
+            targetOrganizationId: _type == TransferDestinationType.organization ? _selectedOrg?.id : null,
+            targetClinicPlaceId: _type == TransferDestinationType.clinic ? _selectedClinic?.placeId : null,
+            targetLat: _type == TransferDestinationType.clinic ? _selectedClinic?.lat : null,
+            targetLng: _type == TransferDestinationType.clinic ? _selectedClinic?.lng : null,
             reason: _reasonController.text.trim(),
             transferDate: _transferDate,
             notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
             actorUid: 'admin',
             actorName: 'Admin Staff',
+            animalIndexes: widget.animalIndexes,
           );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -203,7 +218,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
             Wrap(
               spacing: 8,
               children: [
-                for (final t in _TransferDestinationType.values)
+                for (final t in TransferDestinationType.values)
                   ChoiceChip(
                     label: Text(t.label),
                     selected: _type == t,
@@ -221,9 +236,9 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     switch (_type) {
-                      _TransferDestinationType.organization => _organizationBranch(source),
-                      _TransferDestinationType.clinic => _clinicBranch(),
-                      _TransferDestinationType.volunteer => _volunteerBranch(),
+                      TransferDestinationType.organization => _organizationBranch(source),
+                      TransferDestinationType.clinic => _clinicBranch(),
+                      TransferDestinationType.volunteer => _volunteerBranch(),
                     },
                     const SizedBox(height: 14),
 
@@ -314,7 +329,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
       directory: ref.read(organizationDirectoryRepositoryProvider),
       sourceLat: source.lat,
       sourceLng: source.lng,
-      species: source.animalType,
+      species: source.allSpecies,
       selectedOrgId: _selectedOrg?.id,
       shrinkWrap: true,
       onSelect: (org) => setState(() => _selectedOrg = org),

@@ -19,7 +19,9 @@ class OrganizationPickerList extends StatefulWidget {
   final OrganizationDirectoryRepository directory;
   final double? sourceLat;
   final double? sourceLng;
-  final String? species;
+  // Every species the source case covers (RescueCase.allSpecies) — an org
+  // matches if it accepts any one of them, not just the first animal.
+  final List<String>? species;
   final String? selectedOrgId;
   final ValueChanged<OrgReferralCandidate> onSelect;
   final ScrollController? scrollController;

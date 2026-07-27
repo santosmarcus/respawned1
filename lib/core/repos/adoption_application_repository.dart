@@ -10,6 +10,37 @@ import 'package:respawnd1/core/models/adoption/return_request.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 
+/// Result of [AdoptionApplicationRepository.checkAvailability] — what a
+/// prospective adopter should see/do right now for a given animal.
+enum AnimalAdoptionAvailability {
+  /// Free to submit a brand-new application.
+  available,
+
+  /// The current user already has their own active (non-rejected, non-
+  /// withdrawn) application for this animal — resume it, don't duplicate.
+  ownApplicationActive,
+
+  /// `animals/{id}.adoptionStatus == 'reserved'` for a DIFFERENT applicant.
+  reservedForOther,
+
+  /// `animals/{id}.adoptionStatus == 'adopted'`.
+  adopted,
+
+  /// Not reserved/adopted, but also not currently open for applications
+  /// (e.g. still `not_ready`, archived, or the animal doc is missing).
+  unavailable,
+}
+
+class AnimalAvailabilityResult {
+  final AnimalAdoptionAvailability availability;
+
+  /// Set only when [availability] is [AnimalAdoptionAvailability.
+  /// ownApplicationActive] — the existing `adoptions/{id}` to resume.
+  final String? ownApplicationId;
+
+  const AnimalAvailabilityResult(this.availability, {this.ownApplicationId});
+}
+
 /// Firestore access for the existing `adoptions` collection (written by
 /// adoption_process.dart) plus the `animals` collection's reservation/
 /// adopted fields — the admin Adoption Application Review module reuses
@@ -100,6 +131,98 @@ class AdoptionApplicationRepository {
         .where('personal.adopterId', isEqualTo: adopterId)
         .snapshots()
         .map((snap) => snap.docs.map(AdoptionApplication.fromFirestore).toList());
+  }
+
+  /// Whether a NEW application can be submitted right now for this animal,
+  /// and what to tell the user if not — the single source of truth for
+  /// both the "Adopt" tap gate (animal_page.dart) and the actual submit
+  /// gate (adoption_process.dart), replacing two independent, incorrect
+  /// copies that used to block a new applicant merely because *any* other
+  /// non-terminal application existed for the animal (regardless of who
+  /// owned it, and regardless of whether the animal was ever actually
+  /// reserved/adopted).
+  ///
+  /// Correct rule: multiple people may have pending/interview/under-review
+  /// applications for the same animal simultaneously — only the animal's
+  /// own `animals/{id}.adoptionStatus` (set exclusively by [reserve]/
+  /// [release]/[releaseWithFollowUps], all transactional) determines
+  /// whether it's actually taken. [legacyAnimalId] is only ever consulted
+  /// as a fallback join key for pre-animalRecordId applications, never as
+  /// the primary availability signal.
+  Future<AnimalAvailabilityResult> checkAvailability({
+    required String legacyAnimalId,
+    required String animalRecordId,
+    required String uid,
+  }) async {
+    // "Active" here deliberately excludes the terminal-success statuses too
+    // (completed/return_requested/return_approved) — those are handled by
+    // the caller's own post-adoption routing (see animal_page.dart's
+    // myCompletedDoc), not by this "should I resume an in-progress form"
+    // check.
+    bool isActive(String status) =>
+        status != 'rejected' &&
+        status != 'withdrawn' &&
+        status != 'completed' &&
+        status != 'return_requested' &&
+        status != 'return_approved';
+
+    // 1. Does the CURRENT user already have their own active application
+    // for this exact animal? If so, that takes priority over anything
+    // else — they should resume it, never start a second one.
+    final legacyFuture = _adoptions
+        .where('personal.animalId', isEqualTo: legacyAnimalId)
+        .where('personal.adopterId', isEqualTo: uid)
+        .get();
+    final byRecordFuture = animalRecordId.isEmpty
+        ? Future<QuerySnapshot<Map<String, dynamic>>?>.value(null)
+        : _adoptions
+            .where('personal.animalRecordId', isEqualTo: animalRecordId)
+            .where('personal.adopterId', isEqualTo: uid)
+            .get();
+    final ownResults = await Future.wait([legacyFuture, byRecordFuture]);
+
+    for (final snap in ownResults) {
+      if (snap == null) continue;
+      for (final doc in snap.docs) {
+        final status = doc.data()['status'] as String? ?? '';
+        if (isActive(status)) {
+          return AnimalAvailabilityResult(AnimalAdoptionAvailability.ownApplicationActive, ownApplicationId: doc.id);
+        }
+      }
+    }
+
+    // 2. No animalRecordId to check against (very old/legacy submission
+    // path) — nothing further to gate on; allow it through rather than
+    // blocking on missing data.
+    if (animalRecordId.isEmpty) {
+      return const AnimalAvailabilityResult(AnimalAdoptionAvailability.available);
+    }
+
+    // 3. The animal's own authoritative state — this is what [reserve]
+    // actually checks/sets transactionally, so it's the only thing that
+    // can genuinely make the animal unavailable to a new applicant.
+    final animalSnap = await _animals.doc(animalRecordId).get();
+    final animalData = animalSnap.data();
+    if (animalData == null) {
+      return const AnimalAvailabilityResult(AnimalAdoptionAvailability.unavailable);
+    }
+    if (animalData['archived'] == true) {
+      return const AnimalAvailabilityResult(AnimalAdoptionAvailability.unavailable);
+    }
+
+    final adoptionStatus = animalData['adoptionStatus'] as String?;
+    switch (adoptionStatus) {
+      case 'adopted':
+        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.adopted);
+      case 'reserved':
+        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.reservedForOther);
+      case 'adoptable':
+        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.available);
+      default:
+        // 'not_ready' or any unrecognized/missing value — not currently
+        // open for applications, but not reserved/adopted either.
+        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.unavailable);
+    }
   }
 
   Stream<List<Map<String, dynamic>>> streamNotes(String applicationId) {
@@ -438,6 +561,29 @@ class AdoptionApplicationRepository {
     return _followUpsOf(applicationId).orderBy('sequenceNumber').snapshots().map(
           (snap) => snap.docs.map(FollowUpRecord.fromFirestore).toList(),
     );
+  }
+
+  /// Every follow-up across every application that is overdue right now —
+  /// "overdue" here is [FollowUpRecord.displayStatus]'s own existing
+  /// definition (past its own [FollowUpRecord.scheduledDate] while still
+  /// scheduled/reminderSent), never an invented admin-configurable window.
+  /// Filters to the two non-terminal statuses server-side (a follow-up
+  /// that's completed/cancelled/submitted/confirmed can never be "overdue"),
+  /// then the actual date comparison client-side, so this stays a bounded
+  /// read of only-still-open follow-ups rather than the whole collection
+  /// group.
+  Stream<List<FollowUpRecord>> streamOverdueFollowUps() {
+    return _db
+        .collectionGroup('followUps')
+        .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name])
+        .snapshots()
+        .map((snap) {
+      final now = DateTime.now();
+      return snap.docs
+          .map(FollowUpRecord.fromFirestore)
+          .where((f) => f.displayStatus(now) == 'Overdue')
+          .toList();
+    });
   }
 
   // ---- Release Details (pre-release) ------------------------------------

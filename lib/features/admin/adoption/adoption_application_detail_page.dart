@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -76,15 +77,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
         .completeInterview(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
   }
 
-  Future<void> _markNoShow(AdoptionApplication app) async {
-    final confirmed = await showConfirmActionDialog(context,
-        title: 'Mark as No-show?',
-        message: 'This records that the applicant did not attend. It does not reject the application automatically.',
-        confirmLabel: 'Mark No-show');
-    if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).markNoShow(applicationId: app.id, actorName: _actorName));
-  }
-
   Future<void> _reschedule(AdoptionApplication app) async {
     final result = await showInterviewRescheduleSheet(
       context,
@@ -100,11 +92,64 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
           type: result.type,
           actorName: _actorName,
         ));
+    // Zoom interview spec — only ever created for an Online interview,
+    // never for On-site (and never blocks the appointment save above,
+    // which already completed either way). Deliberately outside _run so a
+    // Zoom failure shows its own retry action without re-litigating
+    // whether the appointment itself saved.
+    if (mounted && result.type == 'Online') {
+      await _setupZoomMeeting(app.id, result.date, result.time);
+    }
   }
 
-  Future<void> _setFitAssessment(AdoptionApplication app, FitAssessmentValue value) async {
-    await _run(() =>
-        ref.read(adoptionApplicationRepositoryProvider).setManualFitAssessment(applicationId: app.id, value: value, actorName: _actorName));
+  /// appointmentRevision is derived from the date+time themselves (not a
+  /// separate counter) — a duplicate save with the SAME date/time always
+  /// produces the same key, so a Firestore listener rebuild, a reopened
+  /// page, or a duplicate tap on Save never creates a second meeting; an
+  /// actual reschedule changes date/time and therefore the key, which is
+  /// exactly when a new/updated meeting is needed.
+  Future<void> _setupZoomMeeting(String applicationId, DateTime date, String time) async {
+    final revision = '${date.toIso8601String()}_$time';
+    final startTime = DateTime(date.year, date.month, date.day);
+    try {
+      await FirebaseFunctions.instance.httpsCallable('createOrUpdateZoomMeeting').call(<String, dynamic>{
+        'applicationId': applicationId,
+        'appointmentRevision': revision,
+        'topic': 'Adoption Interview',
+        'startTimeIso': startTime.toIso8601String(),
+        'durationMinutes': 30,
+      });
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      final unavailable = e.code == 'failed-precondition';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(unavailable
+            ? 'Online meeting setup is unavailable for this organization.'
+            : 'Could not set up the Zoom meeting.'),
+        backgroundColor: Colors.redAccent,
+        action: unavailable
+            ? null
+            : SnackBarAction(label: 'Retry', onPressed: () => _setupZoomMeeting(applicationId, date, time)),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Could not set up the Zoom meeting.'),
+        backgroundColor: Colors.redAccent,
+        action: SnackBarAction(label: 'Retry', onPressed: () => _setupZoomMeeting(applicationId, date, time)),
+      ));
+    }
+  }
+
+  Future<void> _cancelZoomMeeting(String applicationId) async {
+    try {
+      await FirebaseFunctions.instance.httpsCallable('cancelZoomMeeting').call(<String, dynamic>{'applicationId': applicationId});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not cancel the Zoom meeting: $e'), backgroundColor: Colors.redAccent));
+      }
+    }
   }
 
   Future<void> _saveNote(AdoptionApplication app) async {
@@ -133,6 +178,13 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
           actorUid: _actorUid,
           actorName: _actorName,
         ));
+    // Zoom interview spec — rejecting an application with a scheduled
+    // online interview counts as cancelling that interview: the meeting is
+    // invalidated so the old join link stops working, without deleting the
+    // meeting's history.
+    if (mounted && app.hasActiveZoomMeeting) {
+      await _cancelZoomMeeting(app.id);
+    }
   }
 
   // reserve/unreserve/release all take a real animals/{id} doc id for a
@@ -221,7 +273,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                   const SizedBox(height: 12),
                   _FitAssessmentCard(
                     app: app,
-                    onSelect: (v) => _setFitAssessment(app, v),
                     expanded: _fitAssessmentExpanded,
                     onToggle: () => setState(() => _fitAssessmentExpanded = !_fitAssessmentExpanded),
                   ),
@@ -248,7 +299,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                     app: app,
                     busy: _busy,
                     onCompleteInterview: () => _completeInterview(app),
-                    onNoShow: () => _markNoShow(app),
                     onReschedule: () => _reschedule(app),
                   ),
 
@@ -363,10 +413,9 @@ class _InfoItem extends StatelessWidget {
 
 class _FitAssessmentCard extends ConsumerWidget {
   final AdoptionApplication app;
-  final ValueChanged<FitAssessmentValue> onSelect;
   final bool expanded;
   final VoidCallback onToggle;
-  const _FitAssessmentCard({required this.app, required this.onSelect, required this.expanded, required this.onToggle});
+  const _FitAssessmentCard({required this.app, required this.expanded, required this.onToggle});
 
   Color _bandColor(FitAssessmentBand band) => switch (band) {
         FitAssessmentBand.strong => AppColors.greenrspwn,
@@ -406,27 +455,6 @@ class _FitAssessmentCard extends ConsumerWidget {
             )
           else
             _AssessmentSummary(assessment: assessment, expanded: expanded, onToggle: onToggle, bandColor: _bandColor(assessment.band)),
-
-          const Divider(height: 24),
-          Text('Admin Decision', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Text('Manual assessment: ${app.fitAssessment.label}',
-              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          if (app.fitAssessedBy != null)
-            Text('By ${app.fitAssessedBy} · ${_fmtDate(app.fitAssessedAt)}', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final v in [FitAssessmentValue.goodCandidate, FitAssessmentValue.needsReview, FitAssessmentValue.notRecommended])
-                ChoiceChip(
-                  label: Text(v.label),
-                  selected: app.fitAssessment == v,
-                  selectedColor: AppColors.yellowrspwn,
-                  onSelected: (_) => onSelect(v),
-                ),
-            ],
-          ),
         ],
       ),
     );
@@ -814,13 +842,11 @@ class _AppointmentSection extends StatelessWidget {
   final AdoptionApplication app;
   final bool busy;
   final VoidCallback onCompleteInterview;
-  final VoidCallback onNoShow;
   final VoidCallback onReschedule;
   const _AppointmentSection({
     required this.app,
     required this.busy,
     required this.onCompleteInterview,
-    required this.onNoShow,
     required this.onReschedule,
   });
 
@@ -859,6 +885,17 @@ class _AppointmentSection extends StatelessWidget {
           if (app.interviewCompletedAt != null)
             _InfoItem('Interview Completed', '${_fmtDateTime(app.interviewCompletedAt)}${app.interviewCompletedBy != null ? ' · ${app.interviewCompletedBy}' : ''}'),
           if (app.noShowAt != null) _InfoItem('No-show recorded', _fmtDateTime(app.noShowAt)),
+          // Zoom interview spec — only shown for an Online interview that
+          // actually has a meeting on file; the host start URL is
+          // deliberately never available here (server-side only).
+          if (app.appointmentType == 'Online') ...[
+            if (app.hasActiveZoomMeeting)
+              _InfoItem('Zoom Meeting', app.zoom?['zoomJoinUrl'] as String? ?? kNotProvided)
+            else if (app.zoom != null && app.zoom?['zoomMeetingStatus'] == 'cancelled')
+              _InfoItem('Zoom Meeting', 'Cancelled')
+            else
+              _InfoItem('Zoom Meeting', 'Not yet created — reschedule to retry'),
+          ],
           const SizedBox(height: 8),
           // Once adopted (release completed), the interview loop is over —
           // Complete/Reschedule/No-show no longer make sense and are
@@ -877,18 +914,12 @@ class _AppointmentSection extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (app.interviewCompletedAt == null && app.noShowAt == null) ...[
+                if (app.interviewCompletedAt == null && app.noShowAt == null)
                   ElevatedButton(
                     onPressed: busy ? null : onCompleteInterview,
                     style: _yellowButton(),
                     child: const Text('Complete Interview'),
                   ),
-                  ElevatedButton(
-                    onPressed: busy ? null : onNoShow,
-                    style: _yellowButton(),
-                    child: const Text('Mark as No-show'),
-                  ),
-                ],
                 ElevatedButton(
                   onPressed: busy ? null : onReschedule,
                   style: _yellowButton(),
