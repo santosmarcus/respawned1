@@ -179,6 +179,51 @@ class _RescuePageState extends State<RescuePage> {
         : _lostBreed!;
   }
 
+  // Pet Surrender — its own distinct question set (see _buildSurrenderFields).
+  final TextEditingController _surrenderDurationController = TextEditingController();
+  final TextEditingController _surrenderAgeController = TextEditingController();
+  String? _surrenderReason;
+  final TextEditingController _surrenderReasonOtherController = TextEditingController();
+  final TextEditingController _surrenderExplanationController = TextEditingController();
+  String? _petAcquisitionSource;
+
+  static const List<String> _surrenderReasonOptions = [
+    'Financial difficulties',
+    'Moving/Relocation',
+    'Housing restrictions',
+    'Medical issues (owner)',
+    'Medical issues (pet)',
+    'Behavioral issues',
+    'Compatibility with other pets',
+    'Compatibility with children/family',
+    'Lack of time',
+    'Lifestyle changes',
+    'Owner passed away',
+    'Emergency circumstances',
+    'Other (please specify)',
+  ];
+
+  static const List<String> _acquisitionSourceOptions = [
+    'Breeder',
+    'Stray',
+    'Pet Store',
+    'Rescue Org',
+    'Friend/Family',
+    'Born at home',
+  ];
+
+  // Only these reasons need the reporter to explain what's actually wrong
+  // and what they've already tried — a plain checkbox reason isn't enough
+  // for staff to assess these two specifically.
+  bool get _surrenderNeedsExplanation =>
+      _surrenderReason == 'Medical issues (pet)' ||
+          _surrenderReason == 'Behavioral issues';
+
+  // Once the pet came from another rescue org, this flow is meant to stop
+  // here and redirect the owner back to that org rather than collect a
+  // full surrender case for this one.
+  bool get _isRescueOrgAcquisition => _petAcquisitionSource == 'Rescue Org';
+
   // Finder-side: one card per animal found (supports a multi-animal group case)
   final List<_FoundAnimalEntry> _foundAnimals = [_FoundAnimalEntry()];
   final TextEditingController _finderContactController = TextEditingController();
@@ -186,6 +231,7 @@ class _RescuePageState extends State<RescuePage> {
   bool _finderNeedsRescue = false;
 
   bool get _isLostPetType => _selectedRescueType == 'Lost Pet';
+  bool get _isPetSurrenderType => _selectedRescueType == 'Pet Surrender';
 
   // Rescue Type options — each type carries its own inherent urgency level,
   // so reporters are no longer asked to separately self-assess urgency.
@@ -303,6 +349,10 @@ class _RescuePageState extends State<RescuePage> {
     _rewardAmountController.dispose();
     _ownerContactController.dispose();
     _finderContactController.dispose();
+    _surrenderDurationController.dispose();
+    _surrenderAgeController.dispose();
+    _surrenderReasonOtherController.dispose();
+    _surrenderExplanationController.dispose();
     for (final a in _foundAnimals) {
       a.dispose();
     }
@@ -813,7 +863,7 @@ class _RescuePageState extends State<RescuePage> {
         SnackBar(
           content: Text(
             placeCount == 0
-                ? 'You already have ${_mediaFiles.length} photos added — remove one first.'
+                ? 'You already have ${_mediaFiles.length} photos/videos added — remove one first.'
                 : 'Only $placeCount of ${picked.length} photos were added (max ${_mediaFiles.length} total).',
           ),
           backgroundColor: Colors.redAccent,
@@ -1322,10 +1372,10 @@ class _RescuePageState extends State<RescuePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildLabel('Include images', required: true),
+                  _buildLabel('Include images and videos', required: true),
                   const SizedBox(height: 4),
                   Text(
-                    'Provide actual images of the animal. '
+                    'Provide actual images or videos of the animal. '
                         'At least 2 are required.',
                     style: GoogleFonts.zain(
                         fontSize: 11, color: AppColors.textSecondary),
@@ -1452,7 +1502,9 @@ class _RescuePageState extends State<RescuePage> {
 
                   const SizedBox(height: 20),
 
-                  if (!_isLostPetType) ...[
+                  if (_isPetSurrenderType) ...[
+                    ..._buildSurrenderFields(),
+                  ] else if (!_isLostPetType) ...[
                     if (_selectedRescueType != null) ...[
                       Row(
                         children: [
@@ -1881,7 +1933,9 @@ class _RescuePageState extends State<RescuePage> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _handleSubmit,
+                  onPressed: (_isLoading || (_isPetSurrenderType && _isRescueOrgAcquisition))
+                      ? null
+                      : _handleSubmit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.yellowrspwn,
                     foregroundColor: AppColors.textPrimary,
@@ -2140,6 +2194,146 @@ class _RescuePageState extends State<RescuePage> {
         ),
       ),
     );
+  }
+
+  // Pet Surrender — its own question set, replacing the generic on-site /
+  // coordinate-with-shelter / willing-to-adopt questions (none of which
+  // make sense when the owner is voluntarily surrendering their own pet
+  // and is already right there with it).
+  List<Widget> _buildSurrenderFields() {
+    return [
+      // Describe Condition — still relevant (helps staff prep for intake).
+      _buildLabel('Describe Condition', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(_conditionController, 'Enter condition'),
+      const SizedBox(height: 20),
+
+      _buildLabel('Type of Animal', required: true),
+      const SizedBox(height: 4),
+      Text(
+        'Surrendering more than one? Add each animal below — they will '
+            'be tracked together as one case.',
+        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+      ),
+      const SizedBox(height: 10),
+      ..._buildAnimalEntryFields(),
+      const SizedBox(height: 20),
+
+      _buildLabel('How long has the pet been staying with you?', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(_surrenderDurationController, 'e.g. 2 years, since it was a puppy'),
+      const SizedBox(height: 20),
+
+      _buildLabel('Age of the pet', required: true),
+      const SizedBox(height: 6),
+      _lostPetTextField(_surrenderAgeController, 'e.g. 3 years old, 6 months',
+          keyboardType: TextInputType.text),
+      const SizedBox(height: 20),
+
+      _buildLabel('Why are you surrendering this pet?', required: true),
+      const SizedBox(height: 6),
+      DropdownButtonFormField<String>(
+        value: _surrenderReason,
+        isDense: true,
+        isExpanded: true,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Select a reason',
+          hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          border: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+        ),
+        items: [
+          for (final reason in _surrenderReasonOptions)
+            DropdownMenuItem(
+              value: reason,
+              child: Text(reason,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+            ),
+        ],
+        onChanged: (v) => setState(() => _surrenderReason = v),
+      ),
+      if (_surrenderReason == 'Other (please specify)') ...[
+        const SizedBox(height: 6),
+        _lostPetTextField(_surrenderReasonOtherController, 'Please specify'),
+      ],
+      const SizedBox(height: 20),
+
+      if (_surrenderNeedsExplanation) ...[
+        _buildLabel(
+          _surrenderReason == 'Behavioral issues'
+              ? 'Please explain the behavior and what actions you\'ve taken to try to solve it'
+              : 'Please explain the medical issue and what actions you\'ve taken to try to solve it',
+          required: true,
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _surrenderExplanationController,
+          maxLines: 3,
+          decoration: InputDecoration(
+            hintText: 'Describe the issue and what you\'ve already tried…',
+            hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
+            enabledBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: AppColors.textPrimary, width: 1),
+            ),
+            focusedBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+            ),
+            isDense: true,
+            contentPadding: const EdgeInsets.only(bottom: 8),
+          ),
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 20),
+      ],
+
+      _buildLabel('Where did you acquire this pet?', required: true),
+      const SizedBox(height: 6),
+      DropdownButtonFormField<String>(
+        value: _petAcquisitionSource,
+        isDense: true,
+        isExpanded: true,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Select source',
+          hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          border: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+        ),
+        items: [
+          for (final source in _acquisitionSourceOptions)
+            DropdownMenuItem(
+              value: source,
+              child: Text(source, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+            ),
+        ],
+        onChanged: (v) => setState(() => _petAcquisitionSource = v),
+      ),
+
+      if (_isRescueOrgAcquisition) ...[
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.yellowrspwn.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Please contact the previous organization and inquire to them about return pets.',
+                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ];
   }
 
 
@@ -2933,7 +3127,43 @@ class _RescuePageState extends State<RescuePage> {
     final validAnimals =
     _foundAnimals.where((a) => a.speciesText.isNotEmpty).toList();
 
-    if (condition.isEmpty ||
+    if (_isPetSurrenderType) {
+      if (condition.isEmpty ||
+          _selectedUrgency == null ||
+          validAnimals.isEmpty ||
+          _surrenderDurationController.text.trim().isEmpty ||
+          _surrenderAgeController.text.trim().isEmpty ||
+          _surrenderReason == null ||
+          _petAcquisitionSource == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please fill in all required fields.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
+      if (_surrenderReason == 'Other (please specify)' &&
+          _surrenderReasonOtherController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please specify the reason for surrendering.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
+      if (_surrenderNeedsExplanation &&
+          _surrenderExplanationController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please explain the issue and what you\'ve tried.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
+    } else if (condition.isEmpty ||
         _selectedRescueType == null ||
         _selectedUrgency == null ||
         validAnimals.isEmpty ||
@@ -2949,7 +3179,7 @@ class _RescuePageState extends State<RescuePage> {
       return;
     }
 
-    if (_adoptionChoice == 'yes' && !_adoptionCommitmentAccepted) {
+    if (!_isPetSurrenderType && _adoptionChoice == 'yes' && !_adoptionCommitmentAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please agree to the adoption-interest terms before submitting.'),
@@ -2959,7 +3189,7 @@ class _RescuePageState extends State<RescuePage> {
       return;
     }
 
-    if (_coordinateChoice == 'no') {
+    if (!_isPetSurrenderType && _coordinateChoice == 'no') {
       final witnessNameError =
       AppValidators.name(_witnessNameController.text, fieldName: 'Witness name');
       if (witnessNameError != null) {
@@ -3034,6 +3264,10 @@ class _RescuePageState extends State<RescuePage> {
           },
       ];
 
+      final surrenderReasonValue = _surrenderReason == 'Other (please specify)'
+          ? 'Other: ${_surrenderReasonOtherController.text.trim()}'
+          : _surrenderReason;
+
       final docRef = await casesCollection.add({
         'reporterId': uid,
         'reporterName': reporterName,
@@ -3052,9 +3286,11 @@ class _RescuePageState extends State<RescuePage> {
         'rescueType': _selectedRescueType,
         'condition': condition,
         'urgency': _selectedUrgency,
-        'onSite': _onSiteChoice,
-        'accessInstructions': _accessInstructionsController.text.trim(),
-        'bestTimeToContact': _bestTimeContactController.text.trim(),
+        if (!_isPetSurrenderType) 'onSite': _onSiteChoice,
+        if (!_isPetSurrenderType)
+          'accessInstructions': _accessInstructionsController.text.trim(),
+        if (!_isPetSurrenderType)
+          'bestTimeToContact': _bestTimeContactController.text.trim(),
         'reportAnonymously':
         _selectedRescueType == 'Neglect or Abuse' ? _reportAnonymously : false,
         'address': _addressController.text.trim().isEmpty
@@ -3062,10 +3298,17 @@ class _RescuePageState extends State<RescuePage> {
             : _addressController.text.trim(),
         'lat': _pinnedLocation.latitude,
         'lng': _pinnedLocation.longitude,
-        'coordinateWithShelter': _coordinateChoice,
-        'witnessName': _witnessNameController.text.trim(),
-        'witnessPhone': _witnessNumberController.text.trim(),
-        'interestedToAdopt': _adoptionChoice,
+        if (!_isPetSurrenderType) 'coordinateWithShelter': _coordinateChoice,
+        if (!_isPetSurrenderType) 'witnessName': _witnessNameController.text.trim(),
+        if (!_isPetSurrenderType) 'witnessPhone': _witnessNumberController.text.trim(),
+        if (!_isPetSurrenderType) 'interestedToAdopt': _adoptionChoice,
+        // Pet Surrender's own question set — see _buildSurrenderFields.
+        if (_isPetSurrenderType) 'surrenderDuration': _surrenderDurationController.text.trim(),
+        if (_isPetSurrenderType) 'surrenderAge': _surrenderAgeController.text.trim(),
+        if (_isPetSurrenderType) 'surrenderReason': surrenderReasonValue,
+        if (_isPetSurrenderType && _surrenderNeedsExplanation)
+          'surrenderExplanation': _surrenderExplanationController.text.trim(),
+        if (_isPetSurrenderType) 'petAcquisitionSource': _petAcquisitionSource,
         'scannedTagId': _scannedTagId,
         'status': 'pending',
         'statusHistory': [

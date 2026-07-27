@@ -86,7 +86,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         builder: (_) => const LastSeenLocationPicker(
           title: 'Where is the animal now?',
           instructionText:
-              'Tap anywhere on the map to drop a pin, or search an address below. This becomes the animal\'s new known location.',
+          'Tap anywhere on the map to drop a pin, or search an address below. This becomes the animal\'s new known location.',
           pinLabel: 'New location',
           confirmLabel: 'Confirm New Location',
         ),
@@ -131,31 +131,31 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   }
 
   String _typeLabel(String? t) => switch (t) {
-        'still_here' => 'Animal still here',
-        'moved' => 'Animal moved',
-        'rescued' => 'Animal rescued',
-        'no_animal' => 'No animal present',
-        _ => 'Update',
-      };
+    'still_here' => 'Animal still here',
+    'moved' => 'Animal moved',
+    'rescued' => 'Animal rescued',
+    'no_animal' => 'No animal present',
+    _ => 'Update',
+  };
 
   String _typeIconAsset(String? t) => switch (t) {
-        'still_here' => 'assets/icons/animalstillhere.png',
-        'moved' => 'assets/icons/animalmoved.png',
-        'rescued' => 'assets/icons/animalrescued.png',
-        'no_animal' => 'assets/icons/noanimal.png',
-        _ => 'assets/icons/info.png',
-      };
+    'still_here' => 'assets/icons/animalstillhere.png',
+    'moved' => 'assets/icons/animalmoved.png',
+    'rescued' => 'assets/icons/animalrescued.png',
+    'no_animal' => 'assets/icons/noanimal.png',
+    _ => 'assets/icons/info.png',
+  };
 
   String _typeDescription(String? t) => switch (t) {
-        'still_here' => 'Upload a recent photo to confirm the animal is still at the reported location.',
-        'moved' =>
-          'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
-        'rescued' =>
-          'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
-        'no_animal' =>
-          'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
-        _ => '',
-      };
+    'still_here' => 'Upload a recent photo to confirm the animal is still at the reported location.',
+    'moved' =>
+    'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
+    'rescued' =>
+    'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
+    'no_animal' =>
+    'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
+    _ => '',
+  };
 
   Future<void> _pickImage() async {
     final file = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
@@ -189,7 +189,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
       String? photoUrl;
       if (_pickedImage != null) {
         final ref =
-            FirebaseStorage.instance.ref().child('cases/${widget.caseId}/communityReports/${reportRef.id}.jpg');
+        FirebaseStorage.instance.ref().child('cases/${widget.caseId}/communityReports/${reportRef.id}.jpg');
         await ref.putFile(File(_pickedImage!.path), SettableMetadata(contentType: 'image/jpeg'));
         photoUrl = await ref.getDownloadURL();
       }
@@ -298,9 +298,9 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 ),
                 child: _pickedImage != null
                     ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.file(File(_pickedImage!.path), fit: BoxFit.cover),
-                      )
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.file(File(_pickedImage!.path), fit: BoxFit.cover),
+                )
                     : const Icon(Icons.add_a_photo_outlined, color: AppColors.textSecondary, size: 26),
               ),
             ),
@@ -314,7 +314,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                       TextSpan(
                           text: 'Location Found',
                           style:
-                              GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                       const TextSpan(text: ' *', style: TextStyle(color: Colors.redAccent)),
                     ],
                   ),
@@ -391,7 +391,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 ),
                 child: _submitting
                     ? const SizedBox(
-                        height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                    height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                     : Text('Report', style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
               ),
             ),
@@ -430,73 +430,85 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: AppColors.textPrimary,
-            child: Padding(
-              padding: const EdgeInsets.all(9),
-              child: Image.asset(_typeIconAsset(r['type'] as String?), fit: BoxFit.contain),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: AppColors.textPrimary,
+                child: Padding(
+                  padding: const EdgeInsets.all(9),
+                  child: Image.asset(_typeIconAsset(r['type'] as String?), fit: BoxFit.contain),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        '${r['reporterName'] ?? 'Someone'} · ${_typeLabel(r['type'] as String?)}',
-                        style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${r['reporterName'] ?? 'Someone'} · ${_typeLabel(r['type'] as String?)}',
+                            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                          ),
+                        ),
+                        if (date != null)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(_formatTime(date), style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                              Text(_formatDate(date), style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                            ],
+                          ),
+                      ],
                     ),
-                    if (date != null)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(_formatTime(date), style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
-                          Text(_formatDate(date), style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
-                        ],
+
+                    if (comment != null && comment.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Text(comment, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
                       ),
                   ],
                 ),
-                if (newAddress != null && newAddress.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.location_on_outlined, size: 20, color: AppColors.textSecondary),
-                        const SizedBox(width: 4),
-                        Expanded(child: Text(newAddress, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary))),
-                      ],
-                    ),
-                  ),
-                if (comment != null && comment.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(comment, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-                  ),
-              ],
-            ),
+              ),
+            ],
           ),
+          // Photo moved below the row and made full-width, per the design
+          // mockup's large landscape placeholder (was a 36x36 side thumbnail).
           if (photoUrl != null && photoUrl.isNotEmpty) ...[
-            const SizedBox(width: 8),
+            const SizedBox(height: 8),
             ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(10),
               child: Image.network(
                 photoUrl,
-                width: 36,
-                height: 36,
+                width: double.infinity,
+                height: 120,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(width: 36, height: 36, color: AppColors.slaterspwn),
+                errorBuilder: (_, __, ___) => Container(
+                  width: double.infinity,
+                  height: 120,
+                  color: AppColors.slaterspwn,
+                ),
               ),
             ),
           ],
+          if (newAddress != null && newAddress.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on_outlined, size: 20, color: AppColors.textSecondary),
+                  const SizedBox(width: 4),
+                  Expanded(child: Text(newAddress, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary))),
+                ],
+              ),
+            ),
         ],
       ),
     );

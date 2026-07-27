@@ -1356,11 +1356,10 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Address', data['address']),
+          _DetailRow('Rescue Type', data['rescueType']),
+          _DetailRow('Urgency', data['urgency']),
           _DetailRow('Description', data['condition']),
           _AnimalGroupSection(caseId: widget.caseId, data: data),
-          _DetailRow('Containment', data['containmentStatus']),
-          _DetailRow('Approachability', data['strayTemperament']),
-          _DetailRow('Urgency', data['urgency']),
           _DetailRow('Coordination', data['coordinateWithShelter']),
           if (data['coordinateWithShelter'] == 'no') ...[
             _DetailRow('Witness Name', data['witnessName']),
