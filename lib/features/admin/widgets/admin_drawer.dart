@@ -1,11 +1,9 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
-import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/features/admin/admin_adoption_page.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
@@ -32,27 +30,12 @@ void _openModule(BuildContext context, WidgetBuilder builder) {
   rootNavigator.push(MaterialPageRoute(builder: builder));
 }
 
-/// Resolves the current admin's organization (via the existing
-/// OrgMembershipService — never a second lookup) and pushes Organization
-/// Profile — a settings-style page, so this uses a normal push (back
-/// returns to wherever the admin was), not [_openModule]. An account with
-/// no organization membership yet is never left at a dead end: it's still
-/// pushed into the same page with `organizationId: null`, which handles
-/// checking for a pending invitation and the temporary standalone-admin
-/// bootstrap flow itself (spec §7-9) — no separate page, no broken screen,
-/// no silent no-op.
-Future<void> _openOrganizationProfile(BuildContext context) async {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  Navigator.pop(context); // close the drawer
-  if (uid == null) return;
-  final membership = await OrgMembershipService().getMembership(uid);
-  if (context.mounted) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership?.organizationId)),
-    );
-  }
-}
+// _openOrganizationProfile used to be a bare top-level async function with
+// no re-entrancy guard, no loading feedback, and a silent `if
+// (context.mounted)` no-op if the widget unmounted mid-flight (see
+// _AdminDrawerState._handleOpenOrganizationProfile below for the fixed,
+// guarded version — this is the root cause the "sometimes does not open
+// even after repeated taps" bug report pointed at).
 
 /// The one shared admin navigation drawer — every admin root page
 /// (`AdminHomeScreen`, `RescueReportsPage`, `AdminAdoptionPage`,
@@ -77,6 +60,48 @@ class AdminDrawer extends ConsumerStatefulWidget {
 
 class _AdminDrawerState extends ConsumerState<AdminDrawer> {
   bool _signingOut = false;
+
+  // Root cause of "Organization Profile sometimes does not open even after
+  // repeated taps": the old top-level `_openOrganizationProfile` did two
+  // chained Firestore reads (via OrgMembershipService.getMembership) with
+  // no re-entrancy guard, no loading feedback, and a bare
+  // `if (context.mounted)` before pushing — if the drawer/host route was
+  // popped or replaced (e.g. the admin tapped elsewhere, or backed out)
+  // before that finished, the push was silently skipped with zero
+  // feedback, and nothing stopped a second/third tap from spawning its own
+  // independent, equally-unguarded attempt. Fixed by: a guard flag that
+  // disables the row and shows a spinner while resolving (so repeated taps
+  // are impossible, not just harmless), resetting the guard in `finally`
+  // (so a failure or a return-to-this-screen always leaves the row usable
+  // again), an explicit error snackbar instead of a silent no-op, and
+  // reusing the existing `currentOrgMembershipProvider` Riverpod stream
+  // (already watched elsewhere, e.g. rescue_detail_page.dart) instead of a
+  // fresh raw OrgMembershipService() lookup, so this can resolve from an
+  // already-warm cache instead of two guaranteed round-trips every tap.
+  bool _openingOrgProfile = false;
+
+  Future<void> _handleOpenOrganizationProfile() async {
+    if (_openingOrgProfile) return; // re-entrancy guard — no duplicate route pushes
+    setState(() => _openingOrgProfile = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final membership = await ref.read(currentOrgMembershipProvider.future);
+      if (!mounted) return;
+      Navigator.pop(context); // close the drawer only once the destination is ready
+      if (!context.mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership?.organizationId)),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not open Organization Profile: $e')));
+    } finally {
+      // Reset the guard even if this screen is no longer mounted (e.g. the
+      // admin navigated away while this was resolving) — never leaves the
+      // row permanently disabled for the next time this Drawer is opened.
+      if (mounted) setState(() => _openingOrgProfile = false);
+    }
+  }
 
   Future<void> _logOut() async {
     if (_signingOut) return; // disable repeated taps while processing
@@ -203,7 +228,8 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             const Divider(color: Colors.white24),
             _DrawerItem(
               label: 'Organization Profile',
-              onTap: () => _openOrganizationProfile(context),
+              loading: _openingOrgProfile,
+              onTap: _openingOrgProfile ? null : _handleOpenOrganizationProfile,
             ),
 
             const Spacer(),
@@ -242,10 +268,15 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
 
 class _DrawerItem extends StatelessWidget {
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool selected;
+  // Shows a spinner instead of the chevron and disables taps — used by
+  // Organization Profile while its async membership lookup resolves, so a
+  // slow lookup reads as "in progress" instead of "nothing happened",
+  // and can't be re-triggered by an impatient repeated tap.
+  final bool loading;
 
-  const _DrawerItem({required this.label, required this.onTap, this.selected = false});
+  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.loading = false});
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +290,9 @@ class _DrawerItem extends StatelessWidget {
                 fontSize: 15,
                 color: AppColors.background,
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w500)),
-        trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+        trailing: loading
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
+            : const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
         dense: true,
       ),
     );

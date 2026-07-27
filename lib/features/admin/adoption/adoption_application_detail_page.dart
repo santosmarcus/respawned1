@@ -207,7 +207,13 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
         message: 'This reserves the animal for ${app.adopterName} and prevents other reservations while it stays reserved.',
         confirmLabel: 'Reserve');
     if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).reserve(applicationId: app.id, animalId: animalRecordId));
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).reserve(
+          applicationId: app.id,
+          animalId: animalRecordId,
+          actorId: FirebaseAuth.instance.currentUser?.uid,
+          actorName: FirebaseAuth.instance.currentUser?.displayName,
+          actorEmail: FirebaseAuth.instance.currentUser?.email,
+        ));
   }
 
   Future<void> _unreserve(AdoptionApplication app) async {

@@ -503,12 +503,12 @@ class _MedicalTabContent extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         MedicalProfileSection(animal: record, readOnly: true),
+        const SizedBox(height: 20),
+        VaccineSection(animal: record, readOnly: true),
         if (record.hasMeaningfulSpecialNeedsInfo) ...[
           const SizedBox(height: 20),
           SpecialNeedsSection(animal: record),
         ],
-        const SizedBox(height: 20),
-        VaccineSection(animal: record, readOnly: true),
       ],
     );
   }

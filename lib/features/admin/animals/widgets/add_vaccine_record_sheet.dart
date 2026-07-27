@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -92,6 +93,8 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
     });
 
     try {
+      final user = FirebaseAuth.instance.currentUser;
+      final actorName = (user?.displayName?.trim().isNotEmpty ?? false) ? user!.displayName!.trim() : 'Admin Staff';
       final record = VaccinationRecord(
         id: '',
         animalId: widget.animal.id,
@@ -103,9 +106,14 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
         clinicOrProvider: _clinicController.text.trim().isEmpty ? null : _clinicController.text.trim(),
         batchOrLotNumber: _batchController.text.trim().isEmpty ? null : _batchController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-        createdBy: 'Admin Staff',
+        createdBy: actorName,
       );
-      await ref.read(animalRecordRepositoryProvider).addVaccination(animalId: widget.animal.id, record: record);
+      await ref.read(animalRecordRepositoryProvider).addVaccination(
+            animalId: widget.animal.id,
+            record: record,
+            actorId: user?.uid,
+            actorEmail: user?.email,
+          );
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {

@@ -47,6 +47,22 @@ bool animalIsDischarged(RescueCase c, int index) {
   return c.animals[index]['dischargedAt'] != null;
 }
 
+/// True once THIS animal has been physically confirmed received at the
+/// shelter — checks the per-animal `receivedAt` key
+/// RescueCaseRepository.confirmAnimalReceived now always writes (whether
+/// called for a specific subset or the whole case — see that method's own
+/// doc comment), falling back to the case-level `intakeReceivedAt` flag
+/// only for a legacy single-animal report with no `animals[]` entry of its
+/// own to carry that key. Deliberately NO case-level fallback when
+/// `animals[]` is non-empty — that's what previously let confirming ONE
+/// animal received in a multi-animal Intake silently unlock Animal Record
+/// creation for every other (still-unreceived) animal too.
+bool animalIsReceived(RescueCase c, int index) {
+  if (c.animals.isEmpty) return c.intakeReceivedAt != null;
+  if (index < 0 || index >= c.animals.length) return false;
+  return c.animals[index]['receivedAt'] != null;
+}
+
 DateTime? animalDischargedAt(RescueCase c, int index) {
   if (c.animals.isEmpty) return c.dischargedAt;
   if (index < 0 || index >= c.animals.length) return null;
@@ -96,7 +112,9 @@ bool animalActionIsResolved(RescueCase c, int index) {
 /// Selectable for a NEW post-treatment action: discharged, not deceased,
 /// and not already committed to a different (or the same) action.
 bool animalEligibleForNewAction(RescueCase c, int index) =>
-    animalIsDischarged(c, index) && !animalIsDeceased(c, index) && animalPostTreatmentAction(c, index) == null;
+    animalIsDischarged(c, index) &&
+    !animalIsDeceased(c, index) &&
+    animalPostTreatmentAction(c, index) == null;
 
 /// True once at least one animal on the case has a Discharge update on
 /// file and is free to be assigned a post-treatment action — this is what
@@ -119,7 +137,9 @@ bool caseHasAnyEligibleAnimal(RescueCase c) {
 /// actually allows once one animal (but not all) is discharged.
 bool caseAllAnimalsResolved(RescueCase c) {
   if (c.animals.isEmpty) return c.readyForDischarge;
-  return c.animals.every((a) => a['outcome'] == 'deceased' || a['dischargedAt'] != null);
+  return c.animals.every(
+    (a) => a['outcome'] == 'deceased' || a['dischargedAt'] != null,
+  );
 }
 
 /// This animal's current pipeline stage, for tab-membership/denormalized
@@ -158,7 +178,10 @@ List<String> activeStagesOf(RescueCase c) {
 /// card/page must show only the animals relevant to that stage").
 List<int> animalIndexesInStage(RescueCase c, String stage) {
   final animals = effectiveAnimalsOf(c);
-  return [for (var i = 0; i < animals.length; i++) if (animalActiveStage(c, i) == stage) i];
+  return [
+    for (var i = 0; i < animals.length; i++)
+      if (animalActiveStage(c, i) == stage) i,
+  ];
 }
 
 /// Case-level summary status, safely derived from per-animal state instead
@@ -169,7 +192,10 @@ enum CaseStageSummary { review, mixed, completed }
 
 CaseStageSummary deriveCaseStageSummary(RescueCase c) {
   final animals = effectiveAnimalsOf(c);
-  final resolvedCount = [for (var i = 0; i < animals.length; i++) if (animalActionIsResolved(c, i)) i].length;
+  final resolvedCount = [
+    for (var i = 0; i < animals.length; i++)
+      if (animalActionIsResolved(c, i)) i,
+  ].length;
   if (resolvedCount == animals.length) return CaseStageSummary.completed;
   if (resolvedCount == 0) return CaseStageSummary.review;
   return CaseStageSummary.mixed;
@@ -182,10 +208,18 @@ CaseStageSummary deriveCaseStageSummary(RescueCase c) {
 /// [TreatmentLogEntry.appliesToAllAnimals]) counts as applicable to every
 /// animal, per spec's "Logs marked All Animals may update every associated
 /// animal."
-String latestConditionFor(RescueCase c, int index, List<TreatmentLogEntry> logs) {
+String latestConditionFor(
+  RescueCase c,
+  int index,
+  List<TreatmentLogEntry> logs,
+) {
   if (animalIsDeceased(c, index)) return 'Deceased';
 
-  final sorted = [...logs]..sort((a, b) => (b.timestamp ?? DateTime(0)).compareTo(a.timestamp ?? DateTime(0)));
+  final sorted = [...logs]
+    ..sort(
+      (a, b) =>
+          (b.timestamp ?? DateTime(0)).compareTo(a.timestamp ?? DateTime(0)),
+    );
   for (final log in sorted) {
     if (!log.appliesToAnimal(index)) continue;
     final type = TreatmentUpdateType.fromLabel(log.type);

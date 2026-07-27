@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -57,7 +58,9 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      await ref.read(animalRecordRepositoryProvider).updateHealthDetails(
+      final repo = ref.read(animalRecordRepositoryProvider);
+      final before = widget.animal.health;
+      await repo.updateHealthDetails(
             animalId: widget.animal.id,
             spayedNeutered: _sterilized,
             dewormed: _dewormed,
@@ -69,6 +72,33 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
             bodyCondition: _bodyConditionController.text.trim(),
             microchipStatus: _microchipController.text.trim(),
           );
+      final user = FirebaseAuth.instance.currentUser;
+      await repo.logManagementEvent(
+        animalId: widget.animal.id,
+        eventType: 'medical_edited',
+        action: 'Medical Profile edited',
+        actorId: user?.uid,
+        actorName: (user?.displayName?.trim().isNotEmpty ?? false) ? user!.displayName!.trim() : 'Admin Staff',
+        actorEmail: user?.email,
+        previousValues: {
+          'spayedNeutered': before.sterilized,
+          'dewormed': before.dewormed,
+          'allergies': before.allergies,
+          'chronicConditions': before.chronicConditions,
+          'currentMedications': before.currentMedications,
+          'bodyCondition': before.bodyCondition,
+          'microchipStatus': before.microchipStatus,
+        },
+        newValues: {
+          'spayedNeutered': _sterilized,
+          'dewormed': _dewormed,
+          'allergies': _allergiesController.text.trim(),
+          'chronicConditions': _chronicController.text.trim(),
+          'currentMedications': _medsController.text.trim(),
+          'bodyCondition': _bodyConditionController.text.trim(),
+          'microchipStatus': _microchipController.text.trim(),
+        },
+      );
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {

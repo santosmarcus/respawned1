@@ -16,11 +16,12 @@ import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
-import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
+import 'package:respawnd1/core/utils/species_summary.dart'
+    as species_summary_util;
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
@@ -39,7 +40,12 @@ const _kArrivedAtClinicStatuses = {'dropoff', 'in_transit_shelter'};
 // the transporter's own (confusingly-named) en-route-to-clinic status, not
 // RescueStatus.treatment. Once in one of these, the tracking destination
 // switches from the rescue case to the selected clinic.
-const _kPostPickupStatuses = {'treatment', 'dropoff', 'searching_clinic', 'in_transit_shelter'};
+const _kPostPickupStatuses = {
+  'treatment',
+  'dropoff',
+  'searching_clinic',
+  'in_transit_shelter',
+};
 
 /// Which leg of the case this screen is tracking. Added so the same
 /// Track Case screen (map, route, transporter card, timeline) serves both
@@ -105,12 +111,20 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         backgroundColor: AppColors.background,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Change Clinic?'),
-        content: const Text('Changing the clinic will update the transporter\'s destination and route. Continue?'),
+        content: const Text(
+          'Changing the clinic will update the transporter\'s destination and route. Continue?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.yellowrspwn,
+              foregroundColor: AppColors.textPrimary,
+            ),
             child: const Text('Continue'),
           ),
         ],
@@ -141,29 +155,45 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     );
   }
 
+  /// Ongoing's own Close Case entry point (spec §3) — calls the same
+  /// performCloseCase helper Treatment/Intake/Rescue Details all use, not a
+  /// separate Ongoing-only implementation. Pops back to Rescue history only
+  /// after the write actually succeeds — never before, and never a second
+  /// time from a listener (this method is the only place that pops).
   Future<void> _closeCase(RescueCase c, {ClosureReason? initialReason}) async {
     if (_closing) return;
-    final result = await showCloseCaseSheet(context, rescueCase: c, initialReason: initialReason);
-    if (result == null || !mounted) return;
     setState(() => _closing = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).closeCase(
-        caseId: c.id,
-        reason: result.reason,
-        details: result.details,
-        actorUid: _actorUid,
-        actorName: _actorName,
-        lastKnownLocation: result.lastKnownLocation,
-        clinicUnavailableDetails: result.clinicUnavailableDetails,
-        serviceTypeNeeded: result.serviceTypeNeeded,
+      final outcome = await performCloseCase(
+        context,
+        ref,
+        c,
+        initialReason: initialReason,
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
-        Navigator.pop(context);
+      if (outcome.acted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              outcome.wholeCaseClosed
+                  ? 'Case closed.'
+                  : 'Animal marked deceased.',
+            ),
+          ),
+        );
+        // Only leave this tracking page once the CASE itself is closed —
+        // a per-animal death that leaves the case active (other animals
+        // still in treatment) should keep the admin here, not bounce them
+        // back to Rescue history for a case that's still ongoing.
+        if (outcome.wholeCaseClosed) Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not close case: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not close case: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _closing = false);
@@ -179,7 +209,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     }
   }
 
-  void _toggleTransporterCard() => setState(() => _transporterCollapsed = !_transporterCollapsed);
+  void _toggleTransporterCard() =>
+      setState(() => _transporterCollapsed = !_transporterCollapsed);
 
   /// Guards against double-tapping "Proceed to Treatment" and drives the
   /// button's loading state while the write is in flight and being
@@ -195,16 +226,17 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   Future<RouteResult>? _routeFuture;
 
   Future<RouteResult> _routeFor(LatLng riderLocation, LatLng caseLocation) {
-    if (_routeFuture != null && _routeOrigin == riderLocation && _routeDestination == caseLocation) {
+    if (_routeFuture != null &&
+        _routeOrigin == riderLocation &&
+        _routeDestination == caseLocation) {
       return _routeFuture!;
     }
     _routeOrigin = riderLocation;
     _routeDestination = caseLocation;
     _hasFitCamera = false; // a genuinely new route deserves a fresh camera fit
-    _routeFuture = ref.read(directionsRepositoryProvider).fetchRoute(
-      origin: riderLocation,
-      destination: caseLocation,
-    );
+    _routeFuture = ref
+        .read(directionsRepositoryProvider)
+        .fetchRoute(origin: riderLocation, destination: caseLocation);
     return _routeFuture!;
   }
 
@@ -223,11 +255,11 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         .doc(widget.caseId)
         .collection('messages')
         .add({
-      'senderId': 'admin',
-      'senderName': 'Loved by the Gapz',
-      'text': text,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+          'senderId': 'admin',
+          'senderName': 'Loved by the Gapz',
+          'text': text,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
     _messageController.clear();
   }
 
@@ -235,8 +267,11 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     if (_isProceedingToTreatment) return; // guard against double-tap
     setState(() => _isProceedingToTreatment = true);
 
-    final caseRef = FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
-    final expectedStatus = RescueStatus.treatment.firestoreValue; // 'in_treatment'
+    final caseRef = FirebaseFirestore.instance
+        .collection('cases')
+        .doc(widget.caseId);
+    final expectedStatus =
+        RescueStatus.treatment.firestoreValue; // 'in_treatment'
 
     try {
       await caseRef.update({
@@ -245,9 +280,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         'statusHistory': FieldValue.arrayUnion([
           {
             'status':
-            'The animal has reached the clinic. Animal is now in treatment.',
+                'The animal has reached the clinic. Animal is now in treatment.',
             'timestamp': Timestamp.now(),
-          }
+          },
         ]),
       });
 
@@ -259,7 +294,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       final freshSnap = await caseRef.get();
       final freshStatus = freshSnap.data()?['status'] as String?;
       if (freshStatus != expectedStatus) {
-        throw StateError('Case status did not update as expected (got "$freshStatus").');
+        throw StateError(
+          'Case status did not update as expected (got "$freshStatus").',
+        );
       }
 
       // Frees the accepted transporter (demo or real) back to "Available"
@@ -267,17 +304,30 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       // from their single most-recent assignment, so marking this one
       // 'completed' is what clears their Busy state elsewhere. Only done
       // once the treatment transition itself is confirmed, never before.
-      final assignment = ref.read(currentAssignmentProvider(widget.caseId)).asData?.value;
-      if (assignment != null && assignment.status == TransportAssignmentStatus.accepted) {
-        await ref.read(rescueCaseRepositoryProvider).completeAssignment(
-          caseId: widget.caseId,
-          assignmentId: assignment.id,
-        );
+      final assignment = ref
+          .read(currentAssignmentProvider(widget.caseId))
+          .asData
+          ?.value;
+      if (assignment != null &&
+          assignment.status == TransportAssignmentStatus.accepted) {
+        await ref
+            .read(rescueCaseRepositoryProvider)
+            .completeAssignment(
+              caseId: widget.caseId,
+              assignmentId: assignment.id,
+            );
       }
 
       if (mounted) {
-        Navigator.pushReplacement(context, MaterialPageRoute(
-            builder: (_) => TreatmentDetailPage(caseId: widget.caseId, data: {...data, 'status': expectedStatus})));
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TreatmentDetailPage(
+              caseId: widget.caseId,
+              data: {...data, 'status': expectedStatus},
+            ),
+          ),
+        );
       }
     } catch (e) {
       // Stay on Track Case — never navigate on an unconfirmed/failed write.
@@ -298,16 +348,14 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   // transit_progress_page.dart's own _testSkipToNextStep). Lets staff
   // exercise "Proceed to Treatment" without a live rider in transit.
   Future<void> _fastForwardToClinic() async {
-    await FirebaseFirestore.instance
-        .collection('cases')
-        .doc(widget.caseId)
-        .update({
+    await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).update({
       'status': 'dropoff',
       'statusHistory': FieldValue.arrayUnion([
         {
-          'status': '[TEST] Fast-forwarded — transporter marked as arrived at the clinic.',
+          'status':
+              '[TEST] Fast-forwarded — transporter marked as arrived at the clinic.',
           'timestamp': Timestamp.now(),
-        }
+        },
       ]),
     });
   }
@@ -326,7 +374,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   /// so "real" and "saved" collapse to the same check here; there's no
   /// second, distinctly-cached position to fall back to before the demo
   /// coordinates. Never overwrites that field — this only reads it.
-  ({LatLng location, bool isDemo}) _riderLocationFrom(Map<String, dynamic> data) {
+  ({LatLng location, bool isDemo}) _riderLocationFrom(
+    Map<String, dynamic> data,
+  ) {
     final lat = (data['riderLastLat'] as num?)?.toDouble();
     final lng = (data['riderLastLng'] as num?)?.toDouble();
     if (lat != null && lng != null) {
@@ -348,7 +398,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   /// In [TrackingMode.intakeTransfer], this is unrelated to the legacy
   /// pickup/dropoff status vocabulary entirely — the destination is always
   /// the intake shelter location saved by RescueCaseRepository.confirmIntake.
-  ({LatLng? location, String label}) _destinationFrom(Map<String, dynamic> data) {
+  ({LatLng? location, String label}) _destinationFrom(
+    Map<String, dynamic> data,
+  ) {
     if (widget.mode == TrackingMode.intakeTransfer) {
       final lat = (data['intakeDestinationLat'] as num?)?.toDouble();
       final lng = (data['intakeDestinationLng'] as num?)?.toDouble();
@@ -356,7 +408,12 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       if (lat == null || lng == null) {
         return (location: null, label: 'No shelter destination available yet');
       }
-      return (location: LatLng(lat, lng), label: (name != null && name.isNotEmpty) ? name : 'Organization Shelter');
+      return (
+        location: LatLng(lat, lng),
+        label: (name != null && name.isNotEmpty)
+            ? name
+            : 'Organization Shelter',
+      );
     }
 
     final rawStatus = data['status'] as String?;
@@ -377,7 +434,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     final dropoffLat = (data['dropoffLat'] as num?)?.toDouble();
     final dropoffLng = (data['dropoffLng'] as num?)?.toDouble();
     if (dropoffLat != null && dropoffLng != null) {
-      return (location: LatLng(dropoffLat, dropoffLng), label: 'Clinic (legacy destination)');
+      return (
+        location: LatLng(dropoffLat, dropoffLng),
+        label: 'Clinic (legacy destination)',
+      );
     }
 
     return (location: null, label: 'No clinic destination available yet');
@@ -395,24 +455,33 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     return _caseLocationFrom(data);
   }
 
-  String get _originMarkerLabel =>
-      widget.mode == TrackingMode.intakeTransfer ? 'Clinic Pickup' : 'Original Rescue Location';
+  String get _originMarkerLabel => widget.mode == TrackingMode.intakeTransfer
+      ? 'Clinic Pickup'
+      : 'Original Rescue Location';
 
   Future<void> _confirmAnimalReceived(TransportAssignment? assignment) async {
     try {
-      await ref.read(rescueCaseRepositoryProvider).confirmAnimalReceived(
-        caseId: widget.caseId,
-        currentAssignmentId: assignment?.id,
-      );
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .confirmAnimalReceived(
+            caseId: widget.caseId,
+            currentAssignmentId: assignment?.id,
+          );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Animal received — transport complete.'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Animal received — transport complete.'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not confirm arrival: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not confirm arrival: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     }
@@ -428,16 +497,27 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     _hasFitCamera = true;
     final lats = points.map((p) => p.latitude);
     final lngs = points.map((p) => p.longitude);
-    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
-      LatLngBounds(
-        southwest: LatLng(lats.reduce((a, b) => a < b ? a : b), lngs.reduce((a, b) => a < b ? a : b)),
-        northeast: LatLng(lats.reduce((a, b) => a > b ? a : b), lngs.reduce((a, b) => a > b ? a : b)),
+    _mapController!.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(
+            lats.reduce((a, b) => a < b ? a : b),
+            lngs.reduce((a, b) => a < b ? a : b),
+          ),
+          northeast: LatLng(
+            lats.reduce((a, b) => a > b ? a : b),
+            lngs.reduce((a, b) => a > b ? a : b),
+          ),
+        ),
+        56,
       ),
-      56,
-    ));
+    );
   }
 
-  Widget _buildTrackingMap(Map<String, dynamic> data, TransportAssignment? assignment) {
+  Widget _buildTrackingMap(
+    Map<String, dynamic> data,
+    TransportAssignment? assignment,
+  ) {
     // Shown in place of the map, on this same page, whenever the current
     // offer hasn't been accepted yet — no separate Pending/Rejected page
     // or route. In normal use the admin never actually sees this: the
@@ -445,10 +525,16 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     // straight to acceptance before Track Case is ever opened. This only
     // matters for the edge case of reopening the case (e.g. after an app
     // restart) while an offer is still outstanding.
-    if (assignment != null && assignment.status == TransportAssignmentStatus.pending) {
-      return _PendingAssignmentBanner(caseId: widget.caseId, assignment: assignment, caseData: data);
+    if (assignment != null &&
+        assignment.status == TransportAssignmentStatus.pending) {
+      return _PendingAssignmentBanner(
+        caseId: widget.caseId,
+        assignment: assignment,
+        caseData: data,
+      );
     }
-    if (assignment != null && assignment.status == TransportAssignmentStatus.rejected) {
+    if (assignment != null &&
+        assignment.status == TransportAssignmentStatus.rejected) {
       return _DeclinedAssignmentBanner(
         assignment: assignment,
         onChooseAnother: () => Navigator.pop(context),
@@ -466,8 +552,13 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         height: 180,
         color: AppColors.slaterspwn,
         child: Center(
-          child: Text('No coordinates saved for this case.',
-              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+          child: Text(
+            'No coordinates saved for this case.',
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+          ),
         ),
       );
     }
@@ -485,22 +576,35 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           children: [
             GoogleMap(
               gestureRecognizers: {
-                Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                Factory<OneSequenceGestureRecognizer>(
+                  () => EagerGestureRecognizer(),
+                ),
               },
-              initialCameraPosition: CameraPosition(target: rider.location, zoom: 13),
+              initialCameraPosition: CameraPosition(
+                target: rider.location,
+                zoom: 13,
+              ),
               markers: {
                 if (caseLocation != null)
                   Marker(
                     markerId: const MarkerId('rescue_case'),
                     position: caseLocation,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                      BitmapDescriptor.hueViolet,
+                    ),
                     infoWindow: InfoWindow(title: _originMarkerLabel),
                   ),
                 Marker(
                   markerId: const MarkerId('rider'),
                   position: rider.location,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-                  infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                    BitmapDescriptor.hueGreen,
+                  ),
+                  infoWindow: InfoWindow(
+                    title: rider.isDemo
+                        ? 'Transporter (demo location)'
+                        : 'Transporter',
+                  ),
                 ),
               },
               myLocationButtonEnabled: false,
@@ -512,7 +616,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               right: 10,
               bottom: 10,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFE05353),
                   borderRadius: BorderRadius.circular(10),
@@ -520,12 +627,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
                     const SizedBox(width: 6),
                     Flexible(
-                      child: Text(destination.label,
-                          style: GoogleFonts.zain(
-                              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                      child: Text(
+                        destination.label,
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -541,7 +657,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     // Only add a separate "original case" marker once the destination has
     // actually moved on to the clinic — pre-pickup, the case *is* the
     // destination, so a second marker at the same point would be redundant.
-    final showSeparateCaseMarker = isPostPickupDestination &&
+    final showSeparateCaseMarker =
+        isPostPickupDestination &&
         caseLocation != null &&
         (caseLocation.latitude != destinationLocation.latitude ||
             caseLocation.longitude != destinationLocation.longitude);
@@ -554,30 +671,45 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           Marker(
             markerId: const MarkerId('destination'),
             position: destinationLocation,
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueAzure,
+            ),
             infoWindow: InfoWindow(title: destination.label),
           ),
           if (showSeparateCaseMarker)
             Marker(
               markerId: const MarkerId('rescue_case'),
               position: caseLocation,
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueViolet,
+              ),
               infoWindow: InfoWindow(title: _originMarkerLabel),
             ),
           Marker(
             markerId: const MarkerId('rider'),
             position: rider.location,
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-            infoWindow: InfoWindow(title: rider.isDemo ? 'Transporter (demo location)' : 'Transporter'),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueGreen,
+            ),
+            infoWindow: InfoWindow(
+              title: rider.isDemo
+                  ? 'Transporter (demo location)'
+                  : 'Transporter',
+            ),
           ),
         };
 
         // Distance prefers the route's own (road) distance; only the
         // straight-line fallback falls back to haversine, and RouteResult
         // already encodes that — this is never recomputed here.
-        final distanceKm = route?.distanceKm ??
-            haversineDistanceKm(rider.location.latitude, rider.location.longitude,
-                destinationLocation.latitude, destinationLocation.longitude);
+        final distanceKm =
+            route?.distanceKm ??
+            haversineDistanceKm(
+              rider.location.latitude,
+              rider.location.longitude,
+              destinationLocation.latitude,
+              destinationLocation.longitude,
+            );
         final isRoadFollowing = route?.isRoadFollowing ?? false;
 
         // Covers the ordering where the route resolves *after* the map
@@ -593,12 +725,18 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             children: [
               GoogleMap(
                 gestureRecognizers: {
-                  Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                  Factory<OneSequenceGestureRecognizer>(
+                    () => EagerGestureRecognizer(),
+                  ),
                 },
-                initialCameraPosition: CameraPosition(target: destinationLocation, zoom: 13),
+                initialCameraPosition: CameraPosition(
+                  target: destinationLocation,
+                  zoom: 13,
+                ),
                 onMapCreated: (ctrl) {
                   _mapController = ctrl;
-                  if (route != null) _fitTrackingCameraToRoute(route.polylinePoints);
+                  if (route != null)
+                    _fitTrackingCameraToRoute(route.polylinePoints);
                 },
                 markers: markers,
                 polylines: {
@@ -606,8 +744,12 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     Polyline(
                       polylineId: const PolylineId('rider_to_destination'),
                       points: route.polylinePoints,
-                      color: isRoadFollowing ? AppColors.textPrimary : AppColors.textSecondary,
-                      patterns: isRoadFollowing ? const [] : [PatternItem.dash(12), PatternItem.gap(8)],
+                      color: isRoadFollowing
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
+                      patterns: isRoadFollowing
+                          ? const []
+                          : [PatternItem.dash(12), PatternItem.gap(8)],
                       width: 4,
                     ),
                 },
@@ -619,17 +761,23 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 left: 10,
                 bottom: 10,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.yellowrspwn,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     '${distanceKm.toStringAsFixed(1)} km to ${destination.label}'
-                        '${!isRoadFollowing ? ' (straight-line estimate)' : ''}'
-                        '${rider.isDemo ? ' · demo transporter location' : ''}',
+                    '${!isRoadFollowing ? ' (straight-line estimate)' : ''}'
+                    '${rider.isDemo ? ' · demo transporter location' : ''}',
                     style: GoogleFonts.zain(
-                        fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ),
@@ -644,7 +792,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   right: 10,
                   top: 10,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFE0A353),
                       borderRadius: BorderRadius.circular(10),
@@ -652,12 +803,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
+                        const Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: Colors.white,
+                        ),
                         const SizedBox(width: 6),
                         Flexible(
-                          child: Text('Road route unavailable. Showing approximate path.',
-                              style: GoogleFonts.zain(
-                                  fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                          child: Text(
+                            'Road route unavailable. Showing approximate path.',
+                            style: GoogleFonts.zain(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -682,7 +842,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             ? (snapshot.data!.data() as Map<String, dynamic>? ?? widget.data)
             : widget.data;
         final statusHistory = List<Map<String, dynamic>>.from(
-            data['statusHistory'] ?? []);
+          data['statusHistory'] ?? [],
+        );
 
         // Gate on the current transporter offer's persisted status — never
         // on local widget state — so reopening this page (e.g. after an
@@ -693,7 +854,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         // page/route. A missing assignment doc (legacy cases assigned
         // before this feature existed) falls through to the tracking map,
         // matching the old always-tracking behavior.
-        final assignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
+        final assignment = ref
+            .watch(currentAssignmentProvider(widget.caseId))
+            .asData
+            ?.value;
 
         return Scaffold(
           backgroundColor: AppColors.background,
@@ -703,13 +867,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               icon: const Icon(Icons.arrow_back, color: AppColors.background),
               onPressed: () => Navigator.pop(context),
             ),
-            title: Text(widget.mode == TrackingMode.intakeTransfer ? 'Intake Transport' : 'Track Case',
-                style: GoogleFonts.tiltWarp(
-                    fontSize: 18, color: AppColors.background)),
+            title: Text(
+              widget.mode == TrackingMode.intakeTransfer
+                  ? 'Intake Transport'
+                  : 'Track Case',
+              style: GoogleFonts.tiltWarp(
+                fontSize: 18,
+                color: AppColors.background,
+              ),
+            ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.notifications_outlined,
-                    color: AppColors.background),
+                icon: const Icon(
+                  Icons.notifications_outlined,
+                  color: AppColors.background,
+                ),
                 onPressed: () {},
               ),
               PopupMenuButton<String>(
@@ -719,14 +891,28 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   final c = RescueCase.fromMap(widget.caseId, data);
                   if (value == 'change_clinic') {
                     _changeClinic(c);
-                  } else if (value == 'animal_moved') {
-                    _closeCase(c, initialReason: ClosureReason.animalMoved);
+                  } else if (value == 'close_case') {
+                    // Controlled Close Case (spec §3) — full reason picker,
+                    // no preset. The old "Animal Moved / Could Not Be
+                    // Located" one-tap shortcut that used to live here is
+                    // gone: an actual animal-moved location update now only
+                    // ever comes from an approved Community Report, and any
+                    // OTHER reason for closing this Ongoing case (including
+                    // "animal moved / could not be located" as a genuine
+                    // closure reason) goes through this same full sheet.
+                    _closeCase(c);
                   }
                 },
                 itemBuilder: (context) => [
                   if (data['vetClinicName'] != null)
-                    const PopupMenuItem(value: 'change_clinic', child: Text('Change Clinic')),
-                  const PopupMenuItem(value: 'animal_moved', child: Text('Animal Moved / Could Not Be Located')),
+                    const PopupMenuItem(
+                      value: 'change_clinic',
+                      child: Text('Change Clinic'),
+                    ),
+                  const PopupMenuItem(
+                    value: 'close_case',
+                    child: Text('Close Case'),
+                  ),
                 ],
               ),
             ],
@@ -745,8 +931,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 child: Container(
                   decoration: const BoxDecoration(
                     color: AppColors.background,
-                    borderRadius:
-                    BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
                   ),
                   child: SingleChildScrollView(
                     controller: _scrollController,
@@ -754,7 +941,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                       children: [
                         const SizedBox(height: 12),
 
-                        if (assignment != null && assignment.status == TransportAssignmentStatus.accepted)
+                        if (assignment != null &&
+                            assignment.status ==
+                                TransportAssignmentStatus.accepted)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: _CollapsibleTransporterCard(
@@ -800,7 +989,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                             child: Text(
                               '#${shortCaseId(widget.caseId)}',
                               style: GoogleFonts.tiltWarp(
-                                  fontSize: 18, color: AppColors.textPrimary),
+                                fontSize: 18,
+                                color: AppColors.textPrimary,
+                              ),
                             ),
                           ),
                         ),
@@ -818,22 +1009,32 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                           ),
                         ),
 
-                        (widget.mode == TrackingMode.intakeTransfer || _tabIndex == 0)
+                        (widget.mode == TrackingMode.intakeTransfer ||
+                                _tabIndex == 0)
                             ? _AdminTrackingTab(
-                          statusHistory: statusHistory,
-                          caseId: widget.caseId,
-                          messageController: _messageController,
-                          onSend: _sendMessage,
-                          isIntakeMode: widget.mode == TrackingMode.intakeTransfer,
-                          transporterHasReachedClinic:
-                          _kArrivedAtClinicStatuses.contains(data['status']),
-                          isProceedingToTreatment: _isProceedingToTreatment,
-                          onProceedToTreatment: () => _proceedToTreatment(data),
-                          onFastForward: _fastForwardToClinic,
-                          hasReceivedIntake: data['intakeReceivedAt'] != null,
-                          onConfirmAnimalReceived: () => _confirmAnimalReceived(assignment),
-                          hideCommunityContent: data['sourceType'] == 'animalRecordAdmission',
-                        )
+                                statusHistory: statusHistory,
+                                caseId: widget.caseId,
+                                messageController: _messageController,
+                                onSend: _sendMessage,
+                                isIntakeMode:
+                                    widget.mode == TrackingMode.intakeTransfer,
+                                transporterHasReachedClinic:
+                                    _kArrivedAtClinicStatuses.contains(
+                                      data['status'],
+                                    ),
+                                isProceedingToTreatment:
+                                    _isProceedingToTreatment,
+                                onProceedToTreatment: () =>
+                                    _proceedToTreatment(data),
+                                onFastForward: _fastForwardToClinic,
+                                hasReceivedIntake:
+                                    data['intakeReceivedAt'] != null,
+                                onConfirmAnimalReceived: () =>
+                                    _confirmAnimalReceived(assignment),
+                                hideCommunityContent:
+                                    data['sourceType'] ==
+                                    'animalRecordAdmission',
+                              )
                             : _AdminCaseDetailTab(data: data),
                       ],
                     ),
@@ -852,8 +1053,11 @@ class _AdminTabButton extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _AdminTabButton(
-      {required this.label, required this.selected, required this.onTap});
+  const _AdminTabButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -867,13 +1071,14 @@ class _AdminTabButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(50),
           ),
           child: Center(
-            child: Text(label,
-                style: GoogleFonts.zain(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: selected
-                        ? AppColors.background
-                        : AppColors.textPrimary)),
+            child: Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: selected ? AppColors.background : AppColors.textPrimary,
+              ),
+            ),
           ),
         ),
       ),
@@ -899,6 +1104,7 @@ class _AdminTrackingTab extends StatefulWidget {
   final bool isIntakeMode;
   final bool hasReceivedIntake;
   final VoidCallback onConfirmAnimalReceived;
+
   /// True for an animal-record medical admission (see
   /// RescueCaseRepository.createAdmissionCase / data['sourceType']) —
   /// suppresses CommunityReportsSection, which only makes sense for a
@@ -951,24 +1157,19 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
         Column(
           children: [
             Container(
-              width: 20, height: 20,
+              width: 20,
+              height: 20,
               decoration: BoxDecoration(
-                color: isLast
-                    ? AppColors.textPrimary
-                    : AppColors.slaterspwn,
+                color: isLast ? AppColors.textPrimary : AppColors.slaterspwn,
                 shape: BoxShape.circle,
-                border: Border.all(
-                    color: AppColors.textPrimary, width: 2),
+                border: Border.all(color: AppColors.textPrimary, width: 2),
               ),
               child: isLast
-                  ? const Icon(Icons.check,
-                  size: 12, color: Colors.white)
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
                   : null,
             ),
             if (index < statusHistory.length - 1)
-              Container(
-                  width: 2, height: 40,
-                  color: AppColors.textPrimary),
+              Container(width: 2, height: 40, color: AppColors.textPrimary),
           ],
         ),
         const SizedBox(width: 12),
@@ -979,22 +1180,31 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text(item['status'] ?? '',
-                      style: GoogleFonts.zain(
-                          fontSize: 13,
-                          color: AppColors.textPrimary)),
+                  child: Text(
+                    item['status'] ?? '',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(timeStr,
-                        style: GoogleFonts.zain(
-                            fontSize: 11,
-                            color: AppColors.textSecondary)),
-                    Text(dateStr,
-                        style: GoogleFonts.zain(
-                            fontSize: 11,
-                            color: AppColors.textSecondary)),
+                    Text(
+                      timeStr,
+                      style: GoogleFonts.zain(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      dateStr,
+                      style: GoogleFonts.zain(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -1022,9 +1232,11 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             children: [
-              for (var i = 0; i < statusHistory.length; i++) _buildTimelineItem(i),
+              for (var i = 0; i < statusHistory.length; i++)
+                _buildTimelineItem(i),
               const SizedBox(height: 8),
-              if (!widget.isIntakeMode && !widget.hideCommunityContent) CommunityReportsSection(caseId: widget.caseId),
+              if (!widget.isIntakeMode && !widget.hideCommunityContent)
+                CommunityReportsSection(caseId: widget.caseId),
               const SizedBox(height: 8),
             ],
           ),
@@ -1061,7 +1273,6 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
           ),
         ),
         */
-
         const Divider(),
 
         // Collapsible Messages — collapsed by default so the status
@@ -1080,27 +1291,45 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
           builder: (context, snap) {
             final docs = snap.data?.docs ?? const [];
             final count = docs.length;
-            final summary = count == 0 ? 'No messages yet' : '$count message${count == 1 ? '' : 's'}';
+            final summary = count == 0
+                ? 'No messages yet'
+                : '$count message${count == 1 ? '' : 's'}';
 
             return Column(
               children: [
                 InkWell(
-                  onTap: () => setState(() => _messagesExpanded = !_messagesExpanded),
+                  onTap: () =>
+                      setState(() => _messagesExpanded = !_messagesExpanded),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Messages',
-                            style: GoogleFonts.zain(
-                                fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        Text(
+                          'Messages',
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
                         Row(
                           children: [
-                            Text(summary,
-                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                            Text(
+                              summary,
+                              style: GoogleFonts.zain(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
                             const SizedBox(width: 4),
                             Icon(
-                              _messagesExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                              _messagesExpanded
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
                               size: 18,
                               color: AppColors.textSecondary,
                             ),
@@ -1115,36 +1344,47 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
                     height: 200,
                     child: docs.isEmpty
                         ? Center(
-                      child: Text('No messages yet.',
-                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                    )
+                            child: Text(
+                              'No messages yet.',
+                              style: GoogleFonts.zain(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          )
                         : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: docs.length,
-                      itemBuilder: (context, i) {
-                        final msg = docs[i].data() as Map<String, dynamic>;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 12,
-                                backgroundColor: AppColors.slaterspwn,
-                                child: Text((msg['senderName'] ?? 'U')[0],
-                                    style: GoogleFonts.zain(fontSize: 10)),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  '${msg['senderName']}: ${msg['text']}',
-                                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: docs.length,
+                            itemBuilder: (context, i) {
+                              final msg =
+                                  docs[i].data() as Map<String, dynamic>;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 12,
+                                      backgroundColor: AppColors.slaterspwn,
+                                      child: Text(
+                                        (msg['senderName'] ?? 'U')[0],
+                                        style: GoogleFonts.zain(fontSize: 10),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '${msg['senderName']}: ${msg['text']}',
+                                        style: GoogleFonts.zain(
+                                          fontSize: 12,
+                                          color: AppColors.textPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
+                              );
+                            },
                           ),
-                        );
-                      },
-                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.all(12),
@@ -1155,15 +1395,25 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
                             controller: widget.messageController,
                             decoration: InputDecoration(
                               hintText: 'Type a message',
-                              hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              hintStyle: GoogleFonts.zain(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(50),
-                                borderSide: const BorderSide(color: AppColors.slaterspwn),
+                                borderSide: const BorderSide(
+                                  color: AppColors.slaterspwn,
+                                ),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(50),
-                                borderSide: const BorderSide(color: AppColors.textPrimary),
+                                borderSide: const BorderSide(
+                                  color: AppColors.textPrimary,
+                                ),
                               ),
                               filled: true,
                               fillColor: Colors.white,
@@ -1179,7 +1429,11 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
                               color: AppColors.yellowrspwn,
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.send, size: 18, color: AppColors.textPrimary),
+                            child: const Icon(
+                              Icons.send,
+                              size: 18,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                         ),
                       ],
@@ -1201,28 +1455,40 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: widget.hasReceivedIntake
                 ? Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.greenrspwn.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Center(
-                child: Text('Animal received at the shelter.',
-                    style: GoogleFonts.zain(
-                        fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              ),
-            )
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.greenrspwn.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: Center(
+                      child: Text(
+                        'Animal received at the shelter.',
+                        style: GoogleFonts.zain(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  )
                 : ElevatedButton(
-              onPressed: widget.onConfirmAnimalReceived,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                minimumSize: const Size(double.infinity, 48),
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              ),
-              child: Text('Confirm Animal Received',
-                  style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-            ),
+                    onPressed: widget.onConfirmAnimalReceived,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      minimumSize: const Size(double.infinity, 48),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: Text(
+                      'Confirm Animal Received',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 15,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
           )
         // Proceed to Treatment — only enabled once the transporter has
         // actually reached the clinic (status 'dropoff'/'in_transit_shelter').
@@ -1231,23 +1497,34 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: ElevatedButton(
-              onPressed: widget.isProceedingToTreatment ? null : widget.onProceedToTreatment,
+              onPressed: widget.isProceedingToTreatment
+                  ? null
+                  : widget.onProceedToTreatment,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
                 disabledBackgroundColor: AppColors.slaterspwn,
                 minimumSize: const Size(double.infinity, 48),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
+                  borderRadius: BorderRadius.circular(30),
+                ),
               ),
               child: widget.isProceedingToTreatment
                   ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                  : Text('Proceed to Treatment',
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 15, color: AppColors.textPrimary)),
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.textPrimary,
+                      ),
+                    )
+                  : Text(
+                      'Proceed to Treatment',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 15,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
             ),
           )
         else
@@ -1257,19 +1534,29 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
               children: [
                 Text(
                   'Waiting for the transporter to reach the clinic…',
-                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: widget.onFastForward,
                   icon: const Icon(Icons.fast_forward, size: 18),
-                  label: Text('Fast-forward to Clinic (Test)',
-                      style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                  label: Text(
+                    'Fast-forward to Clinic (Test)',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textSecondary,
                     side: const BorderSide(color: AppColors.slaterspwn),
                     minimumSize: const Size(double.infinity, 44),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
                   ),
                 ),
               ],
@@ -1302,9 +1589,12 @@ class _AdminCaseDetailTab extends StatelessWidget {
           _Row('Address', data['address']),
           _Row('Description', data['condition']),
           _Row(
-              'Type of Animal',
-              species_summary_util.summarizeSpecies(
-                  animals: data['animals'] as List?, legacyAnimalType: data['animalType'] as String?)),
+            'Type of Animal',
+            species_summary_util.summarizeSpecies(
+              animals: data['animals'] as List?,
+              legacyAnimalType: data['animalType'] as String?,
+            ),
+          ),
           _Row('Urgency', data['urgency']),
           _Row('Coordination', data['coordinateWithShelter']),
           if (data['coordinateWithShelter'] == 'no') ...[
@@ -1331,14 +1621,21 @@ class _Row extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: GoogleFonts.zain(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
-          Text(value ?? '-',
-              style: GoogleFonts.zain(
-                  fontSize: 13, color: AppColors.textSecondary)),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          Text(
+            value ?? '-',
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+          ),
         ],
       ),
     );
@@ -1382,18 +1679,22 @@ class _CollapsibleTransporterCard extends StatelessWidget {
       child: collapsed
           ? _CompactTransporterRow(assignment: assignment, onTap: onToggle)
           : Column(
-        children: [
-          TransporterDetailsCard(assignment: assignment),
-          GestureDetector(
-            onTap: onToggle,
-            behavior: HitTestBehavior.opaque,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: Icon(Icons.keyboard_arrow_up, size: 18, color: AppColors.textSecondary),
+              children: [
+                TransporterDetailsCard(assignment: assignment),
+                GestureDetector(
+                  onTap: onToggle,
+                  behavior: HitTestBehavior.opaque,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: Icon(
+                      Icons.keyboard_arrow_up,
+                      size: 18,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1407,13 +1708,16 @@ class _CompactTransporterRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final profileAsync = ref.watch(transporterProfileProvider((
-    uid: assignment.riderId,
-    fallbackName: assignment.riderName,
-    type: assignment.riderType,
-    isDemo: assignment.isDemo,
-    )));
-    final profile = profileAsync.asData?.value ??
+    final profileAsync = ref.watch(
+      transporterProfileProvider((
+        uid: assignment.riderId,
+        fallbackName: assignment.riderName,
+        type: assignment.riderType,
+        isDemo: assignment.isDemo,
+      )),
+    );
+    final profile =
+        profileAsync.asData?.value ??
         TransporterProfile(
           uid: assignment.riderId,
           name: assignment.riderName,
@@ -1423,9 +1727,12 @@ class _CompactTransporterRow extends ConsumerWidget {
           isDemo: assignment.isDemo,
         );
 
-    final isCompleted = assignment.status == TransportAssignmentStatus.completed;
+    final isCompleted =
+        assignment.status == TransportAssignmentStatus.completed;
     final chipLabel = isCompleted ? 'Completed' : 'Busy';
-    final chipColor = isCompleted ? AppColors.slaterspwn : AppColors.yellowrspwn;
+    final chipColor = isCompleted
+        ? AppColors.slaterspwn
+        : AppColors.yellowrspwn;
 
     return GestureDetector(
       onTap: onTap,
@@ -1436,25 +1743,44 @@ class _CompactTransporterRow extends ConsumerWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 6,
+            ),
+          ],
         ),
         child: Row(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: (profile.photoUrl != null && profile.photoUrl!.isNotEmpty)
-                  ? Image.network(profile.photoUrl!,
-                  width: 32,
-                  height: 32,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                      width: 32, height: 32, color: AppColors.tearspwn,
-                      child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)))
+                  ? Image.network(
+                      profile.photoUrl!,
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 32,
+                        height: 32,
+                        color: AppColors.tearspwn,
+                        child: const Icon(
+                          Icons.directions_car,
+                          size: 16,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    )
                   : Container(
-                  width: 32,
-                  height: 32,
-                  color: AppColors.tearspwn,
-                  child: const Icon(Icons.directions_car, size: 16, color: AppColors.textSecondary)),
+                      width: 32,
+                      height: 32,
+                      color: AppColors.tearspwn,
+                      child: const Icon(
+                        Icons.directions_car,
+                        size: 16,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -1462,18 +1788,35 @@ class _CompactTransporterRow extends ConsumerWidget {
                 '${profile.name} · ${profile.vehicle}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
               ),
             ),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: chipColor, borderRadius: BorderRadius.circular(20)),
-              child: Text(chipLabel,
-                  style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              decoration: BoxDecoration(
+                color: chipColor,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                chipLabel,
+                style: GoogleFonts.zain(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ),
             const SizedBox(width: 4),
-            const Icon(Icons.keyboard_arrow_down, size: 18, color: AppColors.textSecondary),
+            const Icon(
+              Icons.keyboard_arrow_down,
+              size: 18,
+              color: AppColors.textSecondary,
+            ),
           ],
         ),
       ),
@@ -1490,13 +1833,19 @@ class _PendingAssignmentBanner extends ConsumerStatefulWidget {
   final String caseId;
   final TransportAssignment assignment;
   final Map<String, dynamic> caseData;
-  const _PendingAssignmentBanner({required this.caseId, required this.assignment, required this.caseData});
+  const _PendingAssignmentBanner({
+    required this.caseId,
+    required this.assignment,
+    required this.caseData,
+  });
 
   @override
-  ConsumerState<_PendingAssignmentBanner> createState() => _PendingAssignmentBannerState();
+  ConsumerState<_PendingAssignmentBanner> createState() =>
+      _PendingAssignmentBannerState();
 }
 
-class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBanner> {
+class _PendingAssignmentBannerState
+    extends ConsumerState<_PendingAssignmentBanner> {
   bool _cancelling = false;
 
   @override
@@ -1508,10 +1857,12 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
     // then reflects the clean, assignable state with no further action
     // here. A no-op if it hasn't actually expired.
     if (widget.assignment.isStalePending) {
-      ref.read(rescueCaseRepositoryProvider).reconcileStaleOffer(
-        caseId: widget.caseId,
-        assignmentId: widget.assignment.id,
-      );
+      ref
+          .read(rescueCaseRepositoryProvider)
+          .reconcileStaleOffer(
+            caseId: widget.caseId,
+            assignmentId: widget.assignment.id,
+          );
     }
   }
 
@@ -1529,8 +1880,13 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.background,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Cancel this offer?',
-            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        title: Text(
+          'Cancel this offer?',
+          style: GoogleFonts.tiltWarp(
+            fontSize: 16,
+            color: AppColors.textPrimary,
+          ),
+        ),
         content: Text(
           'The pending offer to ${widget.assignment.riderName} will be cancelled, and you can select another transporter.',
           style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
@@ -1538,8 +1894,13 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Keep Waiting',
-                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+            child: Text(
+              'Keep Waiting',
+              style: GoogleFonts.zain(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -1547,9 +1908,14 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
               backgroundColor: const Color(0xFFE05353),
               foregroundColor: Colors.white,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
             ),
-            child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+            child: Text(
+              'Cancel Offer',
+              style: GoogleFonts.zain(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -1557,21 +1923,30 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
     if (confirmed != true || !mounted) return;
     setState(() => _cancelling = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
-        caseId: widget.caseId,
-        assignmentId: widget.assignment.id,
-        reason: 'Cancelled by organization while waiting',
-      );
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .cancelAssignment(
+            caseId: widget.caseId,
+            assignmentId: widget.assignment.id,
+            reason: 'Cancelled by organization while waiting',
+          );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Offer cancelled. You may select another transporter.')),
+          const SnackBar(
+            content: Text(
+              'Offer cancelled. You may select another transporter.',
+            ),
+          ),
         );
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not cancel this offer: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not cancel this offer: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -1591,20 +1966,45 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(
-                width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3)),
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
             const SizedBox(height: 10),
-            Text('Awaiting transporter response',
-                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            const SizedBox(height: 2),
-            Text('Offered to: ${widget.assignment.riderName}',
-                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-            if (duration.isNotEmpty)
-              Text(duration, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+            Text(
+              'Awaiting transporter response',
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 2),
             Text(
-              clinicName != null && clinicName.isNotEmpty ? 'Selected clinic: $clinicName' : '',
+              'Offered to: ${widget.assignment.riderName}',
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            if (duration.isNotEmpty)
+              Text(
+                duration,
+                style: GoogleFonts.zain(
+                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            const SizedBox(height: 2),
+            Text(
+              clinicName != null && clinicName.isNotEmpty
+                  ? 'Selected clinic: $clinicName'
+                  : '',
               textAlign: TextAlign.center,
-              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+              style: GoogleFonts.zain(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+              ),
             ),
             const SizedBox(height: 10),
             OutlinedButton(
@@ -1617,8 +2017,14 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
               ),
               child: _cancelling
                   ? const SizedBox(
-                  width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(
+                      'Cancel Offer',
+                      style: GoogleFonts.zain(fontWeight: FontWeight.w700),
+                    ),
             ),
           ],
         ),
@@ -1636,7 +2042,10 @@ class _PendingAssignmentBannerState extends ConsumerState<_PendingAssignmentBann
 class _DeclinedAssignmentBanner extends StatelessWidget {
   final TransportAssignment assignment;
   final VoidCallback onChooseAnother;
-  const _DeclinedAssignmentBanner({required this.assignment, required this.onChooseAnother});
+  const _DeclinedAssignmentBanner({
+    required this.assignment,
+    required this.onChooseAnother,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1648,15 +2057,30 @@ class _DeclinedAssignmentBanner extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cancel_outlined, size: 28, color: Color(0xFFE05353)),
+            const Icon(
+              Icons.cancel_outlined,
+              size: 28,
+              color: Color(0xFFE05353),
+            ),
             const SizedBox(height: 8),
-            Text('${assignment.riderName} declined the assignment.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text(
+              '${assignment.riderName} declined the assignment.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(assignment.rejectionReason ?? 'No reason given',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            Text(
+              assignment.rejectionReason ?? 'No reason given',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
             const SizedBox(height: 10),
             OutlinedButton(
               onPressed: onChooseAnother,
@@ -1666,8 +2090,13 @@ class _DeclinedAssignmentBanner extends StatelessWidget {
                 minimumSize: const Size(0, 32),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
               ),
-              child: Text('Choose Another Transporter',
-                  style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+              child: Text(
+                'Choose Another Transporter',
+                style: GoogleFonts.zain(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ),

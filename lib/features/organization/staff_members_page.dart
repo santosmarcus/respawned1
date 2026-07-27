@@ -26,6 +26,27 @@ class StaffMembersPage extends StatefulWidget {
 class _StaffMembersPageState extends State<StaffMembersPage> {
   final _repo = OrganizationInvitationRepository();
 
+  // Root cause of the "Pending Invitations appears/disappears/reappears"
+  // flicker: both streams below used to be created INLINE inside
+  // StreamBuilder's `stream:` argument in build() — a fresh Stream (fresh
+  // Firestore query + fresh .map()) on every single rebuild of this page
+  // (e.g. _loadIsOrgAdmin's setState, or any snack/dialog-triggered
+  // setState). StreamBuilder treats a changed `stream` reference as "the
+  // old subscription is gone, go back to ConnectionState.waiting" while
+  // still holding the previous data — but this page's builders checked
+  // `connectionState == waiting` before checking `hasData`, so the
+  // already-loaded list was hidden and a spinner (or, once the fresh
+  // subscription's first cache/server pair arrived, a transient
+  // empty-list state) rendered in its place, over and over. Hoisting both
+  // streams into `late final` fields — created exactly ONCE for the
+  // lifetime of this State, never recreated by a rebuild — gives
+  // StreamBuilder one stable, long-lived subscription per stream, exactly
+  // matching "use stable stream instances" / "do not create duplicate
+  // Firestore subscriptions".
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _membersStream =
+      FirebaseFirestore.instance.collection('organizations').doc(widget.organizationId).collection('members').snapshots();
+  late final Stream<List<OrganizationInvitation>> _invitationsStream = _repo.streamInvitations(widget.organizationId);
+
   /// Spec's invitation-creation restriction: only an authenticated
   /// organization Admin (checked against *this* organization specifically,
   /// via the existing OrgMembershipService — never a second membership
@@ -193,6 +214,16 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
       ),
     );
     if (role == null || role == current) return;
+    // Demoting the organization's only Admin away from Admin would leave it
+    // with none — same protection _removeMember already has for outright
+    // removal, applied here too since a role change can cause the exact
+    // same admin-less state.
+    if (current == OrgRole.admin && role != OrgRole.admin) {
+      if (await _repo.isFinalAdmin(organizationId: widget.organizationId, uid: uid)) {
+        _snack('This is the only Admin on this organization and cannot be demoted.', error: true);
+        return;
+      }
+    }
     try {
       await _repo.changeMemberRole(organizationId: widget.organizationId, uid: uid, role: role);
       _snack('Role updated.');
@@ -251,12 +282,15 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
           Text('Staff Members', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
           const SizedBox(height: 8),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: FirebaseFirestore.instance.collection('organizations').doc(widget.organizationId).collection('members').snapshots(),
+            stream: _membersStream,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+              // Loading is only the "before the first result ever" state —
+              // once any data has arrived, a stale-but-valid list is always
+              // preferred over a spinner or an empty state.
+              if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
                 return const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: CircularProgressIndicator()));
               }
-              if (snapshot.hasError) {
+              if (snapshot.hasError && !snapshot.hasData) {
                 return Text('Could not load staff members.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
               }
               final docs = snapshot.data?.docs ?? const [];
@@ -281,15 +315,26 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
           Text('Pending Invitations', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
           const SizedBox(height: 8),
           StreamBuilder<List<OrganizationInvitation>>(
-            stream: _repo.streamInvitations(widget.organizationId),
+            stream: _invitationsStream,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
                 return const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: CircularProgressIndicator()));
               }
-              if (snapshot.hasError) {
+              if (snapshot.hasError && !snapshot.hasData) {
                 return Text('Could not load invitations.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
               }
-              final invites = (snapshot.data ?? const []).where((i) => i.status == InvitationStatus.pending).toList();
+              // Deduped by normalized email — `createInvitation` now keys new
+              // invitations by a deterministic organizationId_normalizedEmail
+              // doc id so duplicates can't be newly created, but this is a
+              // defensive backstop against any pre-existing legacy duplicate
+              // docs. streamInvitations orders by createdAt descending, so
+              // `seen.add(...)` (true only the first time) keeps the most
+              // recent one.
+              final seenEmails = <String>{};
+              final invites = (snapshot.data ?? const [])
+                  .where((i) => i.status == InvitationStatus.pending)
+                  .where((i) => seenEmails.add(i.email.trim().toLowerCase()))
+                  .toList();
               if (invites.isEmpty) {
                 return Text('No pending invitations', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
               }

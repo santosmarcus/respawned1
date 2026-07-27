@@ -7,6 +7,7 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/adoption/adoption_page.dart' show kAgeGroupOptions, matchesAgeGroup;
 import 'animal_record_detail_page.dart';
 import 'create_animal_record_page.dart';
 
@@ -59,6 +60,11 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   bool? _hasRescueBackground;
   // Tri-state: null = All, true = Has Special Needs, false = No Special Needs.
   bool? _specialNeedsOnly;
+  // Reuses the exact same life-stage categories/helper the user Adoption
+  // page's own Age filter uses (kAgeGroupOptions/ageGroupOf via
+  // matchesAgeGroup) — replaces the old freeform/numeric age control so
+  // both sides classify any given animal's age identically.
+  final Set<String> _ageGroups = {};
   // Reuses the existing AnimalRecord.archived field — 'Active' (default)
   // excludes archived records the same way the old _includeArchived bool
   // did; 'Archived'/'All' are the new addition. Never a second archive
@@ -118,6 +124,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       (_vaccinatedOnly == true ? 1 : 0) +
       (_hasRescueBackground == true ? 1 : 0) +
       (_specialNeedsOnly != null ? 1 : 0) +
+      _ageGroups.length +
       (_recordStatus != 'Active' ? 1 : 0);
 
   @override
@@ -142,6 +149,13 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     if (_recordStatus == 'Active' && a.archived) return false;
     if (_recordStatus == 'Archived' && !a.archived) return false;
     if (_speciesFilter != 'All' && a.species != (_speciesFilter == 'Dogs' ? 'Dog' : 'Cat')) return false;
+    // Reads the exact same canonical fields AnimalRecord.statusLabel's
+    // precedence chain is built from (adoptionStatus/currentCaseId) — never
+    // a second interpretation of "Adopted"/"In Treatment". 'Adopted' only
+    // ever matches once adoptionStatus is actually 'adopted', which
+    // AdoptionApplicationRepository.release only sets after an approved
+    // application completes handoff — never merely applied/pending/
+    // approved-but-not-yet-released (that stays 'reserved').
     if (_statusFilter != 'All') {
       final want = _statusFilter.toLowerCase().replaceAll(' ', '_');
       if (want == 'in_treatment') {
@@ -155,6 +169,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     if (_vaccinatedOnly == true && !a.vaccinated) return false;
     if (_hasRescueBackground == true && a.rescueBackground.isEmpty) return false;
     if (_specialNeedsOnly != null && a.hasSpecialNeeds != _specialNeedsOnly) return false;
+    if (!matchesAgeGroup(_ageGroups, a)) return false;
     return true;
   }
 
@@ -242,6 +257,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           _vaccinatedOnly = null;
                           _hasRescueBackground = null;
                           _specialNeedsOnly = null;
+                          _ageGroups.clear();
                           _recordStatus = 'Active';
                         }),
                         child: const Text('Clear'),
@@ -352,6 +368,32 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                               onSelected: (_) => setSheetState(() => _specialNeedsOnly = false),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 16),
+                        // Same life-stage categories as the user Adoption
+                        // page's own Age filter (kAgeGroupOptions +
+                        // matchesAgeGroup/ageGroupOf) — not a second age
+                        // system. Multi-select, same as every other chip
+                        // group in this sheet.
+                        Text('Age', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: kAgeGroupOptions
+                              .map((o) => ChoiceChip(
+                                    label: Text(o),
+                                    selected: _ageGroups.contains(o),
+                                    selectedColor: AppColors.yellowrspwn,
+                                    onSelected: (sel) => setSheetState(() {
+                                      if (sel) {
+                                        _ageGroups.add(o);
+                                      } else {
+                                        _ageGroups.remove(o);
+                                      }
+                                    }),
+                                  ))
+                              .toList(),
                         ),
                         const SizedBox(height: 16),
                         Text('Record Status', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),

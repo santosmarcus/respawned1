@@ -9,6 +9,7 @@ import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/utils/adoption_lifecycle.dart';
+import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
@@ -16,6 +17,7 @@ import 'package:respawnd1/features/admin/animals/state/animal_records_providers.
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
+import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
 
 /// Action Required + Current Operations — replaces adminhome_screen.dart's
 /// old hardcoded gauge/"Pending Requests" placeholder block with real,
@@ -207,125 +209,121 @@ class ActionRequiredSection extends ConsumerWidget {
 
     final rows = <Widget>[];
 
+    // Dashboard-flicker fix — every branch below reads `.value`
+    // rather than pattern-matching only on AsyncData via `.when(data: ...)`.
+    // Riverpod's AsyncValue already keeps the LAST successfully-received
+    // value accessible through `.value` even while a provider is
+    // between emissions (a brief AsyncLoading during refresh) or has hit a
+    // transient AsyncError — `.when()`'s `loading`/`error` callbacks simply
+    // never see that carried-over value, so a bare `data: (v) => ...` with
+    // empty `loading`/`error` branches was silently discarding perfectly
+    // good cached data and rendering as if the count had dropped to zero.
+    // Reading `.value` uniformly means: nothing shows before the
+    // first real result ever arrives (matches `anyLoading` below), and
+    // once a result has arrived it is never replaced by a blank/zero state
+    // just because the provider is momentarily reloading or errored — only
+    // a genuinely new emission with a different count changes what's shown.
+    // An error banner only appears when there is no prior value at all to
+    // fall back on.
+
     // Critical rescue reports awaiting review — no threshold, just
     // status==pendingReview/accepted (the Review tab's own definition)
     // filtered to urgency=='Critical'.
-    reviewCases.when(
-      data: (cases) {
-        final critical = cases.where((c) => c.urgency == 'Critical').length;
-        if (critical > 0) {
-          rows.add(_AlertRow(
-            icon: Icons.priority_high,
-            color: const Color(0xFFE05353),
-            title: '$critical critical rescue report${critical == 1 ? '' : 's'} awaiting review',
-            subtitle: 'Urgency: Critical · status: pending review',
-            onTap: () => _openRescueReview(context, ref),
-          ));
-        }
-        final acceptedNoClinic = cases.where((c) => c.status == RescueStatus.accepted).length;
-        if (acceptedNoClinic > 0) {
-          rows.add(_AlertRow(
-            icon: Icons.local_hospital_outlined,
-            color: const Color(0xFF9C6B10),
-            title: '$acceptedNoClinic accepted case${acceptedNoClinic == 1 ? '' : 's'} without a clinic',
-            subtitle: 'Accepted, no clinic selected yet',
-            onTap: () => _openRescueReview(context, ref),
-          ));
-        }
-      },
-      loading: () {},
-      error: (e, _) => rows.add(_AlertRow(
+    final reviewList = reviewCases.value;
+    if (reviewList != null) {
+      final critical = reviewList.where((c) => c.urgency == 'Critical').length;
+      if (critical > 0) {
+        rows.add(_AlertRow(
+          icon: Icons.priority_high,
+          color: const Color(0xFFE05353),
+          title: '$critical critical rescue report${critical == 1 ? '' : 's'} awaiting review',
+          subtitle: 'Urgency: Critical · status: pending review',
+          onTap: () => _openRescueReview(context, ref),
+        ));
+      }
+      final acceptedNoClinic = reviewList.where((c) => c.status == RescueStatus.accepted).length;
+      if (acceptedNoClinic > 0) {
+        rows.add(_AlertRow(
+          icon: Icons.local_hospital_outlined,
+          color: const Color(0xFF9C6B10),
+          title: '$acceptedNoClinic accepted case${acceptedNoClinic == 1 ? '' : 's'} without a clinic',
+          subtitle: 'Accepted, no clinic selected yet',
+          onTap: () => _openRescueReview(context, ref),
+        ));
+      }
+    } else if (reviewCases.hasError) {
+      rows.add(_AlertRow(
         icon: Icons.error_outline,
         color: Colors.redAccent,
         title: 'Could not load Rescue Review data',
-        subtitle: '$e',
+        subtitle: '${reviewCases.error}',
         onTap: () => _openRescueReview(context, ref),
-      )),
-    );
+      ));
+    }
 
-    assignCases.when(
-      data: (cases) {
-        if (cases.isNotEmpty) {
-          rows.add(_AlertRow(
-            icon: Icons.local_shipping_outlined,
-            color: const Color(0xFF9C6B10),
-            title: '${cases.length} case${cases.length == 1 ? '' : 's'} awaiting transporter assignment',
-            subtitle: 'Clinic selected, no transporter offered yet',
-            onTap: () => _openRescueAssign(context, ref),
-          ));
-        }
-      },
-      loading: () {},
-      error: (_, __) {},
-    );
+    final assignList = assignCases.value;
+    if (assignList != null && assignList.isNotEmpty) {
+      rows.add(_AlertRow(
+        icon: Icons.local_shipping_outlined,
+        color: const Color(0xFF9C6B10),
+        title: '${assignList.length} case${assignList.length == 1 ? '' : 's'} awaiting transporter assignment',
+        subtitle: 'Clinic selected, no transporter offered yet',
+        onTap: () => _openRescueAssign(context, ref),
+      ));
+    }
 
-    staleOffersAsync.when(
-      data: (offers) {
-        if (offers.isNotEmpty) {
-          rows.add(_AlertRow(
-            icon: Icons.hourglass_disabled_outlined,
-            color: const Color(0xFFE05353),
-            title: '${offers.length} unanswered transporter offer${offers.length == 1 ? '' : 's'} expired',
-            subtitle: 'Pending offer passed its own response window',
-            onTap: () => _openRescueAssign(context, ref),
-          ));
-        }
-      },
-      loading: () {},
-      error: (_, __) {},
-    );
+    final staleOffers = staleOffersAsync.value;
+    if (staleOffers != null && staleOffers.isNotEmpty) {
+      rows.add(_AlertRow(
+        icon: Icons.hourglass_disabled_outlined,
+        color: const Color(0xFFE05353),
+        title: '${staleOffers.length} unanswered transporter offer${staleOffers.length == 1 ? '' : 's'} expired',
+        subtitle: 'Pending offer passed its own response window',
+        onTap: () => _openRescueAssign(context, ref),
+      ));
+    }
 
-    approvedAsync.when(
-      data: (apps) {
-        if (apps.isNotEmpty) {
-          rows.add(_AlertRow(
-            icon: Icons.home_outlined,
-            color: AppColors.greenrspwn,
-            title: '${apps.length} approved application${apps.length == 1 ? '' : 's'} awaiting release',
-            subtitle: 'Approved, release/handover not completed yet',
-            onTap: () => _openAdoptions(context, AdoptionStatus.approved),
-          ));
-        }
-      },
-      loading: () {},
-      error: (_, __) {},
-    );
+    final approvedApps = approvedAsync.value;
+    if (approvedApps != null && approvedApps.isNotEmpty) {
+      rows.add(_AlertRow(
+        icon: Icons.home_outlined,
+        color: AppColors.greenrspwn,
+        title: '${approvedApps.length} approved application${approvedApps.length == 1 ? '' : 's'} awaiting release',
+        subtitle: 'Approved, release/handover not completed yet',
+        onTap: () => _openAdoptions(context, AdoptionStatus.approved),
+      ));
+    }
 
-    adoptedBucketAsync.when(
-      data: (apps) {
-        final activeReturns = apps.where((a) => isReturnActive(a.returnRequest)).length;
-        if (activeReturns > 0) {
-          rows.add(_AlertRow(
-            icon: Icons.assignment_return_outlined,
-            color: const Color(0xFFE05353),
-            title: '$activeReturns active return request${activeReturns == 1 ? '' : 's'}',
-            subtitle: 'A return is in progress for an adopted animal',
-            onTap: () => _openAdoptions(context, AdoptionStatus.adopted),
-          ));
-        }
-      },
-      loading: () {},
-      error: (_, __) {},
-    );
+    final adoptedBucket = adoptedBucketAsync.value;
+    if (adoptedBucket != null) {
+      final activeReturns = adoptedBucket.where((a) => isReturnActive(a.returnRequest)).length;
+      if (activeReturns > 0) {
+        rows.add(_AlertRow(
+          icon: Icons.assignment_return_outlined,
+          color: const Color(0xFFE05353),
+          title: '$activeReturns active return request${activeReturns == 1 ? '' : 's'}',
+          subtitle: 'A return is in progress for an adopted animal',
+          onTap: () => _openAdoptions(context, AdoptionStatus.adopted),
+        ));
+      }
+    }
 
-    overdueFollowUpsAsync.when(
-      data: (followUps) {
-        if (followUps.isNotEmpty) {
-          rows.add(_AlertRow(
-            icon: Icons.event_busy_outlined,
-            color: const Color(0xFFE05353),
-            title: '${followUps.length} overdue post-adoption follow-up${followUps.length == 1 ? '' : 's'}',
-            subtitle: 'Past their own scheduled check-in date',
-            onTap: () => _openAdoptions(context, AdoptionStatus.adopted),
-          ));
-        }
-      },
-      loading: () {},
-      error: (_, __) {},
-    );
+    final overdueFollowUps = overdueFollowUpsAsync.value;
+    if (overdueFollowUps != null && overdueFollowUps.isNotEmpty) {
+      rows.add(_AlertRow(
+        icon: Icons.event_busy_outlined,
+        color: const Color(0xFFE05353),
+        title: '${overdueFollowUps.length} overdue post-adoption follow-up${overdueFollowUps.length == 1 ? '' : 's'}',
+        subtitle: 'Past their own scheduled check-in date',
+        onTap: () => _openAdoptions(context, AdoptionStatus.adopted),
+      ));
+    }
 
+    // Loading is "before the first result ever" only — once any of these
+    // providers has a value, `anyLoading` never fires again for it, even
+    // during a later refresh.
     final anyLoading = [reviewCases, assignCases, staleOffersAsync, approvedAsync, adoptedBucketAsync, overdueFollowUpsAsync]
-        .any((a) => a.isLoading);
+        .any((a) => !a.hasValue && a.isLoading);
 
     return _DashboardSectionCard(
       title: 'Action Required',
@@ -348,11 +346,23 @@ class ActionRequiredSection extends ConsumerWidget {
       );
 }
 
-final staleTransportOffersProvider = StreamProvider.autoDispose<List<TransportAssignment>>((ref) {
+// Deliberately NOT .autoDispose (dashboard-flicker root cause, part 1):
+// an autoDispose provider is torn down the moment its last widget listener
+// unmounts, and rebuilt from scratch — a fresh Firestore listener — the
+// next time something watches it. Both of these are watched from two
+// sibling sections (ActionRequiredSection + CurrentOperationsSection) that
+// are always mounted together on the dashboard, so autoDispose bought no
+// real memory savings here, while making every "count reappears after
+// having disappeared" report reproducible any time the dashboard is
+// briefly left and returned to. A plain (never-disposed) StreamProvider
+// keeps exactly one Firestore subscription alive for the app's session,
+// so once a value has ever been shown, AsyncValue.value below never
+// goes back to null.
+final staleTransportOffersProvider = StreamProvider<List<TransportAssignment>>((ref) {
   return ref.watch(rescueCaseRepositoryProvider).streamStalePendingAssignments();
 });
 
-final overdueFollowUpsProvider = StreamProvider.autoDispose<List<FollowUpRecord>>((ref) {
+final overdueFollowUpsProvider = StreamProvider<List<FollowUpRecord>>((ref) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamOverdueFollowUps();
 });
 
@@ -431,15 +441,15 @@ class TopMetricsRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Capacity — current occupancy traced from the real AnimalRecord
-    // status/adoptionStatus/archived values (excludes archived, deceased,
-    // and adopted-out animals; no new status values invented). Maximum
-    // comes from shelterMaxCapacityProvider (settings/shelter.maxCapacity)
-    // — never hardcoded, never used to compute a percentage when absent.
+    // status/adoptionStatus/archived values via the shared
+    // isCurrentlyHoused classifier (core/utils/shelter_occupancy.dart) —
+    // the SAME classifier Organization Profile's over-capacity warning
+    // uses, so the two can never disagree. Maximum comes from
+    // shelterMaxCapacityProvider (settings/shelter.maxCapacity) — never
+    // hardcoded, never used to compute a percentage when absent.
     final animalsAsync = ref.watch(allAnimalRecordsProvider);
-    final currentOccupancy = animalsAsync.asData?.value
-        .where((a) => !a.archived && a.status != 'deceased' && a.adoptionStatus != 'adopted' && a.adoptionStatus != 'deceased')
-        .length;
-    final maxCapacity = ref.watch(shelterMaxCapacityProvider).asData?.value;
+    final currentOccupancy = animalsAsync.value?.where(isCurrentlyHoused).length;
+    final maxCapacity = ref.watch(shelterMaxCapacityProvider).value;
 
     final review = ref.watch(casesForTabProvider(RescuePipelineTab.review));
     final assign = ref.watch(casesForTabProvider(RescuePipelineTab.assign));
@@ -448,9 +458,9 @@ class TopMetricsRow extends ConsumerWidget {
     final intake = ref.watch(casesForTabProvider(RescuePipelineTab.intake));
     final activeTabs = [review, assign, ongoing, treatment, intake];
     final allLoaded = activeTabs.every((a) => a.hasValue);
-    final activeCaseCount = allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.asData!.value.length) : null;
+    final activeCaseCount = allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.value!.length) : null;
     final activeAnimalCount =
-        allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.asData!.value.fold<int>(0, (s, c) => s + c.animalCount)) : null;
+        allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.value!.fold<int>(0, (s, c) => s + c.animalCount)) : null;
 
     // Active Volunteers — no distinct active/inactive account field exists
     // for rescue_volunteer users (confirmed by inspection); the only real
@@ -459,8 +469,8 @@ class TopMetricsRow extends ConsumerWidget {
     // Reported honestly as "online now" rather than implying a broader
     // "active" concept the data can't actually support.
     final volunteersAsync = ref.watch(rescueVolunteersProvider);
-    final onlineVolunteers = volunteersAsync.asData?.value.where((v) => v.isOnline).length;
-    final totalVolunteers = volunteersAsync.asData?.value.length;
+    final onlineVolunteers = volunteersAsync.value?.where((v) => v.isOnline).length;
+    final totalVolunteers = volunteersAsync.value?.length;
 
     return Row(
       children: [
@@ -470,7 +480,19 @@ class TopMetricsRow extends ConsumerWidget {
               ? '—'
               : '$currentOccupancy / ${maxCapacity ?? '—'}',
           secondary: maxCapacity == null ? 'Capacity not configured' : null,
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AnimalRecordsPage())),
+          // Opens Organization Profile (spec §9) — Shelter Capacity now
+          // lives there (see section 8), so this is the "existing... page"
+          // this metric's own maximum comes from, rather than the Animal
+          // Records list this used to open.
+          onTap: () async {
+            final membership = await ref.read(currentOrgMembershipProvider.future);
+            if (context.mounted) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership?.organizationId)),
+              );
+            }
+          },
         ),
         const SizedBox(width: 10),
         _CompactMetricCard(
@@ -517,7 +539,7 @@ class CurrentOperationsSection extends ConsumerWidget {
     final activeByRider = ref.watch(activeAssignmentsByRiderProvider);
     final transporters = ref.watch(petTransportersProvider);
 
-    int? lenOf(AsyncValue<List<dynamic>> a) => a.asData?.value.length;
+    int? lenOf(AsyncValue<List<dynamic>> a) => a.value?.length;
 
     final activeRescueCases = [review, assign, ongoing, treatment, intake]
         .map(lenOf)
@@ -527,19 +549,20 @@ class CurrentOperationsSection extends ConsumerWidget {
         .map(lenOf)
         .fold<int?>(0, (sum, v) => sum == null || v == null ? null : sum + v);
 
-    final availableForAdoption = animalsAsync.asData?.value.where((a) => a.adoptionStatus == 'adoptable').length;
+    final availableForAdoption = animalsAsync.value?.where((a) => a.adoptionStatus == 'adoptable').length;
 
-    final activeMonitoring = adoptedBucket.asData?.value
-        .where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted)
+    final activeMonitoring = adoptedBucket.value
+        ?.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted)
         .length;
 
-    final activeAssignments =
-        activeByRider.asData?.value.values.where((s) => s == TransportAssignmentStatus.pending || s == TransportAssignmentStatus.accepted).length;
-    final availableTransporters = transporters.asData?.value == null || !activeByRider.hasValue
+    final activeAssignments = activeByRider.value?.values
+        .where((s) => s == TransportAssignmentStatus.pending || s == TransportAssignmentStatus.accepted)
+        .length;
+    final availableTransporters = transporters.value == null || !activeByRider.hasValue
         ? null
-        : transporters.asData!.value.where((t) {
+        : transporters.value!.where((t) {
             if (!t.isOnline) return false;
-            final status = activeByRider.asData!.value[t.uid];
+            final status = activeByRider.value![t.uid];
             return status != TransportAssignmentStatus.pending && status != TransportAssignmentStatus.accepted;
           }).length;
 
@@ -559,7 +582,7 @@ class CurrentOperationsSection extends ConsumerWidget {
           onTap: () => _pushRescue(context, ref, RescuePipelineTab.review),
         ),
         _KpiCard(
-          value: v(review.asData?.value.where((c) => c.urgency == 'Critical').length),
+          value: v(review.value?.where((c) => c.urgency == 'Critical').length),
           label: 'Critical rescue reports',
           onTap: () => _pushRescue(context, ref, RescuePipelineTab.review),
         ),

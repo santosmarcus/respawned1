@@ -13,7 +13,6 @@ import 'package:respawnd1/core/models/rescue/route_result.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 
-
 class TrackCasePage extends StatefulWidget {
   final String caseId;
   final int initialTabIndex;
@@ -49,19 +48,19 @@ class _TrackCasePageState extends State<TrackCasePage> {
         .doc(uid)
         .get();
     final name =
-    '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
-        .trim();
+        '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
+            .trim();
 
     await FirebaseFirestore.instance
         .collection('cases')
         .doc(caseId)
         .collection('messages')
         .add({
-      'senderId': uid,
-      'senderName': name,
-      'text': text,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+          'senderId': uid,
+          'senderName': name,
+          'text': text,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
 
     _messageController.clear();
   }
@@ -83,19 +82,22 @@ class _TrackCasePageState extends State<TrackCasePage> {
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
         final data = snapshot.data!.data() as Map<String, dynamic>?;
         final status = data?['status'] ?? 'pending';
         final statusHistory = List<Map<String, dynamic>>.from(
-            data?['statusHistory'] ?? []);
-        final isReporter = FirebaseAuth.instance.currentUser?.uid != null &&
+          data?['statusHistory'] ?? [],
+        );
+        final isReporter =
+            FirebaseAuth.instance.currentUser?.uid != null &&
             FirebaseAuth.instance.currentUser?.uid == data?['reporterId'];
 
-
         final normalizedStatus = status.toString().toLowerCase();
-        final isFinalStatus = normalizedStatus == 'closed' ||
+        final isFinalStatus =
+            normalizedStatus == 'closed' ||
             normalizedStatus.contains('completed') ||
             normalizedStatus.contains('ended');
 
@@ -107,17 +109,16 @@ class _TrackCasePageState extends State<TrackCasePage> {
         // the normal read-only Track Case view below instead of looping
         // back to this screen every time.
         final isUnacknowledgedRejection =
-            normalizedStatus == 'rejected' && data?['hiddenFromExplore'] != true;
+            normalizedStatus == 'rejected' &&
+            data?['hiddenFromExplore'] != true;
 
         if (isReporter && (isFinalStatus || isUnacknowledgedRejection)) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
-                builder: (_) => CaseCompletedPage(
-                  caseId: widget.caseId,
-                  caseData: data!,
-                ),
+                builder: (_) =>
+                    CaseCompletedPage(caseId: widget.caseId, caseData: data!),
               ),
             );
           });
@@ -129,8 +130,10 @@ class _TrackCasePageState extends State<TrackCasePage> {
               icon: const Icon(Icons.arrow_back),
               onPressed: () => Navigator.pop(context),
             ),
-            title: Text('Track Case',
-                style: Theme.of(context).textTheme.displaySmall),
+            title: Text(
+              'Track Case',
+              style: Theme.of(context).textTheme.displaySmall,
+            ),
             centerTitle: true,
           ),
           body: Column(
@@ -145,7 +148,10 @@ class _TrackCasePageState extends State<TrackCasePage> {
                       left: 0,
                       right: 0,
                       height: 200,
-                      child: _TrackCaseMap(caseId: widget.caseId, data: data ?? {}),
+                      child: _TrackCaseMap(
+                        caseId: widget.caseId,
+                        data: data ?? {},
+                      ),
                     ),
                     Positioned(
                       left: 24,
@@ -162,8 +168,9 @@ class _TrackCasePageState extends State<TrackCasePage> {
                 child: Container(
                   decoration: const BoxDecoration(
                     color: AppColors.background,
-                    borderRadius:
-                    BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
                   ),
                   child: Column(
                     children: [
@@ -171,8 +178,7 @@ class _TrackCasePageState extends State<TrackCasePage> {
 
                       // Tab switcher
                       Container(
-                        margin:
-                        const EdgeInsets.symmetric(horizontal: 16),
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
                         decoration: BoxDecoration(
                           color: AppColors.slaterspwn,
                           borderRadius: BorderRadius.circular(50),
@@ -182,14 +188,12 @@ class _TrackCasePageState extends State<TrackCasePage> {
                             _TabButton(
                               label: 'Tracking Detail',
                               selected: _tabIndex == 0,
-                              onTap: () =>
-                                  setState(() => _tabIndex = 0),
+                              onTap: () => setState(() => _tabIndex = 0),
                             ),
                             _TabButton(
                               label: 'Case Detail',
                               selected: _tabIndex == 1,
-                              onTap: () =>
-                                  setState(() => _tabIndex = 1),
+                              onTap: () => setState(() => _tabIndex = 1),
                             ),
                           ],
                         ),
@@ -199,15 +203,15 @@ class _TrackCasePageState extends State<TrackCasePage> {
 
                       // Case ID
                       Padding(
-                        padding:
-                        const EdgeInsets.symmetric(horizontal: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
                             '#${widget.caseId.substring(0, 7).toUpperCase()}',
                             style: GoogleFonts.tiltWarp(
-                                fontSize: 18,
-                                color: AppColors.textPrimary),
+                              fontSize: 18,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                         ),
                       ),
@@ -218,20 +222,20 @@ class _TrackCasePageState extends State<TrackCasePage> {
                       Expanded(
                         child: _tabIndex == 0
                             ? _TrackingTab(
-                          statusHistory: statusHistory,
-                          caseId: widget.caseId,
-                          messageController: _messageController,
-                          messageFocusNode: _messageFocusNode,
-                          onSend: () => _sendMessage(widget.caseId),
-                          data: data ?? {},  // ADDED
-                          isReporter: isReporter,
-                        )
+                                statusHistory: statusHistory,
+                                caseId: widget.caseId,
+                                messageController: _messageController,
+                                messageFocusNode: _messageFocusNode,
+                                onSend: () => _sendMessage(widget.caseId),
+                                data: data ?? {}, // ADDED
+                                isReporter: isReporter,
+                              )
                             : _CaseDetailTab(
-                          caseId: widget.caseId,
-                          data: data ?? {},
-                          isReporter: isReporter,
-                          onMessageOrg: _focusOrgMessages,
-                        ),
+                                caseId: widget.caseId,
+                                data: data ?? {},
+                                isReporter: isReporter,
+                                onMessageOrg: _focusOrgMessages,
+                              ),
                       ),
                     ],
                   ),
@@ -284,7 +288,6 @@ class _TabButton extends StatelessWidget {
   }
 }
 
-
 class _TrackCaseMap extends StatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
@@ -309,91 +312,136 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
   Widget build(BuildContext context) {
     final pickup = _latLngFrom(widget.data, 'lat', 'lng');
     final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng');
-    final riderLastKnown =
-    _latLngFrom(widget.data, 'riderLastLat', 'riderLastLng');
+    final riderLastKnown = _latLngFrom(
+      widget.data,
+      'riderLastLat',
+      'riderLastLng',
+    );
 
-    return StreamBuilder<QuerySnapshot>(
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
-          .collection('tracking')
-          .orderBy('timestamp')
-          .limitToLast(200)
+          .collection('communityReports')
+          .where('approvalStatus', isEqualTo: 'pending')
           .snapshots(),
-      builder: (context, snapshot) {
-        final trail = <LatLng>[];
-        if (snapshot.hasData) {
-          for (final doc in snapshot.data!.docs) {
-            final d = doc.data() as Map<String, dynamic>;
-            final lat = d['lat'];
-            final lng = d['lng'];
-            if (lat is num && lng is num) {
-              trail.add(LatLng(lat.toDouble(), lng.toDouble()));
+      builder: (context, reportsSnapshot) {
+        final proposedLocations =
+            reportsSnapshot.data?.docs.where((doc) {
+              final data = doc.data();
+              return data['type'] == 'moved' &&
+                  data['newLat'] is num &&
+                  data['newLng'] is num;
+            }).toList() ??
+            <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('cases')
+              .doc(widget.caseId)
+              .collection('tracking')
+              .orderBy('timestamp')
+              .limitToLast(200)
+              .snapshots(),
+          builder: (context, snapshot) {
+            final trail = <LatLng>[];
+            if (snapshot.hasData) {
+              for (final doc in snapshot.data!.docs) {
+                final d = doc.data() as Map<String, dynamic>;
+                final lat = d['lat'];
+                final lng = d['lng'];
+                if (lat is num && lng is num) {
+                  trail.add(LatLng(lat.toDouble(), lng.toDouble()));
+                }
+              }
             }
-          }
-        }
 
-        final riderPos = trail.isNotEmpty ? trail.last : riderLastKnown;
+            final riderPos = trail.isNotEmpty ? trail.last : riderLastKnown;
 
-        final center = riderPos ?? pickup ?? dropoff ?? const LatLng(14.5416, 121.0644);
+            final center =
+                riderPos ??
+                pickup ??
+                dropoff ??
+                const LatLng(14.5416, 121.0644);
 
-        if (_controller != null && riderPos != null && !_centered) {
-          _centered = true;
-          _controller!.animateCamera(CameraUpdate.newLatLngZoom(riderPos, 15));
-        }
+            if (_controller != null && riderPos != null && !_centered) {
+              _centered = true;
+              _controller!.animateCamera(
+                CameraUpdate.newLatLngZoom(riderPos, 15),
+              );
+            }
 
-        final markers = <Marker>{
-          if (pickup != null)
-            Marker(
-              markerId: const MarkerId('pickup'),
-              position: pickup,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                  BitmapDescriptor.hueGreen),
-              infoWindow: const InfoWindow(title: 'Pickup location'),
-            ),
-          if (dropoff != null)
-            Marker(
-              markerId: const MarkerId('dropoff'),
-              position: dropoff,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                  BitmapDescriptor.hueRed),
-              infoWindow: const InfoWindow(title: 'Drop-off location'),
-            ),
-          if (riderPos != null)
-            Marker(
-              markerId: const MarkerId('rider_current'),
-              position: riderPos,
-              infoWindow: const InfoWindow(title: 'Transporter'),
-            ),
-        };
+            final markers = <Marker>{
+              if (pickup != null)
+                Marker(
+                  markerId: const MarkerId('pickup'),
+                  position: pickup,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                    BitmapDescriptor.hueGreen,
+                  ),
+                  infoWindow: const InfoWindow(title: 'Pickup location'),
+                ),
+              if (dropoff != null)
+                Marker(
+                  markerId: const MarkerId('dropoff'),
+                  position: dropoff,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                    BitmapDescriptor.hueRed,
+                  ),
+                  infoWindow: const InfoWindow(title: 'Drop-off location'),
+                ),
+              if (riderPos != null)
+                Marker(
+                  markerId: const MarkerId('rider_current'),
+                  position: riderPos,
+                  infoWindow: const InfoWindow(title: 'Transporter'),
+                ),
+              for (final report in proposedLocations)
+                Marker(
+                  markerId: MarkerId('proposed_location_${report.id}'),
+                  position: LatLng(
+                    (report.data()['newLat'] as num).toDouble(),
+                    (report.data()['newLng'] as num).toDouble(),
+                  ),
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                    BitmapDescriptor.hueOrange,
+                  ),
+                  infoWindow: InfoWindow(
+                    title: 'Proposed location — awaiting approval',
+                    snippet: report.data()['newAddress'] as String?,
+                  ),
+                ),
+            };
 
-        final routePoints = <LatLng>[
-          if (pickup != null) pickup,
-          ...trail,
-          if (trail.isEmpty && dropoff != null) dropoff,
-        ];
+            final routePoints = <LatLng>[
+              if (pickup != null) pickup,
+              ...trail,
+              if (trail.isEmpty && dropoff != null) dropoff,
+            ];
 
-        return ClipRRect(
-          borderRadius: BorderRadius.zero,
-          child: GoogleMap(
-            onMapCreated: (ctrl) => _controller = ctrl,
-            initialCameraPosition: CameraPosition(target: center, zoom: 14),
-            myLocationEnabled: false,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-            markers: markers,
-            polylines: routePoints.length < 2
-                ? {}
-                : {
-              Polyline(
-                polylineId: const PolylineId('route_trail'),
-                points: routePoints,
-                color: AppColors.textPrimary,
-                width: 4,
+            return ClipRRect(
+              borderRadius: BorderRadius.zero,
+              child: GoogleMap(
+                onMapCreated: (ctrl) => _controller = ctrl,
+                initialCameraPosition: CameraPosition(target: center, zoom: 14),
+                myLocationEnabled: false,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                mapToolbarEnabled: false,
+                markers: markers,
+                polylines: routePoints.length < 2
+                    ? {}
+                    : {
+                        Polyline(
+                          polylineId: const PolylineId('route_trail'),
+                          points: routePoints,
+                          color: AppColors.textPrimary,
+                          width: 4,
+                        ),
+                      },
               ),
-            },
-          ),
+            );
+          },
         );
       },
     );
@@ -435,7 +483,11 @@ class _EtaCardState extends State<_EtaCard> {
   Widget build(BuildContext context) {
     final pickup = _latLngFrom(widget.data, 'lat', 'lng');
     final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng');
-    final riderLastKnown = _latLngFrom(widget.data, 'riderLastLat', 'riderLastLng');
+    final riderLastKnown = _latLngFrom(
+      widget.data,
+      'riderLastLat',
+      'riderLastLng',
+    );
     final destination = dropoff ?? pickup;
 
     return StreamBuilder<QuerySnapshot>(
@@ -452,7 +504,8 @@ class _EtaCardState extends State<_EtaCard> {
           final d = snapshot.data!.docs.last.data() as Map<String, dynamic>;
           final lat = d['lat'];
           final lng = d['lng'];
-          if (lat is num && lng is num) riderPos = LatLng(lat.toDouble(), lng.toDouble());
+          if (lat is num && lng is num)
+            riderPos = LatLng(lat.toDouble(), lng.toDouble());
         }
 
         if (riderPos == null || destination == null) {
@@ -460,7 +513,10 @@ class _EtaCardState extends State<_EtaCard> {
         }
 
         return FutureBuilder<RouteResult>(
-          future: _directionsRepository.fetchRoute(origin: riderPos, destination: destination),
+          future: _directionsRepository.fetchRoute(
+            origin: riderPos,
+            destination: destination,
+          ),
           builder: (context, routeSnapshot) {
             final route = routeSnapshot.data;
             if (route == null) return const SizedBox.shrink();
@@ -553,12 +609,22 @@ class _TrackingTabState extends State<_TrackingTab> {
 
   String _formatDate(DateTime d) {
     const months = [
-      '', 'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
+      '',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     return '${months[d.month]} ${d.day}, ${d.year}';
   }
-
 
   void _showFullImage(BuildContext context, String url) {
     showDialog(
@@ -568,9 +634,7 @@ class _TrackingTabState extends State<_TrackingTab> {
         insetPadding: const EdgeInsets.all(12),
         child: Stack(
           children: [
-            InteractiveViewer(
-              child: Image.network(url, fit: BoxFit.contain),
-            ),
+            InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
             Positioned(
               top: 8,
               right: 8,
@@ -582,8 +646,7 @@ class _TrackingTabState extends State<_TrackingTab> {
                     shape: BoxShape.circle,
                   ),
                   padding: const EdgeInsets.all(6),
-                  child: const Icon(Icons.close,
-                      color: Colors.white, size: 20),
+                  child: const Icon(Icons.close, color: Colors.white, size: 20),
                 ),
               ),
             ),
@@ -594,87 +657,98 @@ class _TrackingTabState extends State<_TrackingTab> {
   }
 
   Widget _buildMediaSection(
-      BuildContext context, String title, List<String> urls) {
+    BuildContext context,
+    String title,
+    List<String> urls,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: GoogleFonts.zain(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
+          Text(
+            title,
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
             child: urls.isEmpty
                 ? Text(
-              'Not available yet.',
-              style: GoogleFonts.zain(
-                  fontSize: 12, color: AppColors.textSecondary),
-            )
+                    'Not available yet.',
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  )
                 : Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: urls.map((url) {
-                return GestureDetector(
-                  onTap: () => _showFullImage(context, url),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      url,
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, progress) {
-                        if (progress == null) return child;
-                        return Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            color: AppColors.slaterspwn,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              value: progress.expectedTotalBytes !=
-                                  null
-                                  ? progress.cumulativeBytesLoaded /
-                                  progress.expectedTotalBytes!
-                                  : null,
-                              strokeWidth: 2,
-                              color: AppColors.textPrimary,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: urls.map((url) {
+                      return GestureDetector(
+                        onTap: () => _showFullImage(context, url),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            url,
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (context, child, progress) {
+                              if (progress == null) return child;
+                              return Container(
+                                width: 80,
+                                height: 80,
+                                decoration: BoxDecoration(
+                                  color: AppColors.slaterspwn,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    value: progress.expectedTotalBytes != null
+                                        ? progress.cumulativeBytesLoaded /
+                                              progress.expectedTotalBytes!
+                                        : null,
+                                    strokeWidth: 2,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                              );
+                            },
+                            errorBuilder: (context, _, __) => Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: AppColors.slaterspwn,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.broken_image_outlined,
+                                color: AppColors.textSecondary,
+                              ),
                             ),
                           ),
-                        );
-                      },
-                      errorBuilder: (context, _, __) => Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: AppColors.slaterspwn,
-                          borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(
-                            Icons.broken_image_outlined,
-                            color: AppColors.textSecondary),
-                      ),
-                    ),
+                      );
+                    }).toList(),
                   ),
-                );
-              }).toList(),
-            ),
           ),
         ],
       ),
     );
   }
+
   // Displayed newest-first (see build() below) — [displayIndex] indexes
   // into that reversed list, so index 0 is always the most recent update
   // and gets the checkmark, matching "latest update at the top" spec.
   Widget _buildTimelineItem(
-      List<Map<String, dynamic>> displayList, int displayIndex) {
+    List<Map<String, dynamic>> displayList,
+    int displayIndex,
+  ) {
     final item = displayList[displayIndex];
     final isNewest = displayIndex == 0;
     final ts = item['timestamp'];
@@ -714,18 +788,28 @@ class _TrackingTabState extends State<_TrackingTab> {
                   child: Text(
                     item['status'] ?? '',
                     style: GoogleFonts.zain(
-                        fontSize: 13, color: AppColors.textPrimary),
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(timeStr,
-                        style: GoogleFonts.zain(
-                            fontSize: 11, color: AppColors.textSecondary)),
-                    Text(dateStr,
-                        style: GoogleFonts.zain(
-                            fontSize: 11, color: AppColors.textSecondary)),
+                    Text(
+                      timeStr,
+                      style: GoogleFonts.zain(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      dateStr,
+                      style: GoogleFonts.zain(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -735,7 +819,6 @@ class _TrackingTabState extends State<_TrackingTab> {
       ],
     );
   }
-
 
   Widget _collapsibleHeader({
     required String title,
@@ -750,11 +833,14 @@ class _TrackingTabState extends State<_TrackingTab> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(title,
-                style: GoogleFonts.zain(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+            Text(
+              title,
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
             Icon(
               expanded ? Icons.expand_less : Icons.expand_more,
               color: AppColors.textPrimary,
@@ -779,24 +865,30 @@ class _TrackingTabState extends State<_TrackingTab> {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       children: [
         _collapsibleHeader(
           title: 'Tracking Progress',
           expanded: _trackingExpanded,
-          onToggle: () => setState(() => _trackingExpanded = !_trackingExpanded),
+          onToggle: () =>
+              setState(() => _trackingExpanded = !_trackingExpanded),
         ),
         const SizedBox(height: 8),
 
         if (_trackingExpanded) ...[
           if (widget.statusHistory.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 24),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
               child: Center(
-                child: Text('No status updates yet.',
-                    style: GoogleFonts.zain(
-                        fontSize: 13, color: AppColors.textSecondary)),
+                child: Text(
+                  'No status updates yet.',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               ),
             )
           else
@@ -804,7 +896,9 @@ class _TrackingTabState extends State<_TrackingTab> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: _buildTimelineItem(
-                    widget.statusHistory.reversed.toList(), i),
+                  widget.statusHistory.reversed.toList(),
+                  i,
+                ),
               ),
 
           const SizedBox(height: 12),
@@ -834,7 +928,8 @@ class _TrackingTabState extends State<_TrackingTab> {
           _collapsibleHeader(
             title: 'Messages to the Organization',
             expanded: _messagesExpanded,
-            onToggle: () => setState(() => _messagesExpanded = !_messagesExpanded),
+            onToggle: () =>
+                setState(() => _messagesExpanded = !_messagesExpanded),
           ),
 
           if (_messagesExpanded) ...[
@@ -856,8 +951,8 @@ class _TrackingTabState extends State<_TrackingTab> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: snap.data!.docs.length,
                     itemBuilder: (context, i) {
-                      final msg = snap.data!.docs[i].data()
-                      as Map<String, dynamic>;
+                      final msg =
+                          snap.data!.docs[i].data() as Map<String, dynamic>;
                       final ts = msg['timestamp'] as Timestamp?;
                       final timeStr = ts != null
                           ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
@@ -873,35 +968,44 @@ class _TrackingTabState extends State<_TrackingTab> {
                               child: Text(
                                 (msg['senderName'] ?? 'U')[0],
                                 style: GoogleFonts.zain(
-                                    fontSize: 12,
-                                    color: AppColors.textPrimary),
+                                  fontSize: 12,
+                                  color: AppColors.textPrimary,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                                        MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text(msg['senderName'] ?? '',
-                                          style: GoogleFonts.zain(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color: AppColors.textPrimary)),
-                                      Text(timeStr,
-                                          style: GoogleFonts.zain(
-                                              fontSize: 10,
-                                              color: AppColors.textSecondary)),
+                                      Text(
+                                        msg['senderName'] ?? '',
+                                        style: GoogleFonts.zain(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary,
+                                        ),
+                                      ),
+                                      Text(
+                                        timeStr,
+                                        style: GoogleFonts.zain(
+                                          fontSize: 10,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                      ),
                                     ],
                                   ),
-                                  Text(msg['text'] ?? '',
-                                      style: GoogleFonts.zain(
-                                          fontSize: 12,
-                                          color: AppColors.textSecondary)),
+                                  Text(
+                                    msg['text'] ?? '',
+                                    style: GoogleFonts.zain(
+                                      fontSize: 12,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -926,18 +1030,24 @@ class _TrackingTabState extends State<_TrackingTab> {
                       decoration: InputDecoration(
                         hintText: 'Type a message',
                         hintStyle: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textSecondary),
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                        ),
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(50),
-                          borderSide:
-                          const BorderSide(color: AppColors.slaterspwn),
+                          borderSide: const BorderSide(
+                            color: AppColors.slaterspwn,
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(50),
                           borderSide: const BorderSide(
-                              color: AppColors.textPrimary),
+                            color: AppColors.textPrimary,
+                          ),
                         ),
                         filled: true,
                         fillColor: Colors.white,
@@ -953,8 +1063,11 @@ class _TrackingTabState extends State<_TrackingTab> {
                         color: AppColors.yellowrspwn,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.send,
-                          size: 18, color: AppColors.textPrimary),
+                      child: const Icon(
+                        Icons.send,
+                        size: 18,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                   ),
                 ],
@@ -996,7 +1109,8 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
     double deg2rad(double deg) => deg * (math.pi / 180.0);
     final dLat = deg2rad(lat2 - lat1);
     final dLng = deg2rad(lng2 - lng1);
-    final a = math.pow(math.sin(dLat / 2), 2) +
+    final a =
+        math.pow(math.sin(dLat / 2), 2) +
         math.cos(deg2rad(lat1)) *
             math.cos(deg2rad(lat2)) *
             math.pow(math.sin(dLng / 2), 2);
@@ -1020,11 +1134,14 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Text(riderName,
-            style: GoogleFonts.tiltWarp(
-                fontSize: 16, color: AppColors.textPrimary)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          riderName,
+          style: GoogleFonts.tiltWarp(
+            fontSize: 16,
+            color: AppColors.textPrimary,
+          ),
+        ),
         content: Text(
           (phone == null || phone.isEmpty)
               ? 'No contact number on file for this transporter yet.'
@@ -1037,25 +1154,29 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: phone!));
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Number copied.')),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Number copied.')));
               },
-              child: Text('Copy',
-                  style: GoogleFonts.zain(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
+              child: Text(
+                'Copy',
+                style: GoogleFonts.zain(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Close',
-                style: GoogleFonts.zain(color: AppColors.textSecondary)),
+            child: Text(
+              'Close',
+              style: GoogleFonts.zain(color: AppColors.textSecondary),
+            ),
           ),
         ],
       ),
     );
   }
-
 
   Widget? _buildRiderInfoCard(BuildContext context) {
     if (!widget.isReporter) return null;
@@ -1074,13 +1195,16 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
         riderLng is num &&
         caseLat is num &&
         caseLng is num) {
-      final km = _distanceKm(riderLat.toDouble(), riderLng.toDouble(),
-          caseLat.toDouble(), caseLng.toDouble());
+      final km = _distanceKm(
+        riderLat.toDouble(),
+        riderLng.toDouble(),
+        caseLat.toDouble(),
+        caseLng.toDouble(),
+      );
       distanceLabel = '${km.toStringAsFixed(1)}km';
     }
 
-    final vehicleLine =
-    [plate, vehicle].where((s) => s.isNotEmpty).join('  ');
+    final vehicleLine = [plate, vehicle].where((s) => s.isNotEmpty).join('  ');
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -1102,28 +1226,42 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                 color: AppColors.slaterspwn,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.person,
-                  color: AppColors.textSecondary, size: 28),
+              child: const Icon(
+                Icons.person,
+                color: AppColors.textSecondary,
+                size: 28,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name,
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 15, color: AppColors.textPrimary)),
+                  Text(
+                    name,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 15,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                   if (distanceLabel != null)
-                    Text(distanceLabel,
-                        style: GoogleFonts.zain(
-                            fontSize: 12, color: AppColors.textSecondary)),
+                    Text(
+                      distanceLabel,
+                      style: GoogleFonts.zain(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   if (vehicleLine.isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    Text(vehicleLine,
-                        style: GoogleFonts.zain(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary)),
+                    Text(
+                      vehicleLine,
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -1157,26 +1295,25 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           .get();
       final userData = userDoc.data();
       final name =
-      '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
-          .trim();
+          '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
+              .trim();
       final label = type == 'adopt';
 
       await FirebaseFirestore.instance
           .collection('cases')
           .doc(widget.caseId)
           .update({
-        'willingAdopterId': uid,
-        'willingAdopterName': name.isEmpty ? 'A general user' : name,
-        'willingAdopterType': type,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status':
-            '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
-
+            'willingAdopterId': uid,
+            'willingAdopterName': name.isEmpty ? 'A general user' : name,
+            'willingAdopterType': type,
+            'statusHistory': FieldValue.arrayUnion([
+              {
+                'status':
+                    '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
+                'timestamp': Timestamp.now(),
+              },
+            ]),
+          });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1198,18 +1335,21 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           .collection('cases')
           .doc(widget.caseId)
           .update({
-        'adopterArrivedAtTreatment': true,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Interested adopter reported arrival at the treatment location.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      });
+            'adopterArrivedAtTreatment': true,
+            'statusHistory': FieldValue.arrayUnion([
+              {
+                'status':
+                    'Interested adopter reported arrival at the treatment location.',
+                'timestamp': Timestamp.now(),
+              },
+            ]),
+          });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Thanks! Let the transporter know you\'re there in person.'),
+            content: Text(
+              'Thanks! Let the transporter know you\'re there in person.',
+            ),
             backgroundColor: AppColors.greenrspwn,
           ),
         );
@@ -1228,7 +1368,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
     }
   }
 
-
   void _showFullImage(BuildContext context, String url) {
     showDialog(
       context: context,
@@ -1237,9 +1376,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
         insetPadding: const EdgeInsets.all(12),
         child: Stack(
           children: [
-            InteractiveViewer(
-              child: Image.network(url, fit: BoxFit.contain),
-            ),
+            InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
             Positioned(
               top: 8,
               right: 8,
@@ -1251,8 +1388,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                     shape: BoxShape.circle,
                   ),
                   padding: const EdgeInsets.all(6),
-                  child: const Icon(Icons.close,
-                      color: Colors.white, size: 20),
+                  child: const Icon(Icons.close, color: Colors.white, size: 20),
                 ),
               ),
             ),
@@ -1263,78 +1399,87 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   }
 
   Widget _buildMediaSection(
-      BuildContext context, String title, List<String> urls) {
+    BuildContext context,
+    String title,
+    List<String> urls,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title,
-            style: GoogleFonts.zain(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary)),
+        Text(
+          title,
+          style: GoogleFonts.zain(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
         const SizedBox(height: 8),
         SizedBox(
           width: double.infinity,
           child: urls.isEmpty
               ? Text(
-            'Not available yet.',
-            style: GoogleFonts.zain(
-                fontSize: 13, color: AppColors.textSecondary),
-          )
+                  'Not available yet.',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                )
               : Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: urls.map((url) {
-              return GestureDetector(
-                onTap: () => _showFullImage(context, url),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    url,
-                    width: 100,
-                    height: 100,
-                    fit: BoxFit.cover,
-                    loadingBuilder: (context, child, progress) {
-                      if (progress == null) return child;
-                      return Container(
-                        width: 100,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          color: AppColors.slaterspwn,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            value: progress.expectedTotalBytes != null
-                                ? progress.cumulativeBytesLoaded /
-                                progress.expectedTotalBytes!
-                                : null,
-                            strokeWidth: 2,
-                            color: AppColors.textPrimary,
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: urls.map((url) {
+                    return GestureDetector(
+                      onTap: () => _showFullImage(context, url),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          url,
+                          width: 100,
+                          height: 100,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                color: AppColors.slaterspwn,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  value: progress.expectedTotalBytes != null
+                                      ? progress.cumulativeBytesLoaded /
+                                            progress.expectedTotalBytes!
+                                      : null,
+                                  strokeWidth: 2,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, _, __) => Container(
+                            width: 100,
+                            height: 100,
+                            decoration: BoxDecoration(
+                              color: AppColors.slaterspwn,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.broken_image_outlined,
+                              color: AppColors.textSecondary,
+                            ),
                           ),
                         ),
-                      );
-                    },
-                    errorBuilder: (context, _, __) => Container(
-                      width: 100,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: AppColors.slaterspwn,
-                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.broken_image_outlined,
-                          color: AppColors.textSecondary),
-                    ),
-                  ),
+                    );
+                  }).toList(),
                 ),
-              );
-            }).toList(),
-          ),
         ),
       ],
     );
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -1393,23 +1538,28 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                         ? 'You\'ve let the transporter know you\'re there.'
                         : 'The animal is at the treatment location, ready for pickup.',
                     style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     data['adopterArrivedAtTreatment'] == true
                         ? 'The transporter will confirm once they see you in person.'
                         : 'Once you\'ve arrived in person, let the transporter know.',
-                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: (data['adopterArrivedAtTreatment'] == true ||
-                          _isMarkingArrival)
+                      onPressed:
+                          (data['adopterArrivedAtTreatment'] == true ||
+                              _isMarkingArrival)
                           ? null
                           : _markArrivedAtTreatment,
                       style: ElevatedButton.styleFrom(
@@ -1418,20 +1568,27 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                         disabledBackgroundColor: AppColors.slaterspwn,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
                       ),
                       child: _isMarkingArrival
                           ? const SizedBox(
-                        height: 16,
-                        width: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
-                      )
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.textPrimary,
+                              ),
+                            )
                           : Text(
-                        data['adopterArrivedAtTreatment'] == true
-                            ? 'Arrived ✓'
-                            : 'Arrived at Treatment',
-                        style: GoogleFonts.zain(fontWeight: FontWeight.w600),
-                      ),
+                              data['adopterArrivedAtTreatment'] == true
+                                  ? 'Arrived ✓'
+                                  : 'Arrived at Treatment',
+                              style: GoogleFonts.zain(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ),
                   ),
                 ],
@@ -1463,8 +1620,9 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed:
-                    _isSubmitting ? null : () => _registerInterest('adopt'),
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => _registerInterest('adopt'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textPrimary,
                       side: const BorderSide(color: AppColors.textPrimary),
@@ -1475,16 +1633,20 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                     ),
                     child: _isSubmitting
                         ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.textPrimary),
-                    )
-                        : Text('Interest to Adopt',
-                        style: GoogleFonts.zain(fontSize: 13)),
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.textPrimary,
+                            ),
+                          )
+                        : Text(
+                            'Interest to Adopt',
+                            style: GoogleFonts.zain(fontSize: 13),
+                          ),
                   ),
                 ),
-               ],
+              ],
             ),
           ] else
             _DetailRow(
@@ -1577,8 +1739,11 @@ class _AnimalDetailBlock extends StatelessWidget {
   final Map<String, dynamic> data;
   final int index;
   final int total;
-  const _AnimalDetailBlock(
-      {required this.data, required this.index, required this.total});
+  const _AnimalDetailBlock({
+    required this.data,
+    required this.index,
+    required this.total,
+  });
 
   List<Widget> _fields() => [
     _DetailRow('Species', data['animalType']),
@@ -1608,11 +1773,14 @@ class _AnimalDetailBlock extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Animal $index of $total',
-              style: GoogleFonts.zain(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
+          Text(
+            'Animal $index of $total',
+            style: GoogleFonts.zain(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 4),
           ..._fields(),
         ],
@@ -1635,7 +1803,9 @@ class _RejectionDetailsSection extends StatelessWidget {
   const _RejectionDetailsSection({required this.caseId, required this.data});
 
   DateTime? get _rejectedAt {
-    final history = List<Map<String, dynamic>>.from(data['statusHistory'] ?? []);
+    final history = List<Map<String, dynamic>>.from(
+      data['statusHistory'] ?? [],
+    );
     for (final h in history) {
       final s = h['status'] as String? ?? '';
       final ts = h['timestamp'];
@@ -1667,16 +1837,27 @@ class _RejectionDetailsSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            const Icon(Icons.block, size: 16, color: Color(0xFFE05353)),
-            const SizedBox(width: 6),
-            Text('Report Rejected',
-                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: const Color(0xFFE05353))),
-          ]),
+          Row(
+            children: [
+              const Icon(Icons.block, size: 16, color: Color(0xFFE05353)),
+              const SizedBox(width: 6),
+              Text(
+                'Report Rejected',
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFFE05353),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           _DetailRow('Reason', _reasonLabel),
           if (rejectedAt != null)
-            _DetailRow('Rejected On', '${rejectedAt.month}/${rejectedAt.day}/${rejectedAt.year}'),
+            _DetailRow(
+              'Rejected On',
+              '${rejectedAt.month}/${rejectedAt.day}/${rejectedAt.year}',
+            ),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
                 .collection('cases')
@@ -1689,7 +1870,8 @@ class _RejectionDetailsSection extends StatelessWidget {
               final docs = snapshot.data?.docs;
               if (docs == null || docs.isEmpty) return const SizedBox.shrink();
               final reviewer = docs.first.data()['actorName'] as String?;
-              if (reviewer == null || reviewer.isEmpty) return const SizedBox.shrink();
+              if (reviewer == null || reviewer.isEmpty)
+                return const SizedBox.shrink();
               return _DetailRow('Reviewed By', reviewer);
             },
           ),
@@ -1711,14 +1893,21 @@ class _DetailRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: GoogleFonts.zain(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
-          Text(value ?? '-',
-              style: GoogleFonts.zain(
-                  fontSize: 13, color: AppColors.textSecondary)),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          Text(
+            value ?? '-',
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+          ),
         ],
       ),
     );

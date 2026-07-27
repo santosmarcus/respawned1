@@ -240,6 +240,8 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
         releaseDate: _releaseDate,
         rules: _rules,
         noFollowUpsPlanned: _noFollowUpsPlanned,
+        actorId: FirebaseAuth.instance.currentUser?.uid,
+        actorEmail: FirebaseAuth.instance.currentUser?.email,
       );
       if (mounted) {
         Navigator.pushReplacement(

@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,13 +21,18 @@ import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/animal_action_selection_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/release_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transfer_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.dart';
 
-const List<String> _conditions = ['Critical', 'Stable', 'Recovering', 'Ready for Discharge'];
+const List<String> _conditions = [
+  'Critical',
+  'Stable',
+  'Recovering',
+  'Ready for Discharge',
+];
 const List<String> _causesOfDeath = [
   'Infection',
   'Trauma/Injury',
@@ -41,10 +45,15 @@ const List<String> _causesOfDeath = [
 class TreatmentDetailPage extends ConsumerStatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const TreatmentDetailPage({super.key, required this.caseId, required this.data});
+  const TreatmentDetailPage({
+    super.key,
+    required this.caseId,
+    required this.data,
+  });
 
   @override
-  ConsumerState<TreatmentDetailPage> createState() => _TreatmentDetailPageState();
+  ConsumerState<TreatmentDetailPage> createState() =>
+      _TreatmentDetailPageState();
 }
 
 class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
@@ -67,42 +76,46 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   /// animal's filtered timeline, or vice versa. Empty set = All Animals.
   Set<int> _updateAnimalIndexes = {};
 
-  String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
-  String get _actorName {
-    final n = FirebaseAuth.instance.currentUser?.displayName;
-    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
-  }
-
-  /// Reason-specific Close Case — separate from [_closeDeceasedCase] below,
-  /// which stays exactly as-is for its own specific
-  /// deceased-with-financial-summary flow. The bare "for any reason, no
-  /// context" popup entry this used to back was removed (Admin Rescue
-  /// Cleanup spec §1 — same unsafe-shortcut category as the generic Close
-  /// Case/End Rescue actions already removed from rescue_detail_page.dart);
-  /// [initialReason] is now always passed by the one remaining caller.
+  /// Controlled Close Case (spec §4) — the 4th Post-Treatment Action,
+  /// always available below Release regardless of discharge state (a death
+  /// during treatment is valid without a normal discharge). Never
+  /// dependent on [caseHasAnyEligibleAnimal] the way Intake/Transfer/
+  /// Release are. [_closeDeceasedCase] below stays a separate, untouched
+  /// flow for the case that's already been through the Death Report
+  /// treatment-log path and only needs its final financial-summary close.
   Future<void> _closeCase(RescueCase c, {ClosureReason? initialReason}) async {
     if (_closingCase) return;
-    final result = await showCloseCaseSheet(context, rescueCase: c, initialReason: initialReason);
-    if (result == null || !mounted) return;
     setState(() => _closingCase = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).closeCase(
-        caseId: c.id,
-        reason: result.reason,
-        details: result.details,
-        actorUid: _actorUid,
-        actorName: _actorName,
-        lastKnownLocation: result.lastKnownLocation,
-        clinicUnavailableDetails: result.clinicUnavailableDetails,
-        serviceTypeNeeded: result.serviceTypeNeeded,
+      final outcome = await performCloseCase(
+        context,
+        ref,
+        c,
+        initialReason: initialReason,
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Case closed.')));
-        Navigator.pop(context);
+      if (outcome.acted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              outcome.wholeCaseClosed
+                  ? 'Case closed.'
+                  : 'Animal marked deceased.',
+            ),
+          ),
+        );
+        // A per-animal death that leaves other animals still in Treatment
+        // must NOT navigate away — the case is still active here (spec
+        // §13). Only pop once the whole case actually became terminal.
+        if (outcome.wholeCaseClosed) Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not close case: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not close case: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _closingCase = false);
@@ -167,7 +180,8 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   bool get _isDeathReport => _selectedType == TreatmentUpdateType.deathReport;
   bool get _isDischarge => _selectedType == TreatmentUpdateType.discharge;
 
-  String get _effectiveVaccineName => _selectedVaccineTemplate?.name ?? _vaccineNameController.text.trim();
+  String get _effectiveVaccineName =>
+      _selectedVaccineTemplate?.name ?? _vaccineNameController.text.trim();
 
   /// Required fields depend on the selected update type (spec) — a
   /// Vaccination/Procedure/Medication no longer needs generic Notes filled
@@ -177,18 +191,20 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     if (_selectedType == null || _treatmentDate == null) return false;
     return switch (_selectedType!) {
       TreatmentUpdateType.deathReport => _selectedCauseOfDeath != null,
-    // Discharge Notes is optional now — Final Condition (discharge
-    // condition) is the one thing that actually gates completion, same
-    // as Post-Treatment Instructions already being optional.
+      // Discharge Notes is optional now — Final Condition (discharge
+      // condition) is the one thing that actually gates completion, same
+      // as Post-Treatment Instructions already being optional.
       TreatmentUpdateType.discharge => _finalCondition != null,
       TreatmentUpdateType.vaccination =>
-      _effectiveVaccineName.isNotEmpty && _vaccineDoseController.text.trim().isNotEmpty,
-      TreatmentUpdateType.procedure => _procedureController.text.trim().isNotEmpty,
+        _effectiveVaccineName.isNotEmpty &&
+            _vaccineDoseController.text.trim().isNotEmpty,
+      TreatmentUpdateType.procedure =>
+        _procedureController.text.trim().isNotEmpty,
       TreatmentUpdateType.medication =>
-      _medicationNameController.text.trim().isNotEmpty && _medicationDoseController.text.trim().isNotEmpty,
-      TreatmentUpdateType.assessment ||
-      TreatmentUpdateType.followUpCheck =>
-      _selectedCondition != null && _notesController.text.trim().isNotEmpty,
+        _medicationNameController.text.trim().isNotEmpty &&
+            _medicationDoseController.text.trim().isNotEmpty,
+      TreatmentUpdateType.assessment || TreatmentUpdateType.followUpCheck =>
+        _selectedCondition != null && _notesController.text.trim().isNotEmpty,
     };
   }
 
@@ -203,7 +219,10 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   }
 
   Future<void> _pickFromCamera() async {
-    final file = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+    final file = await _picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 80,
+    );
     if (file != null && mounted) {
       setState(() {
         _pickedMedia.add(file);
@@ -221,7 +240,10 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   /// failure (unlike that page's silent-null pattern) so _addUpdate can
   /// stop before ever creating a misleading "successful" log entry, and can
   /// keep the picked images in the form for Retry.
-  Future<(String url, String path)> _uploadMedia(XFile file, String storagePath) async {
+  Future<(String url, String path)> _uploadMedia(
+    XFile file,
+    String storagePath,
+  ) async {
     final ref = FirebaseStorage.instance.ref(storagePath);
     await ref.putFile(File(file.path));
     final url = await ref.getDownloadURL();
@@ -247,8 +269,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       try {
         for (var i = 0; i < _pickedMedia.length; i++) {
           final file = _pickedMedia[i];
-          final ext = file.path.contains('.') ? file.path.split('.').last : 'jpg';
-          final storagePath = 'cases/${widget.caseId}/treatmentUpdates/$logId/$i.$ext';
+          final ext = file.path.contains('.')
+              ? file.path.split('.').last
+              : 'jpg';
+          final storagePath =
+              'cases/${widget.caseId}/treatmentUpdates/$logId/$i.$ext';
           final (url, path) = await _uploadMedia(file, storagePath);
           mediaUrls.add(url);
           storagePaths.add(path);
@@ -278,19 +303,31 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       condition: _isDeathReport
           ? 'Deceased'
           : (_isDischarge ? _finalCondition : _selectedCondition),
-      medicationName:
-      _selectedType == TreatmentUpdateType.medication ? _medicationNameController.text.trim() : null,
-      medicationDose:
-      _selectedType == TreatmentUpdateType.medication ? _medicationDoseController.text.trim() : null,
-      procedurePerformed:
-      _selectedType == TreatmentUpdateType.procedure ? _procedureController.text.trim() : null,
-      vaccineName: _selectedType == TreatmentUpdateType.vaccination ? _effectiveVaccineName : null,
-      vaccineDose: _selectedType == TreatmentUpdateType.vaccination ? _vaccineDoseController.text.trim() : null,
-      nextScheduleAt: _selectedType == TreatmentUpdateType.vaccination ? _nextVaccineSchedule : null,
-      dischargeNotes: _isDischarge ? _dischargeNotesController.text.trim() : null,
+      medicationName: _selectedType == TreatmentUpdateType.medication
+          ? _medicationNameController.text.trim()
+          : null,
+      medicationDose: _selectedType == TreatmentUpdateType.medication
+          ? _medicationDoseController.text.trim()
+          : null,
+      procedurePerformed: _selectedType == TreatmentUpdateType.procedure
+          ? _procedureController.text.trim()
+          : null,
+      vaccineName: _selectedType == TreatmentUpdateType.vaccination
+          ? _effectiveVaccineName
+          : null,
+      vaccineDose: _selectedType == TreatmentUpdateType.vaccination
+          ? _vaccineDoseController.text.trim()
+          : null,
+      nextScheduleAt: _selectedType == TreatmentUpdateType.vaccination
+          ? _nextVaccineSchedule
+          : null,
+      dischargeNotes: _isDischarge
+          ? _dischargeNotesController.text.trim()
+          : null,
       finalCondition: _isDischarge ? _finalCondition : null,
-      postTreatmentInstructions:
-      _isDischarge ? _postTreatmentInstructionsController.text.trim() : null,
+      postTreatmentInstructions: _isDischarge
+          ? _postTreatmentInstructionsController.text.trim()
+          : null,
       dateOfDeath: _isDeathReport ? _treatmentDate : null,
       causeOfDeath: _isDeathReport ? _selectedCauseOfDeath : null,
       treatmentDate: _treatmentDate,
@@ -298,11 +335,17 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       mediaTypes: mediaTypes,
       storagePaths: storagePaths,
       createdBy: 'Admin Staff',
-      animalIndexes: _updateAnimalIndexes.isEmpty ? null : _updateAnimalIndexes.toList(),
+      animalIndexes: _updateAnimalIndexes.isEmpty
+          ? null
+          : _updateAnimalIndexes.toList(),
     );
 
     try {
-      await repo.addTreatmentLog(caseId: widget.caseId, entry: entry, logId: logId);
+      await repo.addTreatmentLog(
+        caseId: widget.caseId,
+        entry: entry,
+        logId: logId,
+      );
       if (mounted) {
         setState(() {
           _showUpdateForm = false;
@@ -330,7 +373,10 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       if (mounted) {
         setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save update: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not save update: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     }
@@ -349,11 +395,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   // assignIntakeAction for intake), so a stale disabled-button state can
   // never be bypassed by tapping through anyway.
   Future<void> _startPostTreatmentAction(
-      RescueCase c,
-      String action, // 'intake' | 'transfer' | 'release'
-      Map<String, dynamic> data,
-      List<CaseAnimalOption> animalOptions,
-      ) async {
+    RescueCase c,
+    String action, // 'intake' | 'transfer' | 'release'
+    Map<String, dynamic> data,
+    List<CaseAnimalOption> animalOptions,
+  ) async {
     if (_isActingOnNextStep) return;
     setState(() => _isActingOnNextStep = true);
     try {
@@ -381,11 +427,17 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             try {
               await ref
                   .read(rescueCaseRepositoryProvider)
-                  .assignIntakeAction(caseId: widget.caseId, animalIndexes: selectedIndexes);
+                  .assignIntakeAction(
+                    caseId: widget.caseId,
+                    animalIndexes: selectedIndexes,
+                  );
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not start intake: $e'), backgroundColor: Colors.redAccent),
+                  SnackBar(
+                    content: Text('Could not start intake: $e'),
+                    backgroundColor: Colors.redAccent,
+                  ),
                 );
               }
               return;
@@ -395,16 +447,28 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             await Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => IntakeDetailPage(caseId: widget.caseId, data: data, animalIndexes: selectedIndexes),
+                builder: (_) => IntakeDetailPage(
+                  caseId: widget.caseId,
+                  data: data,
+                  animalIndexes: selectedIndexes,
+                ),
               ),
             );
           }
           break;
         case 'transfer':
-          await showTransferAnimalSheet(context, rescueCase: c, animalIndexes: selectedIndexes);
+          await showTransferAnimalSheet(
+            context,
+            rescueCase: c,
+            animalIndexes: selectedIndexes,
+          );
           break;
         case 'release':
-          await showReleaseAnimalSheet(context, rescueCase: c, animalIndexes: selectedIndexes);
+          await showReleaseAnimalSheet(
+            context,
+            rescueCase: c,
+            animalIndexes: selectedIndexes,
+          );
           break;
       }
     } finally {
@@ -412,7 +476,10 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     }
   }
 
-  Future<void> _closeDeceasedCase(RescueCase c, double outstandingBalance) async {
+  Future<void> _closeDeceasedCase(
+    RescueCase c,
+    double outstandingBalance,
+  ) async {
     final dateOfDeath = c.deceasedAt;
     final dateStr = dateOfDeath != null
         ? '${dateOfDeath.month}/${dateOfDeath.day}/${dateOfDeath.year}'
@@ -420,7 +487,8 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Close Case?',
-      message: 'Case #${c.shortCaseId}\n${c.speciesSummary}\n\n'
+      message:
+          'Case #${c.shortCaseId}\n${c.speciesSummary}\n\n'
           'Date of death: $dateStr\n'
           'Cause of death: ${c.causeOfDeath ?? '-'}\n'
           'Outstanding balance: ${formatPeso(outstandingBalance)}\n\n'
@@ -430,12 +498,17 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     if (!confirmed || !mounted) return;
 
     try {
-      await ref.read(rescueCaseRepositoryProvider).closeDeceasedCase(caseId: widget.caseId);
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .closeDeceasedCase(caseId: widget.caseId);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not close case: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not close case: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     }
@@ -448,18 +521,28 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final data = c.raw.isNotEmpty ? c.raw : widget.data;
 
     final logsAsync = ref.watch(treatmentLogsProvider(widget.caseId));
-    final allLogs = (logsAsync.asData?.value ?? const <TreatmentLogEntry>[]).reversed.toList();
+    final allLogs = (logsAsync.asData?.value ?? const <TreatmentLogEntry>[])
+        .reversed
+        .toList();
 
     // Most cases reach Treatment with no AnimalRecord created yet (that
     // normally happens at Intake) — namesByAnimalIndex is empty for those,
     // and every option falls back to a species-ordinal label ("Dog 1").
-    final linkedRecords = ref.watch(recordsForCaseProvider(widget.caseId)).asData?.value ?? const [];
+    final linkedRecords =
+        ref.watch(recordsForCaseProvider(widget.caseId)).asData?.value ??
+        const [];
     final namesByAnimalIndex = <int, String>{
       for (final r in linkedRecords)
-        if (r.sourceAnimalIndex != null && r.name.isNotEmpty) r.sourceAnimalIndex!: r.name,
+        if (r.sourceAnimalIndex != null && r.name.isNotEmpty)
+          r.sourceAnimalIndex!: r.name,
     };
-    final animalOptions = buildCaseAnimalOptions(c, namesByAnimalIndex: namesByAnimalIndex);
-    final selectedAnimalIndex = _selectedAnimalIndex != null && _selectedAnimalIndex! < animalOptions.length
+    final animalOptions = buildCaseAnimalOptions(
+      c,
+      namesByAnimalIndex: namesByAnimalIndex,
+    );
+    final selectedAnimalIndex =
+        _selectedAnimalIndex != null &&
+            _selectedAnimalIndex! < animalOptions.length
         ? _selectedAnimalIndex
         : null;
     // Gates the three post-treatment action buttons (spec §2/§6) — true
@@ -486,7 +569,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final expensesAsync = ref.watch(expensesProvider(widget.caseId));
     final expenses = expensesAsync.asData?.value ?? const [];
     final totalExpenses = expenses.fold<double>(0, (sum, e) => sum + e.amount);
-    final fundedAmount = expenses.where((e) => e.isFunded).fold<double>(0, (sum, e) => sum + e.amount);
+    final fundedAmount = expenses
+        .where((e) => e.isFunded)
+        .fold<double>(0, (sum, e) => sum + e.amount);
     final outstandingBalance = totalExpenses - fundedAmount;
 
     final dateStr = c.dateAdmitted != null
@@ -501,22 +586,25 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           icon: const Icon(Icons.arrow_back, color: AppColors.background),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Treatment Details',
-            style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+        title: Text(
+          'Treatment Details',
+          style: GoogleFonts.tiltWarp(
+            fontSize: 18,
+            color: AppColors.background,
+          ),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
+            icon: const Icon(
+              Icons.notifications_outlined,
+              color: AppColors.background,
+            ),
             onPressed: () {},
           ),
-          if (!c.isDeceased)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: AppColors.background),
-              enabled: !_closingCase,
-              onSelected: (_) => _closeCase(c, initialReason: ClosureReason.animalMoved),
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'animal_moved', child: Text('Animal Moved / Could Not Be Located')),
-              ],
-            ),
+          // The AppBar's "Animal Moved" one-tap shortcut is gone — that
+          // location update now only ever comes from an approved Community
+          // Report. Close Case (any reason, including animal-moved) is now
+          // the 4th Post-Treatment Action button below, not a menu item.
         ],
       ),
       body: SingleChildScrollView(
@@ -526,28 +614,52 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header — Case ID is the primary identifier, no status chip.
-            Text('#${c.shortCaseId}',
-                style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.textPrimary)),
+            Text(
+              '#${c.shortCaseId}',
+              style: GoogleFonts.tiltWarp(
+                fontSize: 22,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(c.speciesSummary,
-                style: GoogleFonts.zain(
-                    fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text(
+              c.speciesSummary,
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
             if ((c.vetClinicName ?? '').isNotEmpty) ...[
               const SizedBox(height: 2),
-              Text(c.vetClinicName!,
-                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              Text(
+                c.vetClinicName!,
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ],
             const SizedBox(height: 2),
-            Text('Admitted $dateStr',
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            Text(
+              'Admitted $dateStr',
+              style: GoogleFonts.zain(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
 
             const SizedBox(height: 16),
 
             // Info grid
             Row(
               children: [
-                Expanded(child: _InfoItem('Days in Treatment', '${c.daysInTreatment}')),
-                Expanded(child: _InfoItem('Number of Animals', '${c.animalCount}')),
+                Expanded(
+                  child: _InfoItem('Days in Treatment', '${c.daysInTreatment}'),
+                ),
+                Expanded(
+                  child: _InfoItem('Number of Animals', '${c.animalCount}'),
+                ),
               ],
             ),
             Row(
@@ -558,7 +670,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                     c.isDeceased ? 'Deceased' : (c.currentCondition ?? '-'),
                   ),
                 ),
-                Expanded(child: _InfoItem('Reported by', c.reporterName ?? '-')),
+                Expanded(
+                  child: _InfoItem('Reported by', c.reporterName ?? '-'),
+                ),
               ],
             ),
 
@@ -581,7 +695,13 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             // the info grid above.
             if (animalOptions.length > 1) ...[
               const SizedBox(height: 16),
-              Text('Latest Condition', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+              Text(
+                'Latest Condition',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 15,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -600,12 +720,22 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Expanded(
-                              child: Text(o.label,
-                                  style: GoogleFonts.zain(
-                                      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                              child: Text(
+                                o.label,
+                                style: GoogleFonts.zain(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
                             ),
-                            Text(latestConditionFor(c, o.index, allLogs),
-                                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                            Text(
+                              latestConditionFor(c, o.index, allLogs),
+                              style: GoogleFonts.zain(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -617,8 +747,13 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             const SizedBox(height: 16),
 
             // Treatment Logs
-            Text('Treatment Logs',
-                style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+            Text(
+              'Treatment Logs',
+              style: GoogleFonts.tiltWarp(
+                fontSize: 15,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 8),
 
             if (logsAsync.isLoading && logs.isEmpty)
@@ -628,27 +763,37 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               )
             else if (logs.isEmpty)
               Text(
-                  selectedAnimalIndex == null
-                      ? 'No treatment logs yet.'
-                      : 'No treatment logs for this animal yet.',
-                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
+                selectedAnimalIndex == null
+                    ? 'No treatment logs yet.'
+                    : 'No treatment logs for this animal yet.',
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                ),
+              )
             else ...[
-                ...(_showAllLogs ? logs : logs.take(2).toList())
-                    .map((log) => TreatmentLogCard(log: log, animalLabel: logAnimalLabel(log))),
-                if (logs.length > 2)
-                  Center(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _showAllLogs = !_showAllLogs),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Icon(
-                          _showAllLogs ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                          color: AppColors.textPrimary,
-                        ),
+              ...(_showAllLogs ? logs : logs.take(2).toList()).map(
+                (log) => TreatmentLogCard(
+                  log: log,
+                  animalLabel: logAnimalLabel(log),
+                ),
+              ),
+              if (logs.length > 2)
+                Center(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _showAllLogs = !_showAllLogs),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Icon(
+                        _showAllLogs
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        color: AppColors.textPrimary,
                       ),
                     ),
                   ),
-              ],
+                ),
+            ],
 
             const SizedBox(height: 24),
 
@@ -670,16 +815,25 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                       // while viewing one animal's timeline doesn't
                       // silently default to All Animals underneath it.
                       if (_showUpdateForm) {
-                        _updateAnimalIndexes = selectedAnimalIndex != null ? {selectedAnimalIndex} : {};
+                        _updateAnimalIndexes = selectedAnimalIndex != null
+                            ? {selectedAnimalIndex}
+                            : {};
                       }
                     }),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.textPrimary),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    child: Text(_showUpdateForm ? 'Hide Form' : 'Add Update',
-                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                    child: Text(
+                      _showUpdateForm ? 'Hide Form' : 'Add Update',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 15,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                   ),
                 ),
                 if (_showUpdateForm) ...[
@@ -711,11 +865,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.yellowrspwn,
                     elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: Text('Close Case',
-                      style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+                  child: Text(
+                    'Close Case',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                 ),
               )
             // Intake/Transfer/Release stay visible at all times (spec §2:
@@ -723,8 +884,13 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             // at least one animal having a completed Discharge update,
             // never the whole case "seeming" ready (spec §6's fixed bug).
             else ...[
-              Text('Post-Treatment Actions',
-                  style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+              Text(
+                'Post-Treatment Actions',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 15,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               if (!hasEligibleAnimal) ...[
                 const SizedBox(height: 6),
                 Container(
@@ -734,8 +900,13 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                     color: AppColors.slaterspwn.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text('Available once at least one animal has a Discharge update.',
-                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  child: Text(
+                    'Available once at least one animal has a Discharge update.',
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
                 ),
               ],
               const SizedBox(height: 10),
@@ -749,7 +920,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 child: _VerticalActionButton(
                   label: 'Intake',
                   enabled: hasEligibleAnimal && !_isActingOnNextStep,
-                  onTap: () => _startPostTreatmentAction(c, 'intake', data, animalOptions),
+                  onTap: () => _startPostTreatmentAction(
+                    c,
+                    'intake',
+                    data,
+                    animalOptions,
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -758,7 +934,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 child: _VerticalActionButton(
                   label: 'Transfer',
                   enabled: hasEligibleAnimal && !_isActingOnNextStep,
-                  onTap: () => _startPostTreatmentAction(c, 'transfer', data, animalOptions),
+                  onTap: () => _startPostTreatmentAction(
+                    c,
+                    'transfer',
+                    data,
+                    animalOptions,
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -767,7 +948,26 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 child: _VerticalActionButton(
                   label: 'Release',
                   enabled: hasEligibleAnimal && !_isActingOnNextStep,
-                  onTap: () => _startPostTreatmentAction(c, 'release', data, animalOptions),
+                  onTap: () => _startPostTreatmentAction(
+                    c,
+                    'release',
+                    data,
+                    animalOptions,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              // Close Case — deliberately NOT gated on hasEligibleAnimal/
+              // discharge (spec §4: "Animal died during treatment may be
+              // valid without normal discharge"). Only guarded by the same
+              // _closingCase busy-flag every other action here already
+              // uses.
+              SizedBox(
+                width: double.infinity,
+                child: _VerticalActionButton(
+                  label: 'Close Case',
+                  enabled: !_closingCase,
+                  onTap: () => _closeCase(c),
                 ),
               ),
             ],
@@ -779,9 +979,13 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     );
   }
 
-  Widget _buildUpdateForm(List<CaseAnimalOption> animalOptions, List<Map<String, dynamic>> animals) {
-    String? speciesOf(int index) =>
-        (index >= 0 && index < animals.length) ? (animals[index]['species'] as String?)?.trim() : null;
+  Widget _buildUpdateForm(
+    List<CaseAnimalOption> animalOptions,
+    List<Map<String, dynamic>> animals,
+  ) {
+    String? speciesOf(int index) => (index >= 0 && index < animals.length)
+        ? (animals[index]['species'] as String?)?.trim()
+        : null;
     // Which single animal's species should drive the vaccine list: whoever
     // this specific update applies to (if exactly one), else the page-level
     // animal filter. A genuinely mixed "All Animals" update with no single
@@ -795,8 +999,13 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Enter Treatment Update',
-            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        Text(
+          'Enter Treatment Update',
+          style: GoogleFonts.tiltWarp(
+            fontSize: 16,
+            color: AppColors.textPrimary,
+          ),
+        ),
         const SizedBox(height: 16),
 
         // Required per spec: One animal / Multiple animals / All animals.
@@ -827,7 +1036,14 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               firstDate: DateTime(2020),
               lastDate: now,
             );
-            if (picked != null) setState(() => _treatmentDate = DateTime(picked.year, picked.month, picked.day));
+            if (picked != null)
+              setState(
+                () => _treatmentDate = DateTime(
+                  picked.year,
+                  picked.month,
+                  picked.day,
+                ),
+              );
           },
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -842,10 +1058,17 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                       ? 'mm/dd/yyyy'
                       : '${_treatmentDate!.month}/${_treatmentDate!.day}/${_treatmentDate!.year}',
                   style: GoogleFonts.zain(
-                      fontSize: 14,
-                      color: _treatmentDate == null ? AppColors.textSecondary : AppColors.textPrimary),
+                    fontSize: 14,
+                    color: _treatmentDate == null
+                        ? AppColors.textSecondary
+                        : AppColors.textPrimary,
+                  ),
                 ),
-                const Icon(Icons.calendar_today_outlined, size: 18, color: AppColors.textPrimary),
+                const Icon(
+                  Icons.calendar_today_outlined,
+                  size: 18,
+                  color: AppColors.textPrimary,
+                ),
               ],
             ),
           ),
@@ -866,15 +1089,24 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         // asterisks now match _canSubmit()'s actual rules exactly.
         if (_selectedType == TreatmentUpdateType.medication) ...[
           _FieldLabel('Medication Name', required: true),
-          _TextInput(controller: _medicationNameController, hint: 'e.g. Amoxicillin'),
+          _TextInput(
+            controller: _medicationNameController,
+            hint: 'e.g. Amoxicillin',
+          ),
           const SizedBox(height: 12),
           _FieldLabel('Dose', required: true),
-          _TextInput(controller: _medicationDoseController, hint: 'e.g. 250mg twice daily'),
+          _TextInput(
+            controller: _medicationDoseController,
+            hint: 'e.g. 250mg twice daily',
+          ),
           const SizedBox(height: 16),
         ],
         if (_selectedType == TreatmentUpdateType.procedure) ...[
           _FieldLabel('Procedure Performed', required: true),
-          _TextInput(controller: _procedureController, hint: 'e.g. Wound cleaning and suturing'),
+          _TextInput(
+            controller: _procedureController,
+            hint: 'e.g. Wound cleaning and suturing',
+          ),
           const SizedBox(height: 16),
         ],
         if (_selectedType == TreatmentUpdateType.vaccination) ...[
@@ -888,24 +1120,31 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final t in VaccineTemplate.forSpecies(vaccineSpecies ?? widget.data['animalType'] as String?))
+              for (final t in VaccineTemplate.forSpecies(
+                vaccineSpecies ?? widget.data['animalType'] as String?,
+              ))
                 ChoiceChip(
                   label: Text(t.name),
                   selected: _selectedVaccineTemplate?.name == t.name,
                   selectedColor: AppColors.yellowrspwn,
-                  onSelected: (_) => setState(() => _selectedVaccineTemplate = t),
+                  onSelected: (_) =>
+                      setState(() => _selectedVaccineTemplate = t),
                 ),
               ChoiceChip(
                 label: const Text('Other'),
                 selected: _selectedVaccineTemplate == null,
                 selectedColor: AppColors.yellowrspwn,
-                onSelected: (_) => setState(() => _selectedVaccineTemplate = null),
+                onSelected: (_) =>
+                    setState(() => _selectedVaccineTemplate = null),
               ),
             ],
           ),
           if (_selectedVaccineTemplate == null) ...[
             const SizedBox(height: 8),
-            _TextInput(controller: _vaccineNameController, hint: 'Vaccine name'),
+            _TextInput(
+              controller: _vaccineNameController,
+              hint: 'Vaccine name',
+            ),
           ],
           const SizedBox(height: 12),
           _FieldLabel('Dose', required: true),
@@ -925,7 +1164,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 12),
               decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: AppColors.textPrimary)),
+                border: Border(
+                  bottom: BorderSide(color: AppColors.textPrimary),
+                ),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -934,9 +1175,16 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                     _nextVaccineSchedule == null
                         ? 'mm/dd/yyyy'
                         : '${_nextVaccineSchedule!.month}/${_nextVaccineSchedule!.day}/${_nextVaccineSchedule!.year}',
-                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                    style: GoogleFonts.zain(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
-                  const Icon(Icons.calendar_today_outlined, size: 18, color: AppColors.textPrimary),
+                  const Icon(
+                    Icons.calendar_today_outlined,
+                    size: 18,
+                    color: AppColors.textPrimary,
+                  ),
                 ],
               ),
             ),
@@ -959,10 +1207,15 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           const SizedBox(height: 12),
           _FieldLabel('Post-Treatment Instructions'),
           _TextInput(
-              controller: _postTreatmentInstructionsController, hint: 'e.g. Keep wound dry for 5 days'),
+            controller: _postTreatmentInstructionsController,
+            hint: 'e.g. Keep wound dry for 5 days',
+          ),
           const SizedBox(height: 12),
           _FieldLabel('Discharge Notes'),
-          _TextInput(controller: _dischargeNotesController, hint: 'Optional additional notes'),
+          _TextInput(
+            controller: _dischargeNotesController,
+            hint: 'Optional additional notes',
+          ),
           const SizedBox(height: 16),
         ],
         if (_isDeathReport) ...[
@@ -981,7 +1234,8 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         // non-discharge/non-death type (including Vaccination/Procedure/
         // Medication) with a "required" label that _canSubmit() never
         // actually enforced there. Shown+required only where it's real.
-        if (_selectedType == TreatmentUpdateType.assessment || _selectedType == TreatmentUpdateType.followUpCheck) ...[
+        if (_selectedType == TreatmentUpdateType.assessment ||
+            _selectedType == TreatmentUpdateType.followUpCheck) ...[
           _FieldLabel('Overall Condition', required: true),
           _Dropdown<String>(
             value: _selectedCondition,
@@ -999,9 +1253,12 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         // entirely for Discharge (Discharge Notes above covers it — never
         // both).
         if (!_isDischarge) ...[
-          _FieldLabel('Notes',
-              required: _selectedType == TreatmentUpdateType.assessment ||
-                  _selectedType == TreatmentUpdateType.followUpCheck),
+          _FieldLabel(
+            'Notes',
+            required:
+                _selectedType == TreatmentUpdateType.assessment ||
+                _selectedType == TreatmentUpdateType.followUpCheck,
+          ),
           _TextInput(controller: _notesController, hint: 'Enter notes'),
         ],
 
@@ -1012,7 +1269,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (var i = 0; i < _pickedMedia.length; i++) _PickedImageThumb(file: _pickedMedia[i], onRemove: _isSaving ? null : () => _removeMedia(i)),
+            for (var i = 0; i < _pickedMedia.length; i++)
+              _PickedImageThumb(
+                file: _pickedMedia[i],
+                onRemove: _isSaving ? null : () => _removeMedia(i),
+              ),
             GestureDetector(
               onTap: _isSaving ? null : _pickFromGallery,
               child: Container(
@@ -1022,7 +1283,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                   border: Border.all(color: AppColors.greenrspwn, width: 1.5),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.add_photo_alternate_outlined, size: 24, color: AppColors.greenrspwn),
+                child: const Icon(
+                  Icons.add_photo_alternate_outlined,
+                  size: 24,
+                  color: AppColors.greenrspwn,
+                ),
               ),
             ),
             GestureDetector(
@@ -1034,7 +1299,11 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                   border: Border.all(color: AppColors.slaterspwn, width: 1.5),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.camera_alt_outlined, size: 24, color: AppColors.textSecondary),
+                child: const Icon(
+                  Icons.camera_alt_outlined,
+                  size: 24,
+                  color: AppColors.textSecondary,
+                ),
               ),
             ),
           ],
@@ -1044,15 +1313,27 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           Row(
             children: [
               const SizedBox(
-                  width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
               const SizedBox(width: 8),
-              Text('Uploading images…', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              Text(
+                'Uploading images…',
+                style: GoogleFonts.zain(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ],
           ),
         ],
         if (_mediaError != null) ...[
           const SizedBox(height: 10),
-          Text(_mediaError!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+          Text(
+            _mediaError!,
+            style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent),
+          ),
         ],
 
         const SizedBox(height: 24),
@@ -1064,14 +1345,26 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               disabledBackgroundColor: AppColors.slaterspwn,
               fixedSize: Size(MediaQuery.of(context).size.width * 0.5, 48),
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
             ),
             child: _isSaving
                 ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                : Text(_mediaError != null ? 'Retry' : 'Add', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.textPrimary,
+                    ),
+                  )
+                : Text(
+                    _mediaError != null ? 'Retry' : 'Add',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
           ),
         ),
       ],
@@ -1080,8 +1373,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
 }
 
 String _monthName(int month) => const [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ][month - 1];
 
 /// Replaces the "Add Update" button once `readyForDischarge == true` —
@@ -1101,16 +1404,25 @@ class _DischargedNotice extends StatelessWidget {
           style: OutlinedButton.styleFrom(
             disabledForegroundColor: AppColors.textSecondary,
             side: const BorderSide(color: AppColors.slaterspwn),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30),
+            ),
             padding: const EdgeInsets.symmetric(vertical: 14),
           ),
-          child: Text('Treatment Discharged',
-              style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textSecondary)),
+          child: Text(
+            'Treatment Discharged',
+            style: GoogleFonts.tiltWarp(
+              fontSize: 15,
+              color: AppColors.textSecondary,
+            ),
+          ),
         ),
         const SizedBox(height: 6),
-        Text('No further treatment updates can be added after discharge.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+        Text(
+          'No further treatment updates can be added after discharge.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+        ),
       ],
     );
   }
@@ -1124,7 +1436,11 @@ class _VerticalActionButton extends StatelessWidget {
   final String label;
   final bool enabled;
   final VoidCallback onTap;
-  const _VerticalActionButton({required this.label, required this.enabled, required this.onTap});
+  const _VerticalActionButton({
+    required this.label,
+    required this.enabled,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1133,7 +1449,9 @@ class _VerticalActionButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.textPrimary,
         disabledForegroundColor: AppColors.textSecondary,
-        side: BorderSide(color: enabled ? AppColors.textPrimary : AppColors.slaterspwn),
+        side: BorderSide(
+          color: enabled ? AppColors.textPrimary : AppColors.slaterspwn,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         padding: const EdgeInsets.symmetric(vertical: 14),
       ),
@@ -1180,7 +1498,9 @@ class _CostTrackingSection extends StatelessWidget {
         } else {
           for (final i in e.animalIndexes!) {
             final match = animalOptions.where((o) => o.index == i);
-            final label = match.isNotEmpty ? match.first.label : 'Animal ${i + 1}';
+            final label = match.isNotEmpty
+                ? match.first.label
+                : 'Animal ${i + 1}';
             breakdown[label] = (breakdown[label] ?? 0) + e.amount;
           }
         }
@@ -1198,8 +1518,13 @@ class _CostTrackingSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Cost Tracking',
-              style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+          Text(
+            'Cost Tracking',
+            style: GoogleFonts.tiltWarp(
+              fontSize: 15,
+              color: AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 10),
           _CostRow('Total Case Cost', totalExpenses),
           _CostRow('Funded Amount', fundedAmount),
@@ -1208,7 +1533,8 @@ class _CostTrackingSection extends StatelessWidget {
             const SizedBox(height: 8),
             const Divider(height: 1, color: AppColors.slaterspwn),
             const SizedBox(height: 8),
-            for (final entry in breakdown.entries) _CostRow(entry.key, entry.value),
+            for (final entry in breakdown.entries)
+              _CostRow(entry.key, entry.value),
           ],
           const SizedBox(height: 12),
           Wrap(
@@ -1217,26 +1543,38 @@ class _CostTrackingSection extends StatelessWidget {
             children: [
               OutlinedButton(
                 onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => ExpenseListPage(
-                          caseId: caseId,
-                          animalOptions: animalOptions,
-                          initialAnimalIndex: selectedAnimalIndex,
-                        ))),
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ExpenseListPage(
+                      caseId: caseId,
+                      animalOptions: animalOptions,
+                      initialAnimalIndex: selectedAnimalIndex,
+                    ),
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.textPrimary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
-                child: Text('View Expenses', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+                child: Text(
+                  'View Expenses',
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
               ElevatedButton(
                 onPressed: () => showAddEditExpenseSheet(
                   context,
                   caseId: caseId,
                   animalOptions: animalOptions,
-                  initialAnimalIndexes: selectedAnimalIndex != null ? {selectedAnimalIndex!} : const {},
+                  initialAnimalIndexes: selectedAnimalIndex != null
+                      ? {selectedAnimalIndex!}
+                      : const {},
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
@@ -1248,28 +1586,45 @@ class _CostTrackingSection extends StatelessWidget {
                   // primary yellow buttons in this file.
                   foregroundColor: AppColors.textPrimary,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
-                child: Text('Add Expense',
-                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                child: Text(
+                  'Add Expense',
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
               ),
               OutlinedButton(
                 onPressed: outstandingBalance <= 0
                     ? null
                     : () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CreateFundraiserDraftPage(
-                        rescueCase: rescueCase,
-                        outstandingBalance: outstandingBalance,
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CreateFundraiserDraftPage(
+                            rescueCase: rescueCase,
+                            outstandingBalance: outstandingBalance,
+                          ),
+                        ),
                       ),
-                    )),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.textPrimary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
-                child: Text('Create Fundraiser', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+                child: Text(
+                  'Create Fundraiser',
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ],
           ),
@@ -1292,12 +1647,23 @@ class _CostRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-          Text(formatPeso(amount),
-              style: GoogleFonts.zain(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: emphasize ? AppColors.textPrimary : AppColors.textSecondary)),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          Text(
+            formatPeso(amount),
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: emphasize
+                  ? AppColors.textPrimary
+                  : AppColors.textSecondary,
+            ),
+          ),
         ],
       ),
     );
@@ -1316,9 +1682,21 @@ class _InfoItem extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          Text(value,
-              style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.zain(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
         ],
       ),
     );
@@ -1334,9 +1712,16 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(label,
-            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-        if (required) const Text(' *', style: TextStyle(color: Colors.red, fontSize: 14)),
+        Text(
+          label,
+          style: GoogleFonts.zain(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        if (required)
+          const Text(' *', style: TextStyle(color: Colors.red, fontSize: 14)),
       ],
     );
   }
@@ -1353,10 +1738,16 @@ class _TextInput extends StatelessWidget {
       controller: controller,
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
-        enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
-        focusedBorder:
-        const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+        hintStyle: GoogleFonts.zain(
+          color: AppColors.textSecondary,
+          fontSize: 14,
+        ),
+        enabledBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary),
+        ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+        ),
         isDense: true,
         contentPadding: const EdgeInsets.only(bottom: 8),
       ),
@@ -1380,7 +1771,12 @@ class _PickedImageThumb extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.file(File(file.path), width: 72, height: 72, fit: BoxFit.cover),
+            child: Image.file(
+              File(file.path),
+              width: 72,
+              height: 72,
+              fit: BoxFit.cover,
+            ),
           ),
           if (onRemove != null)
             Positioned(
@@ -1390,7 +1786,10 @@ class _PickedImageThumb extends StatelessWidget {
                 onTap: onRemove,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE05353),
+                    shape: BoxShape.circle,
+                  ),
                   child: const Icon(Icons.close, size: 14, color: Colors.white),
                 ),
               ),
@@ -1420,18 +1819,34 @@ class _Dropdown<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropdownButtonFormField<T>(
       value: value,
-      hint: Text(hint, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+      hint: Text(
+        hint,
+        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+      ),
       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
       decoration: const InputDecoration(
         isDense: true,
         contentPadding: EdgeInsets.only(bottom: 8),
-        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
-        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+        enabledBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary),
+        ),
+        focusedBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+        ),
       ),
       items: items
-          .map((item) => DropdownMenuItem(
-          value: item,
-          child: Text(labelOf(item), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))))
+          .map(
+            (item) => DropdownMenuItem(
+              value: item,
+              child: Text(
+                labelOf(item),
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          )
           .toList(),
       onChanged: onChanged,
     );

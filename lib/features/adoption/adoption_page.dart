@@ -162,6 +162,16 @@ const List<String> kHealthOptions = [
 
 const List<String> kSpecialNeedsOptions = ['Special Needs'];
 
+/// [kAgeGroupOptions] entries are the long display labels ("Baby (0-6
+/// months)") but [ageGroupOf] returns the short life-stage word ("Baby") —
+/// a bare `selected.contains(ageGroupOf(animal))` never matches, silently
+/// zeroing every result the moment any Age chip is picked. Each option
+/// label starts with its short word and no two options share a prefix, so
+/// `startsWith` is a safe, single fix shared by every Age filter (user
+/// Adoption and admin Animal Records) rather than patched twice.
+bool matchesAgeGroup(Set<String> selectedOptions, AnimalRecord animal) =>
+    selectedOptions.isEmpty || selectedOptions.any((o) => o.startsWith(ageGroupOf(animal)));
+
 class AdoptionFilters {
   final Set<String> breeds;
   final Set<String> sizes;
@@ -230,7 +240,7 @@ class AdoptionFilters {
     return _matchesAny(breeds, animal.breed) &&
         _matchesAny(sizes, animal.size) &&
         _matchesAny(coatLengths, animal.coatLength) &&
-        _matchesAny(ageGroups, ageGroupOf(animal)) &&
+        matchesAgeGroup(ageGroups, animal) &&
         _matchesAll(health, healthTagsOf(animal)) &&
         _matchesAll(keyCharacteristics, animal.keyCharacteristics) &&
         _matchesAll(rescueBackground, animal.rescueBackground);

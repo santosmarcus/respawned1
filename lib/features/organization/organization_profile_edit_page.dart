@@ -4,14 +4,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/core/models/rescue/locality_result.dart';
-import 'package:respawnd1/core/repos/clinic_search_repository.dart';
+import 'package:respawnd1/core/constants/service_areas.dart';
+import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
+import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 import 'package:respawnd1/features/organization/staff_members_page.dart';
@@ -44,7 +47,6 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   final _repo = OrganizationRepository();
   final _invitationRepo = OrganizationInvitationRepository();
   final _picker = ImagePicker();
-  final _clinicSearchRepo = ClinicSearchRepository(); // reused for its general Places search (searchLocalities)
 
   /// Resolved once known — either passed in directly (already-linked admin)
   /// or set after a successful Join/Create in the unlinked flow below.
@@ -70,16 +72,15 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   final _phoneController = TextEditingController();
   final _facebookController = TextEditingController();
   final _websiteController = TextEditingController();
-  final _serviceAreaController = TextEditingController();
+  // Shelter Capacity (spec §8) — the SAME field the dashboard Capacity
+  // card reads (settings/shelter.maxCapacity, added when that card was
+  // built) rather than a new/separate organization-level field, so the two
+  // can never disagree about what "capacity" means.
+  final _capacityController = TextEditingController();
+  bool _isOrgAdmin = false;
 
   List<ServiceArea> _serviceAreas = [];
   final Set<String> _acceptedSpecies = {};
-
-  // Service-area search (spec §13) — results are only ever validated
-  // Places localities; there is no path that lets typed text become a
-  // ServiceArea without the admin picking one of these results.
-  List<LocalityResult> _serviceAreaResults = const [];
-  bool _searchingServiceAreas = false;
 
   bool get _isBootstrapping => _organizationId == null;
 
@@ -183,6 +184,18 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         .map((e) => ServiceArea.fromMap(Map<String, dynamic>.from(e as Map)))
         .toList();
     _acceptedSpecies.addAll(List<String>.from(data['acceptedSpecies'] ?? const []));
+
+    // Shelter Capacity is admin-only to edit (spec §8) — resolved via the
+    // existing OrgMembershipService, never a second membership model.
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final membership = await OrgMembershipService().getMembership(uid);
+      _isOrgAdmin = membership != null && membership.organizationId == orgId && membership.role == OrgRole.admin;
+    }
+    final shelterDoc = await FirebaseFirestore.instance.collection('settings').doc('shelter').get();
+    final maxCapacity = (shelterDoc.data()?['maxCapacity'] as num?)?.toInt();
+    _capacityController.text = maxCapacity?.toString() ?? '';
+
     if (mounted) setState(() => _loading = false);
   }
 
@@ -195,7 +208,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     _phoneController.dispose();
     _facebookController.dispose();
     _websiteController.dispose();
-    _serviceAreaController.dispose();
+    _capacityController.dispose();
     super.dispose();
   }
 
@@ -236,63 +249,128 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     }
   }
 
-  Future<void> _searchServiceAreas(String query) async {
-    if (query.trim().isEmpty) {
-      setState(() => _serviceAreaResults = const []);
-      return;
-    }
-    setState(() => _searchingServiceAreas = true);
-    try {
-      final results = await _clinicSearchRepo.searchLocalities(query: query);
-      if (!mounted) return;
-      setState(() {
-        _serviceAreaResults = results;
-        _searchingServiceAreas = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _searchingServiceAreas = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not search localities: $e'), backgroundColor: Colors.redAccent),
-        );
-      }
-    }
-  }
-
-  /// Only ever called with a [LocalityResult] the admin actually picked
-  /// from search results — never raw typed text (spec §13's core
-  /// requirement). Deduplicates by placeId first (so "Manila", "City of
-  /// Manila", and "manila" — three different search queries that all
-  /// resolve to the same real place — collapse to one entry regardless of
-  /// how the admin searched) and falls back to normalizedName for legacy
-  /// entries that predate placeId being stored.
-  void _addServiceArea(LocalityResult locality) {
-    final normalized = normalizeForMatch(locality.name);
-    final alreadyAdded = _serviceAreas.any((s) =>
-        (s.placeId != null && s.placeId == locality.placeId) || s.normalizedName == normalized);
-    if (alreadyAdded) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('That service area is already added.'), backgroundColor: Colors.redAccent),
-      );
-      return;
-    }
-    setState(() {
-      _serviceAreas = [
-        ..._serviceAreas,
-        ServiceArea(
-          name: locality.name,
-          normalizedName: normalized,
-          placeId: locality.placeId,
-          administrativeArea: locality.administrativeArea,
-          countryCode: locality.countryCode,
-        ),
-      ];
-      _serviceAreaController.clear();
-      _serviceAreaResults = const [];
-    });
-  }
+  /// True when [area] matches one of the canonical, currently-supported
+  /// cities/LGUs (lib/core/constants/service_areas.dart) — false for a
+  /// legacy value saved before that controlled list existed (a free-text
+  /// entry, or a Places-search pick outside the three supported regions).
+  /// Legacy values are never silently dropped — they stay visible (clearly
+  /// marked) until the admin explicitly removes/replaces them and saves.
+  bool _isSupportedServiceArea(ServiceArea area) =>
+      kSupportedServiceAreas.any((o) => normalizeForMatch(o.name) == area.normalizedName);
 
   void _removeServiceArea(ServiceArea area) => setState(() => _serviceAreas = _serviceAreas.where((s) => s != area).toList());
+
+  /// Multi-select bottom sheet limited to [kSupportedServiceAreas] — the
+  /// only way a new service area can be added (spec §3: no arbitrary
+  /// free-text areas). Searchable (case-insensitive substring over name),
+  /// grouped by region, duplicates blocked (existing/legacy selections are
+  /// pre-checked and can't be re-added), and scrolls correctly for the
+  /// full list. Applies all changes at once on "Done" so partial picks
+  /// aren't saved if the admin backs out.
+  Future<void> _openServiceAreaPicker() async {
+    final selectedNames = _serviceAreas.map((s) => s.normalizedName).toSet();
+    final workingSelection = Set<String>.from(selectedNames);
+    final searchController = TextEditingController();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          final query = searchController.text.trim().toLowerCase();
+          final filtered = query.isEmpty
+              ? kSupportedServiceAreas
+              : kSupportedServiceAreas.where((o) => o.name.toLowerCase().contains(query)).toList();
+
+          return Padding(
+            padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 20 + MediaQuery.of(sheetContext).viewInsets.bottom),
+            child: SizedBox(
+              height: MediaQuery.of(sheetContext).size.height * 0.75,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Service Areas', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: searchController,
+                    decoration: const InputDecoration(hintText: 'Search a supported city…', prefixIcon: Icon(Icons.search)),
+                    onChanged: (_) => setSheetState(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? Center(
+                            child: Text('No supported cities match your search.',
+                                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                          )
+                        : ListView(
+                            children: [
+                              for (final region in kSupportedServiceAreaRegions)
+                                if (filtered.any((o) => o.region == region)) ...[
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                    child: Text(region,
+                                        style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                                  ),
+                                  for (final option in filtered.where((o) => o.region == region))
+                                    CheckboxListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      controlAffinity: ListTileControlAffinity.leading,
+                                      dense: true,
+                                      activeColor: AppColors.greenrspwn,
+                                      title: Text(option.name, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                                      value: workingSelection.contains(normalizeForMatch(option.name)),
+                                      onChanged: (checked) => setSheetState(() {
+                                        final normalized = normalizeForMatch(option.name);
+                                        if (checked ?? false) {
+                                          workingSelection.add(normalized);
+                                        } else {
+                                          workingSelection.remove(normalized);
+                                        }
+                                      }),
+                                    ),
+                                ],
+                            ],
+                          ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.yellowrspwn,
+                        foregroundColor: AppColors.textPrimary,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: Text('Done', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      // Keep every legacy/unsupported entry that was already present and
+      // still checked (removing one only happens via its own chip's
+      // delete button, never implicitly by this sheet), plus every
+      // canonical option the admin just selected.
+      final keptLegacy = _serviceAreas.where((s) => !_isSupportedServiceArea(s) && workingSelection.contains(s.normalizedName));
+      final newCanonical = kSupportedServiceAreas.where((o) => workingSelection.contains(normalizeForMatch(o.name))).map(
+            (o) => ServiceArea(name: o.name, normalizedName: normalizeForMatch(o.name), administrativeArea: o.region),
+          );
+      _serviceAreas = [...keptLegacy, ...newCanonical];
+    });
+  }
 
   String? _websiteError(String v) {
     if (v.trim().isEmpty) return null; // optional
@@ -338,8 +416,67 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       return;
     }
 
+    // Shelter Capacity — whole positive number or unset; admin-only (the
+    // field is read-only text for a non-admin, so this never triggers for
+    // one). Over-capacity is allowed after an explicit confirmation, since
+    // a real shelter can genuinely be over its configured capacity.
+    int? capacityValue;
+    bool clearCapacity = false;
+    if (_isOrgAdmin) {
+      final capacityText = _capacityController.text.trim();
+      if (capacityText.isEmpty) {
+        clearCapacity = true;
+      } else {
+        capacityValue = int.tryParse(capacityText);
+        if (capacityValue == null || capacityValue < 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Shelter capacity must be a whole positive number.'), backgroundColor: Colors.redAccent),
+          );
+          return;
+        }
+        final occupancy = await currentShelterOccupancy();
+        if (occupancy > capacityValue) {
+          if (!mounted) return;
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.background,
+              title: Text('Below Current Occupancy', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+              content: Text(
+                'Current occupancy is $occupancy animals. Setting capacity to $capacityValue will place the shelter over capacity.',
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                  child: const Text('Save Anyway'),
+                ),
+              ],
+            ),
+          );
+          if (confirmed != true) return;
+        }
+      }
+    }
+
     setState(() => _saving = true);
     try {
+      if (_isOrgAdmin) {
+        // settings/shelter is the single source both this field and the
+        // dashboard Capacity card read/write — updating it here reflects
+        // live on the dashboard immediately via shelterMaxCapacityProvider
+        // (a Firestore StreamProvider), no separate refresh needed.
+        // updatedBy/updatedAt is the only audit trail available — there is
+        // no broader organization-level audit log in this codebase yet.
+        await FirebaseFirestore.instance.collection('settings').doc('shelter').set({
+          'maxCapacity': clearCapacity ? null : capacityValue,
+          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+        }, SetOptions(merge: true));
+      }
+
       if (_isBootstrapping) {
         final uid = FirebaseAuth.instance.currentUser?.uid;
         if (uid == null) throw StateError('Not signed in.');
@@ -584,64 +721,29 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   const SizedBox(height: 16),
                 ],
                 _label('Service Areas'),
+                Text('Limited to National Capital Region, CALABARZON, and Central Luzon.',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
                     for (final area in _serviceAreas)
                       Chip(
-                        label: Text(area.name),
+                        label: Text(_isSupportedServiceArea(area) ? area.name : '${area.name} (Unsupported)'),
                         onDeleted: () => _removeServiceArea(area),
-                        backgroundColor: AppColors.lavenderrspwn,
+                        backgroundColor: _isSupportedServiceArea(area) ? AppColors.lavenderrspwn : const Color(0xFFE05353),
+                        labelStyle: _isSupportedServiceArea(area) ? null : const TextStyle(color: Colors.white),
+                        deleteIconColor: _isSupportedServiceArea(area) ? null : Colors.white,
                       ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                // Search-only — a service area can only be added by picking
-                // one of these validated results, never by submitting typed
-                // text directly (spec §13: reject free text/fragments like
-                // "mani" that were never selected from a real place).
-                TextField(
-                  controller: _serviceAreaController,
-                  decoration: InputDecoration(
-                    hintText: 'Search a city or locality…',
-                    suffixIcon: _searchingServiceAreas
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                                width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                          )
-                        : null,
-                  ),
-                  onChanged: _searchServiceAreas,
+                OutlinedButton.icon(
+                  onPressed: _openServiceAreaPicker,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Select Service Areas'),
                 ),
-                if (_serviceAreaResults.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border.all(color: AppColors.slaterspwn),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (final result in _serviceAreaResults)
-                          ListTile(
-                            dense: true,
-                            title: Text(result.name),
-                            subtitle: result.administrativeArea != null ? Text(result.administrativeArea!) : null,
-                            onTap: () => _addServiceArea(result),
-                          ),
-                      ],
-                    ),
-                  )
-                else if (_serviceAreaController.text.trim().isNotEmpty && !_searchingServiceAreas)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text('No matching cities found.',
-                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                  ),
                 const SizedBox(height: 16),
                 _label('Accepted Species'),
                 Wrap(
@@ -656,6 +758,20 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                       ),
                   ],
                 ),
+                const SizedBox(height: 16),
+                _label('Shelter Capacity'),
+                if (_isOrgAdmin) ...[
+                  TextField(
+                    controller: _capacityController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(hintText: 'Not configured'),
+                  ),
+                  Text('This is the same maximum shown on the dashboard Capacity card.',
+                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                ] else
+                  Text(_capacityController.text.isEmpty ? 'Not configured' : _capacityController.text,
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                 const SizedBox(height: 24),
                 _sectionTitle('Contact Details'),
                 _field('Email Address', _emailController, hint: 'org@example.com'),

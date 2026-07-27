@@ -10,6 +10,7 @@ import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart' show genderIconFor;
 import 'package:respawnd1/features/admin/animals/create_animal_record_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/animals/widgets/animal_logs_section.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_management_tab.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_medical_tab.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_profile_tab.dart';
@@ -62,13 +63,7 @@ class _AnimalRecordDetailPageState extends ConsumerState<AnimalRecordDetailPage>
   }
 
   void _viewLogs(String animalId) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.background,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _ManagementLogsSheet(animalId: animalId),
-    );
+    showAnimalLogsSheet(context, animalId: animalId);
   }
 
   @override
@@ -147,15 +142,7 @@ class _AnimalRecordHeader extends StatelessWidget {
 
   const _AnimalRecordHeader({required this.animal, required this.tabIndex, required this.onTabChanged});
 
-  String get _statusText {
-    if (animal.archived) return 'Archived';
-    if (animal.isDeceased) return 'Deceased';
-    if (animal.isAdopted) return 'Adopted';
-    if (animal.isReserved) return 'Reserved';
-    if (animal.currentCaseId != null) return 'In Treatment';
-    if (animal.isAdoptable) return 'Adoptable';
-    return 'Not Ready for Adoption';
-  }
+  String get _statusText => animal.statusLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -251,67 +238,3 @@ class _TabButton extends StatelessWidget {
   }
 }
 
-class _ManagementLogsSheet extends ConsumerWidget {
-  final String animalId;
-  const _ManagementLogsSheet({required this.animalId});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final logsAsync = ref.watch(managementLogsProvider(animalId));
-    final logs = logsAsync.asData?.value ?? const <Map<String, dynamic>>[];
-
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Management Logs', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-            const SizedBox(height: 12),
-            if (logsAsync.isLoading && logs.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (logs.isEmpty)
-              Text('No management actions recorded yet.',
-                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
-            else
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: logs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 16),
-                  itemBuilder: (context, i) {
-                    final log = logs[i];
-                    final ts = log['timestamp'];
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(log['action'] as String? ?? '-',
-                                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                              if ((log['details'] as String?)?.isNotEmpty ?? false)
-                                Text(log['details'] as String,
-                                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                            ],
-                          ),
-                        ),
-                        if (ts != null)
-                          Text('${ts.toDate().month}/${ts.toDate().day}/${ts.toDate().year}',
-                              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                      ],
-                    );
-                  },
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}

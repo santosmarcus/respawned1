@@ -216,6 +216,27 @@ class AnimalRecord {
   bool get isAdopted => adoptionStatus == 'adopted';
   bool get isDeceased => adoptionStatus == 'deceased' || status == 'deceased';
   bool get isReturned => currentStatus == 'returned';
+  // 'transferStatus' only ever reaches 'pending' today (see
+  // AnimalRecordRepository.transferAnimal's own doc comment — there is no
+  // receiving-party accept/complete step yet), so "transferred out" reads
+  // straight off [raw] rather than a dedicated constructor field; there is
+  // no other value this could ever hold.
+  bool get isTransferredOut => (raw['transferStatus'] as String?) == 'pending';
+
+  /// The one canonical human-readable status — used by the record header,
+  /// the Management tab's safety guards, and (via the same underlying
+  /// fields) the Animal Records status filter, so no surface invents its
+  /// own precedence between archived/deceased/adopted/reserved/etc.
+  String get statusLabel {
+    if (archived) return 'Archived';
+    if (isDeceased) return 'Deceased';
+    if (isAdopted) return 'Adopted';
+    if (isTransferredOut) return 'Transferred';
+    if (isReserved) return 'Reserved';
+    if (currentCaseId != null) return 'In Treatment';
+    if (isAdoptable) return 'Adoptable';
+    return 'Not Ready for Adoption';
+  }
   /// True only when there's something worth actually showing — a bare
   /// `hasSpecialNeeds: true` with no selected type and no notes renders
   /// nothing (spec: never show a "Special Needs / None" section).

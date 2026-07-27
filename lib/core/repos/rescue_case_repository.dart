@@ -19,7 +19,8 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
-import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
+import 'package:respawnd1/core/utils/species_summary.dart'
+    as species_summary_util;
 
 /// Firestore access for the admin rescue module. Reads/writes the existing
 /// `cases` collection (shared with the reporter and pet-transporter apps —
@@ -31,12 +32,14 @@ import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_ut
 /// other features are never clobbered.
 class RescueCaseRepository {
   RescueCaseRepository({FirebaseFirestore? firestore})
-      : _db = firestore ?? FirebaseFirestore.instance;
+    : _db = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
 
-  CollectionReference<Map<String, dynamic>> get _cases => _db.collection('cases');
-  DocumentReference<Map<String, dynamic>> _caseDoc(String caseId) => _cases.doc(caseId);
+  CollectionReference<Map<String, dynamic>> get _cases =>
+      _db.collection('cases');
+  DocumentReference<Map<String, dynamic>> _caseDoc(String caseId) =>
+      _cases.doc(caseId);
   CollectionReference<Map<String, dynamic>> _reportsOf(String caseId) =>
       _caseDoc(caseId).collection('reports');
   CollectionReference<Map<String, dynamic>> _referralsOf(String caseId) =>
@@ -46,11 +49,14 @@ class RescueCaseRepository {
   // Same subcollection the user-side track_case_page.dart's
   // _CommunityReportSection already reads/writes — reused here read-only,
   // not a second storage structure.
-  CollectionReference<Map<String, dynamic>> _communityReportsOf(String caseId) =>
-      _caseDoc(caseId).collection('communityReports');
-  CollectionReference<Map<String, dynamic>> _transportAssignmentsOf(String caseId) =>
-      _caseDoc(caseId).collection('transportAssignments');
-  CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
+  CollectionReference<Map<String, dynamic>> _communityReportsOf(
+    String caseId,
+  ) => _caseDoc(caseId).collection('communityReports');
+  CollectionReference<Map<String, dynamic>> _transportAssignmentsOf(
+    String caseId,
+  ) => _caseDoc(caseId).collection('transportAssignments');
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _db.collection('users');
   CollectionReference<Map<String, dynamic>> _treatmentLogsOf(String caseId) =>
       _caseDoc(caseId).collection('treatmentLogs');
   CollectionReference<Map<String, dynamic>> _expensesOf(String caseId) =>
@@ -60,7 +66,8 @@ class RescueCaseRepository {
   // (linkedCaseId is the existing case-reference field); only
   // sourceAnimalIndex is genuinely new, for multi-animal duplicate
   // prevention.
-  CollectionReference<Map<String, dynamic>> get _animals => _db.collection('animals');
+  CollectionReference<Map<String, dynamic>> get _animals =>
+      _db.collection('animals');
 
   // ---- Reads ----------------------------------------------------------
 
@@ -78,8 +85,10 @@ class RescueCaseRepository {
     // at all (e.g. server-side App Check enforcement rejecting requests
     // before rules ever evaluate). Confirm both values below against the
     // Firebase console project you deployed rules to.
-    debugPrint('[RescueCaseRepository] projectId=${Firebase.app().options.projectId} '
-        'uid=${FirebaseAuth.instance.currentUser?.uid} statuses=$values');
+    debugPrint(
+      '[RescueCaseRepository] projectId=${Firebase.app().options.projectId} '
+      'uid=${FirebaseAuth.instance.currentUser?.uid} statuses=$values',
+    );
     // Animal-record admissions (see createAdmissionCase) skip the Rescue
     // Review stage by construction — they're never written with status
     // pendingReview/awaitingAssignment's own review intent in mind, just
@@ -89,19 +98,29 @@ class RescueCaseRepository {
     // any other status list (ongoing/treatment/intake/completed) still
     // includes them — those views are meant to show every case in motion,
     // regardless of source.
-    final isReviewQueueQuery = statuses.every((s) =>
-    s == RescueStatus.pendingReview || s == RescueStatus.accepted || s == RescueStatus.awaitingAssignment);
+    final isReviewQueueQuery = statuses.every(
+      (s) =>
+          s == RescueStatus.pendingReview ||
+          s == RescueStatus.accepted ||
+          s == RescueStatus.awaitingAssignment,
+    );
     // Firestore whereIn supports up to 30 values; our alias lists are well
     // under that even for the broadest status (ongoing).
     return _cases
         .where('status', whereIn: values)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs
-        .map(RescueCase.fromFirestore)
-        .where(_isPrimaryGroupMember)
-        .where((c) => !isReviewQueueQuery || c.raw['sourceType'] != 'animalRecordAdmission')
-        .toList());
+        .map(
+          (snap) => snap.docs
+              .map(RescueCase.fromFirestore)
+              .where(_isPrimaryGroupMember)
+              .where(
+                (c) =>
+                    !isReviewQueueQuery ||
+                    c.raw['sourceType'] != 'animalRecordAdmission',
+              )
+              .toList(),
+        );
   }
 
   /// Creates a `cases` doc directly in the "needs a clinic + transporter"
@@ -135,17 +154,23 @@ class RescueCaseRepository {
       'sourceType': 'animalRecordAdmission',
       'sourceAnimalRecordId': sourceAnimalRecordId,
       'admissionReason': admissionReason,
-      if (admissionNotes != null && admissionNotes.isNotEmpty) 'admissionNotes': admissionNotes,
+      if (admissionNotes != null && admissionNotes.isNotEmpty)
+        'admissionNotes': admissionNotes,
       'animalType': species,
       'condition': admissionNotes ?? '',
       'reporterName': actorName,
       'lat': lat,
       'lng': lng,
-      if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
+      if (shelterAddress != null && shelterAddress.isNotEmpty)
+        'address': shelterAddress,
       'urgency': 'Medium',
       'createdAt': FieldValue.serverTimestamp(),
       'statusHistory': [
-        {'status': 'Medical admission opened for $animalName ($admissionReason).', 'timestamp': now},
+        {
+          'status':
+              'Medical admission opened for $animalName ($admissionReason).',
+          'timestamp': now,
+        },
       ],
     });
     await addActivityLog(
@@ -153,7 +178,10 @@ class RescueCaseRepository {
       action: 'animal_record_admission_created',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'reason': admissionReason},
+      details: {
+        'sourceAnimalRecordId': sourceAnimalRecordId,
+        'reason': admissionReason,
+      },
     );
     return ref.id;
   }
@@ -196,16 +224,21 @@ class RescueCaseRepository {
       'reporterName': adopterName,
       'condition': returnExplanation ?? returnReason,
       'admissionReason': returnReason,
-      if (returnExplanation != null && returnExplanation.isNotEmpty) 'admissionNotes': returnExplanation,
+      if (returnExplanation != null && returnExplanation.isNotEmpty)
+        'admissionNotes': returnExplanation,
       'photoUrls': returnPhotos,
       'retrievedAt': Timestamp.fromDate(retrievedAt),
       'lat': lat,
       'lng': lng,
-      if (shelterAddress != null && shelterAddress.isNotEmpty) 'address': shelterAddress,
+      if (shelterAddress != null && shelterAddress.isNotEmpty)
+        'address': shelterAddress,
       'urgency': 'Medium',
       'createdAt': FieldValue.serverTimestamp(),
       'statusHistory': [
-        {'status': 'Adoption return intake opened for $animalName.', 'timestamp': now},
+        {
+          'status': 'Adoption return intake opened for $animalName.',
+          'timestamp': now,
+        },
       ],
     });
     await addActivityLog(
@@ -213,7 +246,10 @@ class RescueCaseRepository {
       action: 'adoption_return_intake_created',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'sourceAnimalRecordId': sourceAnimalRecordId, 'returnRequestId': returnRequestId},
+      details: {
+        'sourceAnimalRecordId': sourceAnimalRecordId,
+        'returnRequestId': returnRequestId,
+      },
     );
     // Same medicalEpisodes + currentCaseId linkage AnimalRecordRepository.
     // admitAnimal already writes for its own sourceAnimalRecordId flow —
@@ -226,11 +262,15 @@ class RescueCaseRepository {
       'sourceCaseId': ref.id,
       'sourceType': 'adoptionReturn',
       'reason': 'other',
-      'notes': 'Adoption return intake${returnExplanation != null && returnExplanation.isNotEmpty ? ': $returnExplanation' : ''}',
+      'notes':
+          'Adoption return intake${returnExplanation != null && returnExplanation.isNotEmpty ? ': $returnExplanation' : ''}',
       'createdAt': FieldValue.serverTimestamp(),
       if (actorName.isNotEmpty) 'createdBy': actorName,
     });
-    await _animals.doc(sourceAnimalRecordId).update({'currentCaseId': ref.id, 'updatedAt': FieldValue.serverTimestamp()});
+    await _animals.doc(sourceAnimalRecordId).update({
+      'currentCaseId': ref.id,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
     return ref.id;
   }
 
@@ -251,7 +291,7 @@ class RescueCaseRepository {
 
   Stream<RescueCase?> streamCase(String caseId) {
     return _caseDoc(caseId).snapshots().map(
-          (doc) => doc.exists ? RescueCase.fromFirestore(doc) : null,
+      (doc) => doc.exists ? RescueCase.fromFirestore(doc) : null,
     );
   }
 
@@ -263,8 +303,12 @@ class RescueCaseRepository {
   /// write goes to the subcollection exclusively, so the array field never
   /// grows again; it just isn't discarded for cases that already have it.
   Stream<List<TreatmentLogEntry>> streamTreatmentLogs(String caseId) {
-    return _treatmentLogsOf(caseId).orderBy('timestamp').snapshots().asyncMap((snap) async {
-      final subcollectionLogs = snap.docs.map((d) => TreatmentLogEntry.fromFirestore(d, caseId)).toList();
+    return _treatmentLogsOf(caseId).orderBy('timestamp').snapshots().asyncMap((
+      snap,
+    ) async {
+      final subcollectionLogs = snap.docs
+          .map((d) => TreatmentLogEntry.fromFirestore(d, caseId))
+          .toList();
       if (subcollectionLogs.isNotEmpty) return subcollectionLogs;
 
       // Only fall back to the legacy array if the subcollection is
@@ -273,17 +317,24 @@ class RescueCaseRepository {
       // migrated forward by the first new write's own read, avoiding a
       // second Firestore read on every snapshot for cases with real data.
       final caseSnap = await _caseDoc(caseId).get();
-      final legacy = List<Map<String, dynamic>>.from(caseSnap.data()?['treatmentLog'] ?? const []);
+      final legacy = List<Map<String, dynamic>>.from(
+        caseSnap.data()?['treatmentLog'] ?? const [],
+      );
       return [
-        for (var i = 0; i < legacy.length; i++) TreatmentLogEntry.fromLegacyMap(legacy[i], caseId, i),
+        for (var i = 0; i < legacy.length; i++)
+          TreatmentLogEntry.fromLegacyMap(legacy[i], caseId, i),
       ];
     });
   }
 
   Stream<List<Expense>> streamExpenses(String caseId) {
-    return _expensesOf(caseId).orderBy('incurredAt', descending: true).snapshots().map(
-          (snap) => snap.docs.map((d) => Expense.fromFirestore(d, caseId)).toList(),
-    );
+    return _expensesOf(caseId)
+        .orderBy('incurredAt', descending: true)
+        .snapshots()
+        .map(
+          (snap) =>
+              snap.docs.map((d) => Expense.fromFirestore(d, caseId)).toList(),
+        );
   }
 
   /// Which animal-array indexes already have a created record for this
@@ -292,36 +343,54 @@ class RescueCaseRepository {
   /// client-side against this single query rather than a second
   /// composite-indexed query per animal).
   Stream<Set<int>> streamCompletedAnimalRecordIndexes(String caseId) {
-    return _animals.where('linkedCaseId', isEqualTo: caseId).snapshots().map(
+    return _animals
+        .where('linkedCaseId', isEqualTo: caseId)
+        .snapshots()
+        .map(
           (snap) => snap.docs
-          .map((d) => (d.data()['sourceAnimalIndex'] as num?)?.toInt())
-          .whereType<int>()
-          .toSet(),
-    );
+              .map((d) => (d.data()['sourceAnimalIndex'] as num?)?.toInt())
+              .whereType<int>()
+              .toSet(),
+        );
   }
 
   Stream<List<RescueReport>> streamReports(String caseId) {
-    return _reportsOf(caseId).orderBy('submittedAt').snapshots().map(
-          (snap) => snap.docs.map((d) => RescueReport.fromFirestore(d, caseId)).toList(),
-    );
+    return _reportsOf(caseId)
+        .orderBy('submittedAt')
+        .snapshots()
+        .map(
+          (snap) => snap.docs
+              .map((d) => RescueReport.fromFirestore(d, caseId))
+              .toList(),
+        );
   }
 
   Stream<List<Referral>> streamReferrals(String caseId) {
-    return _referralsOf(caseId).orderBy('createdAt', descending: true).snapshots().map(
-          (snap) => snap.docs.map((d) => Referral.fromFirestore(d, caseId)).toList(),
-    );
+    return _referralsOf(caseId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snap) =>
+              snap.docs.map((d) => Referral.fromFirestore(d, caseId)).toList(),
+        );
   }
 
   Stream<List<ActivityLogEntry>> streamActivityLogs(String caseId) {
-    return _activityLogsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
-          (snap) => snap.docs.map((d) => ActivityLogEntry.fromFirestore(d, caseId)).toList(),
-    );
+    return _activityLogsOf(caseId)
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map(
+          (snap) => snap.docs
+              .map((d) => ActivityLogEntry.fromFirestore(d, caseId))
+              .toList(),
+        );
   }
 
   Stream<List<CommunityReport>> streamCommunityReports(String caseId) {
-    return _communityReportsOf(caseId).orderBy('timestamp', descending: true).snapshots().map(
-          (snap) => snap.docs.map(CommunityReport.fromFirestore).toList(),
-    );
+    return _communityReportsOf(caseId)
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(CommunityReport.fromFirestore).toList());
   }
 
   /// Community Location Approval spec §9 — an "Animal moved" community
@@ -345,15 +414,24 @@ class RescueCaseRepository {
     await _db.runTransaction((tx) async {
       final reportSnap = await tx.get(reportRef);
       if (!reportSnap.exists) throw StateError('This report no longer exists.');
+      final caseSnap = await tx.get(caseRef);
+      if (!caseSnap.exists) throw StateError('This case no longer exists.');
       final data = reportSnap.data()!;
-      if (data['type'] != 'moved') throw StateError('Only an "Animal moved" report can update the case location.');
-      if (data['approvalStatus'] != 'pending') throw StateError('This location update has already been reviewed.');
+      final caseData = caseSnap.data()!;
+      if (data['type'] != 'moved')
+        throw StateError(
+          'Only an "Animal moved" report can update the case location.',
+        );
+      if (data['approvalStatus'] != 'pending')
+        throw StateError('This location update has already been reviewed.');
 
       final newAddress = data['newAddress'] as String?;
       final newLat = (data['newLat'] as num?)?.toDouble();
       final newLng = (data['newLng'] as num?)?.toDouble();
       if (newAddress == null || newLat == null || newLng == null) {
-        throw StateError('This report is missing a resolved location and cannot be approved.');
+        throw StateError(
+          'This report is missing a resolved location and cannot be approved.',
+        );
       }
 
       final now = Timestamp.now();
@@ -371,8 +449,27 @@ class RescueCaseRepository {
         'address': newAddress,
         'lat': newLat,
         'lng': newLng,
+        'locationHistory': FieldValue.arrayUnion([
+          {
+            'previousAddress': caseData['address'],
+            'previousLat': caseData['lat'],
+            'previousLng': caseData['lng'],
+            'address': newAddress,
+            'lat': newLat,
+            'lng': newLng,
+            'source': 'community_report',
+            'reportId': reportId,
+            'approvedBy': actorName,
+            'approvedByUid': actorUid,
+            'approvedAt': now,
+          },
+        ]),
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Location updated to "$newAddress" (community report approved by $actorName).', 'timestamp': now},
+          {
+            'status':
+                'Location updated to "$newAddress" (community report approved by $actorName).',
+            'timestamp': now,
+          },
         ]),
       });
     });
@@ -425,9 +522,10 @@ class RescueCaseRepository {
   /// for this (it currently doesn't — it's a single equality filter with no
   /// orderBy), the console error surfaces a direct link to create it.
   Stream<List<PetTransporter>> streamPetTransporters() {
-    return _users.where('role', isEqualTo: 'pet_transporter').snapshots().map(
-          (snap) => snap.docs.map(PetTransporter.fromFirestore).toList(),
-    );
+    return _users
+        .where('role', isEqualTo: 'pet_transporter')
+        .snapshots()
+        .map((snap) => snap.docs.map(PetTransporter.fromFirestore).toList());
   }
 
   /// Every account with role == 'rescue_volunteer' — the other real
@@ -439,11 +537,19 @@ class RescueCaseRepository {
   /// near-identical model, since the Volunteers directory (spec §7) needs
   /// the same fields (name, online/availability, contact).
   Stream<List<PetTransporter>> streamRescueVolunteers() {
-    return _users.where('role', isEqualTo: 'rescue_volunteer').snapshots().map(
+    return _users
+        .where('role', isEqualTo: 'rescue_volunteer')
+        .snapshots()
+        .map(
           (snap) => snap.docs
-          .map((doc) => PetTransporter.fromFirestore(doc, unnamedLabel: 'Unnamed Volunteer'))
-          .toList(),
-    );
+              .map(
+                (doc) => PetTransporter.fromFirestore(
+                  doc,
+                  unnamedLabel: 'Unnamed Volunteer',
+                ),
+              )
+              .toList(),
+        );
   }
 
   /// Resolves display-ready transporter details (vehicle/plate/photo/phone)
@@ -464,21 +570,36 @@ class RescueCaseRepository {
       final vehicle = uid == 'demo-rider-a'
           ? 'Yamaha NMAX'
           : (uid == 'demo-rider-b' ? 'Honda Click' : 'Not provided');
-      final plate =
-      uid == 'demo-rider-a' ? 'DEMO-001' : (uid == 'demo-rider-b' ? 'DEMO-002' : 'Not provided');
+      final plate = uid == 'demo-rider-a'
+          ? 'DEMO-001'
+          : (uid == 'demo-rider-b' ? 'DEMO-002' : 'Not provided');
       return TransporterProfile(
-          uid: uid, name: fallbackName, type: type, vehicle: vehicle, plate: plate, isDemo: true);
+        uid: uid,
+        name: fallbackName,
+        type: type,
+        vehicle: vehicle,
+        plate: plate,
+        isDemo: true,
+      );
     }
     try {
       final doc = await _users.doc(uid).get();
       if (!doc.exists) {
         return TransporterProfile(
-            uid: uid, name: fallbackName, type: type, vehicle: 'Not provided', plate: 'Not provided', isDemo: false);
+          uid: uid,
+          name: fallbackName,
+          type: type,
+          vehicle: 'Not provided',
+          plate: 'Not provided',
+          isDemo: false,
+        );
       }
       final pt = PetTransporter.fromFirestore(doc);
       return TransporterProfile(
         uid: uid,
-        name: pt.name.isNotEmpty && pt.name != 'Unnamed Transporter' ? pt.name : fallbackName,
+        name: pt.name.isNotEmpty && pt.name != 'Unnamed Transporter'
+            ? pt.name
+            : fallbackName,
         type: type,
         photoUrl: pt.photoUrl,
         phone: pt.phone,
@@ -488,7 +609,13 @@ class RescueCaseRepository {
       );
     } catch (_) {
       return TransporterProfile(
-          uid: uid, name: fallbackName, type: type, vehicle: 'Not provided', plate: 'Not provided', isDemo: false);
+        uid: uid,
+        name: fallbackName,
+        type: type,
+        vehicle: 'Not provided',
+        plate: 'Not provided',
+        isDemo: false,
+      );
     }
   }
 
@@ -502,7 +629,11 @@ class RescueCaseRepository {
         .orderBy('offeredAt', descending: true)
         .limit(1)
         .snapshots()
-        .map((snap) => snap.docs.isEmpty ? null : TransportAssignment.fromFirestore(snap.docs.first, caseId));
+        .map(
+          (snap) => snap.docs.isEmpty
+              ? null
+              : TransportAssignment.fromFirestore(snap.docs.first, caseId),
+        );
   }
 
   /// Each transporter's status, derived from their single most-recent
@@ -517,22 +648,25 @@ class RescueCaseRepository {
   /// `transportAssignments` for `offeredAt` (single-field, collection-group
   /// scope) — the first live query prints the console's direct
   /// create-index link if it's still missing.
-  Stream<Map<String, TransportAssignmentStatus>> streamActiveAssignmentsByRider() {
+  Stream<Map<String, TransportAssignmentStatus>>
+  streamActiveAssignmentsByRider() {
     return _db
         .collectionGroup('transportAssignments')
         .orderBy('offeredAt', descending: true)
         .snapshots()
         .map((snap) {
-      final latestByRider = <String, TransportAssignmentStatus>{};
-      for (final doc in snap.docs) {
-        final riderId = doc.data()['riderId'] as String?;
-        // Docs arrive newest-first, so the first one seen per rider is
-        // already their most recent — never overwrite after that.
-        if (riderId == null || latestByRider.containsKey(riderId)) continue;
-        latestByRider[riderId] = TransportAssignmentStatus.fromName(doc.data()['status'] as String?);
-      }
-      return latestByRider;
-    });
+          final latestByRider = <String, TransportAssignmentStatus>{};
+          for (final doc in snap.docs) {
+            final riderId = doc.data()['riderId'] as String?;
+            // Docs arrive newest-first, so the first one seen per rider is
+            // already their most recent — never overwrite after that.
+            if (riderId == null || latestByRider.containsKey(riderId)) continue;
+            latestByRider[riderId] = TransportAssignmentStatus.fromName(
+              doc.data()['status'] as String?,
+            );
+          }
+          return latestByRider;
+        });
   }
 
   /// Every still-`pending` offer across every case whose own [expiresAt] has
@@ -550,10 +684,17 @@ class RescueCaseRepository {
         .collectionGroup('transportAssignments')
         .where('status', isEqualTo: TransportAssignmentStatus.pending.name)
         .snapshots()
-        .map((snap) => snap.docs
-        .map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id))
-        .where((a) => a.isStalePending)
-        .toList());
+        .map(
+          (snap) => snap.docs
+              .map(
+                (d) => TransportAssignment.fromFirestore(
+                  d,
+                  d.reference.parent.parent!.id,
+                ),
+              )
+              .where((a) => a.isStalePending)
+              .toList(),
+        );
   }
 
   /// Naive possible-duplicate lookup: other active cases (pending/awaiting
@@ -562,10 +703,10 @@ class RescueCaseRepository {
   /// pulls a bounded window of same-species active cases and computes
   /// distance client-side rather than doing a true geo query.
   Future<List<RescueCase>> findPossibleDuplicates(
-      RescueCase source, {
-        double radiusKm = 1.0,
-        int limit = 20,
-      }) async {
+    RescueCase source, {
+    double radiusKm = 1.0,
+    int limit = 20,
+  }) async {
     final sourceSpecies = source.allSpecies.toSet();
     if (sourceSpecies.isEmpty || source.lat == null || source.lng == null) {
       return const [];
@@ -607,11 +748,21 @@ class RescueCaseRepository {
     // a source that moved or was re-typed naturally produces a different
     // candidate set anyway; the dismissed-id list itself is never
     // invalidated automatically beyond that).
-    final dismissed = (source.raw['dismissedDuplicateCaseIds'] as List?)?.cast<String>().toSet() ?? const {};
+    final dismissed =
+        (source.raw['dismissedDuplicateCaseIds'] as List?)
+            ?.cast<String>()
+            .toSet() ??
+        const {};
 
     final candidates = docs
         .map(RescueCase.fromFirestore)
-        .where((c) => c.id != source.id && c.lat != null && c.lng != null && !dismissed.contains(c.id))
+        .where(
+          (c) =>
+              c.id != source.id &&
+              c.lat != null &&
+              c.lng != null &&
+              !dismissed.contains(c.id),
+        )
         .toList();
 
     candidates.sort((a, b) {
@@ -621,7 +772,10 @@ class RescueCaseRepository {
     });
 
     return candidates
-        .where((c) => _distanceKm(source.lat!, source.lng!, c.lat!, c.lng!) <= radiusKm)
+        .where(
+          (c) =>
+              _distanceKm(source.lat!, source.lng!, c.lat!, c.lng!) <= radiusKm,
+        )
         .take(limit)
         .toList();
   }
@@ -633,13 +787,21 @@ class RescueCaseRepository {
     return _distanceKm(a.lat!, a.lng!, b.lat!, b.lng!);
   }
 
-  static double _distanceKm(double lat1, double lng1, double lat2, double lng2) {
+  static double _distanceKm(
+    double lat1,
+    double lng1,
+    double lat2,
+    double lng2,
+  ) {
     const earthRadiusKm = 6371.0;
     double deg2rad(double deg) => deg * (math.pi / 180.0);
     final dLat = deg2rad(lat2 - lat1);
     final dLng = deg2rad(lng2 - lng1);
-    final a = math.pow(math.sin(dLat / 2), 2) +
-        math.cos(deg2rad(lat1)) * math.cos(deg2rad(lat2)) * math.pow(math.sin(dLng / 2), 2);
+    final a =
+        math.pow(math.sin(dLat / 2), 2) +
+        math.cos(deg2rad(lat1)) *
+            math.cos(deg2rad(lat2)) *
+            math.pow(math.sin(dLng / 2), 2);
     final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return earthRadiusKm * c;
   }
@@ -668,7 +830,7 @@ class RescueCaseRepository {
               ? 'Rescue case has been accepted and marked open for transfer to another organization.'
               : 'Rescue case has been accepted.',
           'timestamp': Timestamp.now(),
-        }
+        },
       ]),
     });
     await addActivityLog(
@@ -694,9 +856,10 @@ class RescueCaseRepository {
         'rejectionReasonOther': otherText,
       'statusHistory': FieldValue.arrayUnion([
         {
-          'status': 'Case rejected: ${reason == RejectionReason.other ? (otherText ?? reason.label) : reason.label}.',
+          'status':
+              'Case rejected: ${reason == RejectionReason.other ? (otherText ?? reason.label) : reason.label}.',
           'timestamp': Timestamp.now(),
-        }
+        },
       ]),
     });
     await addActivityLog(
@@ -704,7 +867,10 @@ class RescueCaseRepository {
       action: 'rejected',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'reason': reason.name, if (otherText != null) 'otherText': otherText},
+      details: {
+        'reason': reason.name,
+        if (otherText != null) 'otherText': otherText,
+      },
     );
   }
 
@@ -718,7 +884,10 @@ class RescueCaseRepository {
       'status': RescueStatus.possibleDuplicate.firestoreValue,
       'possibleDuplicateOfCaseId': duplicateOfCaseId,
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Flagged as a possible duplicate report.', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Flagged as a possible duplicate report.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -747,9 +916,14 @@ class RescueCaseRepository {
       'status': RescueStatus.pendingReview.firestoreValue,
       'possibleDuplicateOfCaseId': FieldValue.delete(),
       if (dismissedCandidateIds.isNotEmpty)
-        'dismissedDuplicateCaseIds': FieldValue.arrayUnion(dismissedCandidateIds),
+        'dismissedDuplicateCaseIds': FieldValue.arrayUnion(
+          dismissedCandidateIds,
+        ),
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Confirmed as a separate, unrelated report.', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Confirmed as a separate, unrelated report.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -799,9 +973,12 @@ class RescueCaseRepository {
         // duplicate's first/legacy animalType — a merged multi-animal
         // report should still show every species it covered.
         'species': species_summary_util.summarizeSpecies(
-            animals: duplicateData['animals'] as List?, legacyAnimalType: duplicateData['animalType'] as String?),
+          animals: duplicateData['animals'] as List?,
+          legacyAnimalType: duplicateData['animalType'] as String?,
+        ),
         'urgency': duplicateData['urgency'],
-        'submittedAt': duplicateData['createdAt'] ?? FieldValue.serverTimestamp(),
+        'submittedAt':
+            duplicateData['createdAt'] ?? FieldValue.serverTimestamp(),
         'isPrimary': false,
         'sourceCaseId': duplicateCaseId,
       });
@@ -813,7 +990,7 @@ class RescueCaseRepository {
         'status': RescueStatus.merged.firestoreValue,
         'mergedIntoCaseId': primaryCaseId,
         'statusHistory': FieldValue.arrayUnion([
-          {'status': sharedUpdateText, 'timestamp': Timestamp.now()}
+          {'status': sharedUpdateText, 'timestamp': Timestamp.now()},
         ]),
       });
 
@@ -823,7 +1000,7 @@ class RescueCaseRepository {
           {
             'status': 'A duplicate report for this case was merged in.',
             'timestamp': Timestamp.now(),
-          }
+          },
         ]),
       });
 
@@ -860,8 +1037,10 @@ class RescueCaseRepository {
   /// never an automatic closure.
   Future<void> updateOwnershipInfo({
     required String caseId,
-    required String ownershipStatus, // 'Unknown' | 'No known owner' | 'Possible owner' | 'Owner identified'
-    String? ownedAnimalCategory, // 'Lost animal' | 'Neglect concern' | 'Abandonment concern' | 'Other'
+    required String
+    ownershipStatus, // 'Unknown' | 'No known owner' | 'Possible owner' | 'Owner identified'
+    String?
+    ownedAnimalCategory, // 'Lost animal' | 'Neglect concern' | 'Abandonment concern' | 'Other'
     String? ownerName,
     String? ownerContact,
     String? ownershipNotes,
@@ -870,13 +1049,18 @@ class RescueCaseRepository {
   }) async {
     await _caseDoc(caseId).update({
       'ownershipStatus': ownershipStatus,
-      if (ownedAnimalCategory != null) 'ownedAnimalCategory': ownedAnimalCategory,
+      if (ownedAnimalCategory != null)
+        'ownedAnimalCategory': ownedAnimalCategory,
       if (ownerName != null) 'ownerName': ownerName,
       if (ownerContact != null) 'ownerContact': ownerContact,
       if (ownershipNotes != null) 'ownershipNotes': ownershipNotes,
-      if (ownershipStatus == 'Owner identified') 'ownerConfirmedAt': Timestamp.now(),
+      if (ownershipStatus == 'Owner identified')
+        'ownerConfirmedAt': Timestamp.now(),
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Ownership status updated: $ownershipStatus.', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Ownership status updated: $ownershipStatus.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -888,7 +1072,10 @@ class RescueCaseRepository {
       // details map — that log is broadly readable by staff, and contact
       // info should only live on the case doc's own ownership fields,
       // never duplicated somewhere with wider/different visibility.
-      details: {'ownershipStatus': ownershipStatus, 'ownedAnimalCategory': ownedAnimalCategory},
+      details: {
+        'ownershipStatus': ownershipStatus,
+        'ownedAnimalCategory': ownedAnimalCategory,
+      },
     );
   }
 
@@ -914,7 +1101,10 @@ class RescueCaseRepository {
     await _caseDoc(caseId).update({
       'status': RescueStatus.referred.firestoreValue,
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Referred to $targetOrgName for review.', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Referred to $targetOrgName for review.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -959,7 +1149,7 @@ class RescueCaseRepository {
         {
           'status': 'Referred to the $barangay LGU/barangay: ${reason.label}.',
           'timestamp': Timestamp.now(),
-        }
+        },
       ]),
     });
     await addActivityLog(
@@ -1052,7 +1242,10 @@ class RescueCaseRepository {
       // former.
       'status': RescueStatus.awaitingAssignment.firestoreValue,
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Assigned to clinic: $clinicName.', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Assigned to clinic: $clinicName.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -1109,7 +1302,10 @@ class RescueCaseRepository {
       'cachedRouteDistanceKm': FieldValue.delete(),
       'cachedRouteEtaMinutes': FieldValue.delete(),
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Clinic changed from $previousClinicName to $clinicName.', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Clinic changed from $previousClinicName to $clinicName.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -1117,7 +1313,11 @@ class RescueCaseRepository {
       action: 'changed_clinic',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'previousClinicName': previousClinicName, 'clinicPlaceId': clinicPlaceId, 'clinicName': clinicName},
+      details: {
+        'previousClinicName': previousClinicName,
+        'clinicPlaceId': clinicPlaceId,
+        'clinicName': clinicName,
+      },
     );
   }
 
@@ -1172,7 +1372,10 @@ class RescueCaseRepository {
         final lastSeen = riderData?['lastSeenAt'];
         final lastSeenAt = lastSeen is Timestamp ? lastSeen.toDate() : null;
         final stillOnline =
-            online && lastSeenAt != null && DateTime.now().difference(lastSeenAt) <= kTransporterPresenceThreshold;
+            online &&
+            lastSeenAt != null &&
+            DateTime.now().difference(lastSeenAt) <=
+                kTransporterPresenceThreshold;
         if (!stillOnline) {
           throw const TransporterNoLongerOnlineException();
         }
@@ -1184,11 +1387,17 @@ class RescueCaseRepository {
         final currentStatus = currentData?['status'] as String?;
 
         if (currentStatus == 'pending') {
-          throw ActiveAssignmentConflictException.fromMap(currentId, currentData!);
+          throw ActiveAssignmentConflictException.fromMap(
+            currentId,
+            currentData!,
+          );
         }
         if (currentStatus == 'accepted') {
           if (!allowReassign) {
-            throw ActiveAssignmentConflictException.fromMap(currentId, currentData!);
+            throw ActiveAssignmentConflictException.fromMap(
+              currentId,
+              currentData!,
+            );
           }
           // Explicit Reassign Transporter workflow: supersede the prior
           // accepted assignment rather than leaving it dangling as
@@ -1206,7 +1415,8 @@ class RescueCaseRepository {
           // longer exists. Not an error — just logged for visibility — the
           // pointer is reconciled below by being overwritten unconditionally.
           debugPrint(
-              'RescueCaseRepository: currentAssignmentId=$currentId on case $caseId points to a missing assignment document — clearing.');
+            'RescueCaseRepository: currentAssignmentId=$currentId on case $caseId points to a missing assignment document — clearing.',
+          );
         }
         // rejected / cancelled / completed: nothing to do here, the
         // pointer overwrite below is the reconciliation.
@@ -1219,7 +1429,9 @@ class RescueCaseRepository {
         'riderType': riderType,
         'status': 'pending',
         'offeredAt': offeredAt,
-        'expiresAt': Timestamp.fromDate(offeredAt.toDate().add(kTransportOfferTtl)),
+        'expiresAt': Timestamp.fromDate(
+          offeredAt.toDate().add(kTransportOfferTtl),
+        ),
         'respondedAt': null,
         'acceptedAt': null,
         'rejectedAt': null,
@@ -1263,17 +1475,23 @@ class RescueCaseRepository {
         final caseSnap = await tx.get(caseRef);
 
         if (!snap.exists) {
-          throw const OfferNoLongerAvailableException('assignment no longer exists');
+          throw const OfferNoLongerAvailableException(
+            'assignment no longer exists',
+          );
         }
         final data = snap.data()!;
         if (data['status'] != 'pending') {
-          throw OfferNoLongerAvailableException('status is ${data['status']}, not pending');
+          throw OfferNoLongerAvailableException(
+            'status is ${data['status']}, not pending',
+          );
         }
         if (caseSnap.data()?['currentAssignmentId'] != assignmentId) {
           // The case has moved on to a newer offer (or none) since this one
           // was created — a stale/superseded offer trying to resurrect
           // itself. Ignore rather than accept.
-          throw const OfferNoLongerAvailableException('a newer offer has superseded this one');
+          throw const OfferNoLongerAvailableException(
+            'a newer offer has superseded this one',
+          );
         }
         final expiresAt = data['expiresAt'];
         final now = Timestamp.now();
@@ -1299,7 +1517,10 @@ class RescueCaseRepository {
           'assignedVehicle': riderVehicle,
           'assignedPlate': riderPlate,
           'statusHistory': FieldValue.arrayUnion([
-            {'status': 'Pet transporter assigned: $riderName.', 'timestamp': now},
+            {
+              'status': 'Pet transporter assigned: $riderName.',
+              'timestamp': now,
+            },
           ]),
         });
       });
@@ -1334,11 +1555,15 @@ class RescueCaseRepository {
         final snap = await tx.get(assignmentRef);
         final caseSnap = await tx.get(caseRef);
         if (!snap.exists) {
-          throw const OfferNoLongerAvailableException('assignment no longer exists');
+          throw const OfferNoLongerAvailableException(
+            'assignment no longer exists',
+          );
         }
         final data = snap.data()!;
         if (data['status'] != 'pending') {
-          throw OfferNoLongerAvailableException('status is ${data['status']}, not pending');
+          throw OfferNoLongerAvailableException(
+            'status is ${data['status']}, not pending',
+          );
         }
         final expiresAt = data['expiresAt'];
         final now = Timestamp.now();
@@ -1448,7 +1673,10 @@ class RescueCaseRepository {
       final expiresAt = data['expiresAt'];
       if (expiresAt is! Timestamp) return;
       if (Timestamp.now().compareTo(expiresAt) <= 0) return;
-      tx.update(assignmentRef, {'status': 'expired', 'respondedAt': Timestamp.now()});
+      tx.update(assignmentRef, {
+        'status': 'expired',
+        'respondedAt': Timestamp.now(),
+      });
       if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
         tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
       }
@@ -1509,7 +1737,11 @@ class RescueCaseRepository {
     await _caseDoc(caseId).update({
       'status': RescueStatus.awaitingAssignment.firestoreValue,
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Case returned to Assign after a transporter safety report — a different transporter may now be selected.', 'timestamp': Timestamp.now()}
+        {
+          'status':
+              'Case returned to Assign after a transporter safety report — a different transporter may now be selected.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -1532,7 +1764,10 @@ class RescueCaseRepository {
   }) async {
     await _caseDoc(caseId).update({
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Instructions provided to transporter: $note', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Instructions provided to transporter: $note',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
     await addActivityLog(
@@ -1575,7 +1810,9 @@ class RescueCaseRepository {
       final data = snap.data();
       if (data == null) return;
       final animals = List<Map<String, dynamic>>.from(
-        (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+        (data['animals'] as List? ?? const []).map(
+          (a) => Map<String, dynamic>.from(a as Map),
+        ),
       );
       if (animalIndex < 0 || animalIndex >= animals.length) return;
       animals[animalIndex] = {
@@ -1587,12 +1824,16 @@ class RescueCaseRepository {
         if (notes != null) 'deceasedNotes': notes,
         if (photoUrl != null) 'deceasedPhotoUrl': photoUrl,
       };
-      final animalLabel = (animals[animalIndex]['species'] as String?) ?? 'Animal';
+      final animalLabel =
+          (animals[animalIndex]['species'] as String?) ?? 'Animal';
       tx.update(caseRef, {
         'animals': animals,
         ..._stageSummaryUpdate(animals),
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Animal death reported during rescue: $animalLabel.', 'timestamp': Timestamp.now()}
+          {
+            'status': 'Animal death reported during rescue: $animalLabel.',
+            'timestamp': Timestamp.now(),
+          },
         ]),
       });
     });
@@ -1628,7 +1869,9 @@ class RescueCaseRepository {
       final snap = await tx.get(caseRef);
       final data = snap.data();
       if (data == null) return;
-      final previous = List<Map<String, dynamic>>.from(data['previousLocations'] as List? ?? const []);
+      final previous = List<Map<String, dynamic>>.from(
+        data['previousLocations'] as List? ?? const [],
+      );
       previous.add({
         'address': data['address'],
         'lat': data['lat'],
@@ -1641,11 +1884,16 @@ class RescueCaseRepository {
         if (address != null) 'address': address,
         'previousLocations': previous,
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Rescue location updated.', 'timestamp': Timestamp.now()}
+          {'status': 'Rescue location updated.', 'timestamp': Timestamp.now()},
         ]),
       });
     });
-    await addActivityLog(caseId: caseId, action: 'location_updated', actorUid: actorUid, actorName: actorName);
+    await addActivityLog(
+      caseId: caseId,
+      action: 'location_updated',
+      actorUid: actorUid,
+      actorName: actorName,
+    );
   }
 
   // ---- Close Case (spec §2) ------------------------------------------
@@ -1665,34 +1913,69 @@ class RescueCaseRepository {
   /// (transferAnimal/releaseToReporter/completed intake), a different
   /// concept from "closed due to an exception".
   ///
-  /// A no-op if the case is already in a terminal status — guards both
-  /// double-tap and a case that was closed by a different admin
-  /// concurrently. Any pending/accepted transporter assignment is safely
+  /// Rejects the write if the case is already terminal, including when a
+  /// different admin closes it concurrently. Any pending/accepted
+  /// transporter assignment is safely
   /// cancelled first (never left dangling), which also frees that
   /// transporter back to Available.
-  Future<void> closeCase({
+  /// True once every animal in [animals] has either a recorded death or a
+  /// completed Discharge — same rule as
+  /// core/utils/animal_treatment_state.dart's caseAllAnimalsResolved, kept
+  /// as a raw-map twin here (like _stageSummaryUpdate/
+  /// _deriveCaseStatusOverride above) since this runs mid-transaction on
+  /// the map already in hand, not a full RescueCase object.
+  bool _allAnimalsResolved(List<Map<String, dynamic>> animals) =>
+      animals.isEmpty ||
+      animals.every(
+        (a) => a['outcome'] == 'deceased' || a['dischargedAt'] != null,
+      );
+
+  /// Returns true when the whole case became terminal, or false when this
+  /// write only resolved selected animals and the case remains active.
+  Future<bool> closeCase({
     required String caseId,
     required ClosureReason reason,
     required String details,
     required String actorUid,
     required String actorName,
+    String? actorRole,
+    String? organizationId,
     String? lastKnownLocation,
     String? clinicUnavailableDetails,
     String? serviceTypeNeeded,
+    // Which animals this closure applies to (spec §13/§2) — only ever
+    // meaningful for [ClosureReason.diedDuringRescue] (see
+    // ClosureReason.isDeathReason); null means "the whole case", matching
+    // every prior caller's behavior exactly. For a death reason with a
+    // genuine SUBSET of a multi-animal case's animals, only those animals
+    // are marked deceased and the case itself is left in its current
+    // status (still queryable under Treatment/Intake/etc.) unless that
+    // leaves every animal resolved, in which case the case is also closed.
+    List<int>? animalIndexes,
   }) async {
     final caseRef = _caseDoc(caseId);
     final preSnap = await caseRef.get();
     final preData = preSnap.data();
     if (preData == null) throw StateError('This case no longer exists.');
-    if (RescueStatus.fromFirestoreValue(preData['status'] as String?).isTerminal) return;
+    if (RescueStatus.fromFirestoreValue(
+      preData['status'] as String?,
+    ).isTerminal) {
+      throw StateError('This case is already closed.');
+    }
 
     final currentAssignmentId = preData['currentAssignmentId'] as String?;
     if (currentAssignmentId != null) {
-      final assignmentRef = _transportAssignmentsOf(caseId).doc(currentAssignmentId);
+      final assignmentRef = _transportAssignmentsOf(
+        caseId,
+      ).doc(currentAssignmentId);
       final assignmentSnap = await assignmentRef.get();
       final assignmentStatus = assignmentSnap.data()?['status'] as String?;
       if (assignmentStatus == 'pending') {
-        await cancelAssignment(caseId: caseId, assignmentId: currentAssignmentId, reason: 'Case closed: ${reason.label}');
+        await cancelAssignment(
+          caseId: caseId,
+          assignmentId: currentAssignmentId,
+          reason: 'Case closed: ${reason.label}',
+        );
       } else if (assignmentStatus == 'accepted') {
         // Same effect as cancelAssignment (frees the transporter, keeps
         // full history) — completeAssignment doesn't fit here, that means
@@ -1707,11 +1990,93 @@ class RescueCaseRepository {
     }
 
     final closedFromStatus = preData['status'] as String? ?? '';
-    await _db.runTransaction((tx) async {
+    final rawAnimals = (preData['animals'] as List?) ?? const [];
+    final isPerAnimalDeath =
+        reason.isDeathReason &&
+        animalIndexes != null &&
+        animalIndexes.isNotEmpty &&
+        rawAnimals.isNotEmpty;
+
+    final wholeCaseClosed = await _db.runTransaction<bool>((tx) async {
       final snap = await tx.get(caseRef);
       final data = snap.data();
-      if (data == null) return;
-      if (RescueStatus.fromFirestoreValue(data['status'] as String?).isTerminal) return;
+      if (data == null) throw StateError('This case no longer exists.');
+      if (RescueStatus.fromFirestoreValue(
+        data['status'] as String?,
+      ).isTerminal) {
+        throw StateError('This case is already closed.');
+      }
+
+      final closureMeta = {
+        if (actorRole != null && actorRole.isNotEmpty)
+          'closedByRole': actorRole,
+        if (organizationId != null && organizationId.isNotEmpty)
+          'closedByOrganizationId': organizationId,
+      };
+
+      if (isPerAnimalDeath) {
+        final animals = List<Map<String, dynamic>>.from(
+          (data['animals'] as List? ?? const []).map(
+            (a) => Map<String, dynamic>.from(a as Map),
+          ),
+        );
+        final targets = animalIndexes
+            .where(
+              (i) =>
+                  i >= 0 &&
+                  i < animals.length &&
+                  animals[i]['outcome'] != 'deceased',
+            )
+            .toList();
+        if (targets.isEmpty) {
+          throw StateError('The selected animal outcome is already recorded.');
+        }
+        final now = Timestamp.now();
+        for (final i in targets) {
+          animals[i] = {
+            ...animals[i],
+            // Same field shape RescueCaseRepository.reportAnimalDeath writes
+            // (outcome/deceasedAt/deceasedReason/deceasedConfirmedBy) so
+            // every existing reader (animalIsDeceased, latestConditionFor,
+            // the export/transfer PDF, ...) treats a death recorded through
+            // Close Case identically to one recorded through the Death
+            // Report treatment-log form.
+            'outcome': 'deceased',
+            'deceasedAt': now,
+            'deceasedReason': details,
+            'deceasedConfirmedBy': actorName,
+          };
+        }
+        final allResolved = _allAnimalsResolved(animals);
+        final animalLabel = targets.length == 1
+            ? ((animals[targets.first]['species'] as String?) ?? 'Animal')
+            : '${targets.length} animals';
+        tx.update(caseRef, {
+          'animals': animals,
+          ..._stageSummaryUpdate(animals),
+          ...closureMeta,
+          // Only the animals actually died — the case itself only becomes
+          // terminal once every animal is resolved (spec §13's Animal-1-
+          // died/Animal-2-still-in-treatment example: the case must NOT
+          // disappear from Treatment while Animal 2 is still active).
+          if (allResolved) 'status': RescueStatus.cancelled.firestoreValue,
+          if (allResolved) 'closureReason': reason.name,
+          if (allResolved) 'closureDetails': details,
+          if (allResolved) 'closedAt': now,
+          if (allResolved) 'closedBy': actorUid,
+          if (allResolved) 'closedByName': actorName,
+          if (allResolved) 'closedFromStatus': closedFromStatus,
+          'statusHistory': FieldValue.arrayUnion([
+            {
+              'status':
+                  'Animal death reported: $animalLabel.${allResolved ? ' All animals resolved — case closed.' : ''}',
+              'timestamp': now,
+            },
+          ]),
+        });
+        return allResolved;
+      }
+
       tx.update(caseRef, {
         'status': RescueStatus.cancelled.firestoreValue,
         'closureReason': reason.name,
@@ -1720,26 +2085,45 @@ class RescueCaseRepository {
         'closedBy': actorUid,
         'closedByName': actorName,
         'closedFromStatus': closedFromStatus,
-        if (lastKnownLocation != null) 'closureLastKnownLocation': lastKnownLocation,
-        if (clinicUnavailableDetails != null) 'closureClinicDetails': clinicUnavailableDetails,
+        ...closureMeta,
+        if (lastKnownLocation != null)
+          'closureLastKnownLocation': lastKnownLocation,
+        if (clinicUnavailableDetails != null)
+          'closureClinicDetails': clinicUnavailableDetails,
         // Read by assign_rider_page.dart / rescue_detail_page.dart so the
         // requested service type actually shows up wherever the case is
         // presented as a service request afterward, instead of only living
         // inside the free-text closureDetails.
         if (serviceTypeNeeded != null) 'closureServiceType': serviceTypeNeeded,
+        // Informational/audit only for a non-death reason applied to a
+        // subset of animals — this codebase has no per-animal field for
+        // "this specific animal's duplicate-report/owner-reclaimed/etc.
+        // story ended" the way it does for death, so the case itself still
+        // closes as a whole for every reason other than isDeathReason.
+        if (animalIndexes != null)
+          'closureAppliesToAnimalIndexes': animalIndexes,
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Case closed: ${reason.label}.', 'timestamp': Timestamp.now()}
+          {
+            'status': 'Case closed: ${reason.label}.',
+            'timestamp': Timestamp.now(),
+          },
         ]),
       });
+      return true;
     });
 
     await addActivityLog(
       caseId: caseId,
-      action: 'case_closed',
+      action: wholeCaseClosed ? 'case_closed' : 'animal_deceased',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'reason': reason.name, 'closedFromStatus': closedFromStatus},
+      details: {
+        'reason': reason.name,
+        'closedFromStatus': closedFromStatus,
+        if (animalIndexes != null) 'animalIndexes': animalIndexes,
+      },
     );
+    return wholeCaseClosed;
   }
 
   // ---- Treatment ----------------------------------------------------
@@ -1773,8 +2157,10 @@ class RescueCaseRepository {
     final type = TreatmentUpdateType.fromLabel(entry.type);
     switch (type) {
       case TreatmentUpdateType.vaccination:
-        if ((entry.vaccineName ?? '').trim().isEmpty) throw ArgumentError('Vaccine is required.');
-        if ((entry.vaccineDose ?? '').trim().isEmpty) throw ArgumentError('Vaccine dose is required.');
+        if ((entry.vaccineName ?? '').trim().isEmpty)
+          throw ArgumentError('Vaccine is required.');
+        if ((entry.vaccineDose ?? '').trim().isEmpty)
+          throw ArgumentError('Vaccine dose is required.');
         break;
       case TreatmentUpdateType.procedure:
         if ((entry.procedurePerformed ?? '').trim().isEmpty) {
@@ -1782,20 +2168,26 @@ class RescueCaseRepository {
         }
         break;
       case TreatmentUpdateType.medication:
-        if ((entry.medicationName ?? '').trim().isEmpty) throw ArgumentError('Medication name is required.');
-        if ((entry.medicationDose ?? '').trim().isEmpty) throw ArgumentError('Medication dose is required.');
+        if ((entry.medicationName ?? '').trim().isEmpty)
+          throw ArgumentError('Medication name is required.');
+        if ((entry.medicationDose ?? '').trim().isEmpty)
+          throw ArgumentError('Medication dose is required.');
         break;
       case TreatmentUpdateType.discharge:
-        if ((entry.finalCondition ?? '').trim().isEmpty) throw ArgumentError('Final condition is required.');
+        if ((entry.finalCondition ?? '').trim().isEmpty)
+          throw ArgumentError('Final condition is required.');
         break;
       case TreatmentUpdateType.deathReport:
-        if ((entry.causeOfDeath ?? '').trim().isEmpty) throw ArgumentError('Cause of death is required.');
+        if ((entry.causeOfDeath ?? '').trim().isEmpty)
+          throw ArgumentError('Cause of death is required.');
         break;
       case TreatmentUpdateType.assessment:
       case TreatmentUpdateType.followUpCheck:
       case null:
-        if ((entry.condition ?? '').trim().isEmpty) throw ArgumentError('Overall condition is required.');
-        if (entry.notes.trim().isEmpty) throw ArgumentError('Notes are required for this update type.');
+        if ((entry.condition ?? '').trim().isEmpty)
+          throw ArgumentError('Overall condition is required.');
+        if (entry.notes.trim().isEmpty)
+          throw ArgumentError('Notes are required for this update type.');
         break;
     }
   }
@@ -1822,7 +2214,10 @@ class RescueCaseRepository {
       }
       if (stage != null) counts[stage] = (counts[stage] ?? 0) + 1;
     }
-    return {'activeAnimalStages': counts.keys.toList()..sort(), 'animalStageCounts': counts};
+    return {
+      'activeAnimalStages': counts.keys.toList()..sort(),
+      'animalStageCounts': counts,
+    };
   }
 
   /// The case-level `status` a multi-animal case's `animals[]` state
@@ -1835,10 +2230,15 @@ class RescueCaseRepository {
   /// caller keeps whatever explicit status write it already had.
   String? _deriveCaseStatusOverride(List<Map<String, dynamic>> animals) {
     if (animals.isEmpty) return null;
-    final anyUnactioned = animals.any((a) => a['outcome'] != 'deceased' && a['postTreatmentAction'] == null);
+    final anyUnactioned = animals.any(
+      (a) => a['outcome'] != 'deceased' && a['postTreatmentAction'] == null,
+    );
     if (anyUnactioned) return RescueStatus.treatment.firestoreValue;
-    final anyIntakePending =
-    animals.any((a) => a['postTreatmentAction'] == 'intake' && a['intakeCompletedAt'] == null);
+    final anyIntakePending = animals.any(
+      (a) =>
+          a['postTreatmentAction'] == 'intake' &&
+          a['intakeCompletedAt'] == null,
+    );
     if (anyIntakePending) return RescueStatus.intake.firestoreValue;
     return RescueStatus.completed.firestoreValue;
   }
@@ -1852,7 +2252,9 @@ class RescueCaseRepository {
     final caseSnap = await _caseDoc(caseId).get();
     final data = caseSnap.data();
     final animals = List<Map<String, dynamic>>.from(
-      (data?['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      (data?['animals'] as List? ?? const []).map(
+        (a) => Map<String, dynamic>.from(a as Map),
+      ),
     );
 
     // ROOT CAUSE FIX (spec §6): this used to be a single case-wide
@@ -1864,13 +2266,19 @@ class RescueCaseRepository {
     // for a legacy single-animal case (no `animals[]`) that's still just
     // the old scalar `readyForDischarge` flag, unchanged.
     final allResolved = animals.isNotEmpty
-        ? animals.every((a) => a['outcome'] == 'deceased' || a['dischargedAt'] != null)
+        ? animals.every(
+            (a) => a['outcome'] == 'deceased' || a['dischargedAt'] != null,
+          )
         : (data?['readyForDischarge'] == true);
     if (allResolved) {
-      throw StateError('No further treatment updates can be added after discharge.');
+      throw StateError(
+        'No further treatment updates can be added after discharge.',
+      );
     }
 
-    final logRef = logId != null ? _treatmentLogsOf(caseId).doc(logId) : _treatmentLogsOf(caseId).doc();
+    final logRef = logId != null
+        ? _treatmentLogsOf(caseId).doc(logId)
+        : _treatmentLogsOf(caseId).doc();
     await logRef.set(entry.toFirestore());
 
     final now = Timestamp.now();
@@ -1882,11 +2290,11 @@ class RescueCaseRepository {
     final summary = entry.notes.trim().isNotEmpty
         ? entry.notes
         : entry.vaccineName ??
-        entry.procedurePerformed ??
-        entry.medicationName ??
-        entry.finalCondition ??
-        entry.causeOfDeath ??
-        entry.type;
+              entry.procedurePerformed ??
+              entry.medicationName ??
+              entry.finalCondition ??
+              entry.causeOfDeath ??
+              entry.type;
 
     // Which animals THIS entry targets — every animal for a null/empty
     // animalIndexes ("All Animals", spec §5), otherwise only the selected
@@ -1895,13 +2303,17 @@ class RescueCaseRepository {
     final targetIndexes = animals.isEmpty
         ? const <int>[]
         : (entry.animalIndexes != null && entry.animalIndexes!.isNotEmpty
-        ? entry.animalIndexes!
-        : List<int>.generate(animals.length, (i) => i));
+              ? entry.animalIndexes!
+              : List<int>.generate(animals.length, (i) => i));
 
     if (isDischarge) {
       for (final i in targetIndexes) {
         if (i < 0 || i >= animals.length) continue;
-        animals[i] = {...animals[i], 'dischargedAt': now, 'dischargeLogId': logRef.id};
+        animals[i] = {
+          ...animals[i],
+          'dischargedAt': now,
+          'dischargeLogId': logRef.id,
+        };
       }
     } else if (isDeath) {
       for (final i in targetIndexes) {
@@ -1924,7 +2336,8 @@ class RescueCaseRepository {
         {'status': '${entry.type}: $summary', 'timestamp': now},
       ]),
       if (animals.isNotEmpty && (isDischarge || isDeath)) 'animals': animals,
-      if (animals.isNotEmpty && (isDischarge || isDeath)) ..._stageSummaryUpdate(animals),
+      if (animals.isNotEmpty && (isDischarge || isDeath))
+        ..._stageSummaryUpdate(animals),
       // Legacy case-wide fields — kept exactly as before for a case with no
       // `animals[]` array, and also kept (informationally) alongside the
       // new per-animal fields above so any older reader that only looks at
@@ -1935,7 +2348,8 @@ class RescueCaseRepository {
       if (isDischarge) 'dischargedAt': now,
       if (isDeath) 'deceasedAt': now,
       if (isDeath) 'animalStatus': 'Deceased',
-      if (isDeath && entry.causeOfDeath != null) 'causeOfDeath': entry.causeOfDeath,
+      if (isDeath && entry.causeOfDeath != null)
+        'causeOfDeath': entry.causeOfDeath,
     });
   }
 
@@ -1962,24 +2376,35 @@ class RescueCaseRepository {
   /// so a stale sheet or a direct call can't bypass it. Returns the
   /// freshly-read `animals` array so the caller can mutate it in the same
   /// read without a second round-trip.
-  Future<List<Map<String, dynamic>>> _ensureAnimalsEligible(String caseId, List<int>? animalIndexes) async {
+  Future<List<Map<String, dynamic>>> _ensureAnimalsEligible(
+    String caseId,
+    List<int>? animalIndexes,
+  ) async {
     final snap = await _caseDoc(caseId).get();
     final data = snap.data();
     final animals = List<Map<String, dynamic>>.from(
-      (data?['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      (data?['animals'] as List? ?? const []).map(
+        (a) => Map<String, dynamic>.from(a as Map),
+      ),
     );
     if (animals.isEmpty || animalIndexes == null || animalIndexes.isEmpty) {
       final ready = data?['readyForDischarge'] as bool? ?? false;
       if (!ready) {
-        throw StateError('A Discharge update is required before this action is available.');
+        throw StateError(
+          'A Discharge update is required before this action is available.',
+        );
       }
       return animals;
     }
     for (final i in animalIndexes) {
       if (i < 0 || i >= animals.length) continue;
       final a = animals[i];
-      if (a['outcome'] == 'deceased' || a['dischargedAt'] == null || a['postTreatmentAction'] != null) {
-        throw StateError('One or more selected animals are not eligible for this action.');
+      if (a['outcome'] == 'deceased' ||
+          a['dischargedAt'] == null ||
+          a['postTreatmentAction'] != null) {
+        throw StateError(
+          'One or more selected animals are not eligible for this action.',
+        );
       }
     }
     return animals;
@@ -2014,7 +2439,8 @@ class RescueCaseRepository {
   }) async {
     final animals = await _ensureAnimalsEligible(caseId, animalIndexes);
     final now = Timestamp.now();
-    final perAnimal = animals.isNotEmpty && animalIndexes != null && animalIndexes.isNotEmpty;
+    final perAnimal =
+        animals.isNotEmpty && animalIndexes != null && animalIndexes.isNotEmpty;
     if (perAnimal) {
       for (final i in animalIndexes) {
         if (i < 0 || i >= animals.length) continue;
@@ -2029,7 +2455,10 @@ class RescueCaseRepository {
       }
     }
     await _caseDoc(caseId).update({
-      'status': perAnimal ? (_deriveCaseStatusOverride(animals) ?? RescueStatus.completed.firestoreValue) : RescueStatus.completed.firestoreValue,
+      'status': perAnimal
+          ? (_deriveCaseStatusOverride(animals) ??
+                RescueStatus.completed.firestoreValue)
+          : RescueStatus.completed.firestoreValue,
       'transferType': targetType,
       'targetName': targetName,
       // Legacy field names, kept so any existing reader of a
@@ -2039,14 +2468,20 @@ class RescueCaseRepository {
       // fields above are the source of truth once several separate
       // transfers happen for different animals over time.
       if (targetType == 'organization') 'targetOrganizationName': targetName,
-      if (targetContact != null && targetContact.isNotEmpty) 'targetContact': targetContact,
-      if (targetAddress != null && targetAddress.isNotEmpty) 'targetAddress': targetAddress,
-      if (targetOrganizationId != null) 'targetOrganizationId': targetOrganizationId,
-      if (targetClinicPlaceId != null) 'targetClinicPlaceId': targetClinicPlaceId,
+      if (targetContact != null && targetContact.isNotEmpty)
+        'targetContact': targetContact,
+      if (targetAddress != null && targetAddress.isNotEmpty)
+        'targetAddress': targetAddress,
+      if (targetOrganizationId != null)
+        'targetOrganizationId': targetOrganizationId,
+      if (targetClinicPlaceId != null)
+        'targetClinicPlaceId': targetClinicPlaceId,
       if (targetLat != null) 'targetLat': targetLat,
       if (targetLng != null) 'targetLng': targetLng,
       'transferReason': reason,
-      'transferDate': transferDate != null ? Timestamp.fromDate(transferDate) : now,
+      'transferDate': transferDate != null
+          ? Timestamp.fromDate(transferDate)
+          : now,
       'transferNotes': notes,
       'transferRequestedAt': now,
       // TODO(transfer): this is a simplified, one-way record — there is no
@@ -2056,7 +2491,10 @@ class RescueCaseRepository {
       if (perAnimal) 'animals': animals,
       if (perAnimal) ..._stageSummaryUpdate(animals),
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Animal transferred to $targetName ($targetType).', 'timestamp': now}
+        {
+          'status': 'Animal transferred to $targetName ($targetType).',
+          'timestamp': now,
+        },
       ]),
     });
     await addActivityLog(
@@ -2064,7 +2502,12 @@ class RescueCaseRepository {
       action: 'transferred_animal',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'targetType': targetType, 'targetName': targetName, if (targetOrganizationId != null) 'targetOrganizationId': targetOrganizationId},
+      details: {
+        'targetType': targetType,
+        'targetName': targetName,
+        if (targetOrganizationId != null)
+          'targetOrganizationId': targetOrganizationId,
+      },
     );
   }
 
@@ -2083,7 +2526,8 @@ class RescueCaseRepository {
   }) async {
     final animals = await _ensureAnimalsEligible(caseId, animalIndexes);
     final now = Timestamp.now();
-    final perAnimal = animals.isNotEmpty && animalIndexes != null && animalIndexes.isNotEmpty;
+    final perAnimal =
+        animals.isNotEmpty && animalIndexes != null && animalIndexes.isNotEmpty;
     if (perAnimal) {
       for (final i in animalIndexes) {
         if (i < 0 || i >= animals.length) continue;
@@ -2096,7 +2540,10 @@ class RescueCaseRepository {
       }
     }
     await _caseDoc(caseId).update({
-      'status': perAnimal ? (_deriveCaseStatusOverride(animals) ?? RescueStatus.completed.firestoreValue) : RescueStatus.completed.firestoreValue,
+      'status': perAnimal
+          ? (_deriveCaseStatusOverride(animals) ??
+                RescueStatus.completed.firestoreValue)
+          : RescueStatus.completed.firestoreValue,
       'releasedToReporterId': reporterId,
       'releasedToReporterName': reporterName,
       'releasedAt': now,
@@ -2104,7 +2551,10 @@ class RescueCaseRepository {
       if (perAnimal) 'animals': animals,
       if (perAnimal) ..._stageSummaryUpdate(animals),
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Release confirmed — handed off to $reporterName.', 'timestamp': now}
+        {
+          'status': 'Release confirmed — handed off to $reporterName.',
+          'timestamp': now,
+        },
       ]),
     });
     await addActivityLog(
@@ -2134,24 +2584,37 @@ class RescueCaseRepository {
       final data = snap.data();
       if (data == null) throw StateError('This case no longer exists.');
       final animals = List<Map<String, dynamic>>.from(
-        (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+        (data['animals'] as List? ?? const []).map(
+          (a) => Map<String, dynamic>.from(a as Map),
+        ),
       );
       if (animals.isEmpty) return;
       final now = Timestamp.now();
       for (final i in animalIndexes) {
         if (i < 0 || i >= animals.length) continue;
         final a = animals[i];
-        if (a['outcome'] == 'deceased' || a['dischargedAt'] == null || a['postTreatmentAction'] != null) {
-          throw StateError('One or more selected animals are not eligible for this action.');
+        if (a['outcome'] == 'deceased' ||
+            a['dischargedAt'] == null ||
+            a['postTreatmentAction'] != null) {
+          throw StateError(
+            'One or more selected animals are not eligible for this action.',
+          );
         }
-        animals[i] = {...a, 'postTreatmentAction': 'intake', 'postTreatmentStartedAt': now};
+        animals[i] = {
+          ...a,
+          'postTreatmentAction': 'intake',
+          'postTreatmentStartedAt': now,
+        };
       }
       tx.update(caseRef, {
         'animals': animals,
         ..._stageSummaryUpdate(animals),
-        'status': _deriveCaseStatusOverride(animals) ?? (data['status'] as String? ?? RescueStatus.treatment.firestoreValue),
+        'status':
+            _deriveCaseStatusOverride(animals) ??
+            (data['status'] as String? ??
+                RescueStatus.treatment.firestoreValue),
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Selected animal(s) moved to Intake.', 'timestamp': now}
+          {'status': 'Selected animal(s) moved to Intake.', 'timestamp': now},
         ]),
       });
     });
@@ -2178,14 +2641,18 @@ class RescueCaseRepository {
       final data = snap.data();
       if (data == null) return;
       final animals = List<Map<String, dynamic>>.from(
-        (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+        (data['animals'] as List? ?? const []).map(
+          (a) => Map<String, dynamic>.from(a as Map),
+        ),
       );
       if (animals.isEmpty) return;
       final now = Timestamp.now();
       var changed = false;
       for (final i in animalIndexes) {
         if (i < 0 || i >= animals.length) continue;
-        if (animals[i]['postTreatmentAction'] != 'intake' || animals[i]['intakeCompletedAt'] != null) continue;
+        if (animals[i]['postTreatmentAction'] != 'intake' ||
+            animals[i]['intakeCompletedAt'] != null)
+          continue;
         animals[i] = {...animals[i], 'intakeCompletedAt': now};
         changed = true;
       }
@@ -2193,9 +2660,14 @@ class RescueCaseRepository {
       tx.update(caseRef, {
         'animals': animals,
         ..._stageSummaryUpdate(animals),
-        'status': _deriveCaseStatusOverride(animals) ?? (data['status'] as String? ?? RescueStatus.intake.firestoreValue),
+        'status':
+            _deriveCaseStatusOverride(animals) ??
+            (data['status'] as String? ?? RescueStatus.intake.firestoreValue),
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Intake completed for the selected animal(s).', 'timestamp': now}
+          {
+            'status': 'Intake completed for the selected animal(s).',
+            'timestamp': now,
+          },
         ]),
       });
     });
@@ -2214,7 +2686,12 @@ class RescueCaseRepository {
     return _cases
         .where('activeAnimalStages', arrayContains: stage)
         .snapshots()
-        .map((snap) => snap.docs.map(RescueCase.fromFirestore).where(_isPrimaryGroupMember).toList());
+        .map(
+          (snap) => snap.docs
+              .map(RescueCase.fromFirestore)
+              .where(_isPrimaryGroupMember)
+              .toList(),
+        );
   }
 
   Future<void> closeDeceasedCase({required String caseId}) async {
@@ -2230,7 +2707,10 @@ class RescueCaseRepository {
     await _caseDoc(caseId).update({
       'status': 'closed',
       'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Case closed. Animal deceased.', 'timestamp': Timestamp.now()}
+        {
+          'status': 'Case closed. Animal deceased.',
+          'timestamp': Timestamp.now(),
+        },
       ]),
     });
   }
@@ -2284,9 +2764,13 @@ class RescueCaseRepository {
       // to the original unconditional 'intake' write for a legacy case
       // with no `animals[]` array.
       final animalsRaw = List<Map<String, dynamic>>.from(
-        (caseData?['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+        (caseData?['animals'] as List? ?? const []).map(
+          (a) => Map<String, dynamic>.from(a as Map),
+        ),
       );
-      final statusOverride = _deriveCaseStatusOverride(animalsRaw) ?? RescueStatus.intake.firestoreValue;
+      final statusOverride =
+          _deriveCaseStatusOverride(animalsRaw) ??
+          RescueStatus.intake.firestoreValue;
 
       final now = Timestamp.now();
       tx.update(caseRef, {
@@ -2298,7 +2782,11 @@ class RescueCaseRepository {
         'intakeDestinationLng': destinationLng,
         'intakeConfirmedAt': now,
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Intake confirmed — transport to $destinationName arranged.', 'timestamp': now}
+          {
+            'status':
+                'Intake confirmed — transport to $destinationName arranged.',
+            'timestamp': now,
+          },
         ]),
         if (transporterUid != null) 'currentAssignmentId': assignmentRef.id,
         if (transporterUid != null) 'assignedVolunteerId': transporterUid,
@@ -2334,18 +2822,57 @@ class RescueCaseRepository {
   /// the arrival time. Never touches the case's own RescueStatus: arriving
   /// at the shelter doesn't complete the whole rescue case, it just means
   /// transport is done and quarantine/animal-record steps can begin.
+  /// [animalIndexes] scopes this confirmation to specific animals in a
+  /// multi-animal Intake (spec: "Multi-animal Intake must evaluate receipt
+  /// per animal — one received animal should not unlock record creation
+  /// for another"). Writes a per-animal `receivedAt` (see
+  /// core/utils/animal_treatment_state.dart's animalIsReceived, the read
+  /// side this feeds) to just those indexes, or to every animal when
+  /// [animalIndexes] is null (the whole-case call every pre-existing
+  /// caller still makes). The case-level `intakeReceivedAt` flag is only
+  /// ever set once — a later confirmation for a different animal subset
+  /// never overwrites the original received timestamp every other reader
+  /// of that case-level field (View Transport Tracking's gate, the
+  /// intake-mode Track Case screen, ...) already depends on.
   Future<void> confirmAnimalReceived({
     required String caseId,
     String? currentAssignmentId,
+    List<int>? animalIndexes,
   }) async {
-    await _caseDoc(caseId).update({
-      'intakeReceivedAt': Timestamp.now(),
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Animal received at the shelter.', 'timestamp': Timestamp.now()}
-      ]),
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) return;
+      final now = Timestamp.now();
+      final update = <String, dynamic>{
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Animal received at the shelter.', 'timestamp': now},
+        ]),
+      };
+      if (data['intakeReceivedAt'] == null) {
+        update['intakeReceivedAt'] = now;
+      }
+      final rawAnimals = (data['animals'] as List?) ?? const [];
+      if (rawAnimals.isNotEmpty) {
+        final animals = List<Map<String, dynamic>>.from(
+          rawAnimals.map((a) => Map<String, dynamic>.from(a as Map)),
+        );
+        final targets =
+            animalIndexes ?? List.generate(animals.length, (i) => i);
+        for (final i in targets) {
+          if (i < 0 || i >= animals.length) continue;
+          animals[i] = {...animals[i], 'receivedAt': now};
+        }
+        update['animals'] = animals;
+      }
+      tx.update(caseRef, update);
     });
     if (currentAssignmentId != null) {
-      await completeAssignment(caseId: caseId, assignmentId: currentAssignmentId);
+      await completeAssignment(
+        caseId: caseId,
+        assignmentId: currentAssignmentId,
+      );
     }
   }
 
@@ -2363,16 +2890,15 @@ class RescueCaseRepository {
       // The scheduled END is a future instant, which FieldValue.serverTimestamp()
       // can't express (it only stamps "now") — computed from the device
       // clock here. The START above still uses the server clock.
-      'quarantineScheduledEndAt': Timestamp.fromDate(now.add(Duration(days: durationDays))),
+      'quarantineScheduledEndAt': Timestamp.fromDate(
+        now.add(Duration(days: durationDays)),
+      ),
       'quarantineEndedAt': null,
       'quarantineEndReason': null,
     });
   }
 
-  Future<void> endQuarantine({
-    required String caseId,
-    String? reason,
-  }) async {
+  Future<void> endQuarantine({required String caseId, String? reason}) async {
     await _caseDoc(caseId).update({
       'quarantineStatus': 'completed',
       'quarantineEndedAt': FieldValue.serverTimestamp(),
@@ -2424,10 +2950,10 @@ class RescueCaseRepository {
   /// guard against the freshest doc, so calling this redundantly from both
   /// places (or twice in a race) is always harmless.
   Future<void> checkAndCompleteIntakeIfDue(
-      RescueCase c, {
-        required int totalAnimalsExpected,
-        required int completedCount,
-      }) async {
+    RescueCase c, {
+    required int totalAnimalsExpected,
+    required int completedCount,
+  }) async {
     if (c.intakeReceivedAt == null) return;
     if (completedCount < totalAnimalsExpected) return;
     if (c.status == RescueStatus.completed) return;
@@ -2436,7 +2962,9 @@ class RescueCaseRepository {
       final snap = await tx.get(_caseDoc(c.id));
       if (!snap.exists) return;
       final data = snap.data()!;
-      if (RescueStatus.fromFirestoreValue(data['status'] as String?) == RescueStatus.completed) return;
+      if (RescueStatus.fromFirestoreValue(data['status'] as String?) ==
+          RescueStatus.completed)
+        return;
       if (data['intakeReceivedAt'] == null) return;
 
       final now = Timestamp.now();
@@ -2444,7 +2972,10 @@ class RescueCaseRepository {
         'status': RescueStatus.completed.firestoreValue,
         'intakeCompletedAt': now,
         'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Intake completed — all animal records created.', 'timestamp': now}
+          {
+            'status': 'Intake completed — all animal records created.',
+            'timestamp': now,
+          },
         ]),
       });
     });
@@ -2452,7 +2983,10 @@ class RescueCaseRepository {
 
   // ---- Cost tracking --------------------------------------------------
 
-  Future<void> addExpense({required String caseId, required Expense expense}) async {
+  Future<void> addExpense({
+    required String caseId,
+    required Expense expense,
+  }) async {
     if (expense.title.trim().isEmpty) {
       throw ArgumentError('Expense title is required.');
     }
@@ -2472,7 +3006,10 @@ class RescueCaseRepository {
     });
   }
 
-  Future<void> updateExpense({required String caseId, required Expense expense}) async {
+  Future<void> updateExpense({
+    required String caseId,
+    required Expense expense,
+  }) async {
     if (expense.title.trim().isEmpty) {
       throw ArgumentError('Expense title is required.');
     }
@@ -2482,7 +3019,10 @@ class RescueCaseRepository {
     await _expensesOf(caseId).doc(expense.id).update(expense.toFirestore());
   }
 
-  Future<void> deleteExpense({required String caseId, required String expenseId}) async {
+  Future<void> deleteExpense({
+    required String caseId,
+    required String expenseId,
+  }) async {
     await _expensesOf(caseId).doc(expenseId).delete();
   }
 

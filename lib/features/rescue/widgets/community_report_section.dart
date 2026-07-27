@@ -34,6 +34,7 @@ class CommunityReportSection extends StatefulWidget {
 }
 
 class _CommunityReportSectionState extends State<CommunityReportSection> {
+  bool _sectionExpanded = false;
   bool _expanded = false;
   String? _selectedType;
   XFile? _pickedImage;
@@ -61,8 +62,11 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     super.dispose();
   }
 
-  CollectionReference<Map<String, dynamic>> get _reportsRef =>
-      FirebaseFirestore.instance.collection('cases').doc(widget.caseId).collection('communityReports');
+  CollectionReference<Map<String, dynamic>> get _reportsRef => FirebaseFirestore
+      .instance
+      .collection('cases')
+      .doc(widget.caseId)
+      .collection('communityReports');
 
   Future<void> _openLocationPicker() async {
     // Compare against the case's own original lat/lng (its Rescue Report
@@ -71,7 +75,10 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     double? originalLat;
     double? originalLng;
     try {
-      final caseDoc = await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).get();
+      final caseDoc = await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .get();
       originalLat = (caseDoc.data()?['lat'] as num?)?.toDouble();
       originalLng = (caseDoc.data()?['lng'] as num?)?.toDouble();
     } catch (_) {
@@ -86,7 +93,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         builder: (_) => const LastSeenLocationPicker(
           title: 'Where is the animal now?',
           instructionText:
-          'Tap anywhere on the map to drop a pin, or search an address below. This becomes the animal\'s new known location.',
+              'Tap anywhere on the map to drop a pin, or search an address below. This becomes the animal\'s new known location.',
           pinLabel: 'New location',
           confirmLabel: 'Confirm New Location',
         ),
@@ -95,22 +102,35 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     if (picked == null || !mounted) return;
 
     if (originalLat != null && originalLng != null) {
-      final distanceKm = haversineDistanceKm(originalLat, originalLng, picked.lat, picked.lng);
+      final distanceKm = haversineDistanceKm(
+        originalLat,
+        originalLng,
+        picked.lat,
+        picked.lng,
+      );
       if (distanceKm > _farMoveThresholdKm) {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             backgroundColor: AppColors.background,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             title: const Text('Confirm New Location'),
             content: const Text(
               "This location is far from the animal's last known position. Confirm that the new pin is correct.",
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.yellowrspwn,
+                  foregroundColor: AppColors.textPrimary,
+                ),
                 child: const Text('Confirm'),
               ),
             ],
@@ -147,18 +167,22 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   };
 
   String _typeDescription(String? t) => switch (t) {
-    'still_here' => 'Upload a recent photo to confirm the animal is still at the reported location.',
+    'still_here' =>
+      'Upload a recent photo to confirm the animal is still at the reported location.',
     'moved' =>
-    'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
+      'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
     'rescued' =>
-    'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
+      'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
     'no_animal' =>
-    'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
+      'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
     _ => '',
   };
 
   Future<void> _pickImage() async {
-    final file = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final file = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
     if (file != null && mounted) {
       setState(() => _pickedImage = file);
     }
@@ -171,9 +195,13 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     // non-empty freeform text. Reject invalid/unresolved coordinates by
     // simply not allowing submission — nothing is written, so the
     // previous location (if any) is untouched.
-    if (_selectedType == 'moved' && (_pickedLat == null || _pickedLng == null)) {
+    if (_selectedType == 'moved' &&
+        (_pickedLat == null || _pickedLng == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select the new location on the map.'), backgroundColor: Colors.redAccent),
+        const SnackBar(
+          content: Text('Please select the new location on the map.'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
       return;
     }
@@ -181,22 +209,32 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     setState(() => _submitting = true);
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      final name = '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'.trim();
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final name =
+          '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
+              .trim();
 
       final reportRef = _reportsRef.doc();
 
       String? photoUrl;
       if (_pickedImage != null) {
-        final ref =
-        FirebaseStorage.instance.ref().child('cases/${widget.caseId}/communityReports/${reportRef.id}.jpg');
-        await ref.putFile(File(_pickedImage!.path), SettableMetadata(contentType: 'image/jpeg'));
+        final ref = FirebaseStorage.instance.ref().child(
+          'cases/${widget.caseId}/communityReports/${reportRef.id}.jpg',
+        );
+        await ref.putFile(
+          File(_pickedImage!.path),
+          SettableMetadata(contentType: 'image/jpeg'),
+        );
         photoUrl = await ref.getDownloadURL();
       }
 
       // Deliberately never touches the parent case's own `status` — a
       // sighting update is purely additive, never an automatic close.
       await reportRef.set({
+        'caseId': widget.caseId,
         'reporterId': uid,
         'reporterName': name.isEmpty ? 'A community member' : name,
         'type': _selectedType,
@@ -210,18 +248,23 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         // (RescueCaseRepository.approveLocationUpdate). Every other report
         // type has no approval concept at all (null, not 'pending').
         'approvalStatus': _selectedType == 'moved' ? 'pending' : null,
+        if (_selectedType == 'moved') 'locationScope': 'case',
         'photoUrl': photoUrl,
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).collection('activityLogs').add({
-        'action': 'community_report_submitted',
-        'actorUid': uid,
-        'actorName': name.isEmpty ? 'A community member' : name,
-        'actorRole': null,
-        'details': {'type': _selectedType},
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(widget.caseId)
+          .collection('activityLogs')
+          .add({
+            'action': 'community_report_submitted',
+            'actorUid': uid,
+            'actorName': name.isEmpty ? 'A community member' : name,
+            'actorRole': null,
+            'details': {'type': _selectedType},
+            'timestamp': FieldValue.serverTimestamp(),
+          });
 
       if (mounted) {
         setState(() {
@@ -234,13 +277,19 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         });
         _commentController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Thanks! Your report has been submitted.'), backgroundColor: AppColors.greenrspwn),
+          const SnackBar(
+            content: Text('Thanks! Your report has been submitted.'),
+            backgroundColor: AppColors.greenrspwn,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not submit report: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not submit report: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -257,13 +306,22 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
             Container(
               width: 40,
               height: 40,
-              decoration: const BoxDecoration(color: AppColors.textPrimary, shape: BoxShape.circle),
+              decoration: const BoxDecoration(
+                color: AppColors.textPrimary,
+                shape: BoxShape.circle,
+              ),
               child: Image.asset(iconAsset, width: 10, height: 10),
             ),
             const SizedBox(height: 6),
-            Text(label,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
           ],
         ),
       ),
@@ -279,18 +337,36 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
             Container(
               width: 48,
               height: 48,
-              decoration: const BoxDecoration(color: AppColors.textPrimary, shape: BoxShape.circle),
+              decoration: const BoxDecoration(
+                color: AppColors.textPrimary,
+                shape: BoxShape.circle,
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(10),
-                child: Image.asset(_typeIconAsset(_selectedType), fit: BoxFit.contain),
+                child: Image.asset(
+                  _typeIconAsset(_selectedType),
+                  fit: BoxFit.contain,
+                ),
               ),
             ),
             const SizedBox(height: 8),
-            Text(_typeLabel(_selectedType),
-                style: GoogleFonts.tiltWarp(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+            Text(
+              _typeLabel(_selectedType),
+              style: GoogleFonts.tiltWarp(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 6),
-            Text(_typeDescription(_selectedType),
-                textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            Text(
+              _typeDescription(_selectedType),
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
             const SizedBox(height: 14),
             GestureDetector(
               onTap: _pickImage,
@@ -304,10 +380,17 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 ),
                 child: _pickedImage != null
                     ? ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.file(File(_pickedImage!.path), fit: BoxFit.cover),
-                )
-                    : const Icon(Icons.add_a_photo_outlined, color: AppColors.textSecondary, size: 26),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.file(
+                          File(_pickedImage!.path),
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.add_a_photo_outlined,
+                        color: AppColors.textSecondary,
+                        size: 26,
+                      ),
               ),
             ),
             const SizedBox(height: 14),
@@ -318,10 +401,17 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                   TextSpan(
                     children: [
                       TextSpan(
-                          text: 'Location Found',
-                          style:
-                          GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      const TextSpan(text: ' *', style: TextStyle(color: Colors.redAccent)),
+                        text: 'Location Found',
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const TextSpan(
+                        text: ' *',
+                        style: TextStyle(color: Colors.redAccent),
+                      ),
                     ],
                   ),
                 ),
@@ -335,7 +425,10 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 onTap: _openLocationPicker,
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(10),
@@ -343,28 +436,48 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                   ),
                   child: Row(
                     children: [
-                      Icon(_pickedLat != null ? Icons.location_on : Icons.add_location_alt_outlined,
-                          size: 18, color: AppColors.textSecondary),
+                      Icon(
+                        _pickedLat != null
+                            ? Icons.location_on
+                            : Icons.add_location_alt_outlined,
+                        size: 18,
+                        color: AppColors.textSecondary,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _pickedAddress ?? 'Tap to select the new location on the map',
+                          _pickedAddress ??
+                              'Tap to select the new location on the map',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.zain(
-                              fontSize: 13, color: _pickedAddress != null ? AppColors.textPrimary : AppColors.textSecondary),
+                            fontSize: 13,
+                            color: _pickedAddress != null
+                                ? AppColors.textPrimary
+                                : AppColors.textSecondary,
+                          ),
                         ),
                       ),
-                      Text(_pickedAddress != null ? 'Change' : 'Select',
-                          style: GoogleFonts.zain(
-                              fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      Text(
+                        _pickedAddress != null ? 'Change' : 'Select',
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 4),
-              Text('Select a map pin so the new location is accurate — the address is filled in for you.',
-                  style: GoogleFonts.zain(fontSize: 10.5, color: AppColors.textSecondary)),
+              Text(
+                'Select a map pin so the new location is accurate — the address is filled in for you.',
+                style: GoogleFonts.zain(
+                  fontSize: 10.5,
+                  color: AppColors.textSecondary,
+                ),
+              ),
               const SizedBox(height: 10),
             ],
             TextField(
@@ -373,8 +486,14 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
               style: GoogleFonts.zain(fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Comment',
-                hintStyle: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                hintStyle: GoogleFonts.zain(
+                  fontSize: 14,
+                  color: AppColors.textSecondary,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
@@ -393,12 +512,27 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                   foregroundColor: AppColors.textPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
                 ),
                 child: _submitting
                     ? const SizedBox(
-                    height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                    : Text('Report', style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.textPrimary,
+                        ),
+                      )
+                    : Text(
+                        'Report',
+                        style: GoogleFonts.tiltWarp(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
               ),
             ),
           ],
@@ -408,7 +542,11 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
           right: 0,
           child: GestureDetector(
             onTap: () => setState(() => _selectedType = null),
-            child: const Icon(Icons.close, size: 20, color: AppColors.textSecondary),
+            child: const Icon(
+              Icons.close,
+              size: 20,
+              color: AppColors.textSecondary,
+            ),
           ),
         ),
       ],
@@ -423,7 +561,21 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   }
 
   String _formatDate(DateTime d) {
-    const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${months[d.month]} ${d.day}, ${d.year}';
   }
 
@@ -446,15 +598,28 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
-            child: Text(label, style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
           ),
           if (status == 'approved' && approvedBy != null)
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
                 'Approved by $approvedBy${approvedAt != null ? ' on ${_formatDate(approvedAt.toDate())}' : ''}',
-                style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+                style: GoogleFonts.zain(
+                  fontSize: 10,
+                  color: AppColors.textSecondary,
+                ),
               ),
             ),
         ],
@@ -483,7 +648,10 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 backgroundColor: AppColors.textPrimary,
                 child: Padding(
                   padding: const EdgeInsets.all(9),
-                  child: Image.asset(_typeIconAsset(r['type'] as String?), fit: BoxFit.contain),
+                  child: Image.asset(
+                    _typeIconAsset(r['type'] as String?),
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -497,15 +665,31 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                         Expanded(
                           child: Text(
                             '${r['reporterName'] ?? 'Someone'} · ${_typeLabel(r['type'] as String?)}',
-                            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                            style: GoogleFonts.zain(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                         ),
                         if (date != null)
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Text(_formatTime(date), style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
-                              Text(_formatDate(date), style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                              Text(
+                                _formatTime(date),
+                                style: GoogleFonts.zain(
+                                  fontSize: 10,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              Text(
+                                _formatDate(date),
+                                style: GoogleFonts.zain(
+                                  fontSize: 10,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
                             ],
                           ),
                       ],
@@ -514,7 +698,13 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                     if (comment != null && comment.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 3),
-                        child: Text(comment, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+                        child: Text(
+                          comment,
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -545,9 +735,21 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
               padding: const EdgeInsets.only(top: 3),
               child: Row(
                 children: [
-                  const Icon(Icons.location_on_outlined, size: 20, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.location_on_outlined,
+                    size: 20,
+                    color: AppColors.textSecondary,
+                  ),
                   const SizedBox(width: 4),
-                  Expanded(child: Text(newAddress, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary))),
+                  Expanded(
+                    child: Text(
+                      newAddress,
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -569,68 +771,141 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
             Row(
               children: [
                 Expanded(
-                  child: Text('Community Report',
-                      style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-                      textAlign: TextAlign.center),
+                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: _reportsRef.snapshots(),
+                    builder: (context, snap) {
+                      final count = snap.data?.docs.length;
+                      return Text(
+                        'Community Reports${count == null ? '' : '  $count'}',
+                        style: GoogleFonts.tiltWarp(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      );
+                    },
+                  ),
                 ),
                 GestureDetector(
-                  onTap: () => setState(() => _expanded = !_expanded),
-                  child: Icon(_expanded ? Icons.expand_less : Icons.add_circle_outline, color: AppColors.textPrimary),
+                  onTap: () =>
+                      setState(() => _sectionExpanded = !_sectionExpanded),
+                  child: Icon(
+                    _sectionExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ],
             ),
-            if (_expanded) ...[
-              const SizedBox(height: 10),
-              if (_selectedType == null) ...[
-                Text('What is happening?',
-                    style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                const SizedBox(height: 4),
-                Text(
-                  'Help keep rescue reports accurate by sharing timely updates on the animal\'s location, condition, and safety.',
-                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+            if (_sectionExpanded) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  icon: Icon(
+                    _expanded ? Icons.close : Icons.add_circle_outline,
+                    size: 18,
+                  ),
+                  label: Text(_expanded ? 'Cancel' : 'Add Community Report'),
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    _optionButton('still_here', 'assets/icons/animalstillhere.png', 'Animal still here'),
-                    _optionButton('moved', 'assets/icons/animalmoved.png', 'Animal moved'),
-                    _optionButton('rescued', 'assets/icons/animalrescued.png', 'Animal rescued'),
-                    _optionButton('no_animal', 'assets/icons/noanimal.png', 'No Animal Present'),
-                  ],
-                ),
-              ] else
-                _buildForm(),
+              ),
+              if (_expanded) ...[
+                const SizedBox(height: 10),
+                if (_selectedType == null) ...[
+                  Text(
+                    'What is happening?',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Help keep rescue reports accurate by sharing timely updates on the animal\'s location, condition, and safety.',
+                    style: GoogleFonts.zain(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      _optionButton(
+                        'still_here',
+                        'assets/icons/animalstillhere.png',
+                        'Animal still here',
+                      ),
+                      _optionButton(
+                        'moved',
+                        'assets/icons/animalmoved.png',
+                        'Animal moved',
+                      ),
+                      _optionButton(
+                        'rescued',
+                        'assets/icons/animalrescued.png',
+                        'Animal rescued',
+                      ),
+                      _optionButton(
+                        'no_animal',
+                        'assets/icons/noanimal.png',
+                        'No Animal Present',
+                      ),
+                    ],
+                  ),
+                ] else
+                  _buildForm(),
+              ],
+              const SizedBox(height: 12),
+              const Divider(color: AppColors.slaterspwn),
+              const SizedBox(height: 4),
+              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _reportsRef
+                    .orderBy('timestamp', descending: true)
+                    .limit(20)
+                    .snapshots(),
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  }
+                  if (snap.hasError) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'Could not load community reports.',
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    );
+                  }
+                  final docs = snap.data?.docs ?? [];
+                  if (docs.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'No community reports yet.',
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    );
+                  }
+                  return Column(
+                    children: docs.map((d) => _reportTile(d.data())).toList(),
+                  );
+                },
+              ),
             ],
-            const SizedBox(height: 12),
-            const Divider(color: AppColors.slaterspwn),
-            const SizedBox(height: 4),
-            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _reportsRef.orderBy('timestamp', descending: true).limit(20).snapshots(),
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                  );
-                }
-                if (snap.hasError) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text('Could not load community reports.',
-                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                  );
-                }
-                final docs = snap.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text('No community reports yet.',
-                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                  );
-                }
-                return Column(children: docs.map((d) => _reportTile(d.data())).toList());
-              },
-            ),
           ],
         ),
       ),

@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
+import 'package:respawnd1/core/repos/animal_record_repository.dart';
 
 /// The existing animal-record form — reused as-is by both a standalone
 /// "Create Record" entry point and, with [prefillData]/[linkedCaseId]/
@@ -16,10 +17,12 @@ import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 class CreateAnimalRecordPage extends StatefulWidget {
   final Map<String, dynamic>? prefillData; // from intake
   final String? linkedCaseId;
+
   /// This animal's position in the source case's `animals[]` array (0 for
   /// legacy single-animal cases) — the duplicate-prevention key alongside
   /// [linkedCaseId]. Null when opened outside the multi-animal flow.
   final int? sourceAnimalIndex;
+
   /// 1-based step number / total steps, for the "Animal X of N" header and
   /// the Save and Continue vs Finish button label. Both null outside the
   /// multi-animal flow (plain "Create Record" label, no step header).
@@ -59,8 +62,7 @@ class CreateAnimalRecordPage extends StatefulWidget {
   bool get isEditing => existingAnimalId != null;
 
   @override
-  State<CreateAnimalRecordPage> createState() =>
-      _CreateAnimalRecordPageState();
+  State<CreateAnimalRecordPage> createState() => _CreateAnimalRecordPageState();
 }
 
 class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
@@ -72,8 +74,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // Edit mode only — already-uploaded photos, individually removable;
   // newly picked images are uploaded and appended alongside whatever
   // remains of this list on Save.
-  late List<String> _existingPhotoUrls =
-  List<String>.from(widget.existingData?['photoUrls'] ?? const []);
+  late List<String> _existingPhotoUrls = List<String>.from(
+    widget.existingData?['photoUrls'] ?? const [],
+  );
   bool _isUploadingImages = false;
   String? _imageError;
   // Scrolled/focused into view when submission fails the image check.
@@ -88,9 +91,36 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // same string format on save. amount options cover 1-30, generous enough
   // for any realistic shelter animal age in weeks, months, or years.
   static const _ageAmountOptions = [
-    '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
-    '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
-    '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+    '9',
+    '10',
+    '11',
+    '12',
+    '13',
+    '14',
+    '15',
+    '16',
+    '17',
+    '18',
+    '19',
+    '20',
+    '21',
+    '22',
+    '23',
+    '24',
+    '25',
+    '26',
+    '27',
+    '28',
+    '29',
+    '30',
   ];
   static const _ageUnitOptions = ['weeks', 'months', 'years'];
   String? _ageAmount;
@@ -159,22 +189,43 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
   Future<void> _openSpecialNeedsSheet() async {
     final tempSelections = Map<String, bool>.from(_specialNeedsTypes);
-    final tempOtherController = TextEditingController(text: _specialNeedsOtherController.text);
+    final tempOtherController = TextEditingController(
+      text: _specialNeedsOtherController.text,
+    );
     final applied = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Special Needs', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-                Text('Select all that apply.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                Text(
+                  'Special Needs',
+                  style: GoogleFonts.tiltWarp(
+                    fontSize: 17,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  'Select all that apply.',
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 for (final option in kSpecialNeedsTypeValues)
                   CheckboxListTile(
@@ -182,14 +233,25 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     controlAffinity: ListTileControlAffinity.leading,
                     dense: true,
                     activeColor: AppColors.greenrspwn,
-                    title: Text(option, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    title: Text(
+                      option,
+                      style: GoogleFonts.zain(
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                     value: tempSelections[option] ?? false,
-                    onChanged: (v) => setSheetState(() => tempSelections[option] = v ?? false),
+                    onChanged: (v) => setSheetState(
+                      () => tempSelections[option] = v ?? false,
+                    ),
                   ),
                 if (tempSelections[kSpecialNeedsOtherValue] == true) ...[
                   const SizedBox(height: 8),
                   _FieldLabel('Specify special need'),
-                  _UnderlineField(controller: tempOtherController, hint: 'Enter'),
+                  _UnderlineField(
+                    controller: tempOtherController,
+                    hint: 'Enter',
+                  ),
                 ],
                 const SizedBox(height: 16),
                 SizedBox(
@@ -200,10 +262,18 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                       backgroundColor: AppColors.yellowrspwn,
                       foregroundColor: AppColors.textPrimary,
                       elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    child: Text('Done', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                    child: Text(
+                      'Done',
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -248,13 +318,20 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // describe how the animal came to the org in the first place, which is
   // one fact, not several that can be true at once). Auto-set to 'Rescued'
   // whenever this record comes from the rescue workflow (linkedCaseId set).
-  static const _rescueBackgroundOptions = ['Rescued', 'Transferred', 'Surrendered'];
+  static const _rescueBackgroundOptions = [
+    'Rescued',
+    'Transferred',
+    'Surrendered',
+  ];
   String? _rescueBackground;
 
   String get _saveButtonLabel {
     if (widget.isEditing) return 'Save Changes';
-    if (widget.stepCurrent == null || widget.stepTotal == null) return 'Create Record';
-    return widget.stepCurrent! >= widget.stepTotal! ? 'Finish' : 'Save and Continue';
+    if (widget.stepCurrent == null || widget.stepTotal == null)
+      return 'Create Record';
+    return widget.stepCurrent! >= widget.stepTotal!
+        ? 'Finish'
+        : 'Save and Continue';
   }
 
   /// True only on the save that actually makes this animal newly adoptable
@@ -291,13 +368,17 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     required String animalName,
   }) async {
     try {
-      final caseSnap = await FirebaseFirestore.instance.collection('cases').doc(caseId).get();
+      final caseSnap = await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(caseId)
+          .get();
       final caseData = caseSnap.data();
       if (caseData == null) return;
 
       final reporterInterested = caseData['interestedToAdopt'] == 'yes';
       final willingAdopterId = caseData['willingAdopterId'] as String?;
-      final hasWillingAdopter = willingAdopterId != null && willingAdopterId.isNotEmpty;
+      final hasWillingAdopter =
+          willingAdopterId != null && willingAdopterId.isNotEmpty;
       if (!reporterInterested && !hasWillingAdopter) return;
 
       final displayName = animalName.isEmpty ? 'This animal' : animalName;
@@ -306,7 +387,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
       await FirebaseFirestore.instance.collection('cases').doc(caseId).update({
         'statusHistory': FieldValue.arrayUnion([
-          {'status': message, 'timestamp': Timestamp.now()}
+          {'status': message, 'timestamp': Timestamp.now()},
         ]),
       });
     } catch (_) {
@@ -342,7 +423,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   /// just that first part once saved again (the intended effect of
   /// replacing freeform age entry with a structured one).
   void _parseAge(String raw) {
-    final match = RegExp(r'(\d+)\s*(week|month|year)s?', caseSensitive: false).firstMatch(raw);
+    final match = RegExp(
+      r'(\d+)\s*(week|month|year)s?',
+      caseSensitive: false,
+    ).firstMatch(raw);
     if (match == null) return;
     final amount = int.tryParse(match.group(1)!);
     if (amount == null || amount < 1 || amount > 30) return;
@@ -359,11 +443,21 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     _parseAge(d['age'] as String? ?? '');
     _descriptionController.text = d['description'] as String? ?? '';
     _tagsController.text = List<String>.from(d['tags'] ?? const []).join(', ');
-    _selectedSpecies = (d['species'] as String?)?.isNotEmpty == true ? d['species'] as String : null;
-    _selectedBreed = (d['breed'] as String?)?.isNotEmpty == true ? d['breed'] as String : null;
-    _selectedSex = (d['sex'] as String?)?.isNotEmpty == true ? d['sex'] as String : null;
-    _selectedSize = (d['size'] as String?)?.isNotEmpty == true ? d['size'] as String : null;
-    _selectedCoatLength = (d['coatLength'] as String?)?.isNotEmpty == true ? d['coatLength'] as String : null;
+    _selectedSpecies = (d['species'] as String?)?.isNotEmpty == true
+        ? d['species'] as String
+        : null;
+    _selectedBreed = (d['breed'] as String?)?.isNotEmpty == true
+        ? d['breed'] as String
+        : null;
+    _selectedSex = (d['sex'] as String?)?.isNotEmpty == true
+        ? d['sex'] as String
+        : null;
+    _selectedSize = (d['size'] as String?)?.isNotEmpty == true
+        ? d['size'] as String
+        : null;
+    _selectedCoatLength = (d['coatLength'] as String?)?.isNotEmpty == true
+        ? d['coatLength'] as String
+        : null;
     _isAdoptable = d['adoptionStatus'] == 'adoptable';
     // 'vaccinated' is intentionally never read back into form state here —
     // the field was removed from creation/edit entirely (spec section 4).
@@ -373,8 +467,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     _spayedNeutered = d['spayedNeutered'] as bool? ?? false;
     _dewormed = d['dewormed'] as bool? ?? false;
 
-    final existingSpecialNeedsTypes = List<String>.from(d['specialNeedsTypes'] ?? const []);
-    final existingSpecialNeedsNotes = (d['specialNeedsNotes'] as String?)?.trim() ?? '';
+    final existingSpecialNeedsTypes = List<String>.from(
+      d['specialNeedsTypes'] ?? const [],
+    );
+    final existingSpecialNeedsNotes =
+        (d['specialNeedsNotes'] as String?)?.trim() ?? '';
     final unmatched = <String>[];
     for (final value in existingSpecialNeedsTypes) {
       if (_specialNeedsTypes.containsKey(value)) {
@@ -402,7 +499,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
     final background = List<String>.from(d['rescueBackground'] ?? const []);
     _rescueBackground = _rescueBackgroundOptions.cast<String?>().firstWhere(
-          (key) => background.contains(key),
+      (key) => background.contains(key),
       orElse: () => null,
     );
   }
@@ -426,17 +523,19 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
     final sex = (d['sex'] as String?)?.trim();
     if (sex != null) {
-      final match = ['Male', 'Female', 'Unknown']
-          .cast<String?>()
-          .firstWhere((s) => s!.toLowerCase() == sex.toLowerCase(), orElse: () => null);
+      final match = ['Male', 'Female', 'Unknown'].cast<String?>().firstWhere(
+        (s) => s!.toLowerCase() == sex.toLowerCase(),
+        orElse: () => null,
+      );
       if (match != null) _selectedSex = match;
     }
 
     final size = (d['size'] as String?)?.trim();
     if (size != null) {
-      final match = ['Small', 'Medium', 'Large']
-          .cast<String?>()
-          .firstWhere((s) => s!.toLowerCase() == size.toLowerCase(), orElse: () => null);
+      final match = ['Small', 'Medium', 'Large'].cast<String?>().firstWhere(
+        (s) => s!.toLowerCase() == size.toLowerCase(),
+        orElse: () => null,
+      );
       if (match != null) _selectedSize = match;
     }
 
@@ -444,8 +543,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     // description so nothing captured at report time is lost, even though
     // this form has no dedicated breed/color field of its own.
     final descriptionParts = <String>[
-      if ((d['description'] as String?)?.isNotEmpty ?? false) d['description'] as String,
-      if ((d['colorMarkings'] as String?)?.isNotEmpty ?? false) 'Color/markings: ${d['colorMarkings']}',
+      if ((d['description'] as String?)?.isNotEmpty ?? false)
+        d['description'] as String,
+      if ((d['colorMarkings'] as String?)?.isNotEmpty ?? false)
+        'Color/markings: ${d['colorMarkings']}',
     ];
     _descriptionController.text = descriptionParts.join('\n');
 
@@ -470,20 +571,40 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: AppColors.textPrimary),
-              title: Text('Choose from Gallery', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: AppColors.textPrimary,
+              ),
+              title: Text(
+                'Choose from Gallery',
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: AppColors.textPrimary),
-              title: Text('Take Photo', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              leading: const Icon(
+                Icons.camera_alt_outlined,
+                color: AppColors.textPrimary,
+              ),
+              title: Text(
+                'Take Photo',
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             const SizedBox(height: 8),
@@ -502,7 +623,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         });
       }
     } else {
-      final file = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+      final file = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+      );
       if (file != null && mounted) {
         setState(() {
           _pickedImages.add(file);
@@ -524,7 +648,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     if (_isLoading) return; // guards against a duplicate Finish/Save tap
     // Image required for brand-new records only — a legacy record already
     // open for editing is never blocked just because it has no photo yet.
-    final missingImage = !widget.isEditing && _existingPhotoUrls.isEmpty && _pickedImages.isEmpty;
+    final missingImage =
+        !widget.isEditing &&
+        _existingPhotoUrls.isEmpty &&
+        _pickedImages.isEmpty;
 
     // Required fields — breed is deliberately not checked here: this form
     // has no editable breed input at all (see the field's own comment
@@ -553,7 +680,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final imageCtx = _imagesSectionKey.currentContext;
           if (imageCtx != null) {
-            Scrollable.ensureVisible(imageCtx, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+            Scrollable.ensureVisible(
+              imageCtx,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            );
           }
         });
       }
@@ -574,13 +705,36 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       // `intakeReceivedAt` is what unlocks this. Doesn't apply when
       // editing an already-existing record.
       if (!widget.isEditing && widget.linkedCaseId != null) {
-        final caseSnap = await FirebaseFirestore.instance.collection('cases').doc(widget.linkedCaseId).get();
-        if (caseSnap.data()?['intakeReceivedAt'] == null) {
+        final caseSnap = await FirebaseFirestore.instance
+            .collection('cases')
+            .doc(widget.linkedCaseId)
+            .get();
+        final caseData = caseSnap.data();
+        // Multi-animal Intake evaluates receipt per animal (spec) — one
+        // received animal must never unlock record creation for another.
+        // Falls back to the case-level flag for a legacy case with no
+        // animals[] array, or when this creation isn't scoped to one
+        // specific animal at all.
+        final animalsRaw = caseData?['animals'] as List?;
+        final sourceIndex = widget.sourceAnimalIndex;
+        bool received;
+        if (sourceIndex != null &&
+            animalsRaw != null &&
+            sourceIndex >= 0 &&
+            sourceIndex < animalsRaw.length) {
+          final animal = animalsRaw[sourceIndex];
+          received = animal is Map && animal['receivedAt'] != null;
+        } else {
+          received = caseData?['intakeReceivedAt'] != null;
+        }
+        if (!received) {
           if (mounted) {
             setState(() => _isLoading = false);
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('The animal must be confirmed received before creating records.'),
+                content: Text(
+                  'The animal must be confirmed received before creating records.',
+                ),
                 backgroundColor: Colors.redAccent,
               ),
             );
@@ -593,7 +747,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       // before writing, not just the flow page's snapshot from when it was
       // opened — guards the "user taps Confirm repeatedly" / two flow
       // instances open at once edge cases. Doesn't apply when editing.
-      if (!widget.isEditing && widget.linkedCaseId != null && widget.sourceAnimalIndex != null) {
+      if (!widget.isEditing &&
+          widget.linkedCaseId != null &&
+          widget.sourceAnimalIndex != null) {
         final existing = await FirebaseFirestore.instance
             .collection('animals')
             .where('linkedCaseId', isEqualTo: widget.linkedCaseId)
@@ -616,7 +772,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       // before the document itself is written. Editing reuses the
       // existing id instead.
       final docRef = widget.isEditing
-          ? FirebaseFirestore.instance.collection('animals').doc(widget.existingAnimalId)
+          ? FirebaseFirestore.instance
+                .collection('animals')
+                .doc(widget.existingAnimalId)
           : FirebaseFirestore.instance.collection('animals').doc();
 
       final uploadedUrls = <String>[];
@@ -625,9 +783,14 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         try {
           for (var i = 0; i < _pickedImages.length; i++) {
             final file = _pickedImages[i];
-            final ext = file.path.contains('.') ? file.path.split('.').last : 'jpg';
+            final ext = file.path.contains('.')
+                ? file.path.split('.').last
+                : 'jpg';
             final filename = '${DateTime.now().millisecondsSinceEpoch}_$i.$ext';
-            final url = await _uploadImage(file, 'animalRecords/${docRef.id}/images/$filename');
+            final url = await _uploadImage(
+              file,
+              'animalRecords/${docRef.id}/images/$filename',
+            );
             uploadedUrls.add(url);
           }
         } catch (e) {
@@ -654,7 +817,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       // Still written as a list (matching AnimalRecord.rescueBackground's
       // existing List<String> field/every reader of it) — just 0 or 1
       // entries now that selection is single-choice.
-      final selectedBackground = _rescueBackground == null ? <String>[] : [_rescueBackground!];
+      final selectedBackground = _rescueBackground == null
+          ? <String>[]
+          : [_rescueBackground!];
 
       final tags = _tagsController.text
           .split(',')
@@ -686,7 +851,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'dewormed': _dewormed,
         'specialNeeds': _hasSpecialNeeds,
         'specialNeedsTypes': selectedSpecialNeedsTypes,
-        'specialNeedsNotes': _hasSpecialNeeds && specialNeedsNotes.isNotEmpty ? specialNeedsNotes : null,
+        'specialNeedsNotes': _hasSpecialNeeds && specialNeedsNotes.isNotEmpty
+            ? specialNeedsNotes
+            : null,
         'keyCharacteristics': selectedChars,
         'rescueBackground': selectedBackground,
         'tags': tags,
@@ -705,10 +872,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           ...sharedFields,
           'status': 'intake',
           'linkedCaseId': widget.linkedCaseId ?? '',
-          if (widget.sourceAnimalIndex != null) 'sourceAnimalIndex': widget.sourceAnimalIndex,
+          if (widget.sourceAnimalIndex != null)
+            'sourceAnimalIndex': widget.sourceAnimalIndex,
           'rescuedBy': widget.prefillData?['rescuedBy'] ?? 'Loved by the Gapz',
           'intakeStaffId': uid,
-          'photoUrls': uploadedUrls.isNotEmpty ? uploadedUrls : (fallbackPhotoUrl != null ? [fallbackPhotoUrl] : []),
+          'photoUrls': uploadedUrls.isNotEmpty
+              ? uploadedUrls
+              : (fallbackPhotoUrl != null ? [fallbackPhotoUrl] : []),
           'treatmentLog': [],
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
@@ -718,13 +888,73 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             'intakeNotes': widget.prefillData!['intakeNotes'] ?? '',
             'reporterName': widget.prefillData!['reporterName'] ?? '',
             'transporterName': widget.prefillData!['transporterName'] ?? '',
-            if (widget.prefillData!['rescueDate'] is Timestamp) 'rescueDate': widget.prefillData!['rescueDate'],
-          }
+            if (widget.prefillData!['rescueDate'] is Timestamp)
+              'rescueDate': widget.prefillData!['rescueDate'],
+          },
         });
       }
 
-      final caseIdForNotification = widget.linkedCaseId ?? widget.existingData?['linkedCaseId'] as String?;
-      if (_becameAdoptableThisSave && caseIdForNotification != null && caseIdForNotification.isNotEmpty) {
+      final actorDisplayName = FirebaseAuth.instance.currentUser?.displayName
+          ?.trim();
+      final actorEmail = FirebaseAuth.instance.currentUser?.email;
+      final logRepo = AnimalRecordRepository();
+      if (widget.isEditing) {
+        final prevSpecialNeedsTypes =
+            (widget.existingData?['specialNeedsTypes'] as List?)
+                ?.cast<String>() ??
+            const <String>[];
+        final specialNeedsChanged =
+            prevSpecialNeedsTypes.toSet() !=
+                selectedSpecialNeedsTypes.toSet() ||
+            (widget.existingData?['specialNeeds'] as bool? ?? false) !=
+                _hasSpecialNeeds;
+        await logRepo.logManagementEvent(
+          animalId: docRef.id,
+          eventType: 'profile_edited',
+          action: 'Profile edited',
+          actorId: uid,
+          actorName: (actorDisplayName?.isNotEmpty ?? false)
+              ? actorDisplayName
+              : 'Admin Staff',
+          actorEmail: actorEmail,
+        );
+        if (specialNeedsChanged) {
+          await logRepo.logManagementEvent(
+            animalId: docRef.id,
+            eventType: 'special_needs_changed',
+            action: 'Special Needs changed',
+            actorId: uid,
+            actorName: (actorDisplayName?.isNotEmpty ?? false)
+                ? actorDisplayName
+                : 'Admin Staff',
+            actorEmail: actorEmail,
+            previousValues: {'specialNeedsTypes': prevSpecialNeedsTypes},
+            newValues: {'specialNeedsTypes': selectedSpecialNeedsTypes},
+          );
+        }
+      } else {
+        await logRepo.logManagementEvent(
+          animalId: docRef.id,
+          eventType: 'record_created',
+          action: 'Animal Record created',
+          actorId: uid,
+          actorName: (actorDisplayName?.isNotEmpty ?? false)
+              ? actorDisplayName
+              : 'Admin Staff',
+          actorEmail: actorEmail,
+          sourceModule: widget.linkedCaseId != null
+              ? 'rescue'
+              : 'animalRecords',
+          sourceRecordId: widget.linkedCaseId,
+        );
+      }
+
+      final caseIdForNotification =
+          widget.linkedCaseId ??
+          widget.existingData?['linkedCaseId'] as String?;
+      if (_becameAdoptableThisSave &&
+          caseIdForNotification != null &&
+          caseIdForNotification.isNotEmpty) {
         await _notifyInterestedAdopter(
           caseId: caseIdForNotification,
           animalId: docRef.id,
@@ -735,7 +965,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(widget.isEditing ? 'Profile updated!' : 'Animal record created!'),
+            content: Text(
+              widget.isEditing ? 'Profile updated!' : 'Animal record created!',
+            ),
             backgroundColor: Colors.green,
           ),
         );
@@ -768,14 +1000,20 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           icon: const Icon(Icons.arrow_back, color: AppColors.background),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(widget.isEditing ? 'Edit Profile' : 'Animal Records',
-            style: GoogleFonts.tiltWarp(
-                fontSize: 18, color: AppColors.background)),
+        title: Text(
+          widget.isEditing ? 'Edit Profile' : 'Animal Records',
+          style: GoogleFonts.tiltWarp(
+            fontSize: 18,
+            color: AppColors.background,
+          ),
+        ),
         actions: [
           if (!widget.isEditing)
             IconButton(
-              icon: const Icon(Icons.notifications_outlined,
-                  color: AppColors.background),
+              icon: const Icon(
+                Icons.notifications_outlined,
+                color: AppColors.background,
+              ),
               onPressed: () {},
             ),
         ],
@@ -787,28 +1025,45 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           children: [
             Center(
               child: Text(
-                  widget.isEditing
-                      ? 'Edit Profile'
-                      : (widget.stepCurrent != null && widget.stepTotal != null
-                      ? 'Create Animal Record'
-                      : 'Create New Record'),
-                  style: GoogleFonts.tiltWarp(
-                      fontSize: 20, color: AppColors.textPrimary)),
+                widget.isEditing
+                    ? 'Edit Profile'
+                    : (widget.stepCurrent != null && widget.stepTotal != null
+                          ? 'Create Animal Record'
+                          : 'Create New Record'),
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 20,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ),
             if (widget.stepCurrent != null && widget.stepTotal != null) ...[
               const SizedBox(height: 4),
               Center(
-                child: Text('Animal ${widget.stepCurrent} of ${widget.stepTotal}',
-                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                child: Text(
+                  'Animal ${widget.stepCurrent} of ${widget.stepTotal}',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               ),
             ],
             const SizedBox(height: 8),
             Center(
               child: RichText(
                 text: TextSpan(
-                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
                   children: const [
-                    TextSpan(text: '* ', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                    TextSpan(
+                      text: '* ',
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     TextSpan(text: 'Required fields'),
                   ],
                 ),
@@ -832,10 +1087,15 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 for (var i = 0; i < _existingPhotoUrls.length; i++)
                   _ExistingImageThumb(
                     url: _existingPhotoUrls[i],
-                    onRemove: _isLoading ? null : () => setState(() => _existingPhotoUrls.removeAt(i)),
+                    onRemove: _isLoading
+                        ? null
+                        : () => setState(() => _existingPhotoUrls.removeAt(i)),
                   ),
                 for (var i = 0; i < _pickedImages.length; i++)
-                  _PickedImageThumb(file: _pickedImages[i], onRemove: _isLoading ? null : () => _removeImage(i)),
+                  _PickedImageThumb(
+                    file: _pickedImages[i],
+                    onRemove: _isLoading ? null : () => _removeImage(i),
+                  ),
                 GestureDetector(
                   onTap: _isLoading ? null : _pickImages,
                   behavior: HitTestBehavior.opaque,
@@ -843,11 +1103,18 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      border: Border.all(color: AppColors.greenrspwn, width: 1.5),
+                      border: Border.all(
+                        color: AppColors.greenrspwn,
+                        width: 1.5,
+                      ),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Center(
-                      child: Icon(Icons.add_a_photo_outlined, size: 26, color: AppColors.greenrspwn),
+                      child: Icon(
+                        Icons.add_a_photo_outlined,
+                        size: 26,
+                        color: AppColors.greenrspwn,
+                      ),
                     ),
                   ),
                 ),
@@ -857,15 +1124,28 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
                   const SizedBox(width: 8),
-                  Text('Uploading images…', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  Text(
+                    'Uploading images…',
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
                 ],
               ),
             ],
             if (_imageError != null) ...[
               const SizedBox(height: 8),
-              Text(_imageError!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+              Text(
+                _imageError!,
+                style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent),
+              ),
             ],
 
             const SizedBox(height: 20),
@@ -976,15 +1256,16 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             _FieldLabel('Preventive Care'),
             const SizedBox(height: 8),
             Wrap(
-              spacing: 16, runSpacing: 8,
+              spacing: 16,
+              runSpacing: 8,
               children: [
                 _CheckboxField(
-                  label: 'Spay/Neuter Status',
+                  label: 'Spayed/Neutered',
                   value: _spayedNeutered,
                   onChanged: (v) => setState(() => _spayedNeutered = v!),
                 ),
                 _CheckboxField(
-                  label: 'Deworming Status',
+                  label: 'Dewormed',
                   value: _dewormed,
                   onChanged: (v) => setState(() => _dewormed = v!),
                 ),
@@ -994,12 +1275,20 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.info_outline, size: 14, color: AppColors.textSecondary),
+                const Icon(
+                  Icons.info_outline,
+                  size: 14,
+                  color: AppColors.textSecondary,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     'Vaccines can be added after the Animal Record is created from the Medical tab.',
-                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+                    style: GoogleFonts.zain(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
                 ),
               ],
@@ -1020,15 +1309,25 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 decoration: const InputDecoration(
                   isDense: true,
                   contentPadding: EdgeInsets.only(bottom: 8),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.textPrimary),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(_specialNeedsSummary,
-                          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                      child: Text(
+                        _specialNeedsSummary,
+                        style: GoogleFonts.zain(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
                     ),
-                    const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+                    const Icon(
+                      Icons.arrow_drop_down,
+                      color: AppColors.textSecondary,
+                    ),
                   ],
                 ),
               ),
@@ -1036,20 +1335,36 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             if (_selectedSpecialNeedsTypes.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(
-                spacing: 6, runSpacing: 6,
+                spacing: 6,
+                runSpacing: 6,
                 children: [
                   for (final need in _selectedSpecialNeedsTypes)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(20)),
-                      child: Text(need, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.tearspwn.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        need,
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
                     ),
                 ],
               ),
             ],
             const SizedBox(height: 12),
             _FieldLabel('Additional special-needs information'),
-            _UnderlineField(controller: _specialNeedsNotesController, hint: 'Optional'),
+            _UnderlineField(
+              controller: _specialNeedsNotesController,
+              hint: 'Optional',
+            ),
 
             const SizedBox(height: 20),
 
@@ -1065,13 +1380,16 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             _FieldLabel('Temperament'),
             const SizedBox(height: 8),
             Wrap(
-              spacing: 12, runSpacing: 8,
+              spacing: 12,
+              runSpacing: 8,
               children: _temperament.keys
-                  .map((key) => _CheckboxField(
-                label: key,
-                value: _temperament[key]!,
-                onChanged: (v) => setState(() => _temperament[key] = v!),
-              ))
+                  .map(
+                    (key) => _CheckboxField(
+                      label: key,
+                      value: _temperament[key]!,
+                      onChanged: (v) => setState(() => _temperament[key] = v!),
+                    ),
+                  )
                   .toList(),
             ),
 
@@ -1081,13 +1399,17 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             _FieldLabel('Compatibility'),
             const SizedBox(height: 8),
             Wrap(
-              spacing: 12, runSpacing: 8,
+              spacing: 12,
+              runSpacing: 8,
               children: _compatibility.keys
-                  .map((key) => _CheckboxField(
-                label: key,
-                value: _compatibility[key]!,
-                onChanged: (v) => setState(() => _compatibility[key] = v!),
-              ))
+                  .map(
+                    (key) => _CheckboxField(
+                      label: key,
+                      value: _compatibility[key]!,
+                      onChanged: (v) =>
+                          setState(() => _compatibility[key] = v!),
+                    ),
+                  )
                   .toList(),
             ),
 
@@ -1097,13 +1419,16 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             _FieldLabel('Training'),
             const SizedBox(height: 8),
             Wrap(
-              spacing: 12, runSpacing: 8,
+              spacing: 12,
+              runSpacing: 8,
               children: _training.keys
-                  .map((key) => _CheckboxField(
-                label: key,
-                value: _training[key]!,
-                onChanged: (v) => setState(() => _training[key] = v!),
-              ))
+                  .map(
+                    (key) => _CheckboxField(
+                      label: key,
+                      value: _training[key]!,
+                      onChanged: (v) => setState(() => _training[key] = v!),
+                    ),
+                  )
                   .toList(),
             ),
 
@@ -1127,9 +1452,17 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     controlAffinity: ListTileControlAffinity.leading,
                     dense: true,
                     activeColor: AppColors.greenrspwn,
-                    title: Text(key, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    title: Text(
+                      key,
+                      style: GoogleFonts.zain(
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                     value: _rescueBackground == key,
-                    onChanged: (checked) => setState(() => _rescueBackground = (checked ?? false) ? key : null),
+                    onChanged: (checked) => setState(
+                      () => _rescueBackground = (checked ?? false) ? key : null,
+                    ),
                   ),
               ],
             ),
@@ -1139,14 +1472,25 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             // ---- Remaining fields -------------------------------------
             // Rescued by (autofill, read-only)
             _FieldLabel('Rescued by'),
-            Text((widget.prefillData?['rescuedBy'] as String?) ?? 'Loved by the Gapz',
-                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+            Text(
+              (widget.prefillData?['rescuedBy'] as String?) ??
+                  'Loved by the Gapz',
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+            ),
             const SizedBox(height: 16),
 
             // Rescue Case ID (autofill, read-only)
             _FieldLabel('Rescue Case ID'),
-            Text(widget.linkedCaseId ?? 'Autofill',
-                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+            Text(
+              widget.linkedCaseId ?? 'Autofill',
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+            ),
             const SizedBox(height: 20),
 
             _FieldLabel('Adoptable'),
@@ -1159,16 +1503,25 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             const SizedBox(height: 16),
 
             _FieldLabel('Tags'),
-            _UnderlineField(controller: _tagsController, hint: 'e.g. senior, house-trained'),
+            _UnderlineField(
+              controller: _tagsController,
+              hint: 'e.g. senior, house-trained',
+            ),
             const SizedBox(height: 16),
 
             // Any tag already scanned during the original rescue report —
             // shown for reference only. It is NOT a generated animal-record
             // QR/NFC tag and the two are never conflated.
-            if ((widget.prefillData?['scannedTagId'] as String?)?.isNotEmpty ?? false) ...[
+            if ((widget.prefillData?['scannedTagId'] as String?)?.isNotEmpty ??
+                false) ...[
               _FieldLabel('Scanned Tag (from rescue report)'),
-              Text(widget.prefillData!['scannedTagId'] as String,
-                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+              Text(
+                widget.prefillData!['scannedTagId'] as String,
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  color: AppColors.textSecondary,
+                ),
+              ),
               const SizedBox(height: 16),
             ],
 
@@ -1183,11 +1536,23 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               width: double.infinity,
               child: OutlinedButton.icon(
                 onPressed: _showTagNotAvailable,
-                icon: const Icon(Icons.qr_code, size: 18, color: AppColors.textSecondary),
-                label: Text('Add QR', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                icon: const Icon(
+                  Icons.qr_code,
+                  size: 18,
+                  color: AppColors.textSecondary,
+                ),
+                label: Text(
+                  'Add QR',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: AppColors.slaterspwn),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
@@ -1206,15 +1571,27 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                   disabledBackgroundColor: AppColors.slaterspwn,
                   foregroundColor: AppColors.textPrimary,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: _isLoading
                     ? const SizedBox(
-                    height: 22, width: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.textPrimary))
-                    : Text(_saveButtonLabel,
-                    style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: AppColors.textPrimary,
+                        ),
+                      )
+                    : Text(
+                        _saveButtonLabel,
+                        style: GoogleFonts.tiltWarp(
+                          fontSize: 16,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
               ),
             ),
 
@@ -1239,13 +1616,23 @@ class _FieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Text(label,
-          style: GoogleFonts.zain(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary)),
+      Text(
+        label,
+        style: GoogleFonts.zain(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textPrimary,
+        ),
+      ),
       if (required)
-        const Text(' *', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.redAccent)),
+        const Text(
+          ' *',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Colors.redAccent,
+          ),
+        ),
     ],
   );
 }
@@ -1253,26 +1640,24 @@ class _FieldLabel extends StatelessWidget {
 class _UnderlineField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
-  const _UnderlineField(
-      {required this.controller, required this.hint});
+  const _UnderlineField({required this.controller, required this.hint});
 
   @override
   Widget build(BuildContext context) => TextField(
     controller: controller,
     decoration: InputDecoration(
       hintText: hint,
-      hintStyle:
-      GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
+      hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 14),
       enabledBorder: const UnderlineInputBorder(
-          borderSide: BorderSide(color: AppColors.textPrimary)),
+        borderSide: BorderSide(color: AppColors.textPrimary),
+      ),
       focusedBorder: const UnderlineInputBorder(
-          borderSide:
-          BorderSide(color: AppColors.textPrimary, width: 1.5)),
+        borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+      ),
       isDense: true,
       contentPadding: const EdgeInsets.only(bottom: 8),
     ),
-    style: GoogleFonts.zain(
-        fontSize: 14, color: AppColors.textPrimary),
+    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
   );
 }
 
@@ -1291,25 +1676,28 @@ class _DropdownField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DropdownButtonFormField<String>(
     value: value,
-    hint: Text(hint,
-        style: GoogleFonts.zain(
-            fontSize: 14, color: AppColors.textSecondary)),
-    style: GoogleFonts.zain(
-        fontSize: 14, color: AppColors.textPrimary),
+    hint: Text(
+      hint,
+      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+    ),
+    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
     decoration: const InputDecoration(
       isDense: true,
       contentPadding: EdgeInsets.only(bottom: 8),
       enabledBorder: UnderlineInputBorder(
-          borderSide: BorderSide(color: AppColors.textPrimary)),
+        borderSide: BorderSide(color: AppColors.textPrimary),
+      ),
       focusedBorder: UnderlineInputBorder(
-          borderSide:
-          BorderSide(color: AppColors.textPrimary, width: 1.5)),
+        borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5),
+      ),
     ),
     items: items
-        .map((item) => DropdownMenuItem(
-        value: item,
-        child: Text(item,
-            style: GoogleFonts.zain(fontSize: 14))))
+        .map(
+          (item) => DropdownMenuItem(
+            value: item,
+            child: Text(item, style: GoogleFonts.zain(fontSize: 14)),
+          ),
+        )
         .toList(),
     onChanged: onChanged,
   );
@@ -1330,22 +1718,22 @@ class _CheckboxField extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       SizedBox(
-        width: 18, height: 18,
+        width: 18,
+        height: 18,
         child: Checkbox(
           value: value,
           onChanged: onChanged,
           activeColor: AppColors.textPrimary,
-          side: const BorderSide(
-              color: AppColors.textPrimary, width: 1.5),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(2)),
+          side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ),
       const SizedBox(width: 6),
-      Text(label,
-          style: GoogleFonts.zain(
-              fontSize: 12, color: AppColors.textPrimary)),
+      Text(
+        label,
+        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+      ),
     ],
   );
 }
@@ -1367,24 +1755,22 @@ class _SpeciesCheck extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 18, height: 18,
+          width: 18,
+          height: 18,
           decoration: BoxDecoration(
-            color: selected
-                ? AppColors.textPrimary
-                : Colors.transparent,
-            border: Border.all(
-                color: AppColors.textPrimary, width: 1.5),
+            color: selected ? AppColors.textPrimary : Colors.transparent,
+            border: Border.all(color: AppColors.textPrimary, width: 1.5),
             borderRadius: BorderRadius.circular(2),
           ),
           child: selected
-              ? const Icon(Icons.check,
-              size: 12, color: Colors.white)
+              ? const Icon(Icons.check, size: 12, color: Colors.white)
               : null,
         ),
         const SizedBox(width: 6),
-        Text(label,
-            style: GoogleFonts.zain(
-                fontSize: 13, color: AppColors.textPrimary)),
+        Text(
+          label,
+          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+        ),
       ],
     ),
   );
@@ -1405,15 +1791,21 @@ class _ExistingImageThumb extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.network(url,
+            child: Image.network(
+              url,
+              width: 80,
+              height: 80,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
                 width: 80,
                 height: 80,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                    width: 80,
-                    height: 80,
-                    color: AppColors.tearspwn,
-                    child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary))),
+                color: AppColors.tearspwn,
+                child: const Icon(
+                  Icons.image_not_supported_outlined,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
           ),
           if (onRemove != null)
             Positioned(
@@ -1423,7 +1815,10 @@ class _ExistingImageThumb extends StatelessWidget {
                 onTap: onRemove,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE05353),
+                    shape: BoxShape.circle,
+                  ),
                   child: const Icon(Icons.close, size: 14, color: Colors.white),
                 ),
               ),
@@ -1449,7 +1844,12 @@ class _PickedImageThumb extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.file(File(file.path), width: 80, height: 80, fit: BoxFit.cover),
+            child: Image.file(
+              File(file.path),
+              width: 80,
+              height: 80,
+              fit: BoxFit.cover,
+            ),
           ),
           if (onRemove != null)
             Positioned(
@@ -1459,7 +1859,10 @@ class _PickedImageThumb extends StatelessWidget {
                 onTap: onRemove,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Color(0xFFE05353), shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE05353),
+                    shape: BoxShape.circle,
+                  ),
                   child: const Icon(Icons.close, size: 14, color: Colors.white),
                 ),
               ),

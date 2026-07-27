@@ -398,6 +398,9 @@ class AdoptionApplicationRepository {
   Future<void> reserve({
     required String applicationId,
     required String animalId,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
   }) async {
     final appRef = _adoptionDoc(applicationId);
     final animalRef = _animals.doc(animalId);
@@ -432,6 +435,22 @@ class AdoptionApplicationRepository {
         'statusHistory': FieldValue.arrayUnion([
           {'status': 'Animal reserved for this applicant.', 'timestamp': now}
         ]),
+      });
+      // Same transaction as the status change itself, per the Animal Logs
+      // spec ("use the same transaction/batch as the business action where
+      // practical") — the log can never exist without the reservation
+      // actually having committed, or vice versa.
+      tx.set(animalRef.collection('managementLogs').doc(), {
+        'animalId': animalId,
+        'eventType': 'reserved',
+        'action': 'Reserved',
+        if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
+        if (actorName != null && actorName.isNotEmpty) 'actorName': actorName,
+        if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
+        'newValues': {'adoptionStatus': 'reserved'},
+        'sourceModule': 'adoption',
+        'sourceRecordId': applicationId,
+        'timestamp': FieldValue.serverTimestamp(),
       });
     });
   }
@@ -481,6 +500,8 @@ class AdoptionApplicationRepository {
     required String animalId,
     required String actorName,
     String? notes,
+    String? actorId,
+    String? actorEmail,
   }) async {
     final appRef = _adoptionDoc(applicationId);
     final animalRef = _animals.doc(animalId);
@@ -524,6 +545,20 @@ class AdoptionApplicationRepository {
         'statusHistory': FieldValue.arrayUnion([
           {'status': 'Animal released — adoption completed.', 'timestamp': now}
         ]),
+      });
+      // Same transaction as the adoption handoff itself — see reserve()'s
+      // matching comment above.
+      tx.set(animalRef.collection('managementLogs').doc(), {
+        'animalId': animalId,
+        'eventType': 'adopted',
+        'action': 'Adoption/release completed',
+        'actorName': actorName,
+        if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
+        if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
+        'newValues': {'adoptionStatus': 'adopted'},
+        'sourceModule': 'adoption',
+        'sourceRecordId': applicationId,
+        'timestamp': FieldValue.serverTimestamp(),
       });
     });
   }
@@ -624,6 +659,8 @@ class AdoptionApplicationRepository {
     required List<FollowUpScheduleRule> rules,
     bool noFollowUpsPlanned = false,
     String? notes,
+    String? actorId,
+    String? actorEmail,
   }) async {
     if (!noFollowUpsPlanned) {
       if (rules.isEmpty) {
@@ -713,6 +750,22 @@ class AdoptionApplicationRepository {
           'createdAt': now,
         });
       }
+
+      // Same transaction as the release itself — see reserve()'s matching
+      // comment. This is the actual production release path (the Release
+      // Details page calls this, not the simpler [release] above).
+      tx.set(animalRef.collection('managementLogs').doc(), {
+        'animalId': animalId,
+        'eventType': 'adopted',
+        'action': 'Adoption/release completed',
+        'actorName': actorName,
+        if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
+        if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
+        'newValues': {'adoptionStatus': 'adopted'},
+        'sourceModule': 'adoption',
+        'sourceRecordId': applicationId,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
     });
   }
 
