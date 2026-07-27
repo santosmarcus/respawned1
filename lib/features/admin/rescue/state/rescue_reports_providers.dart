@@ -161,14 +161,15 @@ final transporterProfileProvider =
 
 // ---- List filter state --------------------------------------------------
 
-/// The five primary pipeline tabs already used by rescue_reports_page.dart,
+/// The six primary pipeline tabs already used by rescue_reports_page.dart,
 /// each mapped onto the RescueStatus values that belong in that tab.
 enum RescuePipelineTab {
   review,
   assign,
   ongoing,
   treatment,
-  intake;
+  intake,
+  rejected;
 
   String get label => switch (this) {
         RescuePipelineTab.review => 'Review',
@@ -176,6 +177,7 @@ enum RescuePipelineTab {
         RescuePipelineTab.ongoing => 'Ongoing',
         RescuePipelineTab.treatment => 'In Treatment',
         RescuePipelineTab.intake => 'Intake',
+        RescuePipelineTab.rejected => 'Rejected',
       };
 
   // Deliberately `const` — casesByStatusesProvider is a StreamProvider.family
@@ -194,6 +196,13 @@ enum RescuePipelineTab {
         RescuePipelineTab.ongoing => const [RescueStatus.ongoing],
         RescuePipelineTab.treatment => const [RescueStatus.treatment],
         RescuePipelineTab.intake => const [RescueStatus.intake],
+        // RescueStatus.rejected's own queryValues/_legacyAliases are just
+        // ['rejected'] — no 'dismissed'/'cancelled'/'withdrawn' writer for
+        // rescue cases exists anywhere in this codebase today (traced every
+        // writer of RescueCaseRepository before adding this tab), so this
+        // tab intentionally shows only true rejections, not those other
+        // terminal buckets.
+        RescuePipelineTab.rejected => const [RescueStatus.rejected],
       };
 }
 
@@ -229,12 +238,14 @@ final casesForTabProvider =
 });
 
 /// Extra statuses reachable only through the status filter (not one of the
-/// five pipeline tabs above) — referral/duplicate/terminal states.
+/// six pipeline tabs above) — referral/duplicate/terminal states. Rejected
+/// is deliberately NOT listed here anymore now that it's its own pipeline
+/// tab (RescuePipelineTab.rejected) — keeping it in both places would just
+/// make the filter-sheet override redundant with the tab.
 const List<RescueStatus> kSecondaryStatuses = [
   RescueStatus.referred,
   RescueStatus.possibleDuplicate,
   RescueStatus.merged,
-  RescueStatus.rejected,
   RescueStatus.completed,
   RescueStatus.cancelled,
 ];
@@ -248,8 +259,8 @@ class RescueFilters {
   final String? locationQuery;
 
   /// When set, overrides the active pipeline tab's status list — lets the
-  /// filter bar reach referred/possibleDuplicate/merged/rejected/completed/
-  /// cancelled cases that the five quick tabs don't cover.
+  /// filter bar reach referred/possibleDuplicate/merged/completed/cancelled
+  /// cases that the six quick tabs don't cover (rejected has its own tab).
   final RescueStatus? statusOverride;
 
   const RescueFilters({
@@ -388,7 +399,7 @@ final effectiveStatusesProvider = Provider<List<RescueStatus>>((ref) {
 /// from [rescueFilterProvider] applied.
 ///
 /// The filter bar's explicit status override (referred/possibleDuplicate/
-/// merged/rejected/completed/cancelled — [kSecondaryStatuses], none of
+/// merged/completed/cancelled — [kSecondaryStatuses], none of
 /// which are affected by per-animal stage splitting) still queries
 /// directly by status. Otherwise this follows the active pipeline tab via
 /// [casesForTabProvider], which is stage-aware for Intake (spec §7).

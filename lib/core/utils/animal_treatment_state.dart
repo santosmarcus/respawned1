@@ -25,7 +25,7 @@ import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 /// flat/legacy fields so every helper below can treat "one legacy animal"
 /// and "one animals[] entry" uniformly, and every discharge/deceased check
 /// below falls back to the case-level flags for that synthetic entry.
-library;
+//library;
 
 /// The animals this case covers, for per-animal UI purposes — [RescueCase.
 /// animals] itself, or (for a legacy report saved before that array

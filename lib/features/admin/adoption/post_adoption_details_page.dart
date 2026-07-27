@@ -7,7 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
-import 'package:respawnd1/core/models/adoption/return_request.dart';
+import 'package:respawnd1/core/utils/adoption_lifecycle.dart';
 import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
 import 'package:respawnd1/core/widgets/date_time_picker_sheet.dart' as picker;
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
@@ -219,10 +219,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     // via the return banner below — not duplicated here); Completed shows
     // only Initiate Return.
     final returnRequest = app?.returnRequest;
-    final returnActive = returnRequest != null &&
-        returnRequest.status != ReturnRequestStatus.declined &&
-        returnRequest.status != ReturnRequestStatus.cancelled &&
-        returnRequest.status != ReturnRequestStatus.intake;
+    final returnActive = isReturnActive(returnRequest);
     final monitoringCompleted = app?.postAdoptionStatus == 'completed';
     final activeMonitoring = !returnActive && !monitoringCompleted;
 

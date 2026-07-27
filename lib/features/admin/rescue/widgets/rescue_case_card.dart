@@ -8,6 +8,28 @@ import 'package:respawnd1/core/utils/animal_treatment_state.dart';
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 
+/// Extra fields shown on a Rejected-tab card only (Rejected Rescue Reports
+/// spec) — reporter/reason/rejected-date/rejected-by/Community Adoption
+/// eligibility. [rejectedBy] is looked up from the case's activityLogs
+/// subcollection by the caller (rescue_reports_page.dart), never here — this
+/// card stays a plain StatelessWidget with no Firestore dependency of its
+/// own, same reasoning as [pendingOfferNote].
+class RejectionCardInfo {
+  final String? reporterName;
+  final String reasonLabel;
+  final DateTime? rejectedDate;
+  final String? rejectedBy;
+  final bool communityAdoptionEligible;
+
+  const RejectionCardInfo({
+    this.reporterName,
+    required this.reasonLabel,
+    this.rejectedDate,
+    this.rejectedBy,
+    this.communityAdoptionEligible = false,
+  });
+}
+
 /// Compact rescue list card — image, case ID, species summary, priority,
 /// short location, reported date/time, current phase/status, and a "View
 /// Details" action, sized consistently with AnimalRecordCard/adoption cards
@@ -37,6 +59,11 @@ class RescueCaseCard extends StatelessWidget {
   final bool highlightBorder;
   final String? pendingOfferNote;
 
+  /// Rejected-tab only (Rejected Rescue Reports spec) — reporter, rejection
+  /// reason, rejected date/by, and Community Adoption eligibility, appended
+  /// below the usual card content. Null on every other tab.
+  final RejectionCardInfo? rejectionInfo;
+
   /// Restricts the species-summary/animal-count line to only the animals
   /// currently in this stage (spec §7: "card/page must show only the
   /// animals relevant to that stage") — e.g. 'intake' on the Intake tab so
@@ -52,6 +79,7 @@ class RescueCaseCard extends StatelessWidget {
     this.showStatusChip = false,
     this.highlightBorder = false,
     this.pendingOfferNote,
+    this.rejectionInfo,
     this.stageFilter,
   });
 
@@ -160,6 +188,7 @@ class RescueCaseCard extends StatelessWidget {
                     ),
                   if (dateTimeLine.isNotEmpty)
                     Text(dateTimeLine, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                  if (rejectionInfo != null) ..._rejectionInfoLines(rejectionInfo!),
                   const SizedBox(height: 4),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -211,4 +240,41 @@ class RescueCaseCard extends StatelessWidget {
         color: AppColors.tearspwn,
         child: const Icon(Icons.pets, color: AppColors.textSecondary),
       );
+
+  List<Widget> _rejectionInfoLines(RejectionCardInfo info) {
+    final rejectedDate = info.rejectedDate;
+    final rejectedDateStr = rejectedDate != null
+        ? '${rejectedDate.month}/${rejectedDate.day}/${rejectedDate.year}'
+        : 'Unknown';
+    return [
+      const SizedBox(height: 3),
+      if ((info.reporterName ?? '').isNotEmpty)
+        Text('Reporter: ${info.reporterName}',
+            style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
+      Text('Reason: ${info.reasonLabel}',
+          style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      Text('Rejected $rejectedDateStr${info.rejectedBy != null ? ' by ${info.rejectedBy}' : ''}',
+          style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      if (info.communityAdoptionEligible)
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.greenrspwn.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text('Community Adoption eligible',
+                style: GoogleFonts.zain(
+                    fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.greenrspwn)),
+          ),
+        ),
+    ];
+  }
 }

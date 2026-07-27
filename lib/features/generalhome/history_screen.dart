@@ -3,7 +3,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
+import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 
@@ -77,11 +80,14 @@ class _RescueHistoryTab extends StatelessWidget {
           );
         }
 
-        // Only completed rescues; active stays in activity
+        // Completed/closed rescues, plus rejected ones (Rejected Rescue
+        // Reports spec §2 — rejected reports must remain visible in the
+        // reporter's history, not just disappear); still-active cases stay
+        // in Activity only.
         final docs = (snap.data?.docs ?? const [])
             .where((d) {
           final s = (d.data()['status'] as String? ?? '').toLowerCase();
-          return s == 'closed' || s.contains('completed') || s.contains('ended');
+          return s == 'closed' || s.contains('completed') || s.contains('ended') || s == 'rejected';
         })
             .toList();
 
@@ -121,14 +127,32 @@ class _RescueHistoryCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _RescueHistoryCard({required this.caseId, required this.data});
 
+  bool get _isRejected => (data['status'] as String? ?? '').toLowerCase() == 'rejected';
+
   bool get _isFinal {
     final s = (data['status'] as String? ?? '').toLowerCase();
     return s == 'closed' || s.contains('completed') || s.contains('ended');
   }
 
+  bool get _communityAdoptionEligible => isCommunityAdoptionEligible(
+        status: data['status'] as String?,
+        rejectionReason: data['rejectionReason'] as String?,
+        rescueType: data['rescueType'] as String?,
+      );
+
+  String get _rejectionReasonLabel {
+    final reason = RejectionReason.fromName(data['rejectionReason'] as String?);
+    if (reason == RejectionReason.other) {
+      final other = data['rejectionReasonOther'] as String?;
+      return (other?.trim().isNotEmpty ?? false) ? other! : 'Other';
+    }
+    return reason.label;
+  }
+
   String get _statusLabel {
     final s = (data['status'] as String? ?? 'pending');
     final lower = s.toLowerCase();
+    if (lower == 'rejected') return 'Rejected';
     if (lower == 'closed' || lower.contains('ended')) return 'Case Closed';
     if (lower.contains('completed')) return 'Case Completed';
     if (lower == 'pending') return 'Pending';
@@ -161,13 +185,17 @@ class _RescueHistoryCard extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => _isFinal
-                ? CaseSummaryPage(
-              caseId: caseId,
-              caseData: data,
-              fromCompletionFlow: false,
-            )
-                : TrackCasePage(caseId: caseId),
+            builder: (_) => _isRejected
+                ? (_communityAdoptionEligible
+                    ? CommunityAdoptionTrackPage(caseId: caseId)
+                    : TrackCasePage(caseId: caseId))
+                : _isFinal
+                    ? CaseSummaryPage(
+                        caseId: caseId,
+                        caseData: data,
+                        fromCompletionFlow: false,
+                      )
+                    : TrackCasePage(caseId: caseId),
           ),
         );
       },
@@ -250,8 +278,30 @@ class _RescueHistoryCard extends StatelessWidget {
                         style: GoogleFonts.zain(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary)),
+                            color: _isRejected ? const Color(0xFFE05353) : AppColors.textPrimary)),
                   ]),
+                  if (_isRejected) ...[
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      const Icon(Icons.comment_outlined,
+                          size: 14, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Reason: $_rejectionReasonLabel',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ]),
+                    if (_communityAdoptionEligible) ...[
+                      const SizedBox(height: 4),
+                      Text('Eligible for Community Adoption — tap to view',
+                          style: GoogleFonts.zain(
+                              fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.greenrspwn)),
+                    ],
+                  ],
                   const SizedBox(height: 4),
                   _MessageCountRow(caseId: caseId),
                 ],

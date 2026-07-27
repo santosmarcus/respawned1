@@ -30,6 +30,30 @@ const List<String> _stepLabels = [
   'Adoption Day',
 ];
 
+// Copy shown on the splash screen before the actual form fields (see
+// _buildIntroSplash) — a plain numbered walkthrough of the whole process,
+// not the tracker's own short _stepLabels above.
+const List<String> _introStepDescriptions = [
+  'Step 1: Complete the Adoption Form',
+  'Step 2: Schedule Your Interview Appointment',
+  'Step 3: Adoption Application Review',
+  'Step 4: Attend the Interview & Pay the Adoption Fee',
+  'Step 5: Welcome Your New Companion on Adoption Day',
+];
+
+// Required disclaimers shown on the splash before "Let's Start" — distinct
+// from (and never a replacement for) the later Terms and Conditions page
+// reached further into the flow; this is an up-front expectation-setting
+// notice, not the binding agreement itself.
+const List<String> _introDisclaimers = [
+  'Submitting an application does not guarantee approval.',
+  'The organization may receive and review applications from multiple people for the same animal.',
+  "The organization will make the final decision after reviewing the application, documents, interview, and the animal's needs.",
+  'Do not make any adoption-fee payment until the appropriate payment stage is unlocked by the organization.',
+  'The organization will deliver the animal to your address.',
+  'A return may be requested by the adopter or the organization if issues may arise after adoption. The animal will be retrieved by the organization.',
+];
+
 
 // widget.animal is now always built from a live AnimalRecord
 // (adoption_page.dart's animalRecordToCard) — the old hardcoded catalog
@@ -60,6 +84,16 @@ class AdoptionProcess extends StatefulWidget {
 
 class _AdoptionProcessState extends State<AdoptionProcess> {
   _AdoptionProcess _step = _AdoptionProcess.intro;
+
+  // True once the applicant has tapped "Let's Start" on the intro splash
+  // screen (see _buildIntroSplash) — until then, _AdoptionProcess.intro
+  // shows that splash instead of the actual form fields. Resuming an
+  // existing application (existingAdoptionId != null) skips the splash
+  // entirely, since they've already started. A live Firestore update while
+  // resuming (see the `_adoptionSub` listener below) only ever re-runs
+  // _loadExistingAdoption, which never touches this flag — so the splash
+  // never reappears mid-session just because the doc changed.
+  bool _introStarted = false;
 
   // Form fields
   final _formKey = GlobalKey<FormState>();
@@ -102,7 +136,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   bool _canAffordEmergencyCare = false;
   bool _canAffordGrooming = false;
   bool _canAffordCareSupplies= false;
-  String? _monthlyBudget;
   final _reasonCtrl = TextEditingController();
 
   //Required Uploads
@@ -211,6 +244,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   void initState() {
     super.initState();
     if (widget.existingAdoptionId != null) {
+      // Resuming an application means they've already been through the
+      // splash — never show it again for an in-progress application.
+      _introStarted = true;
       _isLoadingExisting = true;
       _loadExistingAdoption();
       _adoptionSub = FirebaseFirestore.instance
@@ -512,7 +548,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             canAfford['emergencyMedicalCare'] as bool? ?? false;
         _canAffordGrooming = canAfford['grooming'] as bool? ?? false;
         _canAffordCareSupplies = canAfford['careSupplies'] as bool? ?? false;
-        _monthlyBudget = lifestyle['monthlyBudget'] as String?;
+        // Monthly Pet Budget was removed from this form — an older
+        // application may still have `lifestyle.monthlyBudget` on file
+        // (never read here, never shown, never required again), and the
+        // field's own Firestore value is left untouched on that historical
+        // document rather than being deleted for cleanup.
         _reasonCtrl.text = agreement['reason'] as String? ?? '';
 
         // Required Uploads (already uploaded — keep the saved URLs)
@@ -608,7 +648,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       if (_hoursAlone == null) 'hours animal will be left alone',
       if (_primaryCaregiver == null) 'Primary Caregiver',
       if (_petStayLocation == null) 'where pet will stay',
-      if (_monthlyBudget == null) 'Monthly Pet Budget',
     ];
     if (missingAnswers.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -638,41 +677,34 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
-      // Checked by both keys: personal.animalId (legacy — matches older
-      // applications written before animalRecordId existed) and
-      // personal.animalRecordId (the real animal doc id, reliable for
-      // every application submitted after this fix). Neither alone is
-      // guaranteed to see every prior application for this exact animal.
-      final legacyExisting = FirebaseFirestore.instance
-          .collection('adoptions')
-          .where('personal.animalId', isEqualTo: '${widget.animal.id}')
-          .get();
-      final byRecordIdExisting = widget.animal.animalRecordId.isEmpty
-          ? Future.value(null)
-          : FirebaseFirestore.instance
-          .collection('adoptions')
-          .where('personal.animalRecordId', isEqualTo: widget.animal.animalRecordId)
-          .get();
-      final existingResults = await Future.wait([legacyExisting, byRecordIdExisting]);
+      // Repository-level validation (spec: "so two simultaneous
+      // applications do not bypass the availability check") — re-checked
+      // here at submit time, not just when the "Adopt" button was first
+      // tapped (animal_page.dart), since time may have passed and another
+      // applicant could have been approved/reserved in the interim.
+      // Multiple people may still have pending/interview/under-review
+      // applications for this animal at once — that alone never blocks a
+      // new one; only the animal's own reserved/adopted state, or the
+      // current user already having their own active application, does.
+      final availability = await AdoptionApplicationRepository().checkAvailability(
+        legacyAnimalId: '${widget.animal.id}',
+        animalRecordId: widget.animal.animalRecordId,
+        uid: uid,
+      );
 
-      bool blocks(QuerySnapshot<Map<String, dynamic>>? snap) {
-        if (snap == null) return false;
-        return snap.docs.any((doc) {
-          final status = doc.data()['status'] as String? ?? '';
-          return status != 'rejected' && status != 'withdrawn';
-        });
-      }
+      final blockMessage = switch (availability.availability) {
+        AnimalAdoptionAvailability.ownApplicationActive => 'You already have an application for this animal.',
+        AnimalAdoptionAvailability.reservedForOther =>
+          'This animal is currently reserved for another approved applicant.',
+        AnimalAdoptionAvailability.adopted => 'This animal has already been adopted.',
+        AnimalAdoptionAvailability.unavailable => 'This animal is not currently accepting applications.',
+        AnimalAdoptionAvailability.available => null,
+      };
 
-      final stillActiveOrDone = blocks(existingResults[0]) || blocks(existingResults[1]);
-
-      if (stillActiveOrDone) {
+      if (blockMessage != null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  '${widget.animal.name} already has an ongoing or completed adoption.'),
-              backgroundColor: Colors.redAccent,
-            ),
+            SnackBar(content: Text(blockMessage), backgroundColor: Colors.redAccent),
           );
           setState(() => _isSubmitting = false);
         }
@@ -758,7 +790,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             'careSupplies':  _canAffordCareSupplies,
 
           },
-          'monthlyBudget': _monthlyBudget,
         },
         'uploads': {
           'governmentId': _governmentIdUrl,
@@ -849,6 +880,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _adoptionId = null;
     _step = _AdoptionProcess.intro;
     _reviewStep = null;
+    _introStarted = false;
 
     _residenceType = null;
     _residenceOtherCtrl.clear();
@@ -875,7 +907,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _canAffordEmergencyCare = false;
     _canAffordGrooming = false;
     _canAffordCareSupplies = false;
-    _monthlyBudget = null;
     _reasonCtrl.clear();
 
     _governmentIdFile = null;
@@ -1170,7 +1201,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   Widget _buildStepBody() {
     switch (_displayStep) {
       case _AdoptionProcess.intro:
-        return _buildIntro();
+        return _introStarted ? _buildAdoptionForm() : _buildIntroSplash();
       case _AdoptionProcess.bookAppointment:
         return _buildBookAppointment();
       case _AdoptionProcess.appReview:
@@ -1186,8 +1217,87 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
-  // 1st step - fill out form
-  Widget _buildIntro() {
+  // 1st step, part A — splash screen shown before any form fields: a plain
+  // walkthrough of the five steps plus the required disclaimers, ending in
+  // a "Let's Start" button. Tapping it just flips _introStarted — no
+  // network call, nothing is created yet (the application doc isn't
+  // written until _submitAdoptionForm actually succeeds).
+  Widget _buildIntroSplash() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Fill out adoption form',
+          style: GoogleFonts.tiltWarp(
+              fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Ready to give a rescue a loving forever home?',
+          style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'The adoption process consists of five steps to ensure the best '
+          'match for both you and your future furry companion:',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+        const SizedBox(height: 12),
+        ..._introStepDescriptions.map(
+          (s) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(s, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary, height: 1.4)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Fill out this quick form to help us match you with the right '
+          'rescue and confirm eligibility for adoption.',
+          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary, height: 1.5),
+        ),
+
+        const SizedBox(height: 16),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.slaterspwn.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final line in _introDisclaimers)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('•  ', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      Expanded(
+                        child: Text(line, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 32),
+
+        _PrimaryButton(
+          label: "Let's Start",
+          onTap: () => setState(() => _introStarted = true),
+        ),
+
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  // 1st step, part B — the actual form.
+  Widget _buildAdoptionForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1484,18 +1594,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 value: _canAffordCareSupplies,
                 onChanged: (v) =>
                     setState(() => _canAffordCareSupplies = v!),
-              ),
-              const SizedBox(height: 12),
-              _RadioGroup<String>(
-                label: 'Monthly Pet Budget',
-                value: _monthlyBudget,
-                options: const [
-                  'Under P1,000',
-                  'P1,000-P3,000',
-                  'P3,000-P5,000',
-                  'Above P5,000'
-                ],
-                onChanged: (v) => setState(() => _monthlyBudget = v),
               ),
               const SizedBox(height: 12),
               _FormField(

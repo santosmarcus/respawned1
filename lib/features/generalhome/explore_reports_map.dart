@@ -12,6 +12,11 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart'
+    as community_adoption_util;
+import 'package:respawnd1/core/utils/public_case_visibility.dart';
+import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
+import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 
 import '../../app_theme.dart';
 
@@ -91,6 +96,8 @@ class ReportMapEntry {
   final String reporterTag;
   final DateTime? createdAt;
   final List<String> photoUrls;
+  final String? rawStatus;
+  final String? rejectionReason;
 
   const ReportMapEntry({
     required this.caseId,
@@ -106,11 +113,23 @@ class ReportMapEntry {
     required this.reporterTag,
     required this.createdAt,
     required this.photoUrls,
+    this.rawStatus,
+    this.rejectionReason,
   });
 
   /// True while a transporter is actively en route — the pin should follow
   /// their live position instead of sitting at the original report location.
   bool get hasLiveRider => riderLat != null && riderLng != null;
+
+  /// True for a healthy/low-urgency report that was rejected (and isn't a
+  /// Lost Pet report) — see community_adoption_eligibility.dart. The map
+  /// keeps this pin visible and offers the Community Adoption listing
+  /// action instead of hiding it like any other rejected case.
+  bool get isCommunityAdoptionEligible => community_adoption_util.isCommunityAdoptionEligible(
+        status: rawStatus,
+        rejectionReason: rejectionReason,
+        rescueType: rescueType,
+      );
 
   static ReportMapEntry? fromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
@@ -128,6 +147,15 @@ class ReportMapEntry {
         ? 'Reported by $reporterName'
         : 'Reported by a community member';
 
+    // Species summary derived the same way PublicRescueItem does (spec:
+    // the map must never disagree with the feed about a multi-animal
+    // case's species) — prefers `animals[]`, falls back to the legacy
+    // top-level `animalType` for a pre-`animals[]` report.
+    final animalSummary = species_summary_util.summarizeSpecies(
+      animals: data['animals'] as List?,
+      legacyAnimalType: data['animalType'] as String?,
+    );
+
     return ReportMapEntry(
       caseId: doc.id,
       lat: lat,
@@ -139,23 +167,16 @@ class ReportMapEntry {
           ? '-'
           : data['address'] as String,
       urgency: data['urgency'] as String? ?? '',
-      animalType: data['animalType'] as String? ?? 'Animal',
+      animalType: animalSummary,
       statusLabel: latestStatus,
       reporterTag: reporterTag,
       createdAt: ts?.toDate(),
       photoUrls: List<String>.from(data['photoUrls'] ?? []),
+      rawStatus: data['status'] as String?,
+      rejectionReason: data['rejectionReason'] as String?,
     );
   }
 }
-
-/// Statuses that mean a report shouldn't show up in the public feed/map.
-const Set<String> kDismissedCaseStatuses = {
-  'dismissed',
-  'ended',
-  'cancelled',
-  'withdrawn',
-  'rejected',
-};
 
 List<ReportMapEntry> extractPublicReports(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
@@ -164,26 +185,60 @@ List<ReportMapEntry> extractPublicReports(
   final out = <ReportMapEntry>[];
   for (final doc in docs) {
     final data = doc.data();
-    final status = (data['status'] as String? ?? '').toLowerCase();
-    if (data['reporterId'] == currentUserId) continue;
-    if (kDismissedCaseStatuses.contains(status)) continue;
-
-
-    final isEndedRescue = status == 'closed' ||
-        status.contains('completed') ||
-        status.contains('ended') ||
-        status == 'merged';
-    if (isEndedRescue) continue;
-    if (data['hiddenFromExplore'] == true) continue;
-
-    final groupId = data['groupId'] as String?;
-    if (groupId != null && groupId != doc.id) continue;
+    final isPublic = isCasePublic(
+      reporterId: data['reporterId'] as String?,
+      viewerId: currentUserId,
+      status: data['status'] as String?,
+      rejectionReason: data['rejectionReason'] as String?,
+      rescueType: data['rescueType'] as String?,
+      hiddenFromExplore: data['hiddenFromExplore'] == true,
+      groupId: data['groupId'] as String?,
+      docId: doc.id,
+    );
+    if (!isPublic) continue;
 
     final report = ReportMapEntry.fromDoc(doc);
     if (report != null) out.add(report);
   }
   return out;
 }
+
+/// The current user's OWN reports, for the "My Reports" map filter — the
+/// same [isCasePublic] rules apply (hidden/final-status/groupId/Community
+/// Adoption carve-out), just with the self-report exclusion deliberately
+/// bypassed (`viewerId: null`), since these reports are being shown
+/// *because* they're the viewer's own, not despite it. Reuses the one
+/// shared visibility predicate rather than a second implementation.
+List<ReportMapEntry> extractMyReports(
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  String uid,
+) {
+  final out = <ReportMapEntry>[];
+  for (final doc in docs) {
+    final data = doc.data();
+    if (data['reporterId'] != uid) continue;
+    final isPublic = isCasePublic(
+      reporterId: data['reporterId'] as String?,
+      viewerId: null,
+      status: data['status'] as String?,
+      rejectionReason: data['rejectionReason'] as String?,
+      rescueType: data['rescueType'] as String?,
+      hiddenFromExplore: data['hiddenFromExplore'] == true,
+      groupId: data['groupId'] as String?,
+      docId: doc.id,
+    );
+    if (!isPublic) continue;
+
+    final report = ReportMapEntry.fromDoc(doc);
+    if (report != null) out.add(report);
+  }
+  return out;
+}
+
+/// Scope-modifier filter chip labels — combined with rescue-type filters
+/// using AND, never OR (see _ExploreReportsMapState._visibleMarkers).
+const String kCommunityAdoptionFilterLabel = 'Community Adoption';
+const String kMyReportsFilterLabel = 'My Reports';
 
 class ExploreReportsMap extends StatefulWidget {
   final VoidCallback? onSeeAll;
@@ -197,11 +252,21 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
   GoogleMapController? _mapController;
   final Map<String, BitmapDescriptor> _iconCache = {};
   final Set<String> _iconRequestsInFlight = {};
-  String? _selectedCategory; // null == "All"
+  // Empty set == "All" — never a normal selected chip alongside others (see
+  // _toggleFilter/_selectAll). Rescue-type labels inside this set are OR'd
+  // together; the two scope modifiers (Community Adoption/My Reports) are
+  // AND'd against that OR group and against each other — see
+  // _visibleMarkers.
+  final Set<String> _selectedFilters = {};
   LatLng _initialCamera = const LatLng(14.5416, 121.0644); // Pateros, Metro Manila fallback
 
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
   List<ReportMapEntry> _allReports = [];
+  // The viewer's own reports — only computed/used when the My Reports
+  // filter is active; kept as a separate list rather than folded into
+  // _allReports since the two use different visibility rules (see
+  // extractMyReports's doc comment).
+  List<ReportMapEntry> _myReports = [];
   bool _loadingReports = true;
   Object? _loadError;
 
@@ -227,8 +292,10 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
       setState(() {
         _allReports = extractPublicReports(snap.docs);
+        _myReports = uid == null ? const [] : extractMyReports(snap.docs, uid);
         _loadingReports = false;
         _loadError = null;
       });
@@ -297,7 +364,12 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       return;
     }
     _iconRequestsInFlight.add(r.caseId);
-    final ringColor = urgencyRingColor(r.urgency);
+    // Community-Adoption-eligible cases get a distinct ring color instead
+    // of the usual urgency color — the animal was assessed healthy, so an
+    // urgency-red/yellow ring would be misleading at this point; lavender
+    // marks it as "up for community adoption" instead, distinct from every
+    // urgency color so the two are never confused on the map.
+    final ringColor = r.isCommunityAdoptionEligible ? AppColors.lavenderrspwn : urgencyRingColor(r.urgency);
 
     try {
       final quick = await _buildRingIcon(ringColor, photoBytes: null);
@@ -491,8 +563,11 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
 
         const SizedBox(height: 14),
 
-        // Filter row — same pill treatment as the reference, colored per
-        // report type so it doubles as a legend.
+        // Filter row — multi-select toggle chips (spec): tapping an
+        // unselected chip adds it, tapping a selected one removes it; "All"
+        // clears everything and is never itself a member of the set. No
+        // separate Apply button — every tap updates markers immediately via
+        // setState.
         SizedBox(
           height: 40,
           child: ListView(
@@ -503,8 +578,24 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                 label: 'All',
                 color: AppColors.textPrimary,
                 icon: Icons.public,
-                selected: _selectedCategory == null,
-                onTap: () => setState(() => _selectedCategory = null),
+                selected: _selectedFilters.isEmpty,
+                onTap: () => setState(() => _selectedFilters.clear()),
+              ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: kCommunityAdoptionFilterLabel,
+                color: AppColors.greenrspwn,
+                icon: Icons.favorite,
+                selected: _selectedFilters.contains(kCommunityAdoptionFilterLabel),
+                onTap: () => _toggleFilter(kCommunityAdoptionFilterLabel),
+              ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: kMyReportsFilterLabel,
+                color: AppColors.lavenderrspwn,
+                icon: Icons.person_outline,
+                selected: _selectedFilters.contains(kMyReportsFilterLabel),
+                onTap: () => _toggleFilter(kMyReportsFilterLabel),
               ),
               const SizedBox(width: 8),
               for (final c in kReportCategories) ...[
@@ -512,8 +603,8 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                   label: c.label,
                   color: c.color,
                   icon: c.icon,
-                  selected: _selectedCategory == c.label,
-                  onTap: () => setState(() => _selectedCategory = c.label),
+                  selected: _selectedFilters.contains(c.label),
+                  onTap: () => _toggleFilter(c.label),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -524,10 +615,40 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     );
   }
 
+  void _toggleFilter(String label) {
+    setState(() {
+      if (_selectedFilters.contains(label)) {
+        _selectedFilters.remove(label);
+      } else {
+        _selectedFilters.add(label);
+      }
+    });
+  }
+
+  /// Filter-combination rules (spec): rescue-type labels are OR'd together
+  /// (any case matching ANY selected type qualifies); the two scope
+  /// modifiers (Community Adoption / My Reports) are each AND'd on top of
+  /// that OR group, and AND'd against each other when both are selected.
+  /// "My Reports" swaps the base pool to the viewer's own reports (which
+  /// the ordinary public pool excludes by design) rather than filtering the
+  /// public pool by reporterId.
   Set<Marker> _visibleMarkers() {
-    final filtered = _selectedCategory == null
-        ? _allReports
-        : _allReports.where((r) => categoryForRescueType(r.rescueType).label == _selectedCategory);
+    final myReportsSelected = _selectedFilters.contains(kMyReportsFilterLabel);
+    final communityAdoptionSelected = _selectedFilters.contains(kCommunityAdoptionFilterLabel);
+    final typeFilters = _selectedFilters
+        .where((f) => f != kMyReportsFilterLabel && f != kCommunityAdoptionFilterLabel)
+        .toSet();
+
+    final basePool = myReportsSelected ? _myReports : _allReports;
+
+    final filtered = basePool.where((r) {
+      if (communityAdoptionSelected && !r.isCommunityAdoptionEligible) return false;
+      if (typeFilters.isNotEmpty && !typeFilters.contains(categoryForRescueType(r.rescueType).label)) {
+        return false;
+      }
+      return true;
+    });
+
     return filtered.map(_markerFor).toSet();
   }
 
@@ -543,7 +664,9 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       markerId: MarkerId(r.caseId),
       position: position,
       icon: _iconCache[r.caseId] ??
-          BitmapDescriptor.defaultMarkerWithHue(_hueForUrgency(r.urgency)),
+          BitmapDescriptor.defaultMarkerWithHue(
+            r.isCommunityAdoptionEligible ? BitmapDescriptor.hueViolet : _hueForUrgency(r.urgency),
+          ),
       onTap: () => _showReportPreview(r, category),
     );
   }
@@ -661,6 +784,27 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                 ),
               ]),
             ],
+            if (r.isCommunityAdoptionEligible) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.greenrspwn.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.favorite, size: 14, color: AppColors.greenrspwn),
+                    const SizedBox(width: 6),
+                    Text(
+                      'This animal is open for adoption.',
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.greenrspwn),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
@@ -670,7 +814,9 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => TrackCasePage(caseId: r.caseId, initialTabIndex: 0),
+                      builder: (_) => r.isCommunityAdoptionEligible
+                          ? CommunityAdoptionTrackPage(caseId: r.caseId)
+                          : TrackCasePage(caseId: r.caseId, initialTabIndex: 0),
                     ),
                   );
                 },

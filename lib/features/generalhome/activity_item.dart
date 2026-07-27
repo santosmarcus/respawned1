@@ -13,6 +13,15 @@ class ActivityItem{
   final String alertKind;
   final String? photoUrl;
 
+  /// Rejected Rescue Reports spec §2 — a rejected report is no longer
+  /// dropped from this feed; these fields carry the extra rejection
+  /// details/actions the card renders instead of the normal status row.
+  /// Always false/null for non-rescue items and non-rejected rescue items.
+  final bool isRejected;
+  final String? rejectionReasonLabel;
+  final DateTime? rejectedAt;
+  final bool communityAdoptionEligible;
+
   const ActivityItem({
     required this.id,
     required this.type,
@@ -25,6 +34,10 @@ class ActivityItem{
     required this.docId,
     this.alertKind = '',
     this.photoUrl,
+    this.isRejected = false,
+    this.rejectionReasonLabel,
+    this.rejectedAt,
+    this.communityAdoptionEligible = false,
   });
 
 }

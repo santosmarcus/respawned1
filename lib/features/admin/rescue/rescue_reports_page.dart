@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/utils/animal_treatment_state.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -47,6 +50,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     RescuePipelineTab.ongoing: Icons.local_shipping_outlined,
     RescuePipelineTab.treatment: Icons.medical_services_outlined,
     RescuePipelineTab.intake: Icons.pets_outlined,
+    RescuePipelineTab.rejected: Icons.block_outlined,
   };
 
   @override
@@ -376,6 +380,60 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                             _ => null,
                           }
                         : null;
+                    if (c.status == RescueStatus.rejected) {
+                      // Rejected-tab only: rejected-by comes from the
+                      // per-case activityLogs subcollection, so this is the
+                      // one card variant with its own listener (same
+                      // reasoning as the Assign-tab's pending-offer watch
+                      // below) — every other tab avoids it entirely.
+                      return Consumer(
+                        builder: (context, ref, _) {
+                          final logs =
+                              ref.watch(caseActivityLogsProvider(c.id)).asData?.value ?? const <ActivityLogEntry>[];
+                          ActivityLogEntry? rejectionLog;
+                          for (final l in logs) {
+                            if (l.action != 'rejected') continue;
+                            final current = rejectionLog;
+                            final lTimestamp = l.timestamp;
+                            final currentTimestamp = current?.timestamp;
+                            if (current == null ||
+                                (lTimestamp != null &&
+                                    (currentTimestamp == null || lTimestamp.isAfter(currentTimestamp)))) {
+                              rejectionLog = l;
+                            }
+                          }
+                          final reason = c.rejectionReason;
+                          final reasonLabel = reason == RejectionReason.other
+                              ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false
+                                  ? c.rejectionReasonOther!
+                                  : 'Other')
+                              : (reason?.label ?? 'Not specified');
+                          DateTime? rejectedDate;
+                          for (final h in c.statusHistory) {
+                            if (h.status.startsWith('Case rejected') && h.timestamp != null) {
+                              rejectedDate = h.timestamp;
+                            }
+                          }
+                          final eligible = isCommunityAdoptionEligible(
+                            status: c.status.firestoreValue,
+                            rejectionReason: reason?.name,
+                            rescueType: c.raw['rescueType'] as String?,
+                          );
+                          return RescueCaseCard(
+                            rescueCase: c,
+                            showStatusChip: filters.statusOverride != null,
+                            rejectionInfo: RejectionCardInfo(
+                              reporterName: c.reporterName,
+                              reasonLabel: reasonLabel,
+                              rejectedDate: rejectedDate,
+                              rejectedBy: rejectionLog?.actorName,
+                              communityAdoptionEligible: eligible,
+                            ),
+                            onTap: () => _navigateToDetail(context, c),
+                          );
+                        },
+                      );
+                    }
                     if (!canHavePendingOffer) {
                       return RescueCaseCard(
                         rescueCase: c,
