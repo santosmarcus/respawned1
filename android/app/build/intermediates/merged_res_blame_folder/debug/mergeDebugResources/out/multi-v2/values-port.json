@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.dlsu.cap2507.respawnd1.app-mergeDebugResources-119:/values-port/values-port.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\AustinCLee\\.gradle\\caches\\8.14\\transforms\\b55f23a8873ffc6f88a19b5ebaee7ce7\\transformed\\appcompat-1.7.1\\res\\values-port\\values-port.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "55",
+                        "endOffsets": "106"
+                    }
+                }
+            ]
+        }
+    ]
+}

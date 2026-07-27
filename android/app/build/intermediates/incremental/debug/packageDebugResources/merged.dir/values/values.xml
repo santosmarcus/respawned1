@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ResPAWnd</string>
+    <string name="default_web_client_id" translatable="false">790537497506-6glr4ieglapamgsqkjldn0j00ne89cta.apps.googleusercontent.com</string>
+    <string name="facebook_app_id">YOUR_FACEBOOK_APP_ID</string>
+    <string name="facebook_client_token">YOUR_FACEBOOK_CLIENT_TOKEN</string>
+    <string name="fb_login_protocol_scheme">fbYOUR_FACEBOOK_APP_ID</string>
+    <string name="gcm_defaultSenderId" translatable="false">790537497506</string>
+    <string name="google_api_key" translatable="false">AIzaSyCuO16U6W5K1Wb2L10cm5istT7xjcX82n8</string>
+    <string name="google_app_id" translatable="false">1:790537497506:android:c4f6983851ca249126e0fb</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyCuO16U6W5K1Wb2L10cm5istT7xjcX82n8</string>
+    <string name="google_storage_bucket" translatable="false">respawnd1-45021.firebasestorage.app</string>
+    <string name="project_id" translatable="false">respawnd1-45021</string>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>

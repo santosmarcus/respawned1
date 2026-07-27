@@ -1,0 +1,26 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.dlsu.cap2507.respawnd1.app-mergeDebugResources-119:/values-en-rSG/values-en-rSG.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\AustinCLee\\.gradle\\caches\\8.14\\transforms\\cea444535b6661b7897ea7ac14e7d95b\\transformed\\jetified-play-services-wallet-19.4.0\\res\\values-en-rSG\\values.xml",
+                    "from": {
+                        "startLines": "4,5",
+                        "startColumns": "0,0",
+                        "startOffsets": "206,263",
+                        "endColumns": "56,70",
+                        "endOffsets": "262,333"
+                    },
+                    "to": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,116",
+                        "endColumns": "60,74",
+                        "endOffsets": "111,186"
+                    }
+                }
+            ]
+        }
+    ]
+}
