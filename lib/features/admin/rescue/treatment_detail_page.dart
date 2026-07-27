@@ -515,6 +515,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
         ],
       ),
       body: SingleChildScrollView(
+        key: PageStorageKey('treatment_detail_${widget.caseId}'),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

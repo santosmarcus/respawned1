@@ -19,7 +19,6 @@ class ProfileEditPage extends StatefulWidget {
 class _ProfileEditPageState extends State<ProfileEditPage> {
   final _picker = ImagePicker();
 
-  final _usernameCtrl = TextEditingController();
   final _displayNameCtrl = TextEditingController();
   final _locationCtrl = TextEditingController();
 
@@ -40,7 +39,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
 
   @override
   void dispose() {
-    _usernameCtrl.dispose();
     _displayNameCtrl.dispose();
     _locationCtrl.dispose();
     super.dispose();
@@ -54,7 +52,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final data = doc.data() ?? {};
       setState(() {
-        _usernameCtrl.text = data['username'] as String? ?? '';
         _displayNameCtrl.text = data['displayName'] as String? ??
             '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
         _locationCtrl.text = data['locationText'] as String? ?? '';
@@ -182,8 +179,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     if (uid == null) return;
     setState(() => _saving = true);
     try {
+      // No longer writes 'username' — the field stays untouched on existing
+      // documents (never deleted) but is no longer editable here (spec:
+      // remove the visible Username field/display from the profile).
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'username': _usernameCtrl.text.trim(),
         'displayName': _displayNameCtrl.text.trim(),
         'locationText': _locationCtrl.text.trim(),
       }, SetOptions(merge: true));
@@ -285,8 +284,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary)),
-            const SizedBox(height: 14),
-            _EditableField(label: 'Username', controller: _usernameCtrl),
             const SizedBox(height: 14),
             _EditableField(
                 label: 'Display name', controller: _displayNameCtrl),

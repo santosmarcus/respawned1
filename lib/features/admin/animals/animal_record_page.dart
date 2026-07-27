@@ -551,6 +551,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
 
                 if (_isGrid) {
                   return GridView.builder(
+                    key: const PageStorageKey('animal_records_grid'),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     // Max-extent delegate: 2 columns at normal phone
                     // widths, more only once there's enough width for them
@@ -575,6 +576,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                 }
 
                 return ListView.separated(
+                  key: const PageStorageKey('animal_records_list'),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: sorted.length,
                   separatorBuilder: (context, index) =>

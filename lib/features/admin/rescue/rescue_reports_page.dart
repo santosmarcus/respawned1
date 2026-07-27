@@ -359,6 +359,10 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   );
                 }
                 return ListView.separated(
+                  // Navigation State spec §11 — keyed per tab/status-filter
+                  // so each pipeline tab keeps its own scroll offset instead
+                  // of sharing one position across differently-scoped lists.
+                  key: PageStorageKey('rescue_reports_list_${filters.statusOverride?.name ?? selectedTab.name}'),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: cases.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),

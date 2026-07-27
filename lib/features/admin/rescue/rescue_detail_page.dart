@@ -25,6 +25,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/case_messages_section.da
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/export_transfer_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/merge_history_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/ownership_status_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/possible_duplicate_sheet.dart';
@@ -425,6 +426,19 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         title: Text('Rescue Details',
             style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
+          // Transfer/Export spec — the shared export sheet, reachable
+          // regardless of case status (a closed/historical case can still
+          // need to be handed off, unlike the workflow actions below).
+          IconButton(
+            icon: const Icon(Icons.ios_share, color: AppColors.background),
+            tooltip: 'Export Transfer Details',
+            onPressed: () => showExportTransferSheet(
+              context,
+              rescueCase: c,
+              transferredByUid: _actorUid,
+              transferredByName: _actorName,
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
             onPressed: () {},
@@ -999,6 +1013,20 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 ),
               ),
 
+            // The bare, no-context "Close Case" bypass action was removed
+            // here (Admin Rescue Cleanup spec §1) — an admin can no longer
+            // end a rescue for no stated reason at every non-terminal
+            // status. What's left is still the exact same
+            // reason-and-explanation-required close_case_sheet (nothing
+            // removed from ClosureReason/closeCase/close_case_sheet.dart —
+            // Reject Report/merge-duplicate/Community Adoption transition
+            // all already live entirely outside this method and are
+            // untouched), just relabeled and reframed as a deliberate
+            // last-resort action for outcomes with no more specific
+            // dedicated workflow of their own (e.g. animal moved/could not
+            // be located, animal died during rescue, clinic unavailable) —
+            // reunited-with-owner/has-owner/aggressive-animal keep their
+            // own dedicated buttons elsewhere on this page, unchanged.
             if (!c.status.isTerminal) ...[
               const SizedBox(height: 10),
               SizedBox(
@@ -1006,7 +1034,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 child: TextButton(
                   onPressed: _isLoading ? null : () => _closeCase(c),
                   style: TextButton.styleFrom(foregroundColor: const Color(0xFFE05353)),
-                  child: const Text('Close Case'),
+                  child: const Text('End Rescue — Select Reason'),
                 ),
               ),
             ],

@@ -1,17 +1,15 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/core/constants/maps_config.dart';
+import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
 
 /// Community sighting-update section — "Animal still here" / "Animal
 /// moved" / "Animal rescued" / "No animal present", with an optional photo,
@@ -40,20 +38,97 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   String? _selectedType;
   XFile? _pickedImage;
   bool _submitting = false;
-  bool _detectingLocation = false;
   final _commentController = TextEditingController();
-  final _locationController = TextEditingController();
   final _picker = ImagePicker();
+
+  // Community Location Validation spec §4 — a "moved" update is only valid
+  // once the user has confirmed a real map pin (via LastSeenLocationPicker,
+  // the same shared picker collar-tag lost-pet reports already use), never
+  // from freeform typed text. Null means no location has been confirmed yet.
+  double? _pickedLat;
+  double? _pickedLng;
+  String? _pickedAddress;
+
+  /// Beyond this distance from the case's original reported location, the
+  /// user must explicitly confirm the new pin rather than have it accepted
+  /// silently — animals/reports can legitimately move far, so this is a
+  /// confirmation, never an automatic rejection.
+  static const double _farMoveThresholdKm = 5.0;
 
   @override
   void dispose() {
     _commentController.dispose();
-    _locationController.dispose();
     super.dispose();
   }
 
   CollectionReference<Map<String, dynamic>> get _reportsRef =>
       FirebaseFirestore.instance.collection('cases').doc(widget.caseId).collection('communityReports');
+
+  Future<void> _openLocationPicker() async {
+    // Compare against the case's own original lat/lng (its Rescue Report
+    // location) so "unusually far" is judged against where the animal was
+    // first reported, not a previous community update.
+    double? originalLat;
+    double? originalLng;
+    try {
+      final caseDoc = await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).get();
+      originalLat = (caseDoc.data()?['lat'] as num?)?.toDouble();
+      originalLng = (caseDoc.data()?['lng'] as num?)?.toDouble();
+    } catch (_) {
+      // Falls through with nulls — the far-move confirmation is simply
+      // skipped rather than blocking the picker from opening at all.
+    }
+
+    if (!mounted) return;
+    final picked = await Navigator.push<PickedLostLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const LastSeenLocationPicker(
+          title: 'Where is the animal now?',
+          instructionText:
+              'Tap anywhere on the map to drop a pin, or search an address below. This becomes the animal\'s new known location.',
+          pinLabel: 'New location',
+          confirmLabel: 'Confirm New Location',
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    if (originalLat != null && originalLng != null) {
+      final distanceKm = haversineDistanceKm(originalLat, originalLng, picked.lat, picked.lng);
+      if (distanceKm > _farMoveThresholdKm) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.background,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Confirm New Location'),
+            content: const Text(
+              "This location is far from the animal's last known position. Confirm that the new pin is correct.",
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                child: const Text('Confirm'),
+              ),
+            ],
+          ),
+        );
+        // Keeps the previously-confirmed location (if any) untouched when
+        // the admin backs out — never silently applies an unconfirmed pin.
+        if (confirmed != true) return;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _pickedLat = picked.lat;
+      _pickedLng = picked.lng;
+      _pickedAddress = picked.address;
+    });
+  }
 
   String _typeLabel(String? t) => switch (t) {
         'still_here' => 'Animal still here',
@@ -89,89 +164,16 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     }
   }
 
-  Future<void> _autoDetectLocation() async {
-    if (_detectingLocation) return;
-    setState(() {
-      _detectingLocation = true;
-      _locationController.text = 'Detecting your location…';
-    });
-
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          setState(() => _locationController.clear());
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Please enable location services to auto-detect.'),
-              action: SnackBarAction(label: 'Settings', onPressed: () => Geolocator.openLocationSettings()),
-            ),
-          );
-        }
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        if (mounted) setState(() => _locationController.clear());
-        return;
-      }
-
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high).timeout(
-        const Duration(seconds: 12),
-        onTimeout: () => Geolocator.getLastKnownPosition().then(
-          (p) =>
-              p ??
-              Position(
-                latitude: 14.5416,
-                longitude: 121.0644,
-                timestamp: DateTime.now(),
-                accuracy: 0,
-                altitude: 0,
-                altitudeAccuracy: 0,
-                heading: 0,
-                headingAccuracy: 0,
-                speed: 0,
-                speedAccuracy: 0,
-              ),
-        ),
-      );
-
-      String resolvedAddress = '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
-      try {
-        final url = Uri.parse(
-          'https://maps.googleapis.com/maps/api/geocode/json'
-          '?latlng=${pos.latitude},${pos.longitude}'
-          '&key=${MapsConfig.placesApiKey}',
-        );
-        final res = await http.get(url).timeout(const Duration(seconds: 10));
-        final data = jsonDecode(res.body);
-        if (res.statusCode == 200 && data['status'] == 'OK' && (data['results'] as List).isNotEmpty) {
-          resolvedAddress = data['results'][0]['formatted_address'];
-        }
-      } catch (_) {}
-
-      if (mounted) setState(() => _locationController.text = resolvedAddress);
-    } catch (e) {
-      if (mounted) {
-        setState(() => _locationController.clear());
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not detect your location — please type it in.')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _detectingLocation = false);
-    }
-  }
-
   Future<void> _submit() async {
     if (_selectedType == null || _submitting) return;
-    if (_selectedType == 'moved' && _locationController.text.trim().isEmpty) {
+    // Community Location Validation spec §4 — requires an actually
+    // confirmed map pin (lat/lng set by _openLocationPicker), never just
+    // non-empty freeform text. Reject invalid/unresolved coordinates by
+    // simply not allowing submission — nothing is written, so the
+    // previous location (if any) is untouched.
+    if (_selectedType == 'moved' && (_pickedLat == null || _pickedLng == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter the new location.'), backgroundColor: Colors.redAccent),
+        const SnackBar(content: Text('Please select the new location on the map.'), backgroundColor: Colors.redAccent),
       );
       return;
     }
@@ -199,7 +201,9 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         'reporterName': name.isEmpty ? 'A community member' : name,
         'type': _selectedType,
         'comment': _commentController.text.trim(),
-        'newAddress': _selectedType == 'moved' ? _locationController.text.trim() : null,
+        'newAddress': _selectedType == 'moved' ? _pickedAddress : null,
+        'newLat': _selectedType == 'moved' ? _pickedLat : null,
+        'newLng': _selectedType == 'moved' ? _pickedLng : null,
         'photoUrl': photoUrl,
         'timestamp': FieldValue.serverTimestamp(),
       });
@@ -217,10 +221,12 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         setState(() {
           _selectedType = null;
           _pickedImage = null;
+          _pickedLat = null;
+          _pickedLng = null;
+          _pickedAddress = null;
           _expanded = false;
         });
         _commentController.clear();
-        _locationController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Thanks! Your report has been submitted.'), backgroundColor: AppColors.greenrspwn),
         );
@@ -239,10 +245,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   Widget _optionButton(String type, String iconAsset, String label) {
     return Expanded(
       child: GestureDetector(
-        onTap: () {
-          setState(() => _selectedType = type);
-          if (type == 'moved') _autoDetectLocation();
-        },
+        onTap: () => setState(() => _selectedType = type),
         child: Column(
           children: [
             Container(
@@ -318,35 +321,43 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 ),
               ),
               const SizedBox(height: 6),
-              TextField(
-                controller: _locationController,
-                enabled: !_detectingLocation,
-                style: GoogleFonts.zain(fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: 'Enter the new location',
-                  hintStyle: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                  prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.textSecondary),
-                  suffixIcon: _detectingLocation
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                        )
-                      : IconButton(
-                          icon: const Icon(Icons.my_location, size: 18, color: AppColors.textSecondary),
-                          tooltip: 'Use current location',
-                          onPressed: _autoDetectLocation,
-                        ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
+              // Community Location Validation spec §4 — a real, confirmed
+              // map pin only; never a freeform-typed address. Tapping opens
+              // the shared LastSeenLocationPicker (map + reverse geocoding),
+              // same widget the collar-tag "last seen" flow already uses.
+              GestureDetector(
+                onTap: _openLocationPicker,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: AppColors.slaterspwn),
+                    border: Border.all(color: AppColors.slaterspwn),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(_pickedLat != null ? Icons.location_on : Icons.add_location_alt_outlined,
+                          size: 18, color: AppColors.textSecondary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _pickedAddress ?? 'Tap to select the new location on the map',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: _pickedAddress != null ? AppColors.textPrimary : AppColors.textSecondary),
+                        ),
+                      ),
+                      Text(_pickedAddress != null ? 'Change' : 'Select',
+                          style: GoogleFonts.zain(
+                              fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    ],
                   ),
                 ),
               ),
               const SizedBox(height: 4),
-              Text('Auto-detected from your current location — you can edit it if needed.',
+              Text('Select a map pin so the new location is accurate — the address is filled in for you.',
                   style: GoogleFonts.zain(fontSize: 10.5, color: AppColors.textSecondary)),
               const SizedBox(height: 10),
             ],

@@ -235,6 +235,10 @@ class ActivityFeed extends StatelessWidget {
 
                 if (standalone) {
                   return ListView.separated(
+                    // Navigation State spec §11 — preserves scroll offset
+                    // when the admin opens an item's detail page and backs
+                    // out to this list.
+                    key: const PageStorageKey('activity_feed_list'),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: items.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -307,15 +311,23 @@ class _ActivityCarouselState extends State<_ActivityCarousel> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Activity Card Overflow spec §12 — PageView forces every page to
+        // exactly this height, so it must safely fit the tallest supported
+        // card (a rejected rescue report, now trimmed to a compact
+        // single-line reason/date block in ActivityCard). Raised from the
+        // original 190 to fit that content with margin, and each page is
+        // additionally wrapped in a SingleChildScrollView as a safety net
+        // against any remaining overflow under larger text-scale factors —
+        // vertical scroll doesn't conflict with PageView's horizontal swipe.
         SizedBox(
-          height: 190,
+          height: 260,
           child: PageView.builder(
             controller: _controller,
             onPageChanged: (i) => setState(() => _page = i),
             itemCount: widget.items.length,
             itemBuilder: (context, i) => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: ActivityCard(item: widget.items[i]),
+              child: SingleChildScrollView(child: ActivityCard(item: widget.items[i])),
             ),
           ),
         ),

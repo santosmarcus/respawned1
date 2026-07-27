@@ -826,6 +826,9 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                   );
                 }
                 return ListView.separated(
+                  // Navigation State spec §11 — keyed per tab so each keeps
+                  // its own scroll offset.
+                  key: PageStorageKey('adoption_review_list_${_tab.name}'),
                   padding: const EdgeInsets.all(16),
                   itemCount: sorted.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),

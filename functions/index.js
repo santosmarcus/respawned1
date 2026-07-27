@@ -382,3 +382,204 @@ exports.expireStaleReporterResponses = onSchedule('every 60 minutes', async () =
     });
   }
 });
+
+// ---- Zoom interview meetings -------------------------------------------
+//
+// Zoom interview spec — meeting creation/reschedule/cancel is only ever
+// done from here, never client-side, so the Zoom Server-to-Server OAuth
+// client secret is never shipped to the Flutter app. Uses the
+// `defineSecret` Secret Manager params API this file already imported
+// (see the top of this file) but never actually called until now.
+//
+// Deploy-time setup this code depends on (not done by this code — an
+// operator action per organization):
+//   firebase functions:secrets:set ZOOM_ACCOUNT_ID
+//   firebase functions:secrets:set ZOOM_CLIENT_ID
+//   firebase functions:secrets:set ZOOM_CLIENT_SECRET
+// (a Zoom Server-to-Server OAuth app's Account ID/Client ID/Client
+// Secret — the current officially-supported Zoom integration method,
+// JWT apps having been retired). Until those are set, createOrUpdateZoomMeeting
+// throws 'failed-precondition' and the Flutter side shows "Online meeting
+// setup is unavailable for this organization." rather than silently
+// pretending a meeting was created.
+//
+// Multi-organization support: only a single global Zoom connection is
+// wired up right now (one set of secrets). zoomProviderOrganizationId is
+// already stored per meeting so a future per-organization secret lookup
+// (e.g. reading connection info from `organizations/{orgId}/zoomConnection`
+// instead of the global secrets) is additive, not a breaking change to the
+// stored shape.
+const zoomAccountId = defineSecret('ZOOM_ACCOUNT_ID');
+const zoomClientId = defineSecret('ZOOM_CLIENT_ID');
+const zoomClientSecret = defineSecret('ZOOM_CLIENT_SECRET');
+
+async function getZoomAccessToken() {
+  const basic = Buffer.from(`${zoomClientId.value()}:${zoomClientSecret.value()}`).toString('base64');
+  const res = await fetch(
+    `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${encodeURIComponent(zoomAccountId.value())}`,
+    {method: 'POST', headers: {Authorization: `Basic ${basic}`}},
+  );
+  if (!res.ok) {
+    throw new Error(`Zoom OAuth token request failed: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.access_token;
+}
+
+// Idempotent by (applicationId, appointmentRevision) — the Flutter caller
+// bumps appointmentRevision only when the interview is actually
+// rescheduled (see interview_scheduling.dart / adoption_process.dart's
+// appointment-save flow), so a Firestore listener rebuild, a re-opened
+// page, or a duplicate save with the SAME revision always returns the
+// existing meeting instead of creating a second one.
+exports.createOrUpdateZoomMeeting = onCall(
+  {secrets: [zoomAccountId, zoomClientId, zoomClientSecret]},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+    const {applicationId, appointmentRevision, topic, startTimeIso, durationMinutes} = request.data || {};
+    if (!applicationId || !appointmentRevision || !startTimeIso) {
+      throw new HttpsError('invalid-argument', 'applicationId, appointmentRevision, and startTimeIso are required.');
+    }
+
+    const appRef = db.collection('adoptions').doc(applicationId);
+    const appSnap = await appRef.get();
+    if (!appSnap.exists) {
+      throw new HttpsError('not-found', 'Application not found.');
+    }
+    const existing = appSnap.data().zoom;
+
+    if (existing && existing.appointmentRevision === appointmentRevision && existing.zoomMeetingId) {
+      return {zoomMeetingId: existing.zoomMeetingId, zoomJoinUrl: existing.zoomJoinUrl, reused: true};
+    }
+
+    let accessToken;
+    try {
+      accessToken = await getZoomAccessToken();
+    } catch (e) {
+      // Zoom not configured for this deployment yet — never blocks saving
+      // an on-site appointment; the Flutter caller only invokes this
+      // function at all when the interview type is Online.
+      throw new HttpsError('failed-precondition', 'Online meeting setup is unavailable for this organization.');
+    }
+
+    // Reschedule: try to update the existing meeting in place first.
+    if (existing && existing.zoomMeetingId) {
+      try {
+        const patchRes = await fetch(`https://api.zoom.us/v2/meetings/${existing.zoomMeetingId}`, {
+          method: 'PATCH',
+          headers: {Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json'},
+          body: JSON.stringify({topic: topic || 'Adoption Interview', start_time: startTimeIso, duration: durationMinutes || 30}),
+        });
+        if (patchRes.ok || patchRes.status === 204) {
+          const updated = {
+            zoomMeetingId: existing.zoomMeetingId,
+            zoomJoinUrl: existing.zoomJoinUrl,
+            zoomCreatedAt: existing.zoomCreatedAt || admin.firestore.FieldValue.serverTimestamp(),
+            zoomUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            zoomMeetingStatus: 'active',
+            zoomProviderOrganizationId: existing.zoomProviderOrganizationId || null,
+            appointmentRevision,
+          };
+          await appRef.update({
+            zoom: updated,
+            statusHistory: admin.firestore.FieldValue.arrayUnion([
+              {status: 'Online interview rescheduled — Zoom meeting updated.', timestamp: admin.firestore.Timestamp.now()},
+            ]),
+          });
+          return {zoomMeetingId: updated.zoomMeetingId, zoomJoinUrl: updated.zoomJoinUrl, reused: false, updated: true};
+        }
+        // Update failed (meeting may have been deleted directly in Zoom) —
+        // fall through and create a replacement, invalidating the old link.
+      } catch (e) {
+        // fall through to create a replacement
+      }
+    }
+
+    const createRes = await fetch('https://api.zoom.us/v2/users/me/meetings', {
+      method: 'POST',
+      headers: {Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        topic: topic || 'Adoption Interview',
+        type: 2, // scheduled meeting
+        start_time: startTimeIso,
+        duration: durationMinutes || 30,
+        settings: {join_before_host: true, waiting_room: true},
+      }),
+    });
+    if (!createRes.ok) {
+      throw new HttpsError('internal', 'Could not create the Zoom meeting. You can retry from the appointment screen.');
+    }
+    const meeting = await createRes.json();
+
+    // Safe metadata only, written to the shared application doc both admin
+    // and adopter can read. The host start URL is sensitive (lets anyone
+    // start the meeting as host) and is deliberately kept out of this doc.
+    const zoomData = {
+      zoomMeetingId: `${meeting.id}`,
+      zoomJoinUrl: meeting.join_url,
+      zoomCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      zoomUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      zoomMeetingStatus: 'active',
+      zoomProviderOrganizationId: null,
+      appointmentRevision,
+    };
+    await appRef.update({
+      zoom: zoomData,
+      statusHistory: admin.firestore.FieldValue.arrayUnion([
+        {status: 'Online interview scheduled — Zoom meeting created.', timestamp: admin.firestore.Timestamp.now()},
+      ]),
+    });
+    // Host-only info lives in a separate, admin-only collection — never
+    // merged into the adopter-readable adoptions/{id} doc.
+    await db.collection('zoomMeetingHostInfo').doc(applicationId).set({
+      hostStartUrl: meeting.start_url,
+      zoomMeetingId: `${meeting.id}`,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return {zoomMeetingId: zoomData.zoomMeetingId, zoomJoinUrl: zoomData.zoomJoinUrl, reused: false};
+  },
+);
+
+// Cancellation spec — invalidates the Zoom meeting remotely (best-effort;
+// meeting history is retained locally either way for audit) and flips the
+// stored status so the Flutter UI stops showing the join link as active,
+// without deleting the record of the meeting having existed.
+exports.cancelZoomMeeting = onCall({secrets: [zoomAccountId, zoomClientId, zoomClientSecret]}, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+  const {applicationId} = request.data || {};
+  if (!applicationId) {
+    throw new HttpsError('invalid-argument', 'applicationId is required.');
+  }
+  const appRef = db.collection('adoptions').doc(applicationId);
+  const appSnap = await appRef.get();
+  const existing = appSnap.data()?.zoom;
+  if (!existing || !existing.zoomMeetingId || existing.zoomMeetingStatus === 'cancelled') {
+    return {cancelled: false};
+  }
+
+  try {
+    const accessToken = await getZoomAccessToken();
+    await fetch(`https://api.zoom.us/v2/meetings/${existing.zoomMeetingId}`, {
+      method: 'DELETE',
+      headers: {Authorization: `Bearer ${accessToken}`},
+    });
+  } catch (e) {
+    // Zoom-side delete failed/unreachable — the local status flip below is
+    // what actually hides the join link from the UI; audit history (the
+    // meeting's prior existence) is never deleted either way.
+  }
+
+  await appRef.update({
+    'zoom.zoomMeetingStatus': 'cancelled',
+    'zoom.zoomUpdatedAt': admin.firestore.FieldValue.serverTimestamp(),
+    statusHistory: admin.firestore.FieldValue.arrayUnion([
+      {status: 'Interview cancelled — Zoom meeting invalidated.', timestamp: admin.firestore.Timestamp.now()},
+    ]),
+  });
+  return {cancelled: true};
+});

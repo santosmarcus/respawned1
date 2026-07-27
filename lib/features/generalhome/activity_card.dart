@@ -258,10 +258,15 @@ class ActivityCard extends StatelessWidget{
                         ],
 
                         // Rejected Rescue Reports spec §2 — a clear
-                        // "Rejected" state plus reason/date/reviewer, and a
-                        // Community Adoption action when the rejection made
-                        // this case eligible. Ordinary rejection stays
-                        // read-only (tap still just opens Track Case).
+                        // "Rejected" state plus reason/date. Deliberately
+                        // compact (single-line reason, no reviewer line, no
+                        // duplicate CA chip — the status row below already
+                        // becomes "View Community Adoption →" when
+                        // eligible) so this block has a bounded height and
+                        // never overflows the fixed-height Home carousel
+                        // card (Activity Card Overflow spec §12). The full
+                        // reason/reviewer/date detail still lives on
+                        // History's rejected card and admin Rescue Details.
                         if (item.isRejected) ...[
                           Container(
                             width: double.infinity,
@@ -273,6 +278,7 @@ class ActivityCard extends StatelessWidget{
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Row(children: [
                                   const Icon(Icons.block, size: 14, color: Color(0xFFE05353)),
@@ -286,35 +292,16 @@ class ActivityCard extends StatelessWidget{
                                 if (item.rejectionReasonLabel != null) ...[
                                   const SizedBox(height: 4),
                                   Text('Reason: ${item.rejectionReasonLabel}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                                 ],
                                 if (item.rejectedAt != null) ...[
                                   const SizedBox(height: 2),
                                   Text('Rejected on ${_formatDate(item.rejectedAt!)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                                ],
-                                _ReviewedByLine(caseId: item.docId),
-                                if (item.communityAdoptionEligible) ...[
-                                  const SizedBox(height: 6),
-                                  GestureDetector(
-                                    onTap: () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (_) => CommunityAdoptionTrackPage(caseId: item.docId)),
-                                    ),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.greenrspwn.withOpacity(0.18),
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      child: Text('View Community Adoption',
-                                          style: GoogleFonts.zain(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w700,
-                                              color: AppColors.greenrspwn)),
-                                    ),
-                                  ),
                                 ],
                               ],
                             ),
@@ -377,44 +364,4 @@ String _formatDate(DateTime d) {
     'Sep', 'Oct', 'Nov', 'Dec'
   ];
   return '${months[d.month]} ${d.day}, ${d.year}';
-}
-
-/// Best-effort "reviewed by" line for a rejected report — this app has no
-/// per-case organization field (single-organization deployment, see
-/// rescue_case.dart), so the closest available identity is the staff
-/// member recorded on the case's own activityLogs 'rejected' entry
-/// (RescueCaseRepository.rejectCase always writes one). Silently renders
-/// nothing if the reporter's own security rules can't read that
-/// subcollection or no entry is found yet, rather than blocking the card.
-class _ReviewedByLine extends StatelessWidget {
-  final String caseId;
-  const _ReviewedByLine({required this.caseId});
-
-  @override
-  Widget build(BuildContext context) {
-    // Filters by action == 'rejected' client-side rather than in the query
-    // (no .where here) — matches RescueCaseRepository.streamActivityLogs's
-    // own established pattern of ordering by timestamp only and never
-    // combining it with an equality filter, which would need a composite
-    // index this project doesn't define (no firestore.indexes.json).
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('cases')
-          .doc(caseId)
-          .collection('activityLogs')
-          .orderBy('timestamp', descending: true)
-          .get(),
-      builder: (context, snap) {
-        final rejectionDocs =
-            snap.data?.docs.where((d) => d.data()['action'] == 'rejected') ?? const [];
-        final actorName = rejectionDocs.isNotEmpty ? rejectionDocs.first.data()['actorName'] as String? : null;
-        if (actorName == null || actorName.isEmpty) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: Text('Reviewed by: $actorName',
-              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-        );
-      },
-    );
-  }
 }
