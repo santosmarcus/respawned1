@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 
 // ─── Admin Analytics building blocks ────────────────────────────────────────
@@ -340,12 +341,14 @@ class _RescueAnalyticsView extends StatefulWidget {
 
 class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
   late Future<List<RescueCase>> _casesFuture;
+  late Future<List<TransportAssignment>> _assignmentsFuture;
   String _urgencyWindow = 'All time';
 
   @override
   void initState() {
     super.initState();
     _casesFuture = _loadCases();
+    _assignmentsFuture = _loadAssignments();
   }
 
   Future<List<RescueCase>> _loadCases() async {
@@ -355,6 +358,21 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
     }
     final snap = await q.get();
     return snap.docs.map(RescueCase.fromFirestore).toList();
+  }
+
+  // Dashboard Improvement spec — the "Pet Transporter Response Rate"/
+  // "Decline Reason" charts below used to claim these fields don't exist;
+  // TransportAssignment (transport_assignment.dart) already has
+  // acceptedAt/rejectedAt/rejectionReason/an `expired` status, just never
+  // wired into this dashboard. No org filter here — transportAssignments
+  // are a subcollection of `cases`, and `cases.organizationId` itself is
+  // sparse/unreliable today (see the Dashboard Gap Analysis), so this
+  // stays honestly unscoped rather than pretending to filter by org.
+  Future<List<TransportAssignment>> _loadAssignments() async {
+    final snap = await FirebaseFirestore.instance.collectionGroup('transportAssignments').get();
+    return snap.docs
+        .map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id))
+        .toList();
   }
 
   @override
@@ -468,16 +486,64 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
             label: 'Rescue Transfer and Refer Rate',
             value: '${transferRate.toStringAsFixed(0)}%'),
         const SizedBox(height: 14),
-        const _ChartCard(
-          title: 'Pet Transporter Response Rate',
-          child: _NotTrackedChart(
-              note: 'No accept/decline timestamp is recorded for transporter job offers yet.'),
-        ),
-        const SizedBox(height: 14),
-        const _ChartCard(
-          title: 'Pet Transporter and Clinic Decline Reason',
-          child: _NotTrackedChart(
-              note: 'Declines aren\'t captured with a reason field yet.'),
+        FutureBuilder<List<TransportAssignment>>(
+          future: _assignmentsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return _ChartCard(
+                title: 'Pet Transporter Response Rate',
+                child: _NotTrackedChart(note: 'Could not load transporter offer data: ${snapshot.error}'),
+              );
+            }
+            if (!snapshot.hasData) {
+              return const _ChartCard(
+                title: 'Pet Transporter Response Rate',
+                child: Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
+              );
+            }
+            final assignments = snapshot.data!;
+            // Response rate: offers the transporter actually acted on
+            // (accepted or rejected) out of every offer that's no longer
+            // pending — excludes still-open offers, which haven't had a
+            // chance to be answered yet.
+            final resolved = assignments.where((a) =>
+                a.status == TransportAssignmentStatus.accepted ||
+                a.status == TransportAssignmentStatus.rejected ||
+                a.status == TransportAssignmentStatus.expired ||
+                a.status == TransportAssignmentStatus.cancelled);
+            final responded = assignments.where((a) =>
+                a.status == TransportAssignmentStatus.accepted || a.status == TransportAssignmentStatus.rejected);
+            final responseRate = resolved.isEmpty ? null : responded.length / resolved.length * 100;
+
+            final declineReasons = <String, num>{};
+            for (final a in assignments) {
+              if (a.status != TransportAssignmentStatus.rejected) continue;
+              final reason = (a.rejectionReason ?? '').trim();
+              final key = reason.isEmpty ? 'No reason given' : reason;
+              declineReasons[key] = (declineReasons[key] ?? 0) + 1;
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _MetricCard(
+                  label: 'Pet Transporter Response Rate',
+                  value: responseRate == null ? 'No offers yet' : '${responseRate.toStringAsFixed(0)}%',
+                ),
+                const SizedBox(height: 14),
+                _ChartCard(
+                  title: 'Pet Transporter Decline Reason',
+                  child: _SimpleBarChart(data: declineReasons),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Clinic decline reasons aren\'t shown — clinic selection has no accept/decline '
+                      'flow with a reason field in the current data model.',
+                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );

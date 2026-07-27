@@ -595,6 +595,29 @@ class AdoptionApplicationRepository {
     );
   }
 
+  /// Every follow-up across every application that is overdue right now —
+  /// "overdue" here is [FollowUpRecord.displayStatus]'s own existing
+  /// definition (past its own [FollowUpRecord.scheduledDate] while still
+  /// scheduled/reminderSent), never an invented admin-configurable window.
+  /// Filters to the two non-terminal statuses server-side (a follow-up
+  /// that's completed/cancelled/submitted/confirmed can never be "overdue"),
+  /// then the actual date comparison client-side, so this stays a bounded
+  /// read of only-still-open follow-ups rather than the whole collection
+  /// group.
+  Stream<List<FollowUpRecord>> streamOverdueFollowUps() {
+    return _db
+        .collectionGroup('followUps')
+        .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name])
+        .snapshots()
+        .map((snap) {
+      final now = DateTime.now();
+      return snap.docs
+          .map(FollowUpRecord.fromFirestore)
+          .where((f) => f.displayStatus(now) == 'Overdue')
+          .toList();
+    });
+  }
+
   // ---- Release Details (pre-release) ------------------------------------
 
   Future<void> setScheduledReleaseDate({required String applicationId, required DateTime date}) async {

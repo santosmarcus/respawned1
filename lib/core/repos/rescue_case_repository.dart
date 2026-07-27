@@ -441,6 +441,27 @@ class RescueCaseRepository {
     });
   }
 
+  /// Every still-`pending` offer across every case whose own [expiresAt] has
+  /// already passed (see [TransportAssignment.isStalePending]) — this is a
+  /// genuine "needs attention" signal (spec's "Rejected, expired, or
+  /// unanswered transporter offers" Action Required item), not a fabricated
+  /// threshold: staleness is judged against the offer's own already-recorded
+  /// `expiresAt`/`kTransportOfferTtl`, never an admin-configurable cutoff
+  /// invented here. Filters `status == pending` server-side, then
+  /// `isStalePending` client-side (Firestore can't compare two fields), so
+  /// the read stays bounded to the (normally small) set of open offers
+  /// rather than every assignment doc ever created.
+  Stream<List<TransportAssignment>> streamStalePendingAssignments() {
+    return _db
+        .collectionGroup('transportAssignments')
+        .where('status', isEqualTo: TransportAssignmentStatus.pending.name)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id))
+            .where((a) => a.isStalePending)
+            .toList());
+  }
+
   /// Naive possible-duplicate lookup: other active cases (pending/awaiting
   /// assignment/ongoing) of the same species, ranked by distance from
   /// [source]. There's no geohashing index on this collection, so this
