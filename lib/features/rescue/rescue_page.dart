@@ -813,7 +813,7 @@ class _RescuePageState extends State<RescuePage> {
         SnackBar(
           content: Text(
             placeCount == 0
-                ? 'You already have ${_mediaFiles.length} photos/videos added — remove one first.'
+                ? 'You already have ${_mediaFiles.length} photos added — remove one first.'
                 : 'Only $placeCount of ${picked.length} photos were added (max ${_mediaFiles.length} total).',
           ),
           backgroundColor: Colors.redAccent,
@@ -1322,10 +1322,10 @@ class _RescuePageState extends State<RescuePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildLabel('Include images and videos', required: true),
+                  _buildLabel('Include images', required: true),
                   const SizedBox(height: 4),
                   Text(
-                    'Provide actual images or videos of the animal. '
+                    'Provide actual images of the animal. '
                         'At least 2 are required.',
                     style: GoogleFonts.zain(
                         fontSize: 11, color: AppColors.textSecondary),

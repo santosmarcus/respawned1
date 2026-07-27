@@ -1820,7 +1820,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             const SizedBox(height: 6),
             Row(
               children: [
-                Text('Provide images and video to verify',
+                Text('Provide images to verify',
                     style: GoogleFonts.zain(
                         fontSize: 13, color: AppColors.textPrimary)),
                 const SizedBox(width: 4),
