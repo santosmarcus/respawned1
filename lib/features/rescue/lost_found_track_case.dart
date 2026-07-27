@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:respawnd1/core/utils/currency.dart';
 import '../../../app_theme.dart';
 
 
@@ -234,14 +235,10 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                         const SizedBox(height: 4),
                         _CaseRow(
                           label: 'Reward',
-                          value: (data['offerReward'] == true)
-                              ? (((data['rewardAmount'] as String?)
-                              ?.trim()
-                              .isNotEmpty ==
-                              true)
-                              ? 'Yes (₱${data['rewardAmount']})'
-                              : 'Yes')
-                              : 'No',
+                          value: formatRewardDisplay(
+                            offerReward: data['offerReward'],
+                            rewardAmount: data['rewardAmount'],
+                          ),
                         ),
                       ],
 

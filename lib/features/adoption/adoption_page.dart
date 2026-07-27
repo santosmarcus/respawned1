@@ -101,7 +101,7 @@ List<String> healthTagsOf(AnimalRecord r) => [
   if (r.vaccinated) 'Vaccinated',
   if (r.spayedNeutered) 'Spayed/Neutered',
   if (r.dewormed) 'Dewormed',
-  if (r.specialNeeds) 'Special Needs',
+  if (r.hasSpecialNeeds) 'Special Needs',
 ];
 
 String ageGroupOf(AnimalRecord r) {
@@ -135,7 +135,7 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
     age: r.age,
     description: r.description,
     healthTags: healthTags,
-    specialNeeds: r.specialNeeds,
+    specialNeeds: r.hasSpecialNeeds,
     gender: sexLower == 'female' ? AnimalGender.female : AnimalGender.male,
     sex: r.sex,
     category: speciesLower == 'cat' ? AnimalCategory.cat : AnimalCategory.dog,
@@ -574,7 +574,12 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
                       favorited: _favoriteIds.contains(stableIntIdFor(record.id)),
                       onFavorite: () => _toggleFavorite(record),
                       publicStatusLabel: _publicStatusLabel(record),
-                      extraChips: [for (final t in healthTagsOf(record)) CardChip(t)],
+                      // 'Special Needs' excluded here — AnimalRecordCard already
+                      // renders its own compact Special Needs badge unconditionally
+                      // (see specialNeedsBadge()); keeping it in healthTagsOf too
+                      // (needed for the filter sheet's Special Needs option) would
+                      // otherwise show it twice on the same card.
+                      extraChips: [for (final t in healthTagsOf(record)) if (t != 'Special Needs') CardChip(t)],
                       onTap: () {
                         final animal = animalRecordToCard(record, index)
                           ..favorited = _favoriteIds.contains(stableIntIdFor(record.id));

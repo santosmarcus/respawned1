@@ -104,6 +104,32 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     await _persistDraft(); // release date shifts every "on release date"/"after previous rule" anchor
   }
 
+  Future<void> _recordDeliveryAttempt(AdoptionApplication app) async {
+    final next = app.deliveryAttempts + 1;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Record Failed Delivery Attempt?',
+      message: 'This will use delivery attempt $next of $kMaxDeliveryAttempts.',
+      confirmLabel: 'Record Attempt',
+      destructive: true,
+    );
+    if (!confirmed) return;
+
+    setState(() => _busy = true);
+    try {
+      await ref.read(adoptionApplicationRepositoryProvider).recordDeliveryAttempt(
+        applicationId: widget.applicationId,
+        actorName: _actorName,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not record attempt: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _addRule() async {
     final rule = await showScheduleRuleEditorSheet(
       context,
@@ -279,6 +305,44 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                       child: Text('${_fmtDate(_releaseDate)} at ${_fmtTime(_releaseDate)}', style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                     ),
                     OutlinedButton.icon(onPressed: _pickReleaseDate, icon: const Icon(Icons.edit_calendar, size: 16), label: const Text('Change')),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              SectionCard(
+                title: 'Delivery Attempts',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            app.deliveryAttemptsExhausted
+                                ? '$kMaxDeliveryAttempts of $kMaxDeliveryAttempts attempts used\nNo delivery attempts remaining'
+                                : '${app.deliveryAttempts} of $kMaxDeliveryAttempts used\n${app.deliveryAttemptsRemaining} attempt${app.deliveryAttemptsRemaining == 1 ? '' : 's'} remaining',
+                            style: GoogleFonts.zain(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: app.deliveryAttemptsExhausted ? Colors.redAccent : AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: (_busy || app.deliveryAttemptsExhausted) ? null : () => _recordDeliveryAttempt(app),
+                          icon: const Icon(Icons.report_gmailerrorred_outlined, size: 16),
+                          label: const Text('Record Failed Delivery Attempt'),
+                        ),
+                      ],
+                    ),
+                    if (app.rescheduleRequested) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'The adopter requested a delivery reschedule${app.rescheduleRequestedAt != null ? ' on ${_fmtDate(app.rescheduleRequestedAt!)}' : ''}.',
+                        style: GoogleFonts.zain(fontSize: 12, fontStyle: FontStyle.italic, color: AppColors.textSecondary),
+                      ),
+                    ],
                   ],
                 ),
               ),

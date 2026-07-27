@@ -257,55 +257,43 @@ class ActivityCard extends StatelessWidget{
                           ]),
                         ],
 
-                        // Rejected Rescue Reports spec §2 — a clear
-                        // "Rejected" state plus reason/date. Deliberately
-                        // compact (single-line reason, no reviewer line, no
-                        // duplicate CA chip — the status row below already
-                        // becomes "View Community Adoption →" when
-                        // eligible) so this block has a bounded height and
-                        // never overflows the fixed-height Home carousel
-                        // card (Activity Card Overflow spec §12). The full
-                        // reason/reviewer/date detail still lives on
-                        // History's rejected card and admin Rescue Details.
+                        // Rejected Rescue Reports spec — a compact status
+                        // chip (not a full-width banner), plus at most one
+                        // ellipsized reason line. The complete reason,
+                        // rejected date, and reviewer now live on the
+                        // report's own details page (TrackCasePage's
+                        // _RejectionDetailsSection) rather than expanding
+                        // this card — keeps rejected cards the same
+                        // approximate height as normal ones and prevents
+                        // bottom overflow with long reasons/addresses.
                         if (item.isRejected) ...[
                           Container(
-                            width: double.infinity,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE05353).withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(10),
+                              color: const Color(0xFFE05353).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Row(children: [
-                                  const Icon(Icons.block, size: 14, color: Color(0xFFE05353)),
-                                  const SizedBox(width: 6),
-                                  Text('Rejected',
-                                      style: GoogleFonts.zain(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: const Color(0xFFE05353))),
-                                ]),
-                                if (item.rejectionReasonLabel != null) ...[
-                                  const SizedBox(height: 4),
-                                  Text('Reason: ${item.rejectionReasonLabel}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                                ],
-                                if (item.rejectedAt != null) ...[
-                                  const SizedBox(height: 2),
-                                  Text('Rejected on ${_formatDate(item.rejectedAt!)}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                                ],
+                                const Icon(Icons.block, size: 12, color: Color(0xFFE05353)),
+                                const SizedBox(width: 4),
+                                Text('Rejected',
+                                    style: GoogleFonts.zain(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFFE05353))),
                               ],
                             ),
                           ),
+                          if (item.rejectionReasonLabel != null) ...[
+                            Text('Reason: ${item.rejectionReasonLabel}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                            const SizedBox(height: 6),
+                          ],
                         ],
 
                         const SizedBox(height: 8),
@@ -356,12 +344,4 @@ class ActivityCard extends StatelessWidget{
 
 
 
-}
-
-String _formatDate(DateTime d) {
-  const months = [
-    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
-    'Sep', 'Oct', 'Nov', 'Dec'
-  ];
-  return '${months[d.month]} ${d.day}, ${d.year}';
 }

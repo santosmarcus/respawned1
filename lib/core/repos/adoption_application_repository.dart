@@ -716,6 +716,44 @@ class AdoptionApplicationRepository {
     });
   }
 
+  /// Admin-side counterpart to the adopter's own Request Reschedule action
+  /// (adoption_process.dart._requestDeliveryReschedule) — records an actual
+  /// unsuccessful/missed delivery so the SAME `deliveryAttempts` counter
+  /// used by the adopter's tracking screen advances by exactly one. Never
+  /// called for a plain date edit/preview — only when a real failed
+  /// delivery is being logged. Transactional so a duplicate tap (or a
+  /// concurrent adopter-side reschedule) can never push the count above
+  /// [kMaxDeliveryAttempts] or apply twice.
+  Future<void> recordDeliveryAttempt({
+    required String applicationId,
+    required String actorName,
+  }) async {
+    final ref = _adoptionDoc(applicationId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) throw StateError('Application not found.');
+      final data = snap.data()!;
+      final current = (data['deliveryAttempts'] as num?)?.toInt() ?? 0;
+      if (current >= kMaxDeliveryAttempts) {
+        throw StateError('All $kMaxDeliveryAttempts delivery attempts have already been used.');
+      }
+      final next = current + 1;
+      final now = Timestamp.now();
+      tx.update(ref, {
+        'deliveryAttempts': next,
+        'rescheduleRequested': false,
+        'lastDeliveryAttemptAt': now,
+        'lastDeliveryAttemptBy': actorName,
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Admin recorded an unsuccessful delivery attempt (attempt $next of $kMaxDeliveryAttempts) — $actorName.',
+            'timestamp': now,
+          }
+        ]),
+      });
+    });
+  }
+
   // ---- Post-Adoption follow-up review ------------------------------------
 
   Future<void> confirmFollowUpReceipt({

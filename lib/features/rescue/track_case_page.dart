@@ -10,6 +10,7 @@ import '../../../app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 
 
@@ -1347,6 +1348,12 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
         children: [
           if (riderCard != null) riderCard,
 
+          // Full rejection detail (reason, rejected date, reviewer) lives
+          // here rather than on the compact Home Activity card — see
+          // activity_card.dart's rejected-chip comment.
+          if ((data['status'] as String?) == 'rejected')
+            _RejectionDetailsSection(caseId: widget.caseId, data: data),
+
           // Case media
           _buildMediaSection(
             context,
@@ -1608,6 +1615,84 @@ class _AnimalDetailBlock extends StatelessWidget {
                   color: AppColors.textPrimary)),
           const SizedBox(height: 4),
           ..._fields(),
+        ],
+      ),
+    );
+  }
+}
+
+/// Full rejection detail — reason, rejected date, and reviewer — moved
+/// here from the compact Home Activity chip (spec: "Show the complete
+/// reason, rejected date, and reviewer details on the report details page
+/// rather than expanding the Activity card"). Reason/date are read
+/// straight off the case doc already in scope; reviewer name requires one
+/// extra read of the case's own `activityLogs` subcollection, since
+/// `rejectedBy`/`rejectedAt` aren't top-level case fields (only the
+/// `rejected` activity-log entry records who acted).
+class _RejectionDetailsSection extends StatelessWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _RejectionDetailsSection({required this.caseId, required this.data});
+
+  DateTime? get _rejectedAt {
+    final history = List<Map<String, dynamic>>.from(data['statusHistory'] ?? []);
+    for (final h in history) {
+      final s = h['status'] as String? ?? '';
+      final ts = h['timestamp'];
+      if (s.startsWith('Case rejected') && ts is Timestamp) return ts.toDate();
+    }
+    return null;
+  }
+
+  String get _reasonLabel {
+    final reason = RejectionReason.fromName(data['rejectionReason'] as String?);
+    if (reason == RejectionReason.other) {
+      final other = (data['rejectionReasonOther'] as String?)?.trim();
+      return (other?.isNotEmpty ?? false) ? other! : 'Other';
+    }
+    return reason.label;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rejectedAt = _rejectedAt;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE05353).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.block, size: 16, color: Color(0xFFE05353)),
+            const SizedBox(width: 6),
+            Text('Report Rejected',
+                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: const Color(0xFFE05353))),
+          ]),
+          const SizedBox(height: 8),
+          _DetailRow('Reason', _reasonLabel),
+          if (rejectedAt != null)
+            _DetailRow('Rejected On', '${rejectedAt.month}/${rejectedAt.day}/${rejectedAt.year}'),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('cases')
+                .doc(caseId)
+                .collection('activityLogs')
+                .where('action', isEqualTo: 'rejected')
+                .limit(1)
+                .snapshots(),
+            builder: (context, snapshot) {
+              final docs = snapshot.data?.docs;
+              if (docs == null || docs.isEmpty) return const SizedBox.shrink();
+              final reviewer = docs.first.data()['actorName'] as String?;
+              if (reviewer == null || reviewer.isEmpty) return const SizedBox.shrink();
+              return _DetailRow('Reviewed By', reviewer);
+            },
+          ),
         ],
       ),
     );

@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -355,6 +356,19 @@ final overdueFollowUpsProvider = StreamProvider.autoDispose<List<FollowUpRecord>
   return ref.watch(adoptionApplicationRepositoryProvider).streamOverdueFollowUps();
 });
 
+/// The shelter's configured maximum capacity — `settings/shelter.maxCapacity`
+/// — the only real "configured maximum" field anywhere in the data model
+/// (confirmed by inspection: no organization/animal-record field for this
+/// exists). Null when unset; the Capacity card shows "Capacity not
+/// configured" rather than inventing/hardcoding a maximum in that case.
+final shelterMaxCapacityProvider = StreamProvider.autoDispose<int?>((ref) {
+  return FirebaseFirestore.instance
+      .collection('settings')
+      .doc('shelter')
+      .snapshots()
+      .map((snap) => (snap.data()?['maxCapacity'] as num?)?.toInt());
+});
+
 // ─── Top compact metrics: Capacity / Active Rescues / Active Volunteers ──
 
 /// A compact card for the top metrics row — deliberately smaller/denser
@@ -416,15 +430,16 @@ class TopMetricsRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Capacity — no configured shelter-capacity field exists anywhere in
-    // the data model today (organizations/animal records/shelter module
-    // all lack one — confirmed by inspection). Never infers a percentage;
-    // shows the real current-occupancy count with an explicit
-    // "not configured" line instead of a fabricated capacity/percentage.
+    // Capacity — current occupancy traced from the real AnimalRecord
+    // status/adoptionStatus/archived values (excludes archived, deceased,
+    // and adopted-out animals; no new status values invented). Maximum
+    // comes from shelterMaxCapacityProvider (settings/shelter.maxCapacity)
+    // — never hardcoded, never used to compute a percentage when absent.
     final animalsAsync = ref.watch(allAnimalRecordsProvider);
     final currentOccupancy = animalsAsync.asData?.value
         .where((a) => !a.archived && a.status != 'deceased' && a.adoptionStatus != 'adopted' && a.adoptionStatus != 'deceased')
         .length;
+    final maxCapacity = ref.watch(shelterMaxCapacityProvider).asData?.value;
 
     final review = ref.watch(casesForTabProvider(RescuePipelineTab.review));
     final assign = ref.watch(casesForTabProvider(RescuePipelineTab.assign));
@@ -451,8 +466,10 @@ class TopMetricsRow extends ConsumerWidget {
       children: [
         _CompactMetricCard(
           title: 'Capacity',
-          primary: currentOccupancy == null ? '—' : '$currentOccupancy animals',
-          secondary: 'Capacity not configured',
+          primary: currentOccupancy == null
+              ? '—'
+              : '$currentOccupancy / ${maxCapacity ?? '—'}',
+          secondary: maxCapacity == null ? 'Capacity not configured' : null,
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AnimalRecordsPage())),
         ),
         const SizedBox(width: 10),

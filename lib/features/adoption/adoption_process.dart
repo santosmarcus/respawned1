@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/features/adoption/interview_scheduling.dart';
 
@@ -162,10 +163,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   DateTime? _scheduledReleaseDate;
   // How many delivery attempts have been used so far (each one spent by a
   // reschedule request — see _requestDeliveryReschedule). Capped at
-  // _maxDeliveryAttempts; the Request Reschedule button disables itself
-  // once that cap is hit.
+  // kMaxDeliveryAttempts (shared with the admin Release page — see
+  // AdoptionApplication — so the two screens can never disagree); the
+  // Request Reschedule button disables itself once that cap is hit.
   int _deliveryAttempts = 0;
-  static const int _maxDeliveryAttempts = 3;
 
   // Appointment
   DateTime? _appointmentDate;
@@ -980,11 +981,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   /// Lets the adopter ask the organization to move the scheduled delivery
-  /// date/time, capped at [_maxDeliveryAttempts] total requests. Doesn't
+  /// date/time, capped at [kMaxDeliveryAttempts] total requests. Doesn't
   /// pick a new date itself — that stays with the organization — this just
   /// records the request (and spends one attempt) so the org can follow up.
   Future<void> _requestDeliveryReschedule() async {
-    if (_adoptionId == null || _deliveryAttempts >= _maxDeliveryAttempts) return;
+    if (_adoptionId == null || _deliveryAttempts >= kMaxDeliveryAttempts) return;
 
     final nextAttempt = _deliveryAttempts + 1;
     final confirmed = await showDialog<bool>(
@@ -998,7 +999,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               fontWeight: FontWeight.bold, color: AppColors.textPrimary),
         ),
         content: Text(
-          'This will use attempt $nextAttempt of $_maxDeliveryAttempts. The '
+          'This will use attempt $nextAttempt of $kMaxDeliveryAttempts. The '
               'organization will reach out to arrange a new delivery date '
               'and time for ${widget.animal.name}.',
           style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
@@ -1038,7 +1039,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         'statusHistory': FieldValue.arrayUnion([
           {
             'status':
-            'Adopter requested a delivery reschedule (attempt $nextAttempt of $_maxDeliveryAttempts).',
+            'Adopter requested a delivery reschedule (attempt $nextAttempt of $kMaxDeliveryAttempts).',
             'timestamp': Timestamp.now(),
           }
         ]),
@@ -1997,12 +1998,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               width: double.infinity,
               child: OutlinedButton(
                 onPressed: (_isSubmitting ||
-                    _deliveryAttempts >= _maxDeliveryAttempts)
+                    _deliveryAttempts >= kMaxDeliveryAttempts)
                     ? null
                     : _requestDeliveryReschedule,
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(
-                    color: _deliveryAttempts >= _maxDeliveryAttempts
+                    color: _deliveryAttempts >= kMaxDeliveryAttempts
                         ? AppColors.slaterspwn
                         : AppColors.greenrspwn,
                     width: 1.5,
@@ -2012,7 +2013,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                       borderRadius: BorderRadius.circular(14)),
                 ),
                 child: Text(
-                  _deliveryAttempts >= _maxDeliveryAttempts
+                  _deliveryAttempts >= kMaxDeliveryAttempts
                       ? 'No reschedule attempts remaining'
                       : 'Request Reschedule',
                   style: GoogleFonts.zain(
@@ -2145,7 +2146,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           if (showAttempts) ...[
             const SizedBox(height: 8),
             Text(
-              'Delivery attempts used: $_deliveryAttempts of $_maxDeliveryAttempts',
+              'Delivery attempts used: $_deliveryAttempts of $kMaxDeliveryAttempts',
               style: GoogleFonts.zain(
                   fontSize: 12,
                   color: attemptsColor),

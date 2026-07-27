@@ -113,6 +113,25 @@ class _FoundAnimalEntry {
   String? biteRisk;
   String? escapeRisk;
 
+  // Scroll target + error-highlight flag for this animal's card — set on a
+  // failed submit so the form can scroll to and visually flag exactly
+  // which animal still needs its Health & Behavior Assessment completed,
+  // never all of them at once.
+  final GlobalKey cardKey = GlobalKey();
+  bool hasAssessmentError = false;
+
+  bool get hasCompleteAssessment =>
+      bodyCondition != null &&
+      mobility != null &&
+      alertness != null &&
+      eyesNoseMouth != null &&
+      skinAndCoat != null &&
+      appetiteHydration != null &&
+      behavior.isNotEmpty &&
+      environmentSafety.isNotEmpty &&
+      biteRisk != null &&
+      escapeRisk != null;
+
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
@@ -2796,11 +2815,12 @@ class _RescuePageState extends State<RescuePage> {
   Widget _buildFoundAnimalCard(int index) {
     final entry = _foundAnimals[index];
     return Container(
+      key: entry.cardKey,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: AppColors.slaterspwn),
+        border: Border.all(color: entry.hasAssessmentError ? const Color(0xFFE05353) : AppColors.slaterspwn, width: entry.hasAssessmentError ? 1.5 : 1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -2893,9 +2913,25 @@ class _RescuePageState extends State<RescuePage> {
           ),
           const SizedBox(height: 10),
           _lostPetTextField(entry.colorController, 'Color / Distinguishing markings'),
+          if (entry.hasAssessmentError) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.error_outline, size: 14, color: Color(0xFFE05353)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text('Complete the Health & Behavior Assessment for this animal.',
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFFE05353))),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 14),
           _buildHealthBehaviorAssessment(entry),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
+          Text('Risk Assessment',
+              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
           _buildRiskFieldsRow(entry),
         ],
       ),
@@ -3204,6 +3240,34 @@ class _RescuePageState extends State<RescuePage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(witnessPhoneError), backgroundColor: Colors.redAccent),
         );
+        return;
+      }
+    }
+
+    // Health & Behavior Assessment required per animal (spec §12-14) —
+    // every animal in validAnimals must independently pass, never just the
+    // first one. On failure: highlight + scroll to the FIRST incomplete
+    // animal's own card, name it in the error, and never clear anything
+    // already entered.
+    for (final entry in _foundAnimals) {
+      if (entry.hasAssessmentError) setState(() => entry.hasAssessmentError = false);
+    }
+    for (var i = 0; i < validAnimals.length; i++) {
+      final entry = validAnimals[i];
+      if (!entry.hasCompleteAssessment) {
+        setState(() => entry.hasAssessmentError = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Complete the Health & Behavior Assessment for Animal ${i + 1}.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final cardContext = entry.cardKey.currentContext;
+          if (cardContext != null) {
+            Scrollable.ensureVisible(cardContext, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+          }
+        });
         return;
       }
     }

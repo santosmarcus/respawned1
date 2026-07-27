@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 
 /// The existing animal-record form — reused as-is by both a standalone
 /// "Create Record" entry point and, with [prefillData]/[linkedCaseId]/
@@ -63,8 +64,9 @@ class CreateAnimalRecordPage extends StatefulWidget {
 }
 
 class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
-  // Images — optional (see _FieldLabel below): no current business rule
-  // requires at least one, so this never blocks submission.
+  // Images — required for brand-new records (at least one), never required
+  // to correct/re-save a legacy record that already opens without one — see
+  // _createRecord's validation, gated on `!widget.isEditing`.
   final _picker = ImagePicker();
   final List<XFile> _pickedImages = [];
   // Edit mode only — already-uploaded photos, individually removable;
@@ -74,6 +76,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   List<String>.from(widget.existingData?['photoUrls'] ?? const []);
   bool _isUploadingImages = false;
   String? _imageError;
+  // Scrolled/focused into view when submission fails the image check.
+  final _imagesSectionKey = GlobalKey();
 
   // Basic info
   final _nameController = TextEditingController();
@@ -105,11 +109,118 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   bool _isAdoptable = true;
   bool _isLoading = false;
 
-  // Health — unchecked when unknown, never inferred.
-  bool _vaccinated = false;
+  // Preventive Care — unchecked when unknown, never inferred. Vaccinated
+  // was removed from creation entirely (spec: vaccines are recorded after
+  // creation via the Vaccines/Medical tab, where individual vaccine names/
+  // dates/doses/boosters can be tracked correctly) — legacy documents that
+  // already have a `vaccinated` boolean keep it untouched, since this
+  // form's save payload no longer writes that key at all.
   bool _spayedNeutered = false;
   bool _dewormed = false;
-  bool _specialNeeds = false;
+
+  // Special Needs — separate from Preventive Care/Temperament/
+  // Compatibility/Training and from the free-text current condition /
+  // diagnosis / medical history / allergies fields (see
+  // AnimalHealthDetails). A dropdown-style field opening a multi-select
+  // bottom sheet (_openSpecialNeedsSheet) rather than an always-visible
+  // checkbox list. hasSpecialNeeds is derived (see getter below), not a
+  // separately-tracked toggle — selecting/clearing options in the sheet is
+  // itself the deliberate action, applied only when "Done" is tapped.
+  final Map<String, bool> _specialNeedsTypes = {
+    for (final v in kSpecialNeedsTypeValues) v: false,
+  };
+  final _specialNeedsOtherController = TextEditingController();
+  final _specialNeedsNotesController = TextEditingController();
+
+  /// Selected structured values, with a valid trimmed "Other" custom entry
+  /// folded in (deduped) and the literal "Other" placeholder itself never
+  /// included. Empty when nothing valid is selected.
+  List<String> get _selectedSpecialNeedsTypes {
+    final result = <String>[
+      for (final entry in _specialNeedsTypes.entries)
+        if (entry.key != kSpecialNeedsOtherValue && entry.value) entry.key,
+    ];
+    if (_specialNeedsTypes[kSpecialNeedsOtherValue] == true) {
+      final custom = _specialNeedsOtherController.text.trim();
+      if (custom.isNotEmpty && !result.contains(custom)) result.add(custom);
+    }
+    return result;
+  }
+
+  /// hasSpecialNeeds = specialNeeds is not empty (spec section 5) — no
+  /// separate stored/tracked flag in this form.
+  bool get _hasSpecialNeeds => _selectedSpecialNeedsTypes.isNotEmpty;
+
+  String get _specialNeedsSummary {
+    final n = _selectedSpecialNeedsTypes.length;
+    if (n == 0) return 'None selected';
+    return '$n selected';
+  }
+
+  Future<void> _openSpecialNeedsSheet() async {
+    final tempSelections = Map<String, bool>.from(_specialNeedsTypes);
+    final tempOtherController = TextEditingController(text: _specialNeedsOtherController.text);
+    final applied = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Special Needs', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+                Text('Select all that apply.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                const SizedBox(height: 8),
+                for (final option in kSpecialNeedsTypeValues)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    dense: true,
+                    activeColor: AppColors.greenrspwn,
+                    title: Text(option, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    value: tempSelections[option] ?? false,
+                    onChanged: (v) => setSheetState(() => tempSelections[option] = v ?? false),
+                  ),
+                if (tempSelections[kSpecialNeedsOtherValue] == true) ...[
+                  const SizedBox(height: 8),
+                  _FieldLabel('Specify special need'),
+                  _UnderlineField(controller: tempOtherController, hint: 'Enter'),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: Text('Done', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (applied == true) {
+      setState(() {
+        _specialNeedsTypes
+          ..clear()
+          ..addAll(tempSelections);
+        _specialNeedsOtherController.text = tempOtherController.text;
+      });
+    }
+  }
 
   // Temperament / Compatibility / Training all still write into the same
   // flat `keyCharacteristics` array the model already had — three separate
@@ -254,10 +365,29 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     _selectedSize = (d['size'] as String?)?.isNotEmpty == true ? d['size'] as String : null;
     _selectedCoatLength = (d['coatLength'] as String?)?.isNotEmpty == true ? d['coatLength'] as String : null;
     _isAdoptable = d['adoptionStatus'] == 'adoptable';
-    _vaccinated = d['vaccinated'] as bool? ?? false;
+    // 'vaccinated' is intentionally never read back into form state here —
+    // the field was removed from creation/edit entirely (spec section 4).
+    // A legacy document's existing `vaccinated` value is left untouched by
+    // this form's save payload (that key is simply never written), so
+    // editing other fields on an old record can't silently clobber it.
     _spayedNeutered = d['spayedNeutered'] as bool? ?? false;
     _dewormed = d['dewormed'] as bool? ?? false;
-    _specialNeeds = d['specialNeeds'] as bool? ?? false;
+
+    final existingSpecialNeedsTypes = List<String>.from(d['specialNeedsTypes'] ?? const []);
+    final existingSpecialNeedsNotes = (d['specialNeedsNotes'] as String?)?.trim() ?? '';
+    final unmatched = <String>[];
+    for (final value in existingSpecialNeedsTypes) {
+      if (_specialNeedsTypes.containsKey(value)) {
+        _specialNeedsTypes[value] = true;
+      } else {
+        unmatched.add(value);
+      }
+    }
+    if (unmatched.isNotEmpty) {
+      _specialNeedsTypes[kSpecialNeedsOtherValue] = true;
+      _specialNeedsOtherController.text = unmatched.join(', ');
+    }
+    _specialNeedsNotesController.text = existingSpecialNeedsNotes;
 
     final chars = List<String>.from(d['keyCharacteristics'] ?? const []);
     for (final key in _temperament.keys) {
@@ -331,6 +461,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     _nameController.dispose();
     _descriptionController.dispose();
     _tagsController.dispose();
+    _specialNeedsOtherController.dispose();
+    _specialNeedsNotesController.dispose();
     super.dispose();
   }
 
@@ -390,11 +522,16 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
   Future<void> _createRecord() async {
     if (_isLoading) return; // guards against a duplicate Finish/Save tap
+    // Image required for brand-new records only — a legacy record already
+    // open for editing is never blocked just because it has no photo yet.
+    final missingImage = !widget.isEditing && _existingPhotoUrls.isEmpty && _pickedImages.isEmpty;
+
     // Required fields — breed is deliberately not checked here: this form
     // has no editable breed input at all (see the field's own comment
     // above), only ever set from an intake report's prefill, so there is
     // nothing to validate against when creating a record from scratch.
     final missing = <String>[
+      if (missingImage) 'At least one image',
       if (_nameController.text.trim().isEmpty) 'Name',
       if (_selectedSpecies == null) 'Species',
       if (_selectedSex == null) 'Gender',
@@ -411,6 +548,15 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           backgroundColor: Colors.redAccent,
         ),
       );
+      if (missingImage) {
+        setState(() => _imageError = 'At least one image is required.');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final imageCtx = _imagesSectionKey.currentContext;
+          if (imageCtx != null) {
+            Scrollable.ensureVisible(imageCtx, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+          }
+        });
+      }
       return;
     }
 
@@ -517,10 +663,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           .toList();
 
       final health = <String>[];
-      if (_vaccinated) health.add('Vaccinated');
       if (_spayedNeutered) health.add('Spayed/Neutered');
       if (_dewormed) health.add('Dewormed');
-      if (_specialNeeds) health.add('Special Needs');
+      if (_hasSpecialNeeds) health.add('Special Needs');
+      final selectedSpecialNeedsTypes = _selectedSpecialNeedsTypes;
+      final specialNeedsNotes = _specialNeedsNotesController.text.trim();
 
       final sharedFields = {
         'name': _nameController.text.trim(),
@@ -532,10 +679,14 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'coatLength': _selectedCoatLength ?? '',
         'description': _descriptionController.text.trim(),
         'health': health,
-        'vaccinated': _vaccinated,
+        // 'vaccinated' deliberately not written here at all (spec section
+        // 4) — an existing legacy value on `docRef` is left exactly as-is
+        // by this partial `update()`/first-time `set()`.
         'spayedNeutered': _spayedNeutered,
         'dewormed': _dewormed,
-        'specialNeeds': _specialNeeds,
+        'specialNeeds': _hasSpecialNeeds,
+        'specialNeedsTypes': selectedSpecialNeedsTypes,
+        'specialNeedsNotes': _hasSpecialNeeds && specialNeedsNotes.isNotEmpty ? specialNeedsNotes : null,
         'keyCharacteristics': selectedChars,
         'rescueBackground': selectedBackground,
         'tags': tags,
@@ -666,8 +817,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             const SizedBox(height: 20),
 
-            // ---- Images (optional) ------------------------------------
-            _FieldLabel('Images (optional)'),
+            // ---- Images -------------------------------------------------
+            // Required for new records (spec section 2); optional when
+            // editing a legacy record that may not have one yet.
+            Container(
+              key: _imagesSectionKey,
+              child: _FieldLabel('Images', required: !widget.isEditing),
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 10,
@@ -811,34 +967,97 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             const SizedBox(height: 20),
 
-            // ---- Health --------------------------------------------------
-            _FieldLabel('Health'),
+            // ---- Preventive Care -------------------------------------------
+            // Renamed from "Health" (visible label only — Firestore fields
+            // spayedNeutered/dewormed are unchanged). Vaccinated was removed
+            // from creation entirely; vaccines are recorded afterward via
+            // the Medical tab's Vaccines workflow, where individual vaccine
+            // names/dates/doses/boosters can be tracked correctly.
+            _FieldLabel('Preventive Care'),
             const SizedBox(height: 8),
             Wrap(
               spacing: 16, runSpacing: 8,
               children: [
                 _CheckboxField(
-                  label: 'Vaccinated',
-                  value: _vaccinated,
-                  onChanged: (v) => setState(() => _vaccinated = v!),
-                ),
-                _CheckboxField(
-                  label: 'Spayed/Neutered',
+                  label: 'Spay/Neuter Status',
                   value: _spayedNeutered,
                   onChanged: (v) => setState(() => _spayedNeutered = v!),
                 ),
                 _CheckboxField(
-                  label: 'Dewormed',
+                  label: 'Deworming Status',
                   value: _dewormed,
                   onChanged: (v) => setState(() => _dewormed = v!),
                 ),
-                _CheckboxField(
-                  label: 'Special Needs',
-                  value: _specialNeeds,
-                  onChanged: (v) => setState(() => _specialNeeds = v!),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 14, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Vaccines can be added after the Animal Record is created from the Medical tab.',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+                  ),
                 ),
               ],
             ),
+
+            const SizedBox(height: 20),
+
+            // ---- Special Needs --------------------------------------------
+            // Separate from Preventive Care/Temperament/Compatibility/
+            // Training and from current condition/diagnosis/medical
+            // history/allergies — never merged into those lists.
+            // Dropdown-style field opening a multi-select bottom sheet.
+            _FieldLabel('Special Needs'),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: _openSpecialNeedsSheet,
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.only(bottom: 8),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(_specialNeedsSummary,
+                          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    ),
+                    const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+                  ],
+                ),
+              ),
+            ),
+            if (_selectedSpecialNeedsTypes.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6, runSpacing: 6,
+                children: [
+                  for (final need in _selectedSpecialNeedsTypes)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(20)),
+                      child: Text(need, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
+            _FieldLabel('Additional special-needs information'),
+            _UnderlineField(controller: _specialNeedsNotesController, hint: 'Optional'),
+
+            const SizedBox(height: 20),
+
+            // ---- Description ------------------------------------------
+            // Shown above Temperament (spec section 7) on both creation
+            // and display pages.
+            _FieldLabel('Description', required: true),
+            _UnderlineField(controller: _descriptionController, hint: 'Enter'),
 
             const SizedBox(height: 20),
 
@@ -918,10 +1137,6 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             const SizedBox(height: 20),
 
             // ---- Remaining fields -------------------------------------
-            _FieldLabel('Description', required: true),
-            _UnderlineField(controller: _descriptionController, hint: 'Enter'),
-            const SizedBox(height: 16),
-
             // Rescued by (autofill, read-only)
             _FieldLabel('Rescued by'),
             Text((widget.prefillData?['rescuedBy'] as String?) ?? 'Loved by the Gapz',

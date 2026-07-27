@@ -21,6 +21,26 @@ class CardChip {
   const CardChip(this.label, {this.color = AppColors.yellowrspwn});
 }
 
+/// Compact "Special Needs" indicator shared by the list card and grid tile —
+/// icon + text label (never icon-alone, per spec), never the specific
+/// need types (those stay on the full Animal Record page). Shown whenever
+/// [AnimalRecord.hasSpecialNeeds] is true, even on the admin's otherwise-
+/// compact list card, since this is a fact admin staff should see at a
+/// glance rather than something hidden behind "compact".
+Widget specialNeedsBadge() => Container(
+      margin: const EdgeInsets.only(top: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: AppColors.pinkrspwn.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.favorite, size: 10, color: AppColors.textPrimary),
+          const SizedBox(width: 3),
+          Text('Special Needs', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+
 /// Shared Animal Record list-card — the structural base for both the admin
 /// Animal Records list (`animal_record_page.dart`) and the user Adoption
 /// list (`adoption_page.dart`), which used to be two unrelated layouts (the
@@ -170,6 +190,7 @@ class AnimalRecordCard extends StatelessWidget {
                     Text(subtitle, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                   if (animal.age.isNotEmpty)
                     Text(animal.age, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  if (animal.hasSpecialNeeds) specialNeedsBadge(),
                   if (!compact && animal.description.isNotEmpty)
                     Text(
                       animal.description,
@@ -314,6 +335,7 @@ class AnimalRecordGridTile extends StatelessWidget {
                   style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
             if (animal.age.isNotEmpty)
               Text(animal.age, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (animal.hasSpecialNeeds) specialNeedsBadge(),
           ],
         ),
       ),

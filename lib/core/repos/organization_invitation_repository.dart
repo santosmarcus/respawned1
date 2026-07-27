@@ -148,6 +148,18 @@ class OrganizationInvitationRepository {
     return OrganizationInvitation.fromFirestore(snap.docs.first);
   }
 
+  /// Deterministic per-(org, email) doc id — makes the actual create step
+  /// below atomic against a concurrent duplicate invite for the exact same
+  /// organization+email (the highest-value race to close, since Firestore
+  /// transactions here can only `get()` a single DocumentReference, not an
+  /// arbitrary query — see the class doc comment on why full multi-check
+  /// transactional dedup across `members`/`organizationInvitations` isn't
+  /// possible with this SDK). `isAlreadyActiveMember`/`findActiveInvitation`/
+  /// `isRoleOccupied` remain separate best-effort pre-checks for a fast,
+  /// friendly error before ever reaching this call.
+  String _invitationDocId({required String organizationId, required String normalizedEmail}) =>
+      '${organizationId}_$normalizedEmail';
+
   Future<String> createInvitation({
     required String organizationId,
     required String organizationName,
@@ -156,20 +168,32 @@ class OrganizationInvitationRepository {
     required String invitedBy,
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
-    final ref = _invitations.doc();
-    await ref.set({
-      'organizationId': organizationId,
-      'organizationName': organizationName,
-      'email': email.trim(),
-      'normalizedEmail': normalizedEmail,
-      'role': role.name,
-      'status': InvitationStatus.pending.name,
-      'invitedBy': invitedBy,
-      'createdAt': FieldValue.serverTimestamp(),
-      'expiresAt': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
-      'acceptedAt': null,
-      'acceptedBy': null,
-      'token': _generateToken(),
+    final ref = _invitations.doc(_invitationDocId(organizationId: organizationId, normalizedEmail: normalizedEmail));
+
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (snap.exists) {
+        final status = InvitationStatus.fromName(snap.data()?['status'] as String?);
+        final expiresAt = snap.data()?['expiresAt'];
+        final expired = expiresAt is Timestamp && DateTime.now().isAfter(expiresAt.toDate());
+        if (status == InvitationStatus.pending && !expired) {
+          throw StateError('An invitation is already pending.');
+        }
+      }
+      tx.set(ref, {
+        'organizationId': organizationId,
+        'organizationName': organizationName,
+        'email': email.trim(),
+        'normalizedEmail': normalizedEmail,
+        'role': role.name,
+        'status': InvitationStatus.pending.name,
+        'invitedBy': invitedBy,
+        'createdAt': FieldValue.serverTimestamp(),
+        'expiresAt': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
+        'acceptedAt': null,
+        'acceptedBy': null,
+        'token': _generateToken(),
+      });
     });
     return ref.id;
   }

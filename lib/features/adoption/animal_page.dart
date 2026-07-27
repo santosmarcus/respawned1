@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,6 +8,8 @@ import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
 import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart' show genderIconFor;
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/animals/widgets/animal_medical_tab.dart' show MedicalProfileSection, SpecialNeedsSection, VaccineSection;
 import 'adoption_page.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
@@ -15,7 +18,6 @@ import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 class _AnimalDetail {
   final String size;
   final String coatLength;
-  final List<String> health;
   final List<String> keyCharacteristics;
   final List<String> rescueBackground;
   final String description;
@@ -25,7 +27,6 @@ class _AnimalDetail {
   const _AnimalDetail({
     required this.size,
     required this.coatLength,
-    required this.health,
     required this.keyCharacteristics,
     required this.rescueBackground,
     required this.description,
@@ -34,8 +35,10 @@ class _AnimalDetail {
   });
 }
 
-// Animal page
-class AnimalPage extends StatefulWidget {
+// Animal page — Profile / Medical tabs (spec section 8), same tab design
+// language as the admin Animal Record page's pill selector, but entirely
+// read-only: no Edit actions anywhere on this page.
+class AnimalPage extends ConsumerStatefulWidget {
   final Animal animal;
   final VoidCallback onFavoriteToggle;
 
@@ -45,19 +48,19 @@ class AnimalPage extends StatefulWidget {
     required this.onFavoriteToggle,});
 
   @override
-  State<AnimalPage> createState() => _AnimalPageState();
+  ConsumerState<AnimalPage> createState() => _AnimalPageState();
 }
 
-class _AnimalPageState extends State<AnimalPage> {
+class _AnimalPageState extends ConsumerState<AnimalPage> {
   late bool _favorited;
   bool _checkingAdoption = false;
+  int _tabIndex = 0; // 0 = Profile, 1 = Medical
 
   _AnimalDetail get _detail {
     final animal = widget.animal;
     return _AnimalDetail(
       size: animal.size,
       coatLength: animal.coatLength,
-      health: animal.healthTags,
       keyCharacteristics: animal.keyCharacteristics.isNotEmpty
           ? animal.keyCharacteristics
           : (animal.badge != null ? [animal.badge!] : []),
@@ -308,99 +311,17 @@ class _AnimalPageState extends State<AnimalPage> {
 
                   const SizedBox(height: 16),
 
-                  _SectionHeader(label: 'Animal Information'),
-                  const SizedBox(height: 10),
-                  AnimalBasicInfoRow(fields: [
-                    InfoField('Species', animal.species.isNotEmpty ? animal.species : 'Not provided'),
-                    InfoField('Age', animal.age.isNotEmpty ? animal.age : 'Not provided'),
-                    InfoField('Size', detail.size),
-                    InfoField('Breed', animal.breed.isNotEmpty ? animal.breed : 'Not provided'),
-                    InfoField('Coat Length', detail.coatLength),
-                    const InfoField('Color / Markings', 'Not provided'),
-                  ]),
-
-                  const SizedBox(height: 20),
-
-                  // Health
-                  _SectionHeader(label: 'Health'),
-                  const SizedBox(height: 6),
-                  Text(
-                    detail.health.join(', '),
-                    style: GoogleFonts.zain(
-                        fontSize: 15, color: AppColors.textPrimary),
+                  _ProfileMedicalTabs(
+                    tabIndex: _tabIndex,
+                    onTabChanged: (i) => setState(() => _tabIndex = i),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
 
-                  for (final group in [
-                    ('Temperament', detail.keyCharacteristics.where(kTemperamentValues.contains).toList()),
-                    ('Compatibility', detail.keyCharacteristics.where(kCompatibilityValues.contains).toList()),
-                    ('Training', detail.keyCharacteristics.where(kTrainingValues.contains).toList()),
-                    ('Rescue Background', detail.rescueBackground),
-                  ])
-                    if (group.$2.isNotEmpty) ...[
-                      _SectionHeader(label: group.$1),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: group.$2.map((t) => _YellowTag(label: t)).toList(),
-                      ),
-                      const SizedBox(height: 20),
-                    ],
-
-                  // Description
-                  _SectionHeader(label: 'Description'),
-                  const SizedBox(height: 6),
-                  Text(
-                    detail.description,
-                    style: GoogleFonts.zain(
-                        fontSize: 15,
-                        color: AppColors.textPrimary,
-                        height: 1.5),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Organization Info
-                  Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: AppColors.slaterspwn,
-                          borderRadius: BorderRadius.circular(22),
-                        ),
-                        child: const Icon(Icons.groups_2_outlined,
-                            size: 22, color: AppColors.textPrimary),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            detail.organization,
-                            style: GoogleFonts.tiltWarp(
-                              fontSize: 14,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          Text(
-                            detail.orgSubtitle,
-                            style: GoogleFonts.zain(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  _SponsorsRow(animalId: animal.id),
+                  if (_tabIndex == 0)
+                    _ProfileTabContent(animal: animal, detail: detail)
+                  else
+                    _MedicalTabContent(animalRecordId: animal.animalRecordId),
 
                   const SizedBox(height: 28),
 
@@ -415,6 +336,180 @@ class _AnimalPageState extends State<AnimalPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Pill-style Profile/Medical selector — same visual language as the admin
+/// Animal Record page's tab pill (animal_record_detail_page.dart), kept as
+/// a separate local implementation since that one isn't a shared/exported
+/// widget. Only two tabs here (no Management — this page is read-only).
+class _ProfileMedicalTabs extends StatelessWidget {
+  final int tabIndex;
+  final ValueChanged<int> onTabChanged;
+  const _ProfileMedicalTabs({required this.tabIndex, required this.onTabChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(50)),
+      child: Row(
+        children: [
+          _TabPillButton(label: 'Profile', index: 0, selected: tabIndex == 0, onTap: onTabChanged),
+          _TabPillButton(label: 'Medical', index: 1, selected: tabIndex == 1, onTap: onTabChanged),
+        ],
+      ),
+    );
+  }
+}
+
+class _TabPillButton extends StatelessWidget {
+  final String label;
+  final int index;
+  final bool selected;
+  final ValueChanged<int> onTap;
+  const _TabPillButton({required this.label, required this.index, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => onTap(index),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.yellowrspwn : Colors.transparent,
+            borderRadius: BorderRadius.circular(50),
+          ),
+          child: Center(
+            child: Text(label, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Profile tab (spec section 8) — general animal information only:
+/// species/breed/sex/size/age/color-markings, Description (above
+/// Temperament), Temperament/Compatibility/Training/Rescue Background,
+/// Organization info, Sponsors. No Health/medical block — that content
+/// lives only on the Medical tab now, never duplicated here.
+class _ProfileTabContent extends StatelessWidget {
+  final Animal animal;
+  final _AnimalDetail detail;
+  const _ProfileTabContent({required this.animal, required this.detail});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(label: 'Animal Information'),
+        const SizedBox(height: 10),
+        AnimalBasicInfoRow(fields: [
+          InfoField('Species', animal.species.isNotEmpty ? animal.species : 'Not provided'),
+          InfoField('Age', animal.age.isNotEmpty ? animal.age : 'Not provided'),
+          InfoField('Size', detail.size),
+          InfoField('Breed', animal.breed.isNotEmpty ? animal.breed : 'Not provided'),
+          InfoField('Coat Length', detail.coatLength),
+          const InfoField('Color / Markings', 'Not provided'),
+        ]),
+
+        const SizedBox(height: 20),
+
+        // Description above Temperament (spec section 7).
+        _SectionHeader(label: 'Description'),
+        const SizedBox(height: 6),
+        Text(
+          detail.description,
+          style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary, height: 1.5),
+        ),
+
+        const SizedBox(height: 20),
+
+        for (final group in [
+          ('Temperament', detail.keyCharacteristics.where(kTemperamentValues.contains).toList()),
+          ('Compatibility', detail.keyCharacteristics.where(kCompatibilityValues.contains).toList()),
+          ('Training', detail.keyCharacteristics.where(kTrainingValues.contains).toList()),
+          ('Rescue Background', detail.rescueBackground),
+        ])
+          if (group.$2.isNotEmpty) ...[
+            _SectionHeader(label: group.$1),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: group.$2.map((t) => _YellowTag(label: t)).toList(),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+        // Organization Info
+        Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(22)),
+              child: const Icon(Icons.groups_2_outlined, size: 22, color: AppColors.textPrimary),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(detail.organization, style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                Text(detail.orgSubtitle, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              ],
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 20),
+
+        _SponsorsRow(animalId: animal.id),
+      ],
+    );
+  }
+}
+
+/// Medical tab (spec section 8) — Medical Profile (read-only) + Vaccines +
+/// Special Needs (only when meaningful). No admin Edit affordances. Needs
+/// the real `animals/{id}` AnimalRecord (not just the lighter `Animal`
+/// display model this page otherwise uses) for health/vaccination data —
+/// `animal.animalRecordId` is the reliable join key (see AdoptionApplication
+/// / animalRecordToCard's own doc comments on why the legacy `animal.id`
+/// int hash can't be used to look this up).
+class _MedicalTabContent extends ConsumerWidget {
+  final String animalRecordId;
+  const _MedicalTabContent({required this.animalRecordId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (animalRecordId.isEmpty) {
+      return Text('Medical information is unavailable for this record.',
+          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
+    }
+    final recordAsync = ref.watch(animalRecordProvider(animalRecordId));
+    final record = recordAsync.asData?.value;
+    if (recordAsync.isLoading && record == null) {
+      return const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()));
+    }
+    if (record == null) {
+      return Text('Medical information is unavailable for this record.',
+          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        MedicalProfileSection(animal: record, readOnly: true),
+        if (record.hasMeaningfulSpecialNeedsInfo) ...[
+          const SizedBox(height: 20),
+          SpecialNeedsSection(animal: record),
+        ],
+        const SizedBox(height: 20),
+        VaccineSection(animal: record, readOnly: true),
+      ],
     );
   }
 }

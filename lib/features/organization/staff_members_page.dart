@@ -126,17 +126,23 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
 
   Future<void> _submitInvite(String email, OrgRole role) async {
     if (!_isOrgAdmin) {
-      _snack('Only an organization Admin can invite new members.', error: true);
+      _snack('You do not have permission to add members.', error: true);
+      return;
+    }
+    final normalized = email.trim().toLowerCase();
+    final selfEmail = FirebaseAuth.instance.currentUser?.email?.trim().toLowerCase();
+    if (selfEmail != null && selfEmail == normalized) {
+      _snack('You cannot invite your own email.', error: true);
       return;
     }
     try {
       if (await _repo.isAlreadyActiveMember(organizationId: widget.organizationId, email: email)) {
-        _snack('This email is already an active member of this organization.', error: true);
+        _snack('This person is already a member.', error: true);
         return;
       }
       final existing = await _repo.findActiveInvitation(organizationId: widget.organizationId, email: email);
       if (existing != null && !existing.isExpired) {
-        _snack('An invitation to this email is already pending.', error: true);
+        _snack('An invitation is already pending.', error: true);
         return;
       }
       if (await _repo.isRoleOccupied(organizationId: widget.organizationId, role: role)) {
@@ -148,13 +154,19 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
         return;
       }
 
+      // No `users` lookup gate here on purpose — invitations are addressed
+      // by normalized email and remain pending until that person signs up
+      // or logs in and matches it at acceptance time (see
+      // OrganizationInvitationRepository.acceptInvitation), so someone
+      // without an existing account is never incorrectly told their email
+      // is invalid or unrecognized.
       final doc = await FirebaseFirestore.instance.collection('organizations').doc(widget.organizationId).get();
       final orgName = doc.data()?['name'] as String? ?? '';
       final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
       await _repo.createInvitation(organizationId: widget.organizationId, organizationName: orgName, email: email, role: role, invitedBy: uid);
       _snack('Invitation sent to $email.');
     } catch (e) {
-      _snack('Could not send invitation: $e', error: true);
+      _snack('Invitation could not be sent: $e', error: true);
     }
   }
 

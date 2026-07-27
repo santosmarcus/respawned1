@@ -74,7 +74,7 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
       if (mounted) {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save health details: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(content: Text('Could not save medical profile: $e'), backgroundColor: Colors.redAccent),
         );
       }
     }
@@ -97,22 +97,22 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
               ),
             ),
             const SizedBox(height: 14),
-            Text('Edit Health Details', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+            Text('Edit Medical Profile', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
             const SizedBox(height: 12),
 
-            _TriStateRow(label: 'Sterilization', value: _sterilized, onChanged: (v) => setState(() => _sterilized = v)),
-            _TriStateRow(label: 'Deworming status', value: _dewormed, onChanged: (v) => setState(() => _dewormed = v)),
+            _TriStateRow(label: 'Spay/Neuter Status', value: _sterilized, onChanged: (v) => setState(() => _sterilized = v)),
+            _TriStateRow(label: 'Deworming Status', value: _dewormed, onChanged: (v) => setState(() => _dewormed = v)),
 
             const SizedBox(height: 8),
-            _Field('Known allergies', _allergiesController),
-            _Field('Chronic conditions', _chronicController),
-            _Field('Current medications', _medsController),
+            _Field('Known Allergies', _allergiesController),
+            _Field('Chronic Conditions', _chronicController),
+            _Field('Current Medications', _medsController),
             _Field('Weight (kg)', _weightController, keyboardType: TextInputType.number),
-            _Field('Body condition', _bodyConditionController),
-            _Field('Microchip / tag status', _microchipController),
+            _Field('Body Condition', _bodyConditionController),
+            _Field('Identification Tag Status', _microchipController),
 
             const SizedBox(height: 6),
-            Text('Last Vet Checkup', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            Text('Last Veterinary Checkup', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
             GestureDetector(
               onTap: () async {
                 final picked = await showDatePicker(
@@ -151,7 +151,7 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
                 ),
                 child: _saving
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                    : Text('Save Health Details', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                    : Text('Save Medical Profile', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
             ),
           ],

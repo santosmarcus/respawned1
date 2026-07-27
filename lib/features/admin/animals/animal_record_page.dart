@@ -57,6 +57,8 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   bool? _inTreatmentOnly;
   bool? _vaccinatedOnly;
   bool? _hasRescueBackground;
+  // Tri-state: null = All, true = Has Special Needs, false = No Special Needs.
+  bool? _specialNeedsOnly;
   // Reuses the existing AnimalRecord.archived field — 'Active' (default)
   // excludes archived records the same way the old _includeArchived bool
   // did; 'Archived'/'All' are the new addition. Never a second archive
@@ -115,6 +117,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       (_inTreatmentOnly == true ? 1 : 0) +
       (_vaccinatedOnly == true ? 1 : 0) +
       (_hasRescueBackground == true ? 1 : 0) +
+      (_specialNeedsOnly != null ? 1 : 0) +
       (_recordStatus != 'Active' ? 1 : 0);
 
   @override
@@ -151,6 +154,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     if (_inTreatmentOnly == true && a.currentCaseId == null) return false;
     if (_vaccinatedOnly == true && !a.vaccinated) return false;
     if (_hasRescueBackground == true && a.rescueBackground.isEmpty) return false;
+    if (_specialNeedsOnly != null && a.hasSpecialNeeds != _specialNeedsOnly) return false;
     return true;
   }
 
@@ -237,6 +241,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           _inTreatmentOnly = null;
                           _vaccinatedOnly = null;
                           _hasRescueBackground = null;
+                          _specialNeedsOnly = null;
                           _recordStatus = 'Active';
                         }),
                         child: const Text('Clear'),
@@ -320,6 +325,33 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           title: const Text('Has rescue background'),
                           value: _hasRescueBackground ?? false,
                           onChanged: (v) => setSheetState(() => _hasRescueBackground = v),
+                        ),
+                        const SizedBox(height: 16),
+                        Text('Special Needs', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('All'),
+                              selected: _specialNeedsOnly == null,
+                              selectedColor: AppColors.greenrspwn,
+                              onSelected: (_) => setSheetState(() => _specialNeedsOnly = null),
+                            ),
+                            ChoiceChip(
+                              label: const Text('Has Special Needs'),
+                              selected: _specialNeedsOnly == true,
+                              selectedColor: AppColors.yellowrspwn,
+                              onSelected: (_) => setSheetState(() => _specialNeedsOnly = true),
+                            ),
+                            ChoiceChip(
+                              label: const Text('No Special Needs'),
+                              selected: _specialNeedsOnly == false,
+                              selectedColor: AppColors.yellowrspwn,
+                              onSelected: (_) => setSheetState(() => _specialNeedsOnly = false),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 16),
                         Text('Record Status', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),

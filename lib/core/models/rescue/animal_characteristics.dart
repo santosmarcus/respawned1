@@ -29,3 +29,23 @@ const List<String> kTrainingValues = [
 /// not the more granular "Rescued From Street"/"Rescued From Abuse"/etc.
 /// wording other UI once assumed; those aren't separately stored anywhere.
 const List<String> kRescueBackgroundValues = ['Rescued', 'Transferred', 'Surrendered'];
+
+/// Structured special-needs categories (distinct from the free-text
+/// current condition / diagnosis / medical history / allergies /
+/// temperament / vaccination fields — those are never merged into this
+/// list). `kSpecialNeedsOtherValue` reveals a custom "Specify special
+/// need" text field when selected.
+const String kSpecialNeedsOtherValue = 'Other';
+
+const List<String> kSpecialNeedsTypeValues = [
+  'Paralyzed',
+  'Blind',
+  'Deaf',
+  'Burn Injury / Burns',
+  'One-eyed',
+  'Disfigured',
+  'Mobility impairment',
+  'Amputee / Missing limb',
+  'Neurological impairment',
+  kSpecialNeedsOtherValue,
+];

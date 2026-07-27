@@ -111,7 +111,19 @@ class AnimalRecord {
   final bool vaccinated;
   final bool spayedNeutered;
   final bool dewormed;
-  final bool specialNeeds;
+  // The visibility/control flag (spec: "Add Special Needs to Animal
+  // Records" section 5). Backed by the legacy `specialNeeds` boolean
+  // Firestore key — no migration/rename of that key was needed since the
+  // structured selections/notes below live under new, separate keys
+  // (`specialNeedsTypes`/`specialNeedsNotes`) rather than colliding with it.
+  final bool hasSpecialNeeds;
+  // Structured selections, e.g. ["Blind", "One-eyed"]. Firestore key:
+  // `specialNeedsTypes` (new — deliberately not named `specialNeeds` to
+  // avoid clashing with the legacy boolean field of that name).
+  final List<String> specialNeedsTypes;
+  // Optional free-text supporting info, e.g. "Requires guided indoor
+  // movement." Firestore key: `specialNeedsNotes`.
+  final String? specialNeedsNotes;
   final List<String> keyCharacteristics;
   final List<String> rescueBackground;
   final List<String> tags;
@@ -165,7 +177,9 @@ class AnimalRecord {
     required this.vaccinated,
     required this.spayedNeutered,
     required this.dewormed,
-    required this.specialNeeds,
+    required this.hasSpecialNeeds,
+    this.specialNeedsTypes = const [],
+    this.specialNeedsNotes,
     required this.keyCharacteristics,
     required this.rescueBackground,
     required this.tags,
@@ -202,6 +216,11 @@ class AnimalRecord {
   bool get isAdopted => adoptionStatus == 'adopted';
   bool get isDeceased => adoptionStatus == 'deceased' || status == 'deceased';
   bool get isReturned => currentStatus == 'returned';
+  /// True only when there's something worth actually showing — a bare
+  /// `hasSpecialNeeds: true` with no selected type and no notes renders
+  /// nothing (spec: never show a "Special Needs / None" section).
+  bool get hasMeaningfulSpecialNeedsInfo =>
+      hasSpecialNeeds && (specialNeedsTypes.isNotEmpty || (specialNeedsNotes?.trim().isNotEmpty ?? false));
 
   /// Never throws — a document whose shape defeats even the safe per-field
   /// helpers below falls back to a minimal, clearly-flagged record (see
@@ -229,7 +248,7 @@ class AnimalRecord {
         vaccinated: false,
         spayedNeutered: false,
         dewormed: false,
-        specialNeeds: false,
+        hasSpecialNeeds: false,
         keyCharacteristics: const [],
         rescueBackground: const [],
         tags: const [],
@@ -269,6 +288,15 @@ class AnimalRecord {
     // 'createdAt' is the standardized field every current writer sets;
     // fall back only when createdAt itself is missing.
     final intakeDateRaw = data['intakeDate'];
+    final specialNeedsTypes = parseStringList(data['specialNeedsTypes']);
+    final specialNeedsNotes = parseOptionalString(data['specialNeedsNotes']);
+    // Legacy documents only ever set the flat `specialNeeds` boolean.
+    // Newer documents may also carry a non-empty `specialNeedsTypes`/notes
+    // list without the legacy boolean being set explicitly true — derive
+    // the flag from that presence rather than losing the data.
+    final hasSpecialNeeds = parseBool(data['specialNeeds']) ||
+        specialNeedsTypes.isNotEmpty ||
+        (specialNeedsNotes?.trim().isNotEmpty ?? false);
 
     return AnimalRecord(
       id: id,
@@ -283,7 +311,9 @@ class AnimalRecord {
       vaccinated: parseBool(data['vaccinated']),
       spayedNeutered: parseBool(data['spayedNeutered']),
       dewormed: parseBool(data['dewormed']),
-      specialNeeds: parseBool(data['specialNeeds']),
+      hasSpecialNeeds: hasSpecialNeeds,
+      specialNeedsTypes: specialNeedsTypes,
+      specialNeedsNotes: specialNeedsNotes,
       keyCharacteristics: parseStringList(data['keyCharacteristics']),
       rescueBackground: parseStringList(data['rescueBackground']),
       tags: parseStringList(data['tags']),
