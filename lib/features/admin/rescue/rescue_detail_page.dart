@@ -1048,28 +1048,50 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 ),
               ),
 
-            // The bare, no-context "Close Case" bypass action was removed
-            // here (Admin Rescue Cleanup spec §1) — an admin can no longer
-            // end a rescue for no stated reason at every non-terminal
-            // status. What's left is still the exact same
-            // reason-and-explanation-required close_case_sheet (nothing
-            // removed from ClosureReason/closeCase/close_case_sheet.dart —
-            // Reject Report/merge-duplicate/Community Adoption transition
-            // all already live entirely outside this method and are
-            // untouched), just relabeled and reframed as a deliberate
-            // last-resort action for outcomes with no more specific
-            // dedicated workflow of their own (e.g. animal moved/could not
-            // be located, animal died during rescue, clinic unavailable) —
-            // reunited-with-owner/has-owner/aggressive-animal keep their
-            // own dedicated buttons elsewhere on this page, unchanged.
+            // "End Rescue" (the generic, no-context close bypass — same
+            // unsafe-shortcut category as the previously removed "Close
+            // Case" button) is gone entirely now, not just relabeled.
+            // Nothing was removed from ClosureReason/closeCase/
+            // close_case_sheet.dart itself — Reject Report/merge-duplicate/
+            // Community Adoption transition all already live entirely
+            // outside this method and are untouched. What replaces the bare
+            // button are two reason-specific outcomes that previously had
+            // no dedicated entry point of their own: Animal Moved and
+            // Animal Deceased During Rescue — mirroring the existing
+            // reunited-with-owner/has-owner/aggressive-animal pattern
+            // elsewhere on this page. clinicUnavailable/duplicateReport/
+            // resolvedWithoutTransport/other no longer have their own
+            // button (duplicateReport already has the superior dedicated
+            // merge flow); they're still reachable by changing the reason
+            // inside either sheet below, just no longer defaulted to by a
+            // generic entry point.
             if (!c.status.isTerminal) ...[
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                child: TextButton(
-                  onPressed: _isLoading ? null : () => _closeCase(c),
-                  style: TextButton.styleFrom(foregroundColor: const Color(0xFFE05353)),
-                  child: const Text('End Rescue — Select Reason'),
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _closeCase(c, initialReason: ClosureReason.animalMoved),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary,
+                    side: const BorderSide(color: AppColors.slaterspwn),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Animal Moved / Could Not Be Located'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _closeCase(c, initialReason: ClosureReason.diedDuringRescue),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFE05353),
+                    side: const BorderSide(color: Color(0xFFE05353)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Animal Deceased During Rescue'),
                 ),
               ),
             ],

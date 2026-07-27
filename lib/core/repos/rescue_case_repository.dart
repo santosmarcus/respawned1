@@ -324,6 +324,100 @@ class RescueCaseRepository {
     );
   }
 
+  /// Community Location Approval spec §9 — an "Animal moved" community
+  /// report never changes the case's own official address/lat/lng at
+  /// submission time (confirmed: nothing in this codebase does that
+  /// today); this is the ONLY path that promotes a proposed location to
+  /// official, and only once an admin explicitly approves it. Uses the
+  /// report's own already-canonical `newAddress`/`newLat`/`newLng` fields
+  /// (set at submission) rather than inventing separate
+  /// `proposedAddress`/`proposedLat`/`proposedLng` fields — same data,
+  /// no duplication. One transaction so the report's approval state and
+  /// the case's location update can never diverge.
+  Future<void> approveLocationUpdate({
+    required String caseId,
+    required String reportId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final reportRef = _communityReportsOf(caseId).doc(reportId);
+    final caseRef = _caseDoc(caseId);
+    await _db.runTransaction((tx) async {
+      final reportSnap = await tx.get(reportRef);
+      if (!reportSnap.exists) throw StateError('This report no longer exists.');
+      final data = reportSnap.data()!;
+      if (data['type'] != 'moved') throw StateError('Only an "Animal moved" report can update the case location.');
+      if (data['approvalStatus'] != 'pending') throw StateError('This location update has already been reviewed.');
+
+      final newAddress = data['newAddress'] as String?;
+      final newLat = (data['newLat'] as num?)?.toDouble();
+      final newLng = (data['newLng'] as num?)?.toDouble();
+      if (newAddress == null || newLat == null || newLng == null) {
+        throw StateError('This report is missing a resolved location and cannot be approved.');
+      }
+
+      final now = Timestamp.now();
+      tx.update(reportRef, {
+        'approvalStatus': 'approved',
+        'approvedBy': actorName,
+        'approvedByUid': actorUid,
+        'approvedAt': now,
+      });
+      // The original submission location is never discarded — it stays on
+      // this same report doc (newAddress/newLat/newLng), and the case's
+      // prior address/lat/lng are preserved in statusHistory below rather
+      // than simply overwritten with no trace.
+      tx.update(caseRef, {
+        'address': newAddress,
+        'lat': newLat,
+        'lng': newLng,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Location updated to "$newAddress" (community report approved by $actorName).', 'timestamp': now},
+        ]),
+      });
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'community_location_approved',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'reportId': reportId},
+    );
+  }
+
+  Future<void> rejectLocationUpdate({
+    required String caseId,
+    required String reportId,
+    required String actorUid,
+    required String actorName,
+    String? reason,
+  }) async {
+    final reportRef = _communityReportsOf(caseId).doc(reportId);
+    await _db.runTransaction((tx) async {
+      final reportSnap = await tx.get(reportRef);
+      if (!reportSnap.exists) throw StateError('This report no longer exists.');
+      if (reportSnap.data()!['approvalStatus'] != 'pending') {
+        throw StateError('This location update has already been reviewed.');
+      }
+      // The case's own address/lat/lng are simply never touched — rejection
+      // is a no-op on the official location, by construction.
+      tx.update(reportRef, {
+        'approvalStatus': 'rejected',
+        'rejectedBy': actorName,
+        'rejectedByUid': actorUid,
+        'rejectedAt': Timestamp.now(),
+        if (reason != null && reason.isNotEmpty) 'rejectionReason': reason,
+      });
+    });
+    await addActivityLog(
+      caseId: caseId,
+      action: 'community_location_rejected',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'reportId': reportId, if (reason != null) 'reason': reason},
+    );
+  }
+
   /// Every account with role == 'pet_transporter' — the exact string
   /// onboard_screen.dart / role_screen.dart write to `users/{uid}.role`.
   /// Excludes general users, org admins/staff, and rescue volunteers, none

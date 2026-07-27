@@ -50,6 +50,17 @@ class FollowUpRecord {
   final String? rescheduledBy;
   final String? rescheduleReason;
 
+  // Per-follow-up admin note (Post-Adoption Notes spec §4) — distinct from
+  // [confirmationNotes] (only ever set once, at confirm-time, describing
+  // the adopter's submission) and distinct from the application-wide
+  // "General Post-Adoption Note" (AdoptionApplicationRepository.
+  // addPrivateNote/notesLog) — this belongs to THIS follow-up only, is
+  // freely editable at any time by staff, and is never shown to the
+  // adopter.
+  final String? adminNote;
+  final DateTime? adminNoteUpdatedAt;
+  final String? adminNoteUpdatedBy;
+
   final Map<String, dynamic> raw;
 
   const FollowUpRecord({
@@ -71,6 +82,9 @@ class FollowUpRecord {
     this.rescheduledAt,
     this.rescheduledBy,
     this.rescheduleReason,
+    this.adminNote,
+    this.adminNoteUpdatedAt,
+    this.adminNoteUpdatedBy,
     required this.raw,
   });
 
@@ -110,6 +124,9 @@ class FollowUpRecord {
       rescheduledAt: ts(data['rescheduledAt']),
       rescheduledBy: data['rescheduledBy'] as String?,
       rescheduleReason: data['rescheduleReason'] as String?,
+      adminNote: data['adminNote'] as String?,
+      adminNoteUpdatedAt: ts(data['adminNoteUpdatedAt']),
+      adminNoteUpdatedBy: data['adminNoteUpdatedBy'] as String?,
       raw: data,
     );
   }

@@ -119,6 +119,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
             const SizedBox(height: 16),
 
+            const TopMetricsRow(),
+
+            const SizedBox(height: 16),
+
             const CurrentOperationsSection(),
 
             const SizedBox(height: 16),

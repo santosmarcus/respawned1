@@ -791,10 +791,18 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
           const SizedBox(height: 12),
 
           Expanded(
-            child: appsAsync.when(
+            // Pull to Refresh spec §13 — same manual re-subscribe the
+            // existing "Retry" button already performs on error, now also
+            // reachable via a pull gesture; never a second/duplicate
+            // listener.
+            child: RefreshIndicator(
+              onRefresh: () async => ref.invalidate(adoptionsByStatusesProvider(statusFilter(_tab.queryStatus))),
+              child: appsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                child: Padding(
+              error: (e, _) => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                Padding(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -814,6 +822,7 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                     ],
                   ),
                 ),
+                ],
               ),
               data: (_) {
                 // `sorted` already reflects the search/animalRecordId
@@ -821,8 +830,16 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                 // branch's item count is built from, never a second,
                 // independently-filtered value.
                 if (sorted.isEmpty) {
-                  return Center(
-                    child: Text(_tab.emptyMessage, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 80),
+                        child: Center(
+                          child: Text(_tab.emptyMessage, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                        ),
+                      ),
+                    ],
                   );
                 }
                 return ListView.separated(
@@ -843,6 +860,7 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                   },
                 );
               },
+              ),
             ),
           ),
         ],
@@ -1166,7 +1184,21 @@ class _AdoptedCard extends ConsumerWidget {
                     ),
                   ],
                   const SizedBox(height: 6),
-                  Align(alignment: Alignment.centerRight, child: _ViewApplicationLink(applicationId: application.id)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Primary action label (spec: Adopted card's primary
+                      // action must read "View Post-Adoption", not just an
+                      // implicit whole-card tap) — the whole card already
+                      // opens PostAdoptionDetailsPage on tap; this makes
+                      // that explicit rather than relying on affordance
+                      // alone. "View Application" stays secondary-only.
+                      Text('View Post-Adoption →',
+                          style: GoogleFonts.zain(
+                              fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary, decoration: TextDecoration.underline)),
+                      _ViewApplicationLink(applicationId: application.id),
+                    ],
+                  ),
                 ],
               ),
             ),

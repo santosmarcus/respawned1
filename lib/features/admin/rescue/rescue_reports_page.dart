@@ -317,12 +317,20 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
 
           const SizedBox(height: 12),
 
-          // Cases list
+          // Cases list — Pull to Refresh spec §13. These providers are
+          // already live Firestore streams (they update on their own), so
+          // "refresh" here means re-subscribing the current tab's listener
+          // (the same manual invalidation the existing "Retry" button
+          // already does on error) — never a second/duplicate listener.
           Expanded(
-            child: casesAsync.when(
+            child: RefreshIndicator(
+              onRefresh: () async => ref.invalidate(casesByStatusesProvider(ref.read(effectiveStatusesProvider))),
+              child: casesAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => Center(
-                child: Padding(
+              error: (err, _) => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                Padding(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -346,16 +354,25 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                     ],
                   ),
                 ),
+                ],
               ),
               data: (cases) {
                 if (cases.isEmpty) {
-                  return Center(
-                    child: Text(
-                      filters.isEmpty
-                          ? 'No cases in this stage.'
-                          : 'No cases match your filters.',
-                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 80),
+                      child: Center(
+                        child: Text(
+                          filters.isEmpty
+                              ? 'No cases in this stage.'
+                              : 'No cases match your filters.',
+                          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                        ),
+                      ),
                     ),
+                    ],
                   );
                 }
                 return ListView.separated(
@@ -469,6 +486,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   },
                 );
               },
+              ),
             ),
           ),
         ],

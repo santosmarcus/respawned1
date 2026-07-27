@@ -204,6 +204,12 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
         'newAddress': _selectedType == 'moved' ? _pickedAddress : null,
         'newLat': _selectedType == 'moved' ? _pickedLat : null,
         'newLng': _selectedType == 'moved' ? _pickedLng : null,
+        // Community Location Approval spec §9 — an "Animal moved" update
+        // starts pending; the case's own official address/lat/lng are
+        // never touched until an admin explicitly approves it
+        // (RescueCaseRepository.approveLocationUpdate). Every other report
+        // type has no approval concept at all (null, not 'pending').
+        'approvalStatus': _selectedType == 'moved' ? 'pending' : null,
         'photoUrl': photoUrl,
         'timestamp': FieldValue.serverTimestamp(),
       });
@@ -421,12 +427,48 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     return '${months[d.month]} ${d.day}, ${d.year}';
   }
 
+  // Community Location Approval spec §9 — never implies the case's
+  // official location changed while still pending.
+  Widget? _approvalBadge(Map<String, dynamic> r) {
+    final status = r['approvalStatus'] as String?;
+    if (status == null) return null;
+    final (label, color) = switch (status) {
+      'approved' => ('Location change approved', AppColors.greenrspwn),
+      'rejected' => ('Location change rejected', Colors.redAccent),
+      _ => ('Pending approval', const Color(0xFF9C6B10)),
+    };
+    final approvedAt = r['approvedAt'] as Timestamp?;
+    final approvedBy = r['approvedBy'] as String?;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+            child: Text(label, style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
+          ),
+          if (status == 'approved' && approvedBy != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Approved by $approvedBy${approvedAt != null ? ' on ${_formatDate(approvedAt.toDate())}' : ''}',
+                style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _reportTile(Map<String, dynamic> r) {
     final ts = r['timestamp'] as Timestamp?;
     final date = ts?.toDate();
     final newAddress = r['newAddress'] as String?;
     final comment = r['comment'] as String?;
     final photoUrl = r['photoUrl'] as String?;
+    final approvalBadge = _approvalBadge(r);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -509,6 +551,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 ],
               ),
             ),
+          if (approvalBadge != null) approvalBadge,
         ],
       ),
     );

@@ -1583,6 +1583,13 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
   bool _confirmCare = false;
   bool _isSubmitting = false;
 
+  // Return Autofill spec §7 — prefilled once in initState (a one-time
+  // read, not a stream), so nothing here ever overwrites an in-progress
+  // edit on rebuild; the user can freely edit either field afterward.
+  final _contactNumberCtrl = TextEditingController();
+  final _returnAddressCtrl = TextEditingController();
+  bool _prefilling = true;
+
   static const _reasonOptions = [
     'Financial Difficulties',
     'Housing Restrictions',
@@ -1601,10 +1608,55 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _prefillContactAndAddress();
+  }
+
+  @override
   void dispose() {
     _otherReasonCtrl.dispose();
     _explanationCtrl.dispose();
+    _contactNumberCtrl.dispose();
+    _returnAddressCtrl.dispose();
     super.dispose();
+  }
+
+  // Priority (spec §7): current authenticated user's own profile phone/
+  // location -> the adoption application's own personal.adopterPhone/
+  // homeAddress -> nothing (left blank, never guessed). Deliberately never
+  // falls back to the original rescue location, clinic, or organization
+  // address — those aren't a return pickup location.
+  Future<void> _prefillContactAndAddress() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      String? profilePhone;
+      String? profileLocation;
+      if (uid != null) {
+        final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        profilePhone = userDoc.data()?['phone'] as String?;
+        profileLocation = userDoc.data()?['locationText'] as String?;
+      }
+
+      final appSnap = await FirebaseFirestore.instance.collection('adoptions').doc(widget.adoptionId).get();
+      final app = appSnap.exists ? AdoptionApplication.fromFirestore(appSnap) : null;
+
+      if (!mounted) return;
+      setState(() {
+        _contactNumberCtrl.text = (profilePhone?.trim().isNotEmpty ?? false) ? profilePhone!.trim() : (app?.adopterPhone ?? '');
+        final personal = (app?.raw['personal'] as Map?) ?? const {};
+        final appHomeAddress = personal['homeAddress'] as String? ?? app?.adopterCity ?? '';
+        _returnAddressCtrl.text = (profileLocation?.trim().isNotEmpty ?? false) ? profileLocation!.trim() : appHomeAddress;
+        _prefilling = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _prefilling = false);
+    }
+  }
+
+  bool _isValidPhone(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.length >= 7;
   }
 
   Future<void> _addImage() async {
@@ -1627,6 +1679,14 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
   }
 
   Future<void> _submit() async {
+    if (!_isValidPhone(_contactNumberCtrl.text)) {
+      _showSnack('Please enter a valid contact number.');
+      return;
+    }
+    if (_returnAddressCtrl.text.trim().isEmpty) {
+      _showSnack('Please enter a return/pickup address.');
+      return;
+    }
     if (_reason == null) {
       _showSnack('Please select a return reason.');
       return;
@@ -1674,6 +1734,8 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
         explanation: _explanationCtrl.text.trim(),
         images: urls,
         actorUid: FirebaseAuth.instance.currentUser?.uid ?? '',
+        contactNumber: _contactNumberCtrl.text.trim(),
+        returnAddress: _returnAddressCtrl.text.trim(),
       );
 
       if (mounted) {
@@ -1738,6 +1800,45 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
                       value: widget.adoptionDate != null
                           ? _formatDate(widget.adoptionDate!)
                           : '-',
+                    ),
+                    const SizedBox(height: 18),
+
+                    // Return Autofill spec §7 — prefilled where possible,
+                    // always editable, clearly labeled to distinguish this
+                    // from the retrieval address/date the org sets later
+                    // when scheduling.
+                    Text('Contact number',
+                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _contactNumberCtrl,
+                      enabled: !_prefilling,
+                      keyboardType: TextInputType.phone,
+                      style: GoogleFonts.zain(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. 09171234567',
+                        hintStyle: GoogleFonts.zain(fontSize: 13),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.slaterspwn)),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text('Return/pickup address',
+                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _returnAddressCtrl,
+                      enabled: !_prefilling,
+                      maxLines: 2,
+                      style: GoogleFonts.zain(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Where the animal can be picked up',
+                        hintStyle: GoogleFonts.zain(fontSize: 13),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.slaterspwn)),
+                      ),
                     ),
                     const SizedBox(height: 18),
 

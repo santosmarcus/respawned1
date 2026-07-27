@@ -737,6 +737,25 @@ class AdoptionApplicationRepository {
     });
   }
 
+  /// Sets (or clears, when [note] is empty) this specific follow-up's own
+  /// admin note (Post-Adoption Notes spec §4) — never the adopter's
+  /// [FollowUpRecord.confirmationNotes], and never the application-wide
+  /// General Post-Adoption Note ([addPrivateNote]/notesLog). Allowed
+  /// regardless of the follow-up's status — the UI decides whether to keep
+  /// completed items read-only.
+  Future<void> setFollowUpAdminNote({
+    required String applicationId,
+    required String followUpId,
+    required String note,
+    required String actorName,
+  }) async {
+    await _followUpsOf(applicationId).doc(followUpId).update({
+      'adminNote': note,
+      'adminNoteUpdatedAt': FieldValue.serverTimestamp(),
+      'adminNoteUpdatedBy': actorName,
+    });
+  }
+
   /// Only allowed by the UI once a response was submitted and confirmed —
   /// unless [manualOverride] is set (admin closing an unanswered follow-up),
   /// which requires [reason] and is recorded as such (spec §12).
@@ -914,6 +933,13 @@ class AdoptionApplicationRepository {
     required String explanation,
     required List<String> images,
     required String actorUid,
+    // Return Autofill spec §7 — the adopter's own contact number/pickup
+    // address at request time. Deliberately separate from
+    // retrievalAddress/retrievalDateTime below, which the ORG sets later
+    // during scheduling (a different stage of the same state machine) —
+    // never conflated with each other.
+    String? contactNumber,
+    String? returnAddress,
   }) async {
     await _adoptionDoc(applicationId).update({
       'returnRequest': {
@@ -922,6 +948,8 @@ class AdoptionApplicationRepository {
         'urgency': urgency,
         'explanation': explanation,
         'images': images,
+        if (contactNumber != null && contactNumber.isNotEmpty) 'contactNumber': contactNumber,
+        if (returnAddress != null && returnAddress.isNotEmpty) 'returnAddress': returnAddress,
         'requestedBy': actorUid,
         'requestedAt': Timestamp.now(),
         'status': ReturnRequestStatus.pendingReview.name,

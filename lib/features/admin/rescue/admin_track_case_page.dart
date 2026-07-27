@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
@@ -140,9 +141,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     );
   }
 
-  Future<void> _closeCase(RescueCase c) async {
+  Future<void> _closeCase(RescueCase c, {ClosureReason? initialReason}) async {
     if (_closing) return;
-    final result = await showCloseCaseSheet(context, rescueCase: c);
+    final result = await showCloseCaseSheet(context, rescueCase: c, initialReason: initialReason);
     if (result == null || !mounted) return;
     setState(() => _closing = true);
     try {
@@ -718,14 +719,14 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   final c = RescueCase.fromMap(widget.caseId, data);
                   if (value == 'change_clinic') {
                     _changeClinic(c);
-                  } else if (value == 'close_case') {
-                    _closeCase(c);
+                  } else if (value == 'animal_moved') {
+                    _closeCase(c, initialReason: ClosureReason.animalMoved);
                   }
                 },
                 itemBuilder: (context) => [
                   if (data['vetClinicName'] != null)
                     const PopupMenuItem(value: 'change_clinic', child: Text('Change Clinic')),
-                  const PopupMenuItem(value: 'close_case', child: Text('Close Case')),
+                  const PopupMenuItem(value: 'animal_moved', child: Text('Animal Moved / Could Not Be Located')),
                 ],
               ),
             ],

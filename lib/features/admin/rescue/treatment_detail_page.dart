@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
@@ -72,13 +73,16 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
   }
 
-  /// General Close Case (spec §2) — separate from [_closeDeceasedCase]
-  /// below, which stays exactly as-is for its own specific
-  /// deceased-with-financial-summary flow. This is for every other
-  /// exception reason while a case is still in Treatment.
-  Future<void> _closeCase(RescueCase c) async {
+  /// Reason-specific Close Case — separate from [_closeDeceasedCase] below,
+  /// which stays exactly as-is for its own specific
+  /// deceased-with-financial-summary flow. The bare "for any reason, no
+  /// context" popup entry this used to back was removed (Admin Rescue
+  /// Cleanup spec §1 — same unsafe-shortcut category as the generic Close
+  /// Case/End Rescue actions already removed from rescue_detail_page.dart);
+  /// [initialReason] is now always passed by the one remaining caller.
+  Future<void> _closeCase(RescueCase c, {ClosureReason? initialReason}) async {
     if (_closingCase) return;
-    final result = await showCloseCaseSheet(context, rescueCase: c);
+    final result = await showCloseCaseSheet(context, rescueCase: c, initialReason: initialReason);
     if (result == null || !mounted) return;
     setState(() => _closingCase = true);
     try {
@@ -508,9 +512,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: AppColors.background),
               enabled: !_closingCase,
-              onSelected: (_) => _closeCase(c),
+              onSelected: (_) => _closeCase(c, initialReason: ClosureReason.animalMoved),
               itemBuilder: (context) => const [
-                PopupMenuItem(value: 'close_case', child: Text('Close Case')),
+                PopupMenuItem(value: 'animal_moved', child: Text('Animal Moved / Could Not Be Located')),
               ],
             ),
         ],

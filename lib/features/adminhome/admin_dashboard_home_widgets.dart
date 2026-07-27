@@ -14,6 +14,7 @@ import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 
 /// Action Required + Current Operations — replaces adminhome_screen.dart's
 /// old hardcoded gauge/"Pending Requests" placeholder block with real,
@@ -353,6 +354,130 @@ final staleTransportOffersProvider = StreamProvider.autoDispose<List<TransportAs
 final overdueFollowUpsProvider = StreamProvider.autoDispose<List<FollowUpRecord>>((ref) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamOverdueFollowUps();
 });
+
+// ─── Top compact metrics: Capacity / Active Rescues / Active Volunteers ──
+
+/// A compact card for the top metrics row — deliberately smaller/denser
+/// than the Current Operations KPI cards below it, matching the old
+/// Capacity gauge's intent ("first thing under Action Required") without
+/// reviving the fabricated gauge graphic itself.
+class _CompactMetricCard extends StatelessWidget {
+  final String title;
+  final String primary;
+  final String? secondary;
+  final VoidCallback? onTap;
+
+  const _CompactMetricCard({required this.title, required this.primary, this.secondary, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              const SizedBox(height: 6),
+              Text(primary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.tiltWarp(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              if (secondary != null) ...[
+                const SizedBox(height: 2),
+                Text(secondary!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shelter Capacity / Active Rescues / Active Volunteers — the three
+/// compact top-level metrics requested right after Action Required.
+class TopMetricsRow extends ConsumerWidget {
+  const TopMetricsRow({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Capacity — no configured shelter-capacity field exists anywhere in
+    // the data model today (organizations/animal records/shelter module
+    // all lack one — confirmed by inspection). Never infers a percentage;
+    // shows the real current-occupancy count with an explicit
+    // "not configured" line instead of a fabricated capacity/percentage.
+    final animalsAsync = ref.watch(allAnimalRecordsProvider);
+    final currentOccupancy = animalsAsync.asData?.value
+        .where((a) => !a.archived && a.status != 'deceased' && a.adoptionStatus != 'adopted' && a.adoptionStatus != 'deceased')
+        .length;
+
+    final review = ref.watch(casesForTabProvider(RescuePipelineTab.review));
+    final assign = ref.watch(casesForTabProvider(RescuePipelineTab.assign));
+    final ongoing = ref.watch(casesForTabProvider(RescuePipelineTab.ongoing));
+    final treatment = ref.watch(casesForTabProvider(RescuePipelineTab.treatment));
+    final intake = ref.watch(casesForTabProvider(RescuePipelineTab.intake));
+    final activeTabs = [review, assign, ongoing, treatment, intake];
+    final allLoaded = activeTabs.every((a) => a.hasValue);
+    final activeCaseCount = allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.asData!.value.length) : null;
+    final activeAnimalCount =
+        allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.asData!.value.fold<int>(0, (s, c) => s + c.animalCount)) : null;
+
+    // Active Volunteers — no distinct active/inactive account field exists
+    // for rescue_volunteer users (confirmed by inspection); the only real
+    // presence signal already used elsewhere (Volunteers page itself) is
+    // PetTransporter.isOnline (online + seen within the last 5 minutes).
+    // Reported honestly as "online now" rather than implying a broader
+    // "active" concept the data can't actually support.
+    final volunteersAsync = ref.watch(rescueVolunteersProvider);
+    final onlineVolunteers = volunteersAsync.asData?.value.where((v) => v.isOnline).length;
+    final totalVolunteers = volunteersAsync.asData?.value.length;
+
+    return Row(
+      children: [
+        _CompactMetricCard(
+          title: 'Capacity',
+          primary: currentOccupancy == null ? '—' : '$currentOccupancy animals',
+          secondary: 'Capacity not configured',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AnimalRecordsPage())),
+        ),
+        const SizedBox(width: 10),
+        _CompactMetricCard(
+          title: 'Active Rescues',
+          primary: activeCaseCount == null ? '—' : '$activeCaseCount cases',
+          secondary: activeAnimalCount == null ? null : '$activeAnimalCount animals',
+          onTap: () => _pushRescueReview(context, ref),
+        ),
+        const SizedBox(width: 10),
+        _CompactMetricCard(
+          title: 'Active Volunteers',
+          primary: onlineVolunteers == null ? '—' : '$onlineVolunteers online',
+          secondary: totalVolunteers == null ? 'True active-state requires additional data' : '$totalVolunteers registered',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VolunteersPage())),
+        ),
+      ],
+    );
+  }
+
+  void _pushRescueReview(BuildContext context, WidgetRef ref) {
+    ref.read(rescuePipelineTabProvider.notifier).select(RescuePipelineTab.review);
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const RescueReportsPage()));
+  }
+}
 
 // ─── Current Operations KPIs ─────────────────────────────────────────────
 

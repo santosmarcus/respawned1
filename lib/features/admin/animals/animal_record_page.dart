@@ -530,22 +530,44 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
           // layout is active, so switching view never loses or re-queries
           // anything.
           Expanded(
-            child: recordsAsync.when(
+            // Pull to Refresh spec §13 — allAnimalRecordsProvider is already
+            // a live stream; refreshing just re-subscribes it (matches the
+            // same manual-invalidate pattern used elsewhere), never a
+            // second/duplicate listener.
+            child: RefreshIndicator(
+              onRefresh: () async => ref.invalidate(allAnimalRecordsProvider),
+              child: recordsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                child: Text('Could not load animal records: $e',
-                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              error: (e, _) => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 80),
+                    child: Center(
+                      child: Text('Could not load animal records: $e',
+                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                    ),
+                  ),
+                ],
               ),
               data: (all) {
                 final filtered = all.where((a) => _matchesFilters(a) && _matchesSearch(a, _searchQuery)).toList();
                 final sorted = _sorted(filtered);
 
                 if (sorted.isEmpty) {
-                  return Center(
-                    child: Text('No animal records found.',
-                        style: GoogleFonts.zain(
-                            fontSize: 14,
-                            color: AppColors.textSecondary)),
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 80),
+                        child: Center(
+                          child: Text('No animal records found.',
+                              style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  color: AppColors.textSecondary)),
+                        ),
+                      ),
+                    ],
                   );
                 }
 
@@ -601,6 +623,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   },
                 );
               },
+              ),
             ),
           ),
 

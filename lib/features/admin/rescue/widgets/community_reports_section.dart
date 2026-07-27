@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -44,7 +45,7 @@ class CommunityReportsSection extends ConsumerWidget {
           }
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: reports.map((r) => _CommunityReportTile(report: r)).toList(),
+            children: reports.map((r) => _CommunityReportTile(caseId: caseId, report: r)).toList(),
           );
         },
       ),
@@ -52,12 +53,63 @@ class CommunityReportsSection extends ConsumerWidget {
   }
 }
 
-class _CommunityReportTile extends StatelessWidget {
+class _CommunityReportTile extends ConsumerStatefulWidget {
+  final String caseId;
   final CommunityReport report;
-  const _CommunityReportTile({required this.report});
+  const _CommunityReportTile({required this.caseId, required this.report});
+
+  @override
+  ConsumerState<_CommunityReportTile> createState() => _CommunityReportTileState();
+}
+
+class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
+  bool _busy = false;
+
+  String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _actorName {
+    final n = FirebaseAuth.instance.currentUser?.displayName;
+    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
+
+  Future<void> _approve() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).approveLocationUpdate(
+            caseId: widget.caseId,
+            reportId: widget.report.id,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not approve: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _reject() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).rejectLocationUpdate(
+            caseId: widget.caseId,
+            reportId: widget.report.id,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not reject: $e'), backgroundColor: Colors.redAccent));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final report = widget.report;
     final name = (report.reporterName?.trim().isNotEmpty ?? false)
         ? report.reporterName!
         : 'A community member';
@@ -95,6 +147,51 @@ class _CommunityReportTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text('New location: ${report.newAddress}',
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                ],
+                // Community Location Approval spec §9 — the case's own
+                // address/lat/lng only ever change once Approve is tapped
+                // here; this card never implies otherwise while pending.
+                if (report.approvalStatus == 'pending') ...[
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFF9C6B10).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+                      child: Text('Pending approval',
+                          style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: const Color(0xFF9C6B10))),
+                    ),
+                  ]),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    OutlinedButton(
+                      onPressed: _busy ? null : _reject,
+                      style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent), minimumSize: const Size(0, 32)),
+                      child: const Text('Reject', style: TextStyle(fontSize: 12)),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _busy ? null : _approve,
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.greenrspwn, foregroundColor: Colors.white, minimumSize: const Size(0, 32)),
+                      child: _busy
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Text('Approve Location Change', style: TextStyle(fontSize: 12)),
+                    ),
+                  ]),
+                ] else if (report.approvalStatus == 'approved') ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Location change approved by ${report.approvedBy ?? '—'}${report.approvedAt != null ? ' on ${_formatReportDateTime(report.approvedAt)}' : ''}',
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.greenrspwn),
+                  ),
+                ] else if (report.approvalStatus == 'rejected') ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Location change rejected by ${report.rejectedBy ?? '—'}${report.rejectedAt != null ? ' on ${_formatReportDateTime(report.rejectedAt)}' : ''}',
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.redAccent),
+                  ),
                 ],
               ],
             ),
