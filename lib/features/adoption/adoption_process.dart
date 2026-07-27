@@ -69,7 +69,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   final _ageCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  String? _city;
+  final _homeAddressCtrl = TextEditingController();
 
   // Household & Living Information
   String? _residenceType;
@@ -233,6 +233,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     _ageCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
+    _homeAddressCtrl.dispose();
     _residenceOtherCtrl.dispose();
     _currentOtherTypeCtrl.dispose();
     _reasonCtrl.dispose();
@@ -390,7 +391,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             data['phone'] ?? '';
         _emailCtrl.text =
             FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
-        _city = data['city'];
+        _homeAddressCtrl.text = data['homeAddress']?.toString() ?? data['address']?.toString() ?? data['city']?.toString() ?? '';
       });
     } catch (_) {}
   }
@@ -473,7 +474,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         _emailCtrl.text = personal['adopterEmail'] as String? ?? '';
         _ageCtrl.text = personal['adopterAge'] as String? ?? '';
         _phoneCtrl.text = personal['adopterPhone'] as String? ?? '';
-        _city = personal['adopterCity'] as String?;
+        _homeAddressCtrl.text = personal['homeAddress']?.toString() ?? personal['adopterHomeAddress']?.toString() ?? personal['adopterCity']?.toString() ?? '';
 
         // Household & Living Information
         _residenceType = household['residenceType'] as String?;
@@ -718,7 +719,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           'adopterEmail': _emailCtrl.text.trim(),
           'adopterAge': _ageCtrl.text.trim(),
           'adopterPhone': _phoneCtrl.text.trim(),
-          'adopterCity': _city,
+          'homeAddress': _homeAddressCtrl.text.trim(),
+          // Legacy field kept for backward compatibility with older reads.
+          'adopterCity': _homeAddressCtrl.text.trim(),
         },
         'household': {
           'residenceType': _residenceType,
@@ -1246,29 +1249,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 ],
               ),
               const SizedBox(height: 12),
-              _DropdownField<String>(
-                label: 'City',
-                value: _city,
-                items: const [
-                  'Quezon City',
-                  'Manila',
-                  'Caloocan',
-                  'Taguig',
-                  'Paranaque',
-                  'Valenzuela',
-                  'Las Pinas',
-                  'Muntinlupa',
-                  'Makati',
-                  'Mandaluyong',
-                  'Malabon',
-                  'Marikina',
-                  'Navotas',
-                  'Pasig',
-                  'Pateros',
-                  'San Juan',
-                  'Other'
-                ],
-                onChanged: (v) => setState(() => _city = v),
+              _FormField(
+                controller: _homeAddressCtrl,
+                label: 'Home Address',
+                hint: 'Enter your complete home address',
+                maxLines: 3,
               ),
 
               const SizedBox(height: 22),
@@ -2005,73 +1990,39 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         // date/time actually arrives is handled in _loadExistingAdoption.
         if (_feePaid && _scheduledReleaseDate != null) ...[
           const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.lavenderrspwn.withOpacity(0.35),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.local_shipping_outlined,
-                        color: AppColors.textPrimary, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Delivery scheduled for ${_formatDate(_scheduledReleaseDate!)} at ${_formatTime(_scheduledReleaseDate!)}',
-                        style: GoogleFonts.zain(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Delivery attempts used: $_deliveryAttempts of $_maxDeliveryAttempts',
-                  style: GoogleFonts.zain(
-                      fontSize: 12, color: AppColors.textPrimary.withOpacity(0.75)),
-                ),
-                if (!_isReadOnly) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: (_isSubmitting ||
-                          _deliveryAttempts >= _maxDeliveryAttempts)
-                          ? null
-                          : _requestDeliveryReschedule,
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(
-                          color: _deliveryAttempts >= _maxDeliveryAttempts
-                              ? AppColors.slaterspwn
-                              : AppColors.greenrspwn,
-                          width: 1.5,
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                      ),
-                      child: Text(
-                        _deliveryAttempts >= _maxDeliveryAttempts
-                            ? 'No reschedule attempts remaining'
-                            : 'Request Reschedule',
-                        style: GoogleFonts.zain(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary),
-                      ),
-                    ),
+          _deliveryInfoCard(showAttempts: true, useGrayAttempts: true),
+          if (!_isReadOnly) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: (_isSubmitting ||
+                    _deliveryAttempts >= _maxDeliveryAttempts)
+                    ? null
+                    : _requestDeliveryReschedule,
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(
+                    color: _deliveryAttempts >= _maxDeliveryAttempts
+                        ? AppColors.slaterspwn
+                        : AppColors.greenrspwn,
+                    width: 1.5,
                   ),
-                ],
-              ],
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                child: Text(
+                  _deliveryAttempts >= _maxDeliveryAttempts
+                      ? 'No reschedule attempts remaining'
+                      : 'Request Reschedule',
+                  style: GoogleFonts.zain(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary),
+                ),
+              ),
             ),
-          ),
+          ],
         ],
 
         if (!_isReadOnly) ...[
@@ -2149,6 +2100,62 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
+
+  Widget _deliveryInfoCard({required bool showAttempts, required bool useGrayAttempts}) {
+    if (!_feePaid || _scheduledReleaseDate == null) return const SizedBox.shrink();
+
+    final attemptsColor = useGrayAttempts
+        ? Colors.grey.shade600
+        : AppColors.textPrimary.withOpacity(0.75);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.lavenderrspwn.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.local_shipping_outlined,
+                  color: AppColors.textPrimary, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Delivery Date',
+                  style: GoogleFonts.zain(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${_formatDate(_scheduledReleaseDate!)} at ${_formatTime(_scheduledReleaseDate!)}',
+            style: GoogleFonts.zain(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary),
+          ),
+          if (showAttempts) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Delivery attempts used: $_deliveryAttempts of $_maxDeliveryAttempts',
+              style: GoogleFonts.zain(
+                  fontSize: 12,
+                  color: attemptsColor),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   // 5th step -- adoption success
   Widget _buildAdoptionDay() {
     return Column(
@@ -2181,6 +2188,11 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           style: GoogleFonts.zain(
               fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
+
+        if (_feePaid && _scheduledReleaseDate != null) ...[
+          const SizedBox(height: 16),
+          _deliveryInfoCard(showAttempts: true, useGrayAttempts: true),
+        ],
 
         const SizedBox(height: 16),
 
