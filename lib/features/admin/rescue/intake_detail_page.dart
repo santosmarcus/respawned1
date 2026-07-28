@@ -14,6 +14,7 @@ import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 
 typedef ShelterDestination = ({
@@ -687,11 +688,25 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 _InfoItem('Address', c.intakeDestinationAddress!),
               const SizedBox(height: 16),
 
-              // Compact transport summary only — the full transporter card
-              // (avatar, vehicle, Message/Call, Busy chip) already lives on
-              // Track Case and isn't repeated here. Reassign Transporter
-              // moved to the overflow menu (see AppBar actions above).
+              // Transporter Card Regression spec §4 — restores the shared
+              // transporter card here too (it previously showed only a
+              // compact text summary, deferring to Track Case for the full
+              // card). Reuses `latestAssignment` — the SAME
+              // currentAssignmentProvider value _confirmIntake itself uses
+              // for transporterUid/Name/Type — so this can never disagree
+              // with what intake actually records, and tolerates legacy
+              // case-level assignments the same way that fallback already
+              // does. Stays visible (with a "Completed" chip) after
+              // delivery for historical context; Reassign Transporter
+              // stays in the overflow menu (see AppBar actions above) —
+              // not re-added to the card itself.
               _SectionHeader('Clinic-to-Shelter Transport'),
+              if (latestAssignment != null &&
+                  (latestAssignment.status == TransportAssignmentStatus.accepted ||
+                      latestAssignment.status == TransportAssignmentStatus.completed)) ...[
+                TransporterDetailsCard(assignment: latestAssignment),
+                const SizedBox(height: 8),
+              ],
               if (selectedAnimalsReceived)
                 Container(
                   padding: const EdgeInsets.all(12),

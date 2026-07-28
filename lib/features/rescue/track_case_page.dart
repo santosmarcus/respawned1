@@ -1,9 +1,7 @@
-import 'dart:math' as math;
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../app_theme.dart';
@@ -11,6 +9,9 @@ import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 
 class TrackCasePage extends StatefulWidget {
@@ -1104,175 +1105,37 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
 
   Map<String, dynamic> get data => widget.data;
 
-  double _distanceKm(double lat1, double lng1, double lat2, double lng2) {
-    const earthRadiusKm = 6371.0;
-    double deg2rad(double deg) => deg * (math.pi / 180.0);
-    final dLat = deg2rad(lat2 - lat1);
-    final dLng = deg2rad(lng2 - lng1);
-    final a =
-        math.pow(math.sin(dLat / 2), 2) +
-        math.cos(deg2rad(lat1)) *
-            math.cos(deg2rad(lat2)) *
-            math.pow(math.sin(dLng / 2), 2);
-    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-    return earthRadiusKm * c;
-  }
-
-  Future<void> _showCallSheet(BuildContext context, String riderName) async {
-    final riderId = data['assignedVolunteerId'] as String?;
-    String? phone;
-    if (riderId != null && riderId.isNotEmpty) {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(riderId)
-          .get();
-      phone = userDoc.data()?['phone'] as String?;
-    }
-
-    if (!context.mounted) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          riderName,
-          style: GoogleFonts.tiltWarp(
-            fontSize: 16,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Text(
-          (phone == null || phone.isEmpty)
-              ? 'No contact number on file for this transporter yet.'
-              : phone,
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-        ),
-        actions: [
-          if (phone != null && phone.isNotEmpty)
-            TextButton(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: phone!));
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('Number copied.')));
-              },
-              child: Text(
-                'Copy',
-                style: GoogleFonts.zain(
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
+  // Transporter Card Regression spec §2 — replaced the old bespoke card
+  // (which read flat `assignedVolunteerName`/`assignedVehicle`/
+  // `assignedPlate`/`riderLastLat`/`riderLastLng` case fields with no
+  // status gating at all, so it could keep showing a rejected/expired/
+  // cancelled/superseded offer's details) with the SAME shared
+  // TransporterDetailsCard admin Track Case already uses, fed by the live
+  // `currentAssignmentProvider` stream and gated on
+  // `TransportAssignmentStatus.accepted` — never inferred from a stale or
+  // non-accepted offer. Call-only (TransporterDetailsCard already omits
+  // Message, since the case's own Messages section covers that).
+  Widget _buildTransporterSection(BuildContext context) {
+    if (!widget.isReporter) return const SizedBox.shrink();
+    return Consumer(
+      builder: (context, ref, _) {
+        final assignmentAsync = ref.watch(currentAssignmentProvider(widget.caseId));
+        final assignment = assignmentAsync.asData?.value;
+        final accepted = assignment != null && assignment.status == TransportAssignmentStatus.accepted;
+        if (!accepted) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
             child: Text(
-              'Close',
-              style: GoogleFonts.zain(color: AppColors.textSecondary),
+              'Waiting for a transporter to accept the assignment.',
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget? _buildRiderInfoCard(BuildContext context) {
-    if (!widget.isReporter) return null;
-    final name = data['assignedVolunteerName'] as String?;
-    if (name == null || name.trim().isEmpty) return null;
-
-    final vehicle = (data['assignedVehicle'] ?? '').toString();
-    final plate = (data['assignedPlate'] ?? '').toString();
-
-    String? distanceLabel;
-    final riderLat = data['riderLastLat'];
-    final riderLng = data['riderLastLng'];
-    final caseLat = data['lat'];
-    final caseLng = data['lng'];
-    if (riderLat is num &&
-        riderLng is num &&
-        caseLat is num &&
-        caseLng is num) {
-      final km = _distanceKm(
-        riderLat.toDouble(),
-        riderLng.toDouble(),
-        caseLat.toDouble(),
-        caseLng.toDouble(),
-      );
-      distanceLabel = '${km.toStringAsFixed(1)}km';
-    }
-
-    final vehicleLine = [plate, vehicle].where((s) => s.isNotEmpty).join('  ');
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: AppColors.slaterspwn,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.person,
-                color: AppColors.textSecondary,
-                size: 28,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  if (distanceLabel != null)
-                    Text(
-                      distanceLabel,
-                      style: GoogleFonts.zain(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  if (vehicleLine.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      vehicleLine,
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.call, color: AppColors.textPrimary),
-              onPressed: () => _showCallSheet(context, name),
-            ),
-          ],
-        ),
-      ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: TransporterDetailsCard(assignment: assignment),
+        );
+      },
     );
   }
 
@@ -1484,14 +1347,13 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   @override
   Widget build(BuildContext context) {
     final photoUrls = List<String>.from(data['photoUrls'] ?? []);
-    final riderCard = _buildRiderInfoCard(context);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (riderCard != null) riderCard,
+          _buildTransporterSection(context),
 
           // Full rejection detail (reason, rejected date, reviewer) lives
           // here rather than on the compact Home Activity card — see

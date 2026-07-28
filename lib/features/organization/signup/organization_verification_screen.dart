@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
-import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
+import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
 
 /// Step 2 of the Organization signup flow (spec §4) — reuses the same
 /// image_picker + Firebase Storage stack the pet-transporter verification
@@ -117,11 +117,27 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     }
     setState(() => _submitting = true);
     try {
+      // Organization Admin Signup Completion spec §7-9 — no reviewer
+      // interface exists anywhere in this codebase to ever act on
+      // `verificationStatus: pending`, so leaving the admin on a waiting
+      // screen after this write is a dead end, not a real pending state.
+      // `submitVerification` still honestly records `verificationStatus:
+      // pending` (never `approved` — see organization_repository.dart's
+      // own doc comment) so a real manual review, if one is ever added or
+      // done directly via the Firestore console, can still act on this
+      // later; access to the admin interface is simply no longer gated on
+      // that ever happening. `pushAndRemoveUntil` clears the entire
+      // signup stack so Back can never return to this completed form and
+      // risk a second submission.
       await _repo.submitVerification(widget.organizationId);
       if (mounted) {
-        Navigator.pushReplacement(
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Organization set up. Verification documents submitted for review.')),
+        );
+        Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => OrganizationVerificationPendingPage(organizationId: widget.organizationId)),
+          MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
+          (route) => false,
         );
       }
     } catch (e) {

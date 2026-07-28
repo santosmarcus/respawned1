@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
@@ -579,10 +578,6 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                           await _repo.revokeInvitation(invite.id);
                           _snack('Invitation cancelled.');
                         },
-                        onCopyDevLink: () {
-                          Clipboard.setData(ClipboardData(text: invite.id));
-                          _snack('Dev-only: invitation ID copied. Real email delivery is not implemented.');
-                        },
                       ),
                   ],
                 );
@@ -710,13 +705,11 @@ class _InvitationRow extends StatelessWidget {
   final VoidCallback onResend;
   final VoidCallback onChangeRole;
   final VoidCallback onRevoke;
-  final VoidCallback onCopyDevLink;
   const _InvitationRow({
     required this.invitation,
     required this.onResend,
     required this.onChangeRole,
     required this.onRevoke,
-    required this.onCopyDevLink,
   });
 
   @override
@@ -757,6 +750,10 @@ class _InvitationRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
+          // Invitation Cleanup spec §1 — Copy Dev Link (a development-only
+          // affordance that exposed the raw invitation doc id, standing in
+          // for real email delivery) removed; Resend/Change Role/Cancel
+          // Invitation are the full retained action set.
           Wrap(
             spacing: 8,
             children: [
@@ -767,7 +764,6 @@ class _InvitationRow extends StatelessWidget {
                 style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFE05353), side: const BorderSide(color: Color(0xFFE05353))),
                 child: const Text('Cancel Invitation'),
               ),
-              TextButton(onPressed: onCopyDevLink, child: const Text('Copy Dev Link')),
             ],
           ),
         ],

@@ -305,62 +305,104 @@ class AnimalRecordGridTile extends StatelessWidget {
       if (animal.breed.isNotEmpty) animal.breed,
     ].join(' · ');
 
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: selected ? Border.all(color: AppColors.yellowrspwn, width: 2) : null,
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: 1,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: animal.photoUrls.isNotEmpty
-                    ? Image.network(
-                        animal.photoUrls.first,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _gridPlaceholder(),
-                      )
-                    : _gridPlaceholder(),
+    // Animal Records Grid Overflow spec — a GridView cell has a fixed
+    // height (from the delegate's childAspectRatio), unlike a ListView row,
+    // so a long name/breed, both status badges present at once, or a
+    // larger text-scale factor could push this Column past that fixed
+    // height and throw a render overflow. LayoutBuilder + FittedBox(fit:
+    // scaleDown) lays the content out at its natural (unconstrained)
+    // height at a FIXED width (so Text ellipsis/wrapping still computes
+    // correctly), then uniformly scales the whole card content down only
+    // if it doesn't fit — never scales up, so the common case (short name,
+    // no badges) renders at full size, unaffected. This guarantees zero
+    // overflow for any combination of content length/badges/text scale
+    // without hiding any required status information.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GestureDetector(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Container(
+            width: constraints.maxWidth,
+            height: constraints.maxHeight,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: selected ? Border.all(color: AppColors.yellowrspwn, width: 2) : null,
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.topCenter,
+              child: SizedBox(
+                width: constraints.maxWidth - 16,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 1,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: animal.photoUrls.isNotEmpty
+                            ? Image.network(
+                                animal.photoUrls.first,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _gridPlaceholder(),
+                              )
+                            : _gridPlaceholder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Name + gender in one Row, never a separate top-right
+                    // trailing icon — same rule as the list card.
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            displayName,
+                            style: GoogleFonts.tiltWarp(fontSize: 13, color: AppColors.textPrimary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (genderIcon != null) ...[
+                          const SizedBox(width: 4),
+                          Icon(genderIcon, size: 14, color: AppColors.textSecondary),
+                        ],
+                      ],
+                    ),
+                    if (subtitle.isNotEmpty)
+                      Text(subtitle,
+                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    if (animal.age.isNotEmpty)
+                      Text(animal.age,
+                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    // Both badges in one Wrap (not two always-stacked full
+                    // rows) — sit side-by-side when both fit, only
+                    // dropping to a second line when they genuinely don't,
+                    // instead of always reserving two full rows of height.
+                    if (animal.hasSpecialNeeds || isInShelter(animal))
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: [
+                          if (animal.hasSpecialNeeds) specialNeedsBadge(),
+                          if (isInShelter(animal)) inShelterBadge(),
+                        ],
+                      ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 8),
-            // Name + gender in one Row, never a separate top-right trailing
-            // icon — same rule as the list card.
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    displayName,
-                    style: GoogleFonts.tiltWarp(fontSize: 13, color: AppColors.textPrimary),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (genderIcon != null) ...[
-                  const SizedBox(width: 4),
-                  Icon(genderIcon, size: 14, color: AppColors.textSecondary),
-                ],
-              ],
-            ),
-            if (subtitle.isNotEmpty)
-              Text(subtitle,
-                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (animal.age.isNotEmpty)
-              Text(animal.age, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (animal.hasSpecialNeeds) specialNeedsBadge(),
-            if (isInShelter(animal)) inShelterBadge(),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

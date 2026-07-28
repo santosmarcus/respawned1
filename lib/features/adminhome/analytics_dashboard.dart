@@ -23,14 +23,25 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 // plainly instead of showing a fabricated number.
 
 /// The four categories the admin home screen lets you switch between.
-enum AdminAnalyticsCategory { rescue, adoption, donation, shelter }
+// Analytics/Audit Cleanup spec §2 — `shelter` deliberately removed from
+// this enum (not just hidden in the UI): the category picker on
+// adminhome_screen.dart is driven directly off `AdminAnalyticsCategory.
+// values`, so removing it here is what actually removes the tab, with no
+// leftover index/blank-tab risk since that picker matches by enum
+// equality, never by numeric index. Shelter-specific data (live/non-live
+// outcome counts) was computed only inside `_ShelterAnalyticsView` below
+// (also removed) from its own `cases`/`adoptions` queries — never a shared
+// data source. Shelter occupancy/capacity (TopMetricsRow's Capacity card,
+// `shelterMaxCapacityProvider`) and Organization Profile's shelter capacity
+// field live in admin_dashboard_home_widgets.dart / organization_repository.dart
+// respectively — untouched by this removal.
+enum AdminAnalyticsCategory { rescue, adoption, donation }
 
 extension AdminAnalyticsCategoryX on AdminAnalyticsCategory {
   String get label => switch (this) {
     AdminAnalyticsCategory.rescue => 'Rescue',
     AdminAnalyticsCategory.adoption => 'Adoptions',
     AdminAnalyticsCategory.donation => 'Donations',
-    AdminAnalyticsCategory.shelter => 'Shelter',
   };
 }
 
@@ -47,8 +58,6 @@ class AdminAnalyticsSection extends StatelessWidget {
     switch (category) {
       case AdminAnalyticsCategory.rescue:
         return _RescueAnalyticsView(orgId: orgId);
-      case AdminAnalyticsCategory.shelter:
-        return _ShelterAnalyticsView(orgId: orgId);
       case AdminAnalyticsCategory.adoption:
         return const _AdoptionAnalyticsView();
       case AdminAnalyticsCategory.donation:
@@ -209,6 +218,19 @@ class _NotTrackedChart extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Rescue Analytics spec §2/§5 — the shared normalization step for
+/// species aggregation only (never mutates species_summary.dart's own
+/// display casing, which case cards/search elsewhere reuse as-is).
+/// Groups "dog"/"Dog"/"DOG" together under one canonical "Dog" bucket,
+/// and returns null for a blank/placeholder value (species_summary.dart's
+/// own "Unknown species" filler included) so charts never invent a
+/// misleading category for animals with no real species on file.
+String? _normalizedSpeciesForAnalytics(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty || trimmed.toLowerCase() == 'unknown species') return null;
+  return trimmed[0].toUpperCase() + trimmed.substring(1).toLowerCase();
 }
 
 const _chartPalette = [
@@ -447,11 +469,25 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
     _assignmentsFuture = _loadAssignments();
   }
 
+  // Rescue Analytics Regression fix — this used to filter
+  // `cases.where('organizationId', isEqualTo: widget.orgId)` whenever an
+  // org id was available. No write path anywhere in this app
+  // (rescue_page.dart's report submission, RescueCaseRepository) ever sets
+  // `organizationId` on a case document — confirmed by grep, and already
+  // documented next to _loadAssignments() below ("cases.organizationId
+  // itself is sparse/unreliable today"). Once the Organization Invitations
+  // work elsewhere in this app started actually populating
+  // `users/{uid}.organizationId` for real admin accounts, this dashboard's
+  // own org-resolution (adminhome_screen.dart's `_resolveOrg`) began
+  // returning a non-null orgId far more often than before — which flipped
+  // this filter on for most admins, and since no case ever has that field
+  // set, the query matched zero documents. That is the actual root cause
+  // of "Rescue Analytics shows no data" — not the animals[] schema change
+  // (allSpecies/speciesList already tolerate both shapes fine). Left
+  // unscoped, matching the sibling method's own established reasoning,
+  // until case documents reliably carry a real organizationId.
   Future<List<RescueCase>> _loadCases() async {
-    Query<Map<String, dynamic>> q = FirebaseFirestore.instance.collection('cases');
-    if (widget.orgId != null) {
-      q = q.where('organizationId', isEqualTo: widget.orgId);
-    }
+    final q = FirebaseFirestore.instance.collection('cases');
     final snap = await q.get();
     final cases = <RescueCase>[];
     for (final doc in snap.docs) {
@@ -539,16 +575,57 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
       }
     }
 
+    // Rescue Analytics Regression spec §3/§5 — case count vs animal count
+    // are different units and must never be conflated. `total`/`successful`/
+    // `byStatus`/`byRescueType` all count one document per case (a
+    // two-animal report is still 1 case); `animalsReported`/`bySpecies`/
+    // `byAnimalStage` flatten every case's `allSpecies`/`animalStageCounts`
+    // (a case with two cats is 2 animals).
+    var animalsReported = 0;
     final bySpecies = <String, num>{};
     for (final c in cases) {
       for (final s in c.allSpecies) {
-        bySpecies[s] = (bySpecies[s] ?? 0) + 1;
+        animalsReported++;
+        final normalized = _normalizedSpeciesForAnalytics(s);
+        if (normalized == null) continue; // blank/placeholder — not a real species
+        bySpecies[normalized] = (bySpecies[normalized] ?? 0) + 1;
       }
     }
 
     final byStatus = <String, num>{};
     for (final c in cases) {
       byStatus[c.status.label] = (byStatus[c.status.label] ?? 0) + 1;
+    }
+
+    // Rescue Type is its own case-level field (e.g. Stray/Neglect/
+    // Surrender/Lost Pet) — separate from species. Previously this chart
+    // was mislabeled "Rescue Type" while actually charting species; kept
+    // as two distinct charts now, each reading its own real source field.
+    final byRescueType = <String, num>{};
+    for (final c in cases) {
+      final rt = c.rescueType?.trim();
+      if (rt == null || rt.isEmpty) continue;
+      byRescueType[rt] = (byRescueType[rt] ?? 0) + 1;
+    }
+
+    // Animal-level workflow stage (a case can have animals in different
+    // stages at once — e.g. one animal already in Treatment while another
+    // is still at Intake). Reuses the SAME denormalized
+    // `animalStageCounts` RescueCaseRepository already maintains for the
+    // Intake tab's own query (animal_treatment_state.dart's
+    // activeStagesOf), so this chart can never disagree with the Rescue
+    // Reports tabs. Deliberately separate from `byStatus` above, which is
+    // the case's own single canonical workflow status.
+    final byAnimalStage = <String, num>{};
+    for (final c in cases) {
+      c.animalStageCounts.forEach((stage, count) {
+        final label = switch (stage) {
+          'intake' => 'Intake',
+          'in_treatment' => 'In Treatment',
+          _ => stage,
+        };
+        byAnimalStage[label] = (byAnimalStage[label] ?? 0) + count;
+      });
     }
 
     final transferred =
@@ -559,7 +636,8 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _MetricsGrid(cards: [
-          _MetricCard(label: 'Total Rescues', value: '$total'),
+          _MetricCard(label: 'Total Rescues (Cases)', value: '$total'),
+          _MetricCard(label: 'Animals Reported', value: '$animalsReported'),
           _MetricCard(label: 'Successful Rescues', value: '$successful'),
           _MetricCard(
               label: 'Case Resolution Rate', value: '${resolutionRate.toStringAsFixed(0)}%'),
@@ -567,9 +645,12 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
               label: 'Average Rescue Response Time',
               value: '${avgResponseHours.toStringAsFixed(1)} hrs'),
         ]),
+        const SizedBox(height: 6),
+        Text('$total active cases · $animalsReported animals involved',
+            style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
         const SizedBox(height: 14),
         _ChartCard(
-          title: 'Rescue Reports and Urgency Levels',
+          title: 'Rescue Reports and Urgency Levels (Cases)',
           filterOptions: const ['All time', 'Last 7 days', 'Last 30 days'],
           selectedFilter: _urgencyWindow,
           onFilterChanged: (v) => setState(() => _urgencyWindow = v),
@@ -582,9 +663,13 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
               note: 'Needs a map view over case lat/lng — not built yet.'),
         ),
         const SizedBox(height: 14),
-        _ChartCard(title: 'Rescue Type', child: _SimpleBarChart(data: bySpecies)),
+        _ChartCard(title: 'Reports by Rescue Type (Cases)', child: _SimpleBarChart(data: byRescueType)),
         const SizedBox(height: 14),
-        _ChartCard(title: 'Report Classification Split', child: _SimplePieChart(data: byStatus)),
+        _ChartCard(title: 'Animals by Species', child: _SimpleBarChart(data: bySpecies)),
+        const SizedBox(height: 14),
+        _ChartCard(title: 'Report Classification Split (Cases)', child: _SimplePieChart(data: byStatus)),
+        const SizedBox(height: 14),
+        _ChartCard(title: 'Animals by Current Stage', child: _SimpleBarChart(data: byAnimalStage)),
         const SizedBox(height: 14),
         _MetricCard(
             label: 'Rescue Transfer and Refer Rate',
@@ -661,93 +746,6 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
   }
 }
 
-// ─── Shelter Analytics ────────────────────────────────────────────────────
-
-class _ShelterAnalyticsView extends StatelessWidget {
-  final String? orgId;
-  const _ShelterAnalyticsView({required this.orgId});
-
-  Future<Map<String, num>> _loadOutcomes() async {
-    Query<Map<String, dynamic>> caseQuery = FirebaseFirestore.instance.collection('cases');
-    if (orgId != null) caseQuery = caseQuery.where('organizationId', isEqualTo: orgId);
-    final caseSnap = await caseQuery.get();
-    final cases = <RescueCase>[];
-    for (final doc in caseSnap.docs) {
-      try {
-        cases.add(RescueCase.fromFirestore(doc));
-      } catch (e) {
-        debugPrint('[AnalyticsDashboard] Skipping unparseable case ${doc.id}: $e');
-      }
-    }
-
-    final transferred =
-    cases.where((c) => c.status == RescueStatus.referred || c.status == RescueStatus.merged);
-    final deceased = cases.where((c) => c.isDeceased).toList();
-    final euthanasia =
-        deceased.where((c) => (c.causeOfDeath ?? '').toLowerCase().contains('euthan')).length;
-
-    final adoptSnap = await FirebaseFirestore.instance.collection('adoptions').get();
-    final adopted = adoptSnap.docs.where((d) => d.data()['adoptedAt'] != null).length;
-
-    return {
-      'Adopted': adopted,
-      'Return-to-Owner': 0, // not tracked as a distinct outcome yet
-      'Return-to-Field': 0, // not tracked as a distinct outcome yet
-      'Transferred': transferred.length,
-      'Euthanasia': euthanasia,
-      'Died in care': deceased.length - euthanasia,
-      'Died in transit': 0, // not distinguished from "died in care" yet
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _SectionTitle('Shelter Analytics'),
-        FutureBuilder<Map<String, num>>(
-          future: _loadOutcomes(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) {
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
-              );
-            }
-            final data = snapshot.data!;
-            final liveOutcomes = {
-              'Adopted': data['Adopted']!,
-              'Return-to-Owner': data['Return-to-Owner']!,
-              'Return-to-Field': data['Return-to-Field']!,
-              'Transferred': data['Transferred']!,
-            };
-            final nonLiveOutcomes = {
-              'Euthanasia': data['Euthanasia']!,
-              'Died in care': data['Died in care']!,
-              'Died in transit': data['Died in transit']!,
-            };
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _ChartCard(title: 'Live-Outcomes', child: _SimplePieChart(data: liveOutcomes)),
-                const SizedBox(height: 14),
-                _ChartCard(
-                    title: 'Non-Live Outcomes', child: _SimplePieChart(data: nonLiveOutcomes)),
-                const SizedBox(height: 8),
-                Text(
-                  'Return-to-Owner/Return-to-Field and Died-in-transit aren\'t distinct fields '
-                      'yet — Adopted, Transferred, and Euthanasia vs. Died-in-care are real counts.',
-                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-                ),
-              ],
-            );
-          },
-        ),
-      ],
-    );
-  }
-}
 
 // ─── Adoption Analytics ───────────────────────────────────────────────────
 

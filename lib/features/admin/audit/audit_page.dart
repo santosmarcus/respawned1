@@ -141,51 +141,84 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
     }
     if (widget.category == AuditCategory.animalRecords) {
       final rowsAsync = ref.watch(animalRecordAuditProvider);
-      return _RowListView(rowsAsync: rowsAsync);
+      return _buildAuditSection(
+        rows: rowsAsync.value,
+        hasError: rowsAsync.hasError,
+        onRetry: () => ref.invalidate(animalRecordAuditProvider),
+      );
     }
     if (widget.category == AuditCategory.rescueCases) {
       final rowsAsync = ref.watch(rescueCaseAuditProvider);
-      return _RowListView(rowsAsync: rowsAsync);
+      return _buildAuditSection(
+        rows: rowsAsync.value,
+        hasError: rowsAsync.hasError,
+        onRetry: () => ref.invalidate(rescueCaseAuditProvider),
+      );
     }
-    final entriesAsync = ref.watch(
-      auditCategoryLogsProvider((category: widget.category, organizationId: widget.organizationId)),
-    );
-    return entriesAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
-      error: (e, _) => _ErrorState(
-        message: 'Could not load ${widget.category.label}.',
-        onRetry: () => ref.invalidate(
-          auditCategoryLogsProvider((category: widget.category, organizationId: widget.organizationId)),
-        ),
-      ),
-      data: (entries) {
-        if (entries.isEmpty) {
-          return const _EmptyState(message: 'No audit entries yet.');
-        }
-        return _RowListView(rowsAsync: AsyncValue.data(entries.map(AuditDisplayRow.fromAuditLog).toList()));
-      },
+    final key = (category: widget.category, organizationId: widget.organizationId);
+    final entriesAsync = ref.watch(auditCategoryLogsProvider(key));
+    return _buildAuditSection(
+      rows: entriesAsync.value?.map(AuditDisplayRow.fromAuditLog).toList(),
+      hasError: entriesAsync.hasError,
+      onRetry: () => ref.invalidate(auditCategoryLogsProvider(key)),
     );
   }
-}
 
-class _RowListView extends StatelessWidget {
-  final AsyncValue<List<AuditDisplayRow>> rowsAsync;
-  const _RowListView({required this.rowsAsync});
-
-  @override
-  Widget build(BuildContext context) {
-    return rowsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
-      error: (e, _) => _ErrorState(message: 'Could not load these entries.', onRetry: () {}),
-      data: (rows) {
-        if (rows.isEmpty) return const _EmptyState(message: 'No audit entries yet.');
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: rows.length,
-          separatorBuilder: (_, __) => const Divider(height: 20),
-          itemBuilder: (context, i) => _AuditRowTile(row: rows[i]),
-        );
-      },
+  // Audit Flicker spec §3/§4 — reads `.value` (Riverpod's AsyncValue keeps
+  // the last successfully-received value accessible here even while the
+  // provider is mid-refresh or has hit a transient error) instead of
+  // pattern-matching purely via `.when()`, whose `loading`/`error`
+  // branches never see that carried-over value. Loading only ever shows
+  // before the very first result (`rows == null` with no error yet);
+  // once data has arrived once, a later error shows a compact "Could not
+  // refresh" banner ABOVE the still-visible previous rows rather than
+  // replacing them with a spinner or empty state.
+  Widget _buildAuditSection({
+    required List<AuditDisplayRow>? rows,
+    required bool hasError,
+    required VoidCallback onRetry,
+  }) {
+    if (rows == null) {
+      if (hasError) {
+        return _ErrorState(message: 'Could not load audit records.', onRetry: onRetry);
+      }
+      return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
+    }
+    if (rows.isEmpty) {
+      return const _EmptyState(message: 'No audit records yet.');
+    }
+    return Column(
+      children: [
+        if (hasError)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Could not refresh.',
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                ),
+                TextButton(onPressed: onRetry, child: const Text('Retry')),
+              ],
+            ),
+          ),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: rows.length,
+            separatorBuilder: (_, __) => const Divider(height: 20),
+            itemBuilder: (context, i) => _AuditRowTile(row: rows[i]),
+          ),
+        ),
+      ],
     );
   }
 }

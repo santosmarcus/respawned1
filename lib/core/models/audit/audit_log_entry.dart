@@ -8,21 +8,37 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// `collectionGroup`), reusing that logging rather than duplicating it.
 /// Adoptions/Logins/Donations/OrganizationStaff have no existing
 /// equivalent log, so those write directly into `auditLogs`.
+// Audit Cleanup spec §5 — declaration order is also `AuditCategory.values`'
+// iteration order, which is what actually drives both the Audit page's tab
+// order and `TabController.length`; reordering here is what reorders the
+// tabs (`.name`, used as the stored Firestore `category` value, is based on
+// the identifier itself, not position, so this is safe against existing
+// data). Ordered to match the admin drawer's own module order
+// (admin_drawer.dart's `AdminModule` enum: Dashboard, Rescue, Adoptions,
+// Donations, Records, Events, Volunteers, Transporters, Collar Tags,
+// Audit) for every category that has a real drawer-module counterpart;
+// `logins`/`organizationStaff` have no corresponding drawer module, so they
+// come last as a distinct, un-alphabetized trailing group.
 enum AuditCategory {
+  rescueCases,
   adoptions,
-  logins,
   donations,
   animalRecords,
-  rescueCases,
+  logins,
   organizationStaff;
 
+  // Audit Cleanup spec §6 — dropped the redundant visible "Changes"/"and
+  // Case" suffixes (the row content directly below each tab already shows
+  // the actual action, e.g. "Profile edited" — repeating "Changes" in the
+  // section label added no information). Structured previous/new-value
+  // detail rows are untouched; see AuditDisplayRow.
   String get label => switch (this) {
         AuditCategory.adoptions => 'Adoptions',
         AuditCategory.logins => 'Logins',
         AuditCategory.donations => 'Donations',
-        AuditCategory.animalRecords => 'Animal Record Changes',
-        AuditCategory.rescueCases => 'Rescue and Case Changes',
-        AuditCategory.organizationStaff => 'Organization and Staff Changes',
+        AuditCategory.animalRecords => 'Records',
+        AuditCategory.rescueCases => 'Rescue',
+        AuditCategory.organizationStaff => 'Organization and Staff',
       };
 }
 

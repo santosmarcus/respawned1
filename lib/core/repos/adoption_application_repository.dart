@@ -59,6 +59,18 @@ class AnimalAvailabilityResult {
 /// lives in the adoption doc's `returnRequest` map — see
 /// core/models/adoption/{follow_up_schedule,follow_up_record,
 /// return_request}.dart for the field shapes.
+/// Thrown by [AdoptionApplicationRepository.releaseWithFollowUps] when no
+/// valid Post-Adoption follow-up schedule exists yet — a domain-specific
+/// error (spec §8) rather than a bare StateError, so callers can reliably
+/// distinguish "you forgot to schedule follow-ups" from any other release
+/// failure (animal already adopted, application not approved, etc.).
+class PostAdoptionScheduleRequiredException implements Exception {
+  static const code = 'post-adoption-schedule-required';
+  const PostAdoptionScheduleRequiredException();
+  @override
+  String toString() => code;
+}
+
 class AdoptionApplicationRepository {
   AdoptionApplicationRepository({
     FirebaseFirestore? firestore,
@@ -698,20 +710,27 @@ class AdoptionApplicationRepository {
     String? actorId,
     String? actorEmail,
   }) async {
-    if (!noFollowUpsPlanned) {
-      if (rules.isEmpty) {
-        throw StateError('Add at least one follow-up schedule, or turn on "No follow-ups needed".');
-      }
-      for (final r in rules) {
-        if (r.intervalValue <= 0 || r.durationValue <= 0) {
-          throw StateError('Every follow-up schedule needs a positive interval and duration.');
-        }
+    // Post-Adoption Release Gate spec §6-8 — release/handover must not
+    // complete without at least one actual scheduled follow-up. Re-checked
+    // here (not just in the calling page's UI) so a stale screen — or any
+    // future/direct caller — can never bypass it; this throws before any
+    // write happens, so the animal is never partially marked adopted.
+    // `noFollowUpsPlanned` no longer bypasses this: an "opt out of
+    // follow-ups entirely" release is exactly the state this rule
+    // forbids. The parameter is still accepted (and still written to the
+    // application doc) purely for backward-compatible field shape.
+    if (rules.isEmpty) {
+      throw const PostAdoptionScheduleRequiredException();
+    }
+    for (final r in rules) {
+      if (r.intervalValue <= 0 || r.durationValue <= 0) {
+        throw StateError('Every follow-up schedule needs a positive interval and duration.');
       }
     }
 
-    final generated = noFollowUpsPlanned ? const <GeneratedFollowUpDate>[] : generateFollowUpDates(rules, releaseDate);
-    if (!noFollowUpsPlanned && generated.isEmpty) {
-      throw StateError('This follow-up schedule produced no dates — check each rule\'s interval and duration.');
+    final generated = generateFollowUpDates(rules, releaseDate);
+    if (generated.isEmpty) {
+      throw const PostAdoptionScheduleRequiredException();
     }
 
     final appRef = _adoptionDoc(applicationId);

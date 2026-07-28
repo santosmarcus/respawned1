@@ -7,6 +7,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_schedule.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
@@ -185,13 +186,14 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     await _persistDraft();
   }
 
-  Future<void> _toggleNoFollowUps(bool value) async {
-    setState(() => _noFollowUpsPlanned = value);
-    await _persistDraft();
-  }
-
   List<DateTime> get _combinedPreview => generateFollowUpDates(_rules, _releaseDate).map((g) => g.date).toList();
 
+  // Post-Adoption Release Gate spec §6-8 — a release/handover must not be
+  // completable without at least one actual scheduled follow-up; there is
+  // no "no follow-ups needed" bypass any more (the repository's
+  // releaseWithFollowUps enforces the same requirement independently, so
+  // a stale copy of this screen — or a direct repository call — can never
+  // push a release through without it either).
   ({bool canRelease, String? reason}) _releaseGuard(AdoptionApplication app, AnimalRecord? animal) {
     if (app.status != AdoptionStatus.approved) return (canRelease: false, reason: 'Only an approved application can be released.');
     if (animal == null) return (canRelease: false, reason: 'Animal record not found.');
@@ -199,10 +201,10 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     if (animal.adoptionStatus == 'reserved' && animal.reservedApplicationId != widget.applicationId) {
       return (canRelease: false, reason: 'This animal is reserved for a different applicant.');
     }
-    if (!_noFollowUpsPlanned && _rules.isEmpty) {
-      return (canRelease: false, reason: 'Add at least one follow-up schedule, or turn on "No follow-ups needed".');
+    if (_rules.isEmpty) {
+      return (canRelease: false, reason: 'Set at least one Post-Adoption follow-up before completing the release.');
     }
-    if (!_noFollowUpsPlanned && _combinedPreview.isEmpty) {
+    if (_combinedPreview.isEmpty) {
       return (canRelease: false, reason: 'This follow-up schedule produced no dates — check each rule.');
     }
     return (canRelease: true, reason: null);
@@ -226,7 +228,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Mark ${app.animalName} as Released?',
-      message: 'This finalizes the adoption on ${_fmtDate(_releaseDate)} at ${_fmtTime(_releaseDate)}${_noFollowUpsPlanned ? '' : ' and schedules ${_combinedPreview.length} follow-up${_combinedPreview.length == 1 ? '' : 's'}'}. The animal will be removed from public adoptable listings.',
+      message: 'This finalizes the adoption on ${_fmtDate(_releaseDate)} at ${_fmtTime(_releaseDate)} and schedules ${_combinedPreview.length} follow-up${_combinedPreview.length == 1 ? '' : 's'}. The animal will be removed from public adoptable listings.',
       confirmLabel: 'Mark as Released',
     );
     if (!confirmed) return;
@@ -239,7 +241,9 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
         actorName: _actorName,
         releaseDate: _releaseDate,
         rules: _rules,
-        noFollowUpsPlanned: _noFollowUpsPlanned,
+        // See _releaseGuard's doc comment — this no longer has a
+        // meaningful "true" state a release can go through with.
+        noFollowUpsPlanned: false,
         actorId: FirebaseAuth.instance.currentUser?.uid,
         actorEmail: FirebaseAuth.instance.currentUser?.email,
       );
@@ -248,6 +252,12 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
           context,
           MaterialPageRoute(builder: (_) => PostAdoptionDetailsPage(applicationId: widget.applicationId)),
         );
+      }
+    } on PostAdoptionScheduleRequiredException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Set at least one Post-Adoption follow-up before completing the release.'),
+            backgroundColor: Colors.redAccent));
       }
     } catch (e) {
       if (mounted) {
@@ -355,20 +365,35 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text('No post-adoption follow-ups needed', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-                      value: _noFollowUpsPlanned,
-                      activeThumbColor: AppColors.greenrspwn,
-                      onChanged: _toggleNoFollowUps,
-                    ),
-                    if (!_noFollowUpsPlanned) ...[
-                      if (_rules.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Text('No schedules yet — add at least one.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                        )
-                      else
+                    // Post-Adoption Release Gate spec §6-8 — the previous
+                    // "No post-adoption follow-ups needed" toggle let an
+                    // admin skip scheduling entirely; that bypass is
+                    // removed since a release can no longer complete
+                    // without at least one real scheduled follow-up (see
+                    // _releaseGuard and repository releaseWithFollowUps).
+                    if (_rules.isEmpty)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Post-Adoption Schedule Required',
+                                style: GoogleFonts.zain(fontSize: 13, color: Colors.redAccent, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Set at least one follow-up schedule before completing the release.',
+                              style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (_rules.isNotEmpty)
                         ReorderableListView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
@@ -403,7 +428,11 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                           },
                         ),
                       const SizedBox(height: 6),
-                      OutlinedButton.icon(onPressed: _addRule, icon: const Icon(Icons.add), label: const Text('Add Schedule')),
+                      OutlinedButton.icon(
+                        onPressed: _addRule,
+                        icon: const Icon(Icons.add),
+                        label: Text(_rules.isEmpty ? 'Set Post-Adoption Schedule' : 'Add Schedule'),
+                      ),
                       const SizedBox(height: 14),
                       Text('Combined Preview', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                       const SizedBox(height: 6),
@@ -421,7 +450,6 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                               ),
                           ],
                         ),
-                    ],
                   ],
                 ),
               ),

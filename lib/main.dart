@@ -160,11 +160,21 @@ class _AuthWrapperState extends State<AuthWrapper> {
 }
 
 /// Second-level routing for role == 'organization' — reads the org doc's
-/// verificationStatus and picks the right step of the signup pipeline
-/// (draft still needs documents uploaded; pending/rejected/requires_changes
-/// show the status page; approved reaches the admin shell), mirroring the
-/// existing pet_transporter case's use of transporterVerificationStatus
-/// just one Firestore hop further (organization, not the user doc itself).
+/// verificationStatus and picks the right step of the signup pipeline.
+///
+/// Organization Admin Signup Completion spec §7-9 — `pending` now reaches
+/// the admin shell directly, same as `approved`: no reviewer interface
+/// exists anywhere in this codebase to ever move a submission out of
+/// `pending`, so gating app access on it would be a permanent dead end,
+/// not a real pending state. `verificationStatus` itself still honestly
+/// stays `pending` (never silently promoted to `approved`) — see
+/// organization_repository.dart's `submitVerification` doc comment — so a
+/// real reviewer, if one is ever built (or a manual Firestore console
+/// edit), can still act on it later. `rejected`/`requiresChanges` are
+/// deliberately NOT included here — those values are never set by any
+/// code path in this app, only by an actual person making that call
+/// (today, only possible via direct Firestore console edit), so if either
+/// is ever seen, respecting it is correct.
 class OrganizationRoleRouter extends StatelessWidget {
   final String organizationId;
   const OrganizationRoleRouter({super.key, required this.organizationId});
@@ -181,10 +191,10 @@ class OrganizationRoleRouter extends StatelessWidget {
         final status = OrgVerificationStatus.fromName(data?['verificationStatus'] as String?);
         switch (status) {
           case OrgVerificationStatus.approved:
+          case OrgVerificationStatus.pending:
             return const AdminHomeScreen();
           case OrgVerificationStatus.draft:
             return OrganizationVerificationScreen(organizationId: organizationId);
-          case OrgVerificationStatus.pending:
           case OrgVerificationStatus.rejected:
           case OrgVerificationStatus.requiresChanges:
             return OrganizationVerificationPendingPage(organizationId: organizationId);
