@@ -437,13 +437,22 @@ class _CompactMetricCard extends StatelessWidget {
 /// The Capacity card's own navigation to Organization Profile — pulled out
 /// of the otherwise-stateless TopMetricsRow into its own tiny
 /// ConsumerStatefulWidget purely so it can hold a re-entrancy guard, same
-/// as admin_drawer.dart's already-fixed _handleOpenOrganizationProfile
-/// (this card's onTap previously had none of that: no guard against a
-/// double-tap pushing two stacked profile routes, no loading feedback
-/// during the membership lookup, no try/catch — a slow/failed lookup just
-/// looked like nothing happened, exactly the "cannot reliably be opened"
-/// symptom). Also resolves organizationId via resolveOrganizationId as a
-/// fallback, same reasoning as the drawer's fix.
+/// as admin_drawer.dart's `_handleOpenOrganizationProfile` (this card's
+/// onTap previously had none of that: no guard against a double-tap
+/// pushing two stacked profile routes, no loading feedback during the
+/// membership lookup, no try/catch).
+///
+/// Resolves organizationId via [OrgMembershipService.resolveOrganizationId]
+/// directly rather than reading `currentOrgMembershipProvider.future` —
+/// that provider is a `StreamProvider.autoDispose`, and `ref.read` doesn't
+/// register a listener, so with nothing else on screen watching it,
+/// autoDispose could tear the provider down before its stream ever emits,
+/// throwing "provider was disposed during loading state, yet no value
+/// could be emitted" (see admin_drawer.dart's fix for the same bug, hit
+/// there first). `resolveOrganizationId` is a plain repository Future with
+/// no Riverpod lifecycle to be disposed out from under, and is all this
+/// card ever needed — the membership object itself was only ever used for
+/// its organizationId field.
 class _CapacityMetricCard extends ConsumerStatefulWidget {
   final String primary;
   final String? secondary;
@@ -461,21 +470,29 @@ class _CapacityMetricCardState extends ConsumerState<_CapacityMetricCard> {
     setState(() => _opening = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final membership = await ref.read(currentOrgMembershipProvider.future);
-      var organizationId = membership?.organizationId;
-      if (organizationId == null) {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid != null) {
-          organizationId = await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
-        }
-      }
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final organizationId = uid == null
+          ? null
+          : await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
+
       if (!mounted) return;
+      // organizationId == null legitimately reaches this page's own
+      // pending-invitation/bootstrap flow for an admin not yet linked to
+      // an organization — a real, meaningful screen, not a blank error.
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: organizationId)),
       );
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Could not open Organization Profile: $e')));
+    } catch (e, st) {
+      debugPrint('[TopMetricsRow] Could not resolve organization membership: $e\n$st');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('Could not load the organization profile.'),
+            action: SnackBarAction(label: 'Retry', onPressed: _open),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _opening = false);
     }

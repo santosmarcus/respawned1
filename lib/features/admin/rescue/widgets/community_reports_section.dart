@@ -215,6 +215,84 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
     }
   }
 
+  // Community Report Overflow spec §3 — the previous fixed Row of both
+  // buttons overflowed by ~52px on narrow screens/at larger text scales
+  // ("RIGHT OVERFLOWED BY 52 PIXELS"), since neither button had a bounded
+  // width and their combined intrinsic width exceeded the card's content
+  // area. LayoutBuilder switches to a stacked column (primary action
+  // first, per spec) once the row genuinely doesn't have room for both
+  // buttons at a reasonable size, instead of shrinking text or clipping.
+  Widget _approvalActionButtons() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final rejectButton = OutlinedButton(
+          onPressed: _busy ? null : _reject,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.redAccent,
+            side: const BorderSide(color: Colors.redAccent),
+            minimumSize: const Size(0, 40),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ),
+          child: const Text(
+            'Reject',
+            style: TextStyle(fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
+        );
+
+        final approveButton = ElevatedButton(
+          onPressed: _busy ? null : _approve,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.greenrspwn,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(0, 40),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ),
+          child: _busy
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text(
+                  'Approve Location Change',
+                  style: TextStyle(fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+        );
+
+        // Below this width (or when text-scaling would push either label
+        // past it) two side-by-side buttons can't fit without clipping —
+        // stack them instead, primary action on top per the recommended
+        // mobile order.
+        final textScale = MediaQuery.textScalerOf(context).scale(12);
+        final narrow = constraints.maxWidth < 260 || textScale > 16;
+
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              approveButton,
+              const SizedBox(height: 8),
+              rejectButton,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            rejectButton,
+            const SizedBox(width: 8),
+            Expanded(child: approveButton),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final report = widget.report;
@@ -314,44 +392,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      OutlinedButton(
-                        onPressed: _busy ? null : _reject,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.redAccent,
-                          side: const BorderSide(color: Colors.redAccent),
-                          minimumSize: const Size(0, 32),
-                        ),
-                        child: const Text(
-                          'Reject',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _busy ? null : _approve,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.greenrspwn,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(0, 32),
-                        ),
-                        child: _busy
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text(
-                                'Approve Location Change',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                      ),
-                    ],
-                  ),
+                  _approvalActionButtons(),
                 ] else if (report.approvalStatus == 'approved') ...[
                   const SizedBox(height: 4),
                   Text(

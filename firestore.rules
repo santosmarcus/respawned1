@@ -1,0 +1,160 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------------
+// NEWLY AUTHORED — no firestore.rules file existed in this repository before
+// this change, even though firebase.json already points "firestore.rules" at
+// this exact path. Numerous code comments across lib/core/repos/*.dart
+// describe "this app's existing wide-open Firestore rules" as the current
+// live behavior for most collections — meaning whatever rules are actually
+// deployed today are NOT visible from this checkout, and this file has never
+// been deployed or tested against the live project or the Firestore emulator.
+//
+// Scope of what's actually enforced here (Organization Invitations spec §16):
+//   - organizationInvitations/{invitationId}
+//   - organizations/{orgId}/members/{uid}
+// Every other collection keeps the same effectively-open
+// "any signed-in user" access the rest of this codebase already assumes,
+// specifically so deploying this file cannot newly break any of the
+// dozens of other collections (cases, adoptions, animalRecords, donations,
+// auditLogs, collarTags, settings, etc.) this rules file was not written
+// against a full audit of. Tightening those is a separate, larger security
+// review outside this feature's scope — do not treat this file as a
+// comprehensive lockdown.
+//
+// BEFORE DEPLOYING (`firebase deploy --only firestore:rules`): review this
+// file against the Firestore Rules Playground or emulator with real data,
+// since an incorrect rule here can silently break legitimate reads/writes
+// app-wide. This was authored from static code inspection only.
+// ---------------------------------------------------------------------------
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function normalizedEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    // organizations/{orgId} document itself (profile/verification fields) —
+    // unchanged from the app's existing effectively-open behavior. Does NOT
+    // cascade to the members subcollection below — Firestore rules never
+    // apply to subcollections unless explicitly matched.
+    match /organizations/{orgId} {
+      allow read, write: if signedIn();
+    }
+
+    // organizations/{orgId}/members/{uid} — spec §16:
+    //   - Users cannot create arbitrary memberships for themselves.
+    //   - Membership creation through acceptance must verify the invitation.
+    //   - Ordinary members cannot change their own role to admin.
+    //   - Organization admins cannot remove the last active admin.
+    // Reads stay open to any signed-in user (Staff Members / duplicate-org
+    // checks already read across organizations client-side, matching the
+    // rest of this app's current privacy posture) — only writes are gated.
+    match /organizations/{orgId}/members/{uid} {
+      allow read: if signedIn();
+
+      function isOrgAdmin() {
+        return signedIn() &&
+          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
+      }
+
+      function isOwner() {
+        return signedIn() &&
+          get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
+      }
+
+      // A brand-new membership doc may only be created by:
+      //  (a) an org admin directly adding someone (invite-less legacy path /
+      //      admin tooling), or
+      //  (b) the invited person themselves, but ONLY when a matching
+      //      pending invitation for their own email actually exists for
+      //      this organization+uid — this is the "verify the invitation"
+      //      requirement; a user can never simply write themselves in.
+      function acceptingOwnValidInvitation() {
+        let invitationId = request.resource.data.invitationId;
+        return invitationId is string && invitationId.size() > 0 &&
+          exists(/databases/$(database)/documents/organizationInvitations/$(invitationId)) &&
+          get(/databases/$(database)/documents/organizationInvitations/$(invitationId)).data.organizationId == orgId &&
+          get(/databases/$(database)/documents/organizationInvitations/$(invitationId)).data.normalizedEmail == normalizedEmail() &&
+          get(/databases/$(database)/documents/organizationInvitations/$(invitationId)).data.status == 'pending' &&
+          request.auth.uid == uid;
+      }
+
+      allow create: if isOrgAdmin() || isOwner() || acceptingOwnValidInvitation();
+
+      // Updates (role changes / status changes): only an org admin, EXCEPT
+      // an ordinary member may never grant themselves admin — closes the
+      // specific "members cannot change their own role to admin" gap even
+      // for an admin-looking write that isn't actually coming from a real
+      // admin account.
+      allow update: if isOrgAdmin() &&
+        !(request.auth.uid == uid && resource.data.role != 'admin' && request.resource.data.role == 'admin' && !isOrgAdmin());
+
+      // Deletes (removal): only an org admin, and never the last one.
+      // Counting admins requires a query, which rules can't run directly —
+      // the client-side isFinalAdmin() pre-check
+      // (OrganizationInvitationRepository) is the primary guard; this rule
+      // additionally blocks an admin from deleting their OWN membership
+      // when they are the organization's `ownerId`, since the owner must
+      // always remain a member per spec §3.
+      allow delete: if isOrgAdmin() && !(uid == get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId);
+    }
+
+    // organizationInvitations/{invitationId} — spec §16:
+    //   - A user may read invitations addressed to their authenticated email.
+    //   - A user may accept or reject only their own invitation.
+    //   - Only authorized organization admins may create or cancel
+    //     organization invitations.
+    match /organizationInvitations/{invitationId} {
+      function isOrgAdminOf(orgId) {
+        return signedIn() &&
+          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
+      }
+
+      // An org admin managing their own organization's invitations, OR the
+      // invited person reading/acting on an invitation addressed to their
+      // own authenticated email — never a third party's.
+      allow read: if signedIn() &&
+        (resource.data.normalizedEmail == normalizedEmail() || isOrgAdminOf(resource.data.organizationId));
+
+      allow create: if isOrgAdminOf(request.resource.data.organizationId);
+
+      // Admin actions (resend/change role/cancel) vs. the invited person's
+      // own accept/reject are distinguished by which fields change:
+      // the invited person may only ever flip status pending -> accepted
+      // or pending -> rejected on their OWN invitation, never touch an
+      // invitation addressed to someone else, and never resurrect/alter a
+      // non-pending one. An org admin may update anything on their own
+      // organization's invitations (resend/cancel/change intended role).
+      allow update: if isOrgAdminOf(resource.data.organizationId) ||
+        (
+          resource.data.normalizedEmail == normalizedEmail() &&
+          resource.data.status == 'pending' &&
+          (request.resource.data.status == 'accepted' || request.resource.data.status == 'rejected') &&
+          request.resource.data.organizationId == resource.data.organizationId &&
+          request.resource.data.email == resource.data.email &&
+          request.resource.data.role == resource.data.role
+        );
+
+      allow delete: if false; // history is kept, not deleted (spec §9)
+    }
+
+    // Everything else: unchanged from this app's existing documented
+    // behavior — any signed-in user. Explicitly excludes the two
+    // collections above so their tighter rules above are the ones that
+    // actually govern those paths (a broader match here would otherwise
+    // OR together with the specific rules and defeat them).
+    match /{collection}/{docId} {
+      allow read, write: if signedIn() && collection != 'organizationInvitations';
+    }
+    match /organizations/{orgId}/{subcollection}/{docId} {
+      allow read, write: if signedIn() && subcollection != 'members';
+    }
+  }
+}

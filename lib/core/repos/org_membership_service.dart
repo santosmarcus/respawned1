@@ -91,17 +91,36 @@ class OrgMembershipService {
     });
   }
 
+  /// [email]/[displayName]/[status]/[invitationId] are optional purely for
+  /// backward compatibility with existing callers that only ever changed
+  /// `role` — when supplied they're merged in alongside it so a role change
+  /// can also backfill a legacy membership doc's missing display fields
+  /// without a second write.
   Future<void> setMember({
     required String organizationId,
     required String uid,
     required OrgRole role,
+    String? email,
+    String? displayName,
+    String? status,
+    String? invitationId,
   }) async {
     await _db
         .collection('organizations')
         .doc(organizationId)
         .collection('members')
         .doc(uid)
-        .set({'role': role.name, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+        .set({
+      'role': role.name,
+      'updatedAt': FieldValue.serverTimestamp(),
+      if (email != null && email.isNotEmpty) ...{
+        'email': email,
+        'normalizedEmail': email.trim().toLowerCase(),
+      },
+      if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
+      if (status != null && status.isNotEmpty) 'status': status,
+      if (invitationId != null && invitationId.isNotEmpty) 'invitationId': invitationId,
+    }, SetOptions(merge: true));
     await _db.collection('users').doc(uid).update({'organizationId': organizationId});
   }
 }

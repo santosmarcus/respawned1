@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
@@ -10,6 +11,7 @@ import 'package:respawnd1/core/repos/org_membership_service.dart';
 enum InvitationStatus {
   pending,
   accepted,
+  rejected,
   expired,
   revoked;
 
@@ -22,11 +24,17 @@ class OrganizationInvitation {
   final String organizationId;
   final String organizationName;
   final String email;
+  final String normalizedEmail;
   final OrgRole role;
   final InvitationStatus status;
   final String invitedBy;
+  final String invitedByName;
   final DateTime? createdAt;
   final DateTime? expiresAt;
+  final String? acceptedBy;
+  final DateTime? acceptedAt;
+  final String? rejectedBy;
+  final DateTime? rejectedAt;
   final String token;
 
   const OrganizationInvitation({
@@ -34,11 +42,17 @@ class OrganizationInvitation {
     required this.organizationId,
     required this.organizationName,
     required this.email,
+    required this.normalizedEmail,
     required this.role,
     required this.status,
     required this.invitedBy,
+    required this.invitedByName,
     this.createdAt,
     this.expiresAt,
+    this.acceptedBy,
+    this.acceptedAt,
+    this.rejectedBy,
+    this.rejectedAt,
     required this.token,
   });
 
@@ -47,16 +61,27 @@ class OrganizationInvitation {
   factory OrganizationInvitation.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
+    final email = data['email'] as String? ?? '';
     return OrganizationInvitation(
       id: doc.id,
       organizationId: data['organizationId'] as String? ?? '',
       organizationName: data['organizationName'] as String? ?? '',
-      email: data['email'] as String? ?? '',
+      email: email,
+      // Backward-compatible: older invitation docs (written before this
+      // field existed) never stored normalizedEmail — fall back to
+      // normalizing `email` on read rather than losing the ability to
+      // match/display those legacy documents.
+      normalizedEmail: (data['normalizedEmail'] as String?) ?? email.trim().toLowerCase(),
       role: OrgRole.fromName(data['role'] as String?),
       status: InvitationStatus.fromName(data['status'] as String?),
       invitedBy: data['invitedBy'] as String? ?? '',
+      invitedByName: data['invitedByName'] as String? ?? '',
       createdAt: ts(data['createdAt']),
       expiresAt: ts(data['expiresAt']),
+      acceptedBy: data['acceptedBy'] as String?,
+      acceptedAt: ts(data['acceptedAt']),
+      rejectedBy: data['rejectedBy'] as String?,
+      rejectedAt: ts(data['rejectedAt']),
       token: data['token'] as String? ?? '',
     );
   }
@@ -89,12 +114,30 @@ class OrganizationInvitationRepository {
 
   String _generateToken() => List.generate(32, (_) => _rng.nextInt(36).toRadixString(36)).join();
 
+  /// Parses each doc individually rather than via a bare `.map(...)` —
+  /// spec §11's "Could not load invitations." must come from a genuine
+  /// query/rules/index failure, never from one malformed invitation
+  /// document throwing inside the mapper and taking the whole list down
+  /// with it (the same root cause this app's Rescue Reports list hit
+  /// before its own per-doc try/catch fix).
+  List<OrganizationInvitation> _parseInvitations(QuerySnapshot<Map<String, dynamic>> snap) {
+    final out = <OrganizationInvitation>[];
+    for (final doc in snap.docs) {
+      try {
+        out.add(OrganizationInvitation.fromFirestore(doc));
+      } catch (e) {
+        debugPrint('[OrganizationInvitationRepository] Skipping unparseable invitation ${doc.id}: $e');
+      }
+    }
+    return out;
+  }
+
   Stream<List<OrganizationInvitation>> streamInvitations(String organizationId) {
     return _invitations
         .where('organizationId', isEqualTo: organizationId)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map(OrganizationInvitation.fromFirestore).toList());
+        .map(_parseInvitations);
   }
 
   /// Every pending invitation addressed to [normalizedEmail], across every
@@ -109,30 +152,7 @@ class OrganizationInvitationRepository {
         .where('normalizedEmail', isEqualTo: normalizedEmail)
         .where('status', isEqualTo: InvitationStatus.pending.name)
         .snapshots()
-        .map((snap) => snap.docs.map(OrganizationInvitation.fromFirestore).toList());
-  }
-
-  /// True if the given role is already held by an active member, or already
-  /// has a live (pending, unexpired) invitation outstanding — the current
-  /// one-email-per-role limitation (spec §14). Membership records are kept
-  /// per-uid regardless, so this is a UI-level rule, not a schema
-  /// limitation — multiple members per role becomes possible later just by
-  /// removing this check.
-  Future<bool> isRoleOccupied({required String organizationId, required OrgRole role}) async {
-    final members = await _db.collection('organizations').doc(organizationId).collection('members').where('role', isEqualTo: role.name).limit(1).get();
-    if (members.docs.isNotEmpty) return true;
-
-    final pending = await _invitations
-        .where('organizationId', isEqualTo: organizationId)
-        .where('role', isEqualTo: role.name)
-        .where('status', isEqualTo: InvitationStatus.pending.name)
-        .limit(1)
-        .get();
-    if (pending.docs.isEmpty) return false;
-    // A pending doc that's actually expired doesn't count as "occupied".
-    final expiresAt = pending.docs.first.data()['expiresAt'];
-    if (expiresAt is Timestamp && DateTime.now().isAfter(expiresAt.toDate())) return false;
-    return true;
+        .map(_parseInvitations);
   }
 
   Future<bool> isAlreadyActiveMember({required String organizationId, required String email}) async {
@@ -159,9 +179,9 @@ class OrganizationInvitationRepository {
   /// transactions here can only `get()` a single DocumentReference, not an
   /// arbitrary query — see the class doc comment on why full multi-check
   /// transactional dedup across `members`/`organizationInvitations` isn't
-  /// possible with this SDK). `isAlreadyActiveMember`/`findActiveInvitation`/
-  /// `isRoleOccupied` remain separate best-effort pre-checks for a fast,
-  /// friendly error before ever reaching this call.
+  /// possible with this SDK). `isAlreadyActiveMember`/`findActiveInvitation`
+  /// remain separate best-effort pre-checks for a fast, friendly error
+  /// before ever reaching this call.
   String _invitationDocId({required String organizationId, required String normalizedEmail}) =>
       '${organizationId}_$normalizedEmail';
 
@@ -171,6 +191,7 @@ class OrganizationInvitationRepository {
     required String email,
     required OrgRole role,
     required String invitedBy,
+    String invitedByName = '',
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
     final ref = _invitations.doc(_invitationDocId(organizationId: organizationId, normalizedEmail: normalizedEmail));
@@ -182,7 +203,7 @@ class OrganizationInvitationRepository {
         final expiresAt = snap.data()?['expiresAt'];
         final expired = expiresAt is Timestamp && DateTime.now().isAfter(expiresAt.toDate());
         if (status == InvitationStatus.pending && !expired) {
-          throw StateError('An invitation is already pending.');
+          throw StateError('An invitation is already pending for this email.');
         }
       }
       tx.set(ref, {
@@ -193,10 +214,13 @@ class OrganizationInvitationRepository {
         'role': role.name,
         'status': InvitationStatus.pending.name,
         'invitedBy': invitedBy,
+        'invitedByName': invitedByName,
         'createdAt': FieldValue.serverTimestamp(),
         'expiresAt': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
         'acceptedAt': null,
         'acceptedBy': null,
+        'rejectedAt': null,
+        'rejectedBy': null,
         'token': _generateToken(),
       });
     });
@@ -273,17 +297,32 @@ class OrganizationInvitationRepository {
         throw StateError('This account is already linked to a different organization.');
       }
 
+      // Already an active member of THIS SAME organization (e.g. a double
+      // tap raced two acceptances of the same invitation) — the invitation
+      // status update below still needs to happen, but never overwrite an
+      // existing membership doc's role/joinedAt.
+      final memberRef = _organizations.doc(organizationId).collection('members').doc(uid);
+      final existingMemberSnap = await tx.get(memberRef);
+
       grantedRole = OrgRole.fromName(data['role'] as String?);
+      final normalizedSignedInEmail = signedInEmail.trim().toLowerCase();
+      final displayName = userSnap.data()?['name'] as String?;
 
       tx.update(ref, {'status': InvitationStatus.accepted.name, 'acceptedAt': FieldValue.serverTimestamp(), 'acceptedBy': uid});
-      final memberRef = _organizations.doc(organizationId).collection('members').doc(uid);
-      tx.set(memberRef, {
-        'role': grantedRole.name,
-        'email': signedInEmail.trim().toLowerCase(),
-        'status': 'active',
-        'joinedAt': FieldValue.serverTimestamp(),
-        'invitedBy': data['invitedBy'],
-      });
+      if (!existingMemberSnap.exists) {
+        tx.set(memberRef, {
+          'uid': uid,
+          'organizationId': organizationId,
+          'role': grantedRole.name,
+          'email': signedInEmail.trim(),
+          'normalizedEmail': normalizedSignedInEmail,
+          if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
+          'status': 'active',
+          'joinedAt': FieldValue.serverTimestamp(),
+          'invitedBy': data['invitedBy'],
+          'invitationId': ref.id,
+        });
+      }
       tx.set(_users.doc(uid), {
         'organizationId': organizationId,
         if (!preserveAccountRole) 'role': 'organization',
@@ -299,6 +338,37 @@ class OrganizationInvitationRepository {
       targetId: uid,
       newValues: {'role': grantedRole.name},
     );
+  }
+
+  /// The invited person's own decline action (distinct from
+  /// [revokeInvitation], which is the organization side cancelling it).
+  /// Never creates a membership — only the invitation doc is updated, kept
+  /// (not deleted) so its history remains visible on both the org's and the
+  /// invited user's invitation lists.
+  Future<void> rejectInvitation({
+    required String invitationId,
+    required String uid,
+    required String signedInEmail,
+  }) async {
+    final ref = _invitations.doc(invitationId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) throw StateError('This invitation no longer exists.');
+      final data = snap.data()!;
+      final status = InvitationStatus.fromName(data['status'] as String?);
+      if (status != InvitationStatus.pending) {
+        throw StateError('This invitation is no longer pending.');
+      }
+      final invitedEmail = (data['normalizedEmail'] as String? ?? '').trim();
+      if (invitedEmail != signedInEmail.trim().toLowerCase()) {
+        throw StateError('This invitation was sent to a different email address.');
+      }
+      tx.update(ref, {
+        'status': InvitationStatus.rejected.name,
+        'rejectedAt': FieldValue.serverTimestamp(),
+        'rejectedBy': uid,
+      });
+    });
   }
 
   /// Blocks removing the final active Admin — every organization must keep

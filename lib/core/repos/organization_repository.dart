@@ -317,6 +317,49 @@ class OrganizationRepository {
     return orgRef.id;
   }
 
+  /// Organization Invitations spec §3 — every organization must have at
+  /// least one active Admin, and `ownerId` (kept forever, never replaced
+  /// when another admin joins) is the natural fallback account for that
+  /// when no membership doc exists yet: an organization created before this
+  /// membership model existed, or whose original `setMember` call for some
+  /// reason never landed. Safe to call on every Organization Profile load —
+  /// it only ever performs a write the FIRST time (checks for an existing
+  /// membership doc before creating one), so repeated calls across widget
+  /// rebuilds are cheap reads that no-op, never repeated writes. Never
+  /// creates a second/duplicate owner membership doc (doc id is always
+  /// `members/{ownerId}`) and never touches `ownerId` itself.
+  Future<void> ensureOwnerMembership(String organizationId) async {
+    final orgSnap = await _organizations.doc(organizationId).get();
+    final ownerId = orgSnap.data()?['ownerId'] as String?;
+    if (ownerId == null || ownerId.isEmpty) return;
+
+    final memberRef = _organizations.doc(organizationId).collection('members').doc(ownerId);
+    final memberSnap = await memberRef.get();
+    if (memberSnap.exists) return;
+
+    final ownerUserSnap = await _users.doc(ownerId).get();
+    final email = ownerUserSnap.data()?['email'] as String?;
+    final displayName = ownerUserSnap.data()?['name'] as String?;
+
+    // Written directly (not via OrgMembershipService.setMember) so
+    // `joinedAt` is set exactly once, on creation — setMember's own
+    // `merge: true` write is reused elsewhere for role CHANGES on an
+    // already-existing member, where overwriting `joinedAt` to "now" every
+    // time would erase real history.
+    await memberRef.set({
+      'uid': ownerId,
+      'organizationId': organizationId,
+      'role': OrgRole.admin.name,
+      if (email != null && email.isNotEmpty) ...{
+        'email': email,
+        'normalizedEmail': email.trim().toLowerCase(),
+      },
+      if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
+      'status': 'active',
+      'joinedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   /// Profile-management fields only — deliberately never touches
   /// `verification`/`verificationStatus`/`verification*At` so editing the
   /// public profile can never silently invalidate an existing approval.

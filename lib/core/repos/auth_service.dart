@@ -97,33 +97,6 @@ class AuthService {
     return userCredential;
   }
 
-  Future<UserCredential?> signInWithFacebook() async {
-    final LoginResult result = await FacebookAuth.instance.login(
-      permissions: ['public_profile', 'email'],
-    );
-
-    switch (result.status) {
-      case LoginStatus.success:
-        final OAuthCredential credential =
-        FacebookAuthProvider.credential(result.accessToken!.tokenString);
-
-        final userCredential =
-        await firebaseAuth.signInWithCredential(credential);
-        await _createUserDocIfNew(userCredential.user!);
-        await _logLogin(userCredential.user, method: 'facebook');
-        return userCredential;
-
-      case LoginStatus.cancelled:
-        return null; // user backed out — not an error, don't show a message
-
-      case LoginStatus.failed:
-      case LoginStatus.operationInProgress:
-        throw Exception(
-          result.message ?? 'Facebook sign-in failed. Please try again.',
-        );
-    }
-  }
-
   // Step 1: Send OTP
   Future<void> sendOtp({
     required String phoneNumber, // format: +639XXXXXXXXX

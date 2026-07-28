@@ -132,6 +132,11 @@ class _ChartCard extends StatelessWidget {
   final List<String>? filterOptions;
   final String? selectedFilter;
   final ValueChanged<String>? onFilterChanged;
+  // Dashboard Chart Overflow spec §4 — most charts fit the original fixed
+  // 180 height, but a horizontal-bar chart with many/long categories needs
+  // more room (and to scroll internally rather than clip) — callers with
+  // that need pass a taller value instead of every card growing.
+  final double height;
 
   const _ChartCard({
     required this.title,
@@ -139,6 +144,7 @@ class _ChartCard extends StatelessWidget {
     this.filterOptions,
     this.selectedFilter,
     this.onFilterChanged,
+    this.height = 180,
   });
 
   @override
@@ -179,7 +185,7 @@ class _ChartCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          SizedBox(height: 180, child: child),
+          SizedBox(height: height, child: child),
         ],
       ),
     );
@@ -262,6 +268,96 @@ class _SimpleBarChart extends StatelessWidget {
         borderData: FlBorderData(show: false),
         gridData: const FlGridData(show: false),
       ),
+    );
+  }
+}
+
+/// Dashboard Chart Overflow spec §4 — "Pet Transporter Decline Reason" used
+/// _SimpleBarChart's vertical bars with bottom-axis labels, which overlapped
+/// into an unreadable mess once reasons were full sentences ("Handling
+/// another rescue", "Pickup location too far", ...) rather than the short
+/// single-word categories (Critical/Medium/Low, species names) every other
+/// _SimpleBarChart user has. A horizontal layout puts the label to the
+/// left of its own bar instead of competing for space with its neighbors,
+/// so it scales with however many distinct reasons actually exist instead
+/// of clipping/overlapping. Read-only over whatever `data` it's given — the
+/// underlying decline-reason tally in _RescueAnalyticsViewState is
+/// untouched.
+class _DeclineReasonBarChart extends StatelessWidget {
+  final Map<String, num> data;
+  const _DeclineReasonBarChart({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = data.entries.where((e) => e.value > 0).toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    if (entries.isEmpty) {
+      return const _NotTrackedChart(note: 'No decline data yet.');
+    }
+    final maxValue = entries.first.value.toDouble();
+
+    // Real category count only — never pads with invented zero-value
+    // reasons just to fill the card.
+    return ListView.separated(
+      physics: entries.length > 5
+          ? const ClampingScrollPhysics()
+          : const NeverScrollableScrollPhysics(),
+      itemCount: entries.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, i) {
+        final entry = entries[i];
+        final fraction = maxValue == 0 ? 0.0 : entry.value / maxValue;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              flex: 4,
+              child: Text(
+                entry.key,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 5,
+              child: Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  Container(
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: AppColors.slaterspwn.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                  FractionallySizedBox(
+                    widthFactor: fraction.clamp(0.05, 1.0),
+                    child: Container(
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: _chartPalette[i % _chartPalette.length],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 20,
+              child: Text(
+                '${entry.value.toInt()}',
+                textAlign: TextAlign.right,
+                style: GoogleFonts.zain(
+                    fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -541,7 +637,14 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
                 const SizedBox(height: 14),
                 _ChartCard(
                   title: 'Pet Transporter Decline Reason',
-                  child: _SimpleBarChart(data: declineReasons),
+                  // Enough height to show up to 5 reasons without scrolling;
+                  // beyond that the ListView itself scrolls within a capped
+                  // card height rather than growing the card indefinitely or
+                  // clipping/overlapping labels.
+                  height: (declineReasons.values.where((v) => v > 0).length * 40 + 16)
+                      .clamp(80, 220)
+                      .toDouble(),
+                  child: _DeclineReasonBarChart(data: declineReasons),
                 ),
                 const SizedBox(height: 6),
                 Text(

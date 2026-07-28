@@ -67,22 +67,36 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
   bool _signingOut = false;
 
   // Root cause of "Organization Profile sometimes does not open even after
-  // repeated taps": the old top-level `_openOrganizationProfile` did two
-  // chained Firestore reads (via OrgMembershipService.getMembership) with
-  // no re-entrancy guard, no loading feedback, and a bare
-  // `if (context.mounted)` before pushing — if the drawer/host route was
-  // popped or replaced (e.g. the admin tapped elsewhere, or backed out)
-  // before that finished, the push was silently skipped with zero
-  // feedback, and nothing stopped a second/third tap from spawning its own
-  // independent, equally-unguarded attempt. Fixed by: a guard flag that
-  // disables the row and shows a spinner while resolving (so repeated taps
-  // are impossible, not just harmless), resetting the guard in `finally`
-  // (so a failure or a return-to-this-screen always leaves the row usable
-  // again), an explicit error snackbar instead of a silent no-op, and
-  // reusing the existing `currentOrgMembershipProvider` Riverpod stream
-  // (already watched elsewhere, e.g. rescue_detail_page.dart) instead of a
-  // fresh raw OrgMembershipService() lookup, so this can resolve from an
-  // already-warm cache instead of two guaranteed round-trips every tap.
+  // repeated taps" (first pass): the old top-level `_openOrganizationProfile`
+  // did two chained Firestore reads with no re-entrancy guard, no loading
+  // feedback, and a bare `if (context.mounted)` before pushing. Fixed by a
+  // guard flag that disables the row and shows a spinner while resolving,
+  // resetting the guard in `finally`, and an explicit error snackbar
+  // instead of a silent no-op.
+  //
+  // Root cause of the SECOND bug ("Bad state: The provider
+  // StreamProvider<OrgMembership?> was disposed during loading state, yet
+  // no value could be emitted."): that fix read
+  // `currentOrgMembershipProvider.future` — a `StreamProvider.autoDispose`
+  // — via `ref.read` from inside this tap callback. `ref.read` does not
+  // register a listener, so with nothing else on screen watching that
+  // provider (e.g. no rescue_detail_page.dart open), autoDispose tears it
+  // down again almost immediately — often before its underlying Firestore
+  // stream has emitted a first value, which is exactly the disposed-while-
+  // loading crash. The membership value was only ever used for its
+  // `organizationId` field anyway, and per OrgMembershipService's own
+  // doc comment, [getMembership]/the membership stream return null for
+  // every real account today (no `organizations/{orgId}/members/{uid}`
+  // subdocs exist yet) — so this always fell through to
+  // [resolveOrganizationId] regardless. Fixed by dropping the disposable
+  // stream read entirely for this one-time "which org do I open" lookup
+  // and going straight to the plain repository Future
+  // (OrgMembershipService.resolveOrganizationId), which has no Riverpod
+  // provider lifecycle to be disposed out from under. Role-gated actions
+  // elsewhere (e.g. rescue_detail_page.dart's `canManageOrgActions`) are
+  // unaffected — they still `ref.watch` the membership stream directly on
+  // a page that stays mounted, which is the safe pattern this callback
+  // was not following.
   bool _openingOrgProfile = false;
 
   Future<void> _handleOpenOrganizationProfile() async {
@@ -90,31 +104,33 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     setState(() => _openingOrgProfile = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final membership = await ref.read(currentOrgMembershipProvider.future);
-      // Viewing the profile must not depend on the organizations/{id}/
-      // members/{uid} subdoc existing (see OrgMembershipService's own
-      // TODO — no such subdoc exists for real users yet, so `membership`
-      // is null for every legitimate account today). Fall back to
-      // resolving the organization directly off users/{uid}.organizationId
-      // so the real profile opens instead of the blank bootstrap/
-      // invitation flow. Role-gated actions inside the page itself still
-      // rely on membership, unaffected by this fallback.
-      var organizationId = membership?.organizationId;
-      if (organizationId == null) {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid != null) {
-          organizationId = await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
-        }
-      }
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final organizationId = uid == null
+          ? null
+          : await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
+
       if (!mounted) return;
       Navigator.pop(context); // close the drawer only once the destination is ready
       if (!context.mounted) return;
+      // organizationId == null legitimately reaches this page too — it
+      // runs its own pending-invitation/bootstrap flow for an admin not
+      // yet linked to an organization (see OrganizationProfileEditPage's
+      // own doc comment), which is a real, meaningful screen, not a blank
+      // error state.
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: organizationId)),
       );
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Could not open Organization Profile: $e')));
+    } catch (e, st) {
+      debugPrint('[AdminDrawer] Could not resolve organization membership: $e\n$st');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('Could not load the organization profile.'),
+            action: SnackBarAction(label: 'Retry', onPressed: _handleOpenOrganizationProfile),
+          ),
+        );
+      }
     } finally {
       // Reset the guard even if this screen is no longer mounted (e.g. the
       // admin navigated away while this was resolving) — never leaves the

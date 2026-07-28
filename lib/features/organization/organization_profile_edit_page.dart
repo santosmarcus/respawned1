@@ -187,6 +187,14 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         .toList();
     _acceptedSpecies.addAll(List<String>.from(data['acceptedSpecies'] ?? const []));
 
+    // Organization Invitations spec §3 — a one-shot, idempotent check (this
+    // method itself is only ever called from initState/_joinInvitation,
+    // never from build()) so an organization that predates the membership
+    // model — or whose owner's original membership write never landed —
+    // always ends up with an active Admin membership for its `ownerId`,
+    // without ever touching `ownerId` itself or duplicating the doc.
+    await _repo.ensureOwnerMembership(orgId);
+
     // Shelter Capacity is admin-only to edit (spec §8) — resolved via the
     // existing OrgMembershipService, never a second membership model.
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -583,18 +591,20 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.background), onPressed: () => Navigator.pop(context)),
         title: Text('Organization Profile', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
         actions: [
-          // Only reachable once an organization actually exists — a
-          // standalone admin with nothing to staff yet gets no dead-end
-          // Staff Members button.
-          if (_organizationId != null)
-            IconButton(
-              icon: const Icon(Icons.people_outline, color: AppColors.background),
-              tooltip: 'Staff Members',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => StaffMembersPage(organizationId: _organizationId!)),
-              ),
+          // Organization Invitations spec §8 — always reachable, even
+          // before an organization exists: an invited account with no
+          // membership yet still needs somewhere to see and act on "My
+          // Pending Invitations". StaffMembersPage itself hides the
+          // organization-scoped sections (Staff Members / Organization
+          // Pending Invitations) when organizationId is null.
+          IconButton(
+            icon: const Icon(Icons.people_outline, color: AppColors.background),
+            tooltip: 'Staff Members',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => StaffMembersPage(organizationId: _organizationId)),
             ),
+          ),
         ],
       ),
       body: _buildBody(),

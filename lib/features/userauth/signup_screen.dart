@@ -135,25 +135,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  Future<void> _handleFacebookSignUp() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
-    try {
-      final result = await _authService.signInWithFacebook();
-      if (result?.user != null && mounted) {
-        await _routeAfterSocialSignIn(result!.user!.uid);
-      } else if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Facebook sign-in failed: $e';
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
   Future<void> _routeAfterSocialSignIn(String uid) async {
     final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     final firstName = (doc.data()?['firstName'] as String?)?.trim() ?? '';
@@ -303,23 +284,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                   fontSize: 22,
                                   fontWeight: FontWeight.bold,
                                   color: AppColors.textPrimary)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    GestureDetector(
-                      onTap: _isLoading ? null : _handleFacebookSignUp,
-                      child: Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: AppColors.slaterspwn,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.textSecondary),
-                        ),
-                        child: const Center(
-                          child: Icon(Icons.facebook,
-                              size: 26, color: AppColors.textPrimary),
                         ),
                       ),
                     ),

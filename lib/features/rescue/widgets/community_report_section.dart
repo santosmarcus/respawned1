@@ -39,6 +39,11 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   String? _selectedType;
   XFile? _pickedImage;
   bool _submitting = false;
+  // Community Report Image Requirement spec §2 — shown beside the uploader
+  // and used to scroll/focus it when submission is blocked for a missing
+  // photo, rather than only a generic snackbar.
+  bool _showImageError = false;
+  final _imageSectionKey = GlobalKey();
   final _commentController = TextEditingController();
   final _picker = ImagePicker();
 
@@ -184,29 +189,57 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
       imageQuality: 80,
     );
     if (file != null && mounted) {
-      setState(() => _pickedImage = file);
+      setState(() {
+        _pickedImage = file;
+        _showImageError = false;
+      });
     }
   }
 
   Future<void> _submit() async {
     if (_selectedType == null || _submitting) return;
-    // Community Location Validation spec §4 — requires an actually
-    // confirmed map pin (lat/lng set by _openLocationPicker), never just
-    // non-empty freeform text. Reject invalid/unresolved coordinates by
-    // simply not allowing submission — nothing is written, so the
-    // previous location (if any) is untouched.
-    if (_selectedType == 'moved' &&
-        (_pickedLat == null || _pickedLng == null)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select the new location on the map.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+
+    // Community Report Image Requirement spec §2 — at least one uploaded
+    // photo is required for every report type; an empty/placeholder value
+    // never counts. Community Location Validation spec §4 — a "moved"
+    // update additionally requires an actually confirmed map pin (lat/lng
+    // set by _openLocationPicker), never just non-empty freeform text.
+    // Neither requirement bypasses the other — both are checked and
+    // reported together so a "moved" report missing both isn't corrected
+    // one round-trip at a time.
+    final missingImage = _pickedImage == null;
+    final missingLocation =
+        _selectedType == 'moved' && (_pickedLat == null || _pickedLng == null);
+
+    if (missingImage || missingLocation) {
+      if (missingImage) setState(() => _showImageError = true);
+      if (missingLocation) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select the new location on the map.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      if (missingImage) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = _imageSectionKey.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(
+              ctx,
+              duration: const Duration(milliseconds: 300),
+              alignment: 0.2,
+            );
+          }
+        });
+      }
       return;
     }
 
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      _showImageError = false;
+    });
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final userDoc = await FirebaseFirestore.instance
@@ -300,7 +333,10 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   Widget _optionButton(String type, String iconAsset, String label) {
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedType = type),
+        onTap: () => setState(() {
+          _selectedType = type;
+          _showImageError = false;
+        }),
         child: Column(
           children: [
             Container(
@@ -368,30 +404,74 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
               ),
             ),
             const SizedBox(height: 14),
-            GestureDetector(
-              onTap: _pickImage,
-              child: Container(
-                width: 90,
-                height: 90,
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.slaterspwn),
-                  borderRadius: BorderRadius.circular(10),
-                  color: AppColors.background,
-                ),
-                child: _pickedImage != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.file(
-                          File(_pickedImage!.path),
-                          fit: BoxFit.cover,
+            Column(
+              key: _imageSectionKey,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'Photo',
+                          style: GoogleFonts.zain(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
-                      )
-                    : const Icon(
-                        Icons.add_a_photo_outlined,
-                        color: AppColors.textSecondary,
-                        size: 26,
+                        const TextSpan(
+                          text: ' *',
+                          style: TextStyle(color: Colors.redAccent),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    width: 90,
+                    height: 90,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: _showImageError
+                            ? Colors.redAccent
+                            : AppColors.slaterspwn,
+                        width: _showImageError ? 1.5 : 1,
                       ),
-              ),
+                      borderRadius: BorderRadius.circular(10),
+                      color: AppColors.background,
+                    ),
+                    child: _pickedImage != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.file(
+                              File(_pickedImage!.path),
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.add_a_photo_outlined,
+                            color: AppColors.textSecondary,
+                            size: 26,
+                          ),
+                  ),
+                ),
+                if (_showImageError) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'At least one photo is required.',
+                    style: GoogleFonts.zain(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.redAccent,
+                    ),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 14),
             if (_selectedType == 'moved') ...[

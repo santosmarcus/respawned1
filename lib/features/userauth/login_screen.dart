@@ -300,27 +300,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 12),
 
-// Facebook button
-              /* _SocialButton(
-                label: 'Continue with Facebook',
-                iconData: Icons.facebook,
-                onTap: () async {
-                  setState(() => _errorMessage = null);
-                  try {
-                    final result = await _authService.signInWithFacebook();
-                    if (result != null && mounted) {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      setState(() => _errorMessage = 'Facebook sign-in failed: $e');
-                    }
-                  }
-                },
-              ),
-
-              const SizedBox(height: 12),*/
-
 // Phone button
               _SocialButton(
                 label: 'Continue with Phone',
