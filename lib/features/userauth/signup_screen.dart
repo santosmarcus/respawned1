@@ -135,7 +135,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  Future<void> _handleFacebookSignUp() async {
+  /*Future<void> _handleFacebookSignUp() async {
     setState(() { _isLoading = true; _errorMessage = null; });
     try {
       final result = await _authService.signInWithFacebook();
@@ -152,7 +152,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         });
       }
     }
-  }
+  }*/
 
   Future<void> _routeAfterSocialSignIn(String uid) async {
     final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
@@ -308,7 +308,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     ),
                     const SizedBox(width: 16),
                     GestureDetector(
-                      onTap: _isLoading ? null : _handleFacebookSignUp,
+                      //onTap: _isLoading ? null : _handleFacebookSignUp,
                       child: Container(
                         width: 52,
                         height: 52,

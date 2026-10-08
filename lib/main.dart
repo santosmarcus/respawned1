@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+//import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
@@ -29,14 +29,14 @@ void main() async {
 
   GoogleFonts.config.allowRuntimeFetching = false;
 
-  if (kIsWeb) {
+  /*if (kIsWeb) {
     await FacebookAuth.instance.webAndDesktopInitialize(
       appId: "YOUR_FACEBOOK_APP_ID",
       cookie: true,
       xfbml: true,
       version: "v19.0",
     );
-  }
+  }*/
 
 
   runApp(const ProviderScope(child: ResPAWndApp()));

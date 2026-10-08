@@ -67,3 +67,4 @@ ios/Runner.xcworkspace/
 *.keystore
 *.jks
 key.properties
+._*
