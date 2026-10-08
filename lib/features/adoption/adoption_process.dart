@@ -26,7 +26,7 @@ const List<String> _stepLabels = [
   'Fill out adoption form',
   'Book appointment',
   'Application review',
-  'Time to meet! | Adoption Fee',
+  'Time to meet!',
   'Adoption Day',
 ];
 
@@ -148,11 +148,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   // reservation, release, rejection) show up here without the applicant
   // needing to reopen this screen.
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _adoptionSub;
-
-  // Adoption fee / payment
-  static const double adoptionFeeAmount = 500;
-  bool _feePaid = false;
-  String? _paymentMethod;
 
   // Delivery — set by the organization once the animal is released (see
   // ReleaseDetailsPage's Release / Adoption Date, admin-side). Carries a
@@ -539,11 +534,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         }
         _appointmentType = data['appointmentType'] as String? ?? _appointmentType;
         _appointmentTime = data['appointmentTime'] as String?;
-
-        // Adoption fee / payment
-        final payment = (data['payment'] as Map?) ?? {};
-        _feePaid = payment['status'] == 'paid';
-        _paymentMethod = payment['method'] as String?;
 
         // Set by AdoptionApplicationRepository.reserve (admin-side) —
         // cleared again by unreserve/release.
@@ -1876,7 +1866,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Time to meet! | Adoption Fee',
+          'Time to meet!',
           style: GoogleFonts.tiltWarp(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -1894,16 +1884,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         ),
         const SizedBox(height: 6),
         Text(
-          _feePaid
-              ? 'Your adoption fee payment has been confirmed. We\'ll finalize '
-              'the remaining requirements and prepare ${widget.animal.name} '
-              'for their forever home.'
-              : 'The next step is to complete your adoption fee payment to '
-              'proceed with the adoption process. Once your payment has '
-              'been confirmed, we\'ll finalize the remaining requirements '
-              'and prepare your fur baby for their forever home. We are '
-              'excited to get to know you as a potential adopter for '
-              '${widget.animal.name}!',
+          'We\'ll finalize the remaining requirements and prepare '
+              '${widget.animal.name} for their forever home. We are excited '
+              'to get to know you as a potential adopter!',
           style: GoogleFonts.zain(
               fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
@@ -1927,35 +1910,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: AppColors.textPrimary),
-                ),
-              ],
-            ),
-          ),
-        ],
-
-        if (_feePaid) ...[
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.greenrspwn.withOpacity(0.25),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.check_circle,
-                    color: AppColors.greenrspwn, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Adoption fee paid'
-                        '${_paymentMethod != null ? ' via $_paymentMethod' : ''}.',
-                    style: GoogleFonts.zain(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary),
-                  ),
                 ),
               ],
             ),
@@ -1988,7 +1942,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         // date/time (see ReleaseDetailsPage, admin-side). Staying on this
         // step (rather than jumping straight to "Adoption Day") until that
         // date/time actually arrives is handled in _loadExistingAdoption.
-        if (_feePaid && _scheduledReleaseDate != null) ...[
+        if (_scheduledReleaseDate != null) ...[
           const SizedBox(height: 16),
           _deliveryInfoCard(showAttempts: true, useGrayAttempts: true),
           if (!_isReadOnly) ...[
@@ -2025,39 +1979,32 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           ],
         ],
 
-        if (!_isReadOnly) ...[
+        if (!_isReadOnly && _scheduledReleaseDate == null) ...[
           const SizedBox(height: 28),
-          if (!_feePaid) ...[
-            _PrimaryButton(
-              label: 'Make Payment',
-              onTap: _openReviewPayment,
-            ),
-            // Withdrawing is only available before the adoption fee is
-            // paid — once payment is confirmed, the adopter is committed
-            // and instead sees delivery info above.
-            const SizedBox(height: 12),
-            _SecondaryButton(
-              label: 'Withdraw Application',
-              onTap: _isSubmitting ? null : _withdrawApplication,
-            ),
-          ] else if (_scheduledReleaseDate == null)
           // The organization completes the actual handoff (Release
           // Animal, from the admin Adoption Application Review module) —
           // this screen just reflects that live once it happens, rather
           // than letting the applicant self-declare adoption complete.
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.slaterspwn.withOpacity(0.35),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Center(
-                child: Text('Waiting for the organization to release the animal to you.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              color: AppColors.slaterspwn.withOpacity(0.35),
+              borderRadius: BorderRadius.circular(30),
             ),
+            child: Center(
+              child: Text('Waiting for the organization to release the animal to you.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            ),
+          ),
+          // Withdrawing stays available until the organization schedules
+          // the release; after that the adopter uses Request Reschedule.
+          const SizedBox(height: 12),
+          _SecondaryButton(
+            label: 'Withdraw Application',
+            onTap: _isSubmitting ? null : _withdrawApplication,
+          ),
         ],
 
         const SizedBox(height: 24),
@@ -2065,44 +2012,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     );
   }
 
-  // Opens the adoption-fee payment sheet (same presentation as the
-  // donation flow's DonationReviewSheet). On a confirmed payment, the
-  // sheet itself writes the 'payment' map + status history onto the
-  // adoption doc and pops back with `true`, so we just flip local state to
-  // reveal the "Adoption Day!" action without waiting for a full reload.
-  Future<void> _openReviewPayment() async {
-    if (_adoptionId == null) return;
-    final paid = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _ReviewPaymentSheet(
-        adoptionId: _adoptionId!,
-        animalName: widget.animal.name,
-        organizationName: 'Loved by the Gapz',
-        feeAmount: adoptionFeeAmount,
-        animalPhotoUrl: widget.animal.photoUrl,
-      ),
-    );
-
-    if (paid == true && mounted) {
-      setState(() => _feePaid = true);
-      // Pull the confirmed method back from Firestore so the banner text
-      // above is accurate without duplicating the write logic here.
-      final doc = await FirebaseFirestore.instance
-          .collection('adoptions')
-          .doc(_adoptionId)
-          .get();
-      final payment = (doc.data()?['payment'] as Map?) ?? {};
-      if (mounted) {
-        setState(() => _paymentMethod = payment['method'] as String?);
-      }
-    }
-  }
-
-
   Widget _deliveryInfoCard({required bool showAttempts, required bool useGrayAttempts}) {
-    if (!_feePaid || _scheduledReleaseDate == null) return const SizedBox.shrink();
+    if (_scheduledReleaseDate == null) return const SizedBox.shrink();
 
     final attemptsColor = useGrayAttempts
         ? Colors.grey.shade600
@@ -2189,7 +2100,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               fontSize: 14, color: AppColors.textPrimary, height: 1.5),
         ),
 
-        if (_feePaid && _scheduledReleaseDate != null) ...[
+        if ( _scheduledReleaseDate != null) ...[
           const SizedBox(height: 16),
           _deliveryInfoCard(showAttempts: true, useGrayAttempts: true),
         ],
@@ -2326,314 +2237,6 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 }
 
 
-// Review Payment sheet (Adoption Fee) — mirrors DonationReviewSheet's
-// bottom-sheet design (donation_detail.dart) exactly: same handle bar,
-// divider rhythm, bordered info/payment rows, and button styling, so the
-// adoption fee flow feels like the same payment surface as donations.
-//
-// In production, "Pay" should call a Cloud Function that creates a
-// PayMongo Payment Intent/Source for the selected method and amount, then
-// either opens the returned checkout URL (card/e-wallet authorization) or
-// polls/receives a webhook-driven update once PayMongo confirms the
-// charge. That backend + webhook infrastructure isn't available in this
-// environment, so the confirmation here is simulated — clearly marked
-// below — while the surrounding UI, state, and Firestore write are the
-// real integration points to keep when wiring PayMongo in.
-class _ReviewPaymentSheet extends StatefulWidget {
-  final String adoptionId;
-  final String animalName;
-  final String organizationName;
-  final double feeAmount;
-  // The animal's own real photo — kept entirely separate from the
-  // applicant's uploaded Home Photos / documents (different fields,
-  // different widgets); this summary card must never show either of those
-  // instead of the animal itself.
-  final String? animalPhotoUrl;
-
-  const _ReviewPaymentSheet({
-    required this.adoptionId,
-    required this.animalName,
-    required this.organizationName,
-    required this.feeAmount,
-    this.animalPhotoUrl,
-  });
-
-  @override
-  State<_ReviewPaymentSheet> createState() => _ReviewPaymentSheetState();
-}
-
-class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
-  String? _selectedPayment;
-  bool _submitting = false;
-
-  static const List<String> _paymentMethods = [
-    'Credit Card',
-    'PayPal',
-    'GCash',
-    'Maya',
-  ];
-
-  String get _formattedFee => widget.feeAmount % 1 == 0
-      ? widget.feeAmount.toInt().toString()
-      : widget.feeAmount.toStringAsFixed(2);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.textPrimary.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            Text('Review Payment',
-                style: GoogleFonts.tiltWarp(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary)),
-
-            const SizedBox(height: 16),
-
-            // Adoption info row
-            Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: widget.animalPhotoUrl != null
-                      ? Image.network(
-                    widget.animalPhotoUrl!,
-                    width: 60,
-                    height: 60,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _petThumbPlaceholder(),
-                  )
-                      : _petThumbPlaceholder(),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Adopt ${widget.animalName}',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text(widget.organizationName,
-                          style: GoogleFonts.zain(
-                              fontSize: 14,
-                              color: AppColors.textPrimary.withOpacity(0.7))),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-            const Divider(thickness: 0.5),
-
-            // Adoption fee (fixed by the organization — shown, not editable)
-            Text('Adoption Fee',
-                style: GoogleFonts.zain(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-            Container(
-              height: 44,
-              decoration: BoxDecoration(
-                border:
-                Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('₱',
-                        style: GoogleFonts.zain(
-                            fontSize: 16, color: AppColors.textPrimary)),
-                  ),
-                  Text(_formattedFee,
-                      style: GoogleFonts.zain(
-                          fontSize: 14, color: AppColors.textPrimary)),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 16),
-            const Divider(thickness: 0.5),
-
-            // Payment method
-            Text('Select Payment Method',
-                style: GoogleFonts.zain(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-            ..._paymentMethods.map((method) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: GestureDetector(
-                onTap: _submitting
-                    ? null
-                    : () => setState(() => _selectedPayment = method),
-                child: Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: _selectedPayment == method
-                          ? AppColors.textPrimary
-                          : AppColors.textPrimary.withOpacity(0.2),
-                      width: _selectedPayment == method ? 1.5 : 1,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                    color: _selectedPayment == method
-                        ? AppColors.yellowrspwn.withOpacity(0.3)
-                        : Colors.transparent,
-                  ),
-                  child: Row(
-                    children: [
-                      Radio<String>(
-                        value: method,
-                        groupValue: _selectedPayment,
-                        activeColor: AppColors.textPrimary,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        onChanged: _submitting
-                            ? null
-                            : (v) => setState(() => _selectedPayment = v),
-                      ),
-                      Text(method,
-                          style: GoogleFonts.zain(
-                              fontSize: 14, color: AppColors.textPrimary)),
-                    ],
-                  ),
-                ),
-              ),
-            )),
-
-            const SizedBox(height: 12),
-            const Divider(thickness: 0.5),
-
-            // Adoption fee summary
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Adoption Fee',
-                    style: GoogleFonts.zain(
-                        fontSize: 14, color: AppColors.textPrimary)),
-                Text('₱$_formattedFee',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 14, color: AppColors.textPrimary)),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // Pay button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: (_selectedPayment == null || _submitting)
-                    ? null
-                    : _pay,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  disabledBackgroundColor:
-                  AppColors.yellowrspwn.withOpacity(0.5),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  elevation: 0,
-                ),
-                child: _submitting
-                    ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.textPrimary),
-                )
-                    : Text('Pay',
-                    style: GoogleFonts.tiltWarp(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary)),
-              ),
-            ),
-
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pay() async {
-    if (_selectedPayment == null) return;
-    setState(() => _submitting = true);
-    try {
-      // ---- Simulated PayMongo confirmation (see class comment above) ----
-      await Future.delayed(const Duration(milliseconds: 900));
-      // --------------------------------------------------------------
-
-      await FirebaseFirestore.instance
-          .collection('adoptions')
-          .doc(widget.adoptionId)
-          .set({
-        'payment': {
-          'method': _selectedPayment,
-          'amount': widget.feeAmount,
-          'status': 'paid',
-          'paidAt': Timestamp.now(),
-          'paidBy': FirebaseAuth.instance.currentUser?.uid,
-        },
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status':
-            'Adoption fee payment received via $_selectedPayment.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
-      }, SetOptions(merge: true));
-
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Payment failed: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
 
   Widget _petThumbPlaceholder() => Container(
     width: 60,
@@ -2641,7 +2244,6 @@ class _ReviewPaymentSheetState extends State<_ReviewPaymentSheet> {
     decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
     child: const Icon(Icons.pets, size: 26, color: AppColors.textPrimary),
   );
-}
 
 // Terms and Conditions page (Adoption Day)
 class _TermsAndConditionsPage extends StatelessWidget {
@@ -2821,15 +2423,19 @@ class _StepTracker extends StatelessWidget {
                 : null,
             child: Column(
               children: [
-                Row(
+                SizedBox(
+                  height: 18,
+                  child: Row(
                   children: [
                     if (index != 0)
                       Expanded(
                         child: Container(
                           height: 2,
-                          color: isDone
-                              ? AppColors.lavenderrspwn
-                              : AppColors.slaterspwn,
+                          color: index == 0
+                              ? Colors.transparent
+                              : (isReachable
+                                  ? AppColors.lavenderrspwn
+                                  : AppColors.slaterspwn),
                         ),
                       ),
 
@@ -2858,17 +2464,18 @@ class _StepTracker extends StatelessWidget {
                       )
                           : null,
                     ),
-
-                    if (index != labels.length - 1)
                       Expanded(
                         child: Container(
                           height: 2,
-                          color: index < activeIndex
-                              ? AppColors.lavenderrspwn
-                              : AppColors.slaterspwn,
+                          color: index == labels.length - 1
+                              ? Colors.transparent
+                              : (isDone
+                                ? AppColors.lavenderrspwn
+                                : AppColors.slaterspwn),
                         ),
                       ),
                   ],
+                ),
                 ),
 
                 const SizedBox(height: 8),
