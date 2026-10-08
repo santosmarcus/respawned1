@@ -58,10 +58,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
 
       if (mounted) {
-        // Back to AuthWrapper (the root route), which now sees the new
-        // account without a role and shows the onboarding questions.
+        // Go to user type selection after account created
         setState(() => _isLoading = false);
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
+        );
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'email-already-in-use') {
@@ -71,11 +73,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
             password: _passwordController.text.trim(),
           );
           if (mounted) {
-            // This is an existing account — let AuthWrapper decide where it
-            // goes. It only shows onboarding if this user never finished it;
-            // forcing EnterDetailsScreen here made returning users redo it.
             setState(() => _isLoading = false);
-            Navigator.of(context).popUntil((route) => route.isFirst);
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
+            );
           }
           return;
         } catch (_) {
