@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
@@ -94,7 +95,7 @@ class _UserProfileState extends State<UserProfile> {
       ),
     );
     if (confirmed == true){
-      await FirebaseAuth.instance.signOut();
+      await AuthService().signOut();
       if(mounted){
         Navigator.of(context).popUntil((route) => route.isFirst);
       }

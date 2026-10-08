@@ -58,12 +58,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
 
       if (mounted) {
-        // Go to user type selection after account created
         setState(() => _isLoading = false);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
-        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'email-already-in-use') {
@@ -74,10 +70,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
           );
           if (mounted) {
             setState(() => _isLoading = false);
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
-            );
+            Navigator.of(context).popUntil((route) => route.isFirst);
           }
           return;
         } catch (_) {

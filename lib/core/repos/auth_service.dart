@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/generalhome/push_token_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 //import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -182,8 +183,8 @@ class AuthService {
       }
     } catch (e) {
       debugPrint('Facebook sign-out cleanup failed (non-fatal): $e');
-    }
-    await firebaseAuth.signOut();*/
+    }*/
+    await firebaseAuth.signOut();
   }
 
   Future<void> _createUserDocIfNew(User user) async {
@@ -207,10 +208,13 @@ class AuthService {
     });
   }
 
+  static bool hasCompletedOnboarding(Map<String, dynamic>? userData) {
+    final role = userData?['role'];
+    return role is String && role.isNotEmpty;
+  }
+
   Future<bool> isNewUser(String uid) async {
     final doc = await _firestore.collection('users').doc(uid).get();
-    if (!doc.exists) return true;
-    final role = doc.data()?['role'];
-    return role == null || role == '';
+    return !hasCompletedOnboarding(doc.data());
   }
 }
