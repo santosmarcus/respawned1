@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 //import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/features/generalhome/push_token_service.dart';
 
 ValueNotifier<AuthService> authService = ValueNotifier (AuthService());
 
@@ -154,6 +155,12 @@ class AuthService {
 
 
   Future<void> signOut() async {
+    // Detach this device's push token from the outgoing user's profile while
+    // they're still authenticated (Firestore rules need the uid), so the next
+    // person to sign in on this device doesn't get the previous user's
+    // notifications — and so register() runs again for whoever signs in next.
+    await PushTokenService.unregister();
+
     final googleSignIn = GoogleSignIn();
     // signOut() clears the cached session Google Play Services uses to
     // silently reauth on the next sign-in attempt (this is what actually
@@ -182,8 +189,14 @@ class AuthService {
       }
     } catch (e) {
       debugPrint('Facebook sign-out cleanup failed (non-fatal): $e');
-    }
-    await firebaseAuth.signOut();*/
+    }*/
+
+    // The actual Firebase sign-out. This used to sit inside the commented-out
+    // Facebook block above, so every caller of AuthService.signOut() only
+    // cleared the Google session and the user stayed signed in to Firebase —
+    // authStateChanges() never emitted null and AuthWrapper never returned to
+    // LoginScreen.
+    await firebaseAuth.signOut();
   }
 
   Future<void> _createUserDocIfNew(User user) async {
@@ -207,10 +220,16 @@ class AuthService {
     });
   }
 
+  /// Single definition of "finished onboarding", shared by AuthWrapper's
+  /// routing and isNewUser(). Onboarding ends by saving a role on the
+  /// user's Firestore profile, so it survives logout and later logins.
+  static bool hasCompletedOnboarding(Map<String, dynamic>? userData) {
+    final role = userData?['role'];
+    return role is String && role.isNotEmpty;
+  }
+
   Future<bool> isNewUser(String uid) async {
     final doc = await _firestore.collection('users').doc(uid).get();
-    if (!doc.exists) return true;
-    final role = doc.data()?['role'];
-    return role == null || role == '';
+    return !hasCompletedOnboarding(doc.data());
   }
 }

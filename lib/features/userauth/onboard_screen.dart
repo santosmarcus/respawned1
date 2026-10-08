@@ -4,9 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
-import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
@@ -102,12 +100,6 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       }, SetOptions(merge: true));
 
       if (mounted) {
-        // Matches AuthWrapper's role -> screen mapping in main.dart, so the
-        // very first screen after onboarding is the same one a restart
-        // would land on (previously 'rescue_volunteer' fell through to
-        // HomeScreen here but ServiceScreen on restart — an inconsistency).
-        Widget nextPage;
-
         if (_selectedRole == 'pet_transporter') {
           Navigator.push(
             context,
@@ -120,22 +112,20 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
             ),
           );
           return;
-        } else if (_selectedRole == 'rescue_volunteer') {
-          nextPage = const ServiceScreen();
         } else if (_selectedRole == 'organization') {
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const OrganizationAboutScreen()),
           );
           return;
-        } else {
-          nextPage = const HomeScreen();
         }
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => nextPage),
-              (route) => false,
-        );
+        // General user / rescue volunteer: hand back to AuthWrapper (the
+        // root route), which watches the user doc and has already switched
+        // to the role's home screen (HomeScreen / ServiceScreen) now that the
+        // role is saved. This used to pushAndRemoveUntil the home screen,
+        // which threw AuthWrapper away — after that, signing out had nothing
+        // left to send the user back to LoginScreen.
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       // Previously this only printed to the debug console — on a real

@@ -33,6 +33,34 @@ class PushTokenService {
     }
   }
 
+  /// Called on sign-out, before the Firebase session ends. Forgets which uid
+  /// this device registered for (otherwise the same user signing back in is
+  /// skipped as "already handled") and removes this device's token from the
+  /// outgoing user's profile so their notifications stop arriving here once
+  /// someone else signs in. Never throws — logout must not depend on it.
+  static Future<void> unregister() async {
+    _registeredForUid = null;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      final token = await FirebaseMessaging.instance
+          .getToken()
+          .timeout(const Duration(seconds: 5));
+      if (token == null) return;
+      final doc = FirebaseFirestore.instance.collection('users').doc(uid);
+      final snap = await doc.get().timeout(const Duration(seconds: 5));
+      // Only clear it if it's still this device's token — another device
+      // the same user signed into later may have overwritten it.
+      if (snap.data()?['fcmToken'] == token) {
+        await doc
+            .update({'fcmToken': FieldValue.delete()})
+            .timeout(const Duration(seconds: 5));
+      }
+    } catch (_) {
+    }
+  }
+
   static Future<void> _saveToken(String uid, String token) {
     return FirebaseFirestore.instance.collection('users').doc(uid).set(
       {'fcmToken': token},

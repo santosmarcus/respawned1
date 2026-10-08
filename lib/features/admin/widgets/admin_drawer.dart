@@ -86,6 +86,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     // own BuildContext is deactivated once the drawer closes mid-flow.
     final rootNavigator = Navigator.of(context, rootNavigator: true);
     final messenger = ScaffoldMessenger.of(context);
+    final container = ProviderScope.containerOf(context, listen: false);
     Navigator.pop(context); // close the drawer, same pattern every other item uses
 
     try {
@@ -96,7 +97,9 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
       // so their Firestore listeners tear themselves down as soon as the
       // pages watching them are removed below. currentOrgMembershipProvider
       // is global (not tied to a specific page) so it's cleared explicitly.
-      ref.invalidate(currentOrgMembershipProvider);
+      // Through the captured container, not `ref`: signing out resets the
+      // navigator (see ResPAWndApp), which can dispose this drawer first.
+      container.invalidate(currentOrgMembershipProvider);
 
       // Remove every pushed admin route so the stale authenticated screen
       // can't linger on top of AuthWrapper's now-signed-out content —
