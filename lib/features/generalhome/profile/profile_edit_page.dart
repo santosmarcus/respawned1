@@ -1,5 +1,5 @@
 import 'dart:io';
-
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -68,8 +68,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   }
 
   Future<void> _pickPhoto() async {
-    final picked =
-    await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final picked = await pickImageWithSource(context, _picker);
     if (picked == null) return;
     setState(() => _pickedPhoto = File(picked.path));
 

@@ -10,6 +10,7 @@ import 'package:respawnd1/core/utils/validators.dart';
 import '../../../app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_id_tag_screen.dart';
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 
 class CollarTagFormScreen extends StatefulWidget {
   final CollarTagData? existingTag;
@@ -127,12 +128,12 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
   }
 
   Future<void> _pickPetImage() async {
-    final xf = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final xf = await pickImageWithSource(context, _picker);
     if (xf != null) setState(() => _petImage = File(xf.path));
   }
 
   Future<void> _pickVaccinationImage() async {
-    final xf = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final xf = await pickImageWithSource(context, _picker);
     if (xf != null) setState(() => _vaccinationImage = File(xf.path));
   }
 

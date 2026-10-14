@@ -6,7 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/locality_result.dart';
 import 'package:respawnd1/core/repos/clinic_search_repository.dart';
@@ -200,7 +200,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   }
 
   Future<void> _pickAvatar() async {
-    final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await pickImageWithSource(context, _picker, imageQuality: 85);
     if (picked == null) return;
     setState(() => _pendingAvatar = File(picked.path));
   }

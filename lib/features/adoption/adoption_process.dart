@@ -1,5 +1,5 @@
 import 'dart:async';
-
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
@@ -258,11 +258,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   Future<void> _pickUploadFile({
     required void Function(File) onPicked,
   }) async {
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-      maxWidth: 1280,
-    );
+    final picked = await pickImageWithSource(context, _picker, maxWidth: 1280);
     if (picked != null) {
       onPicked(File(picked.path));
     }
@@ -276,7 +272,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   /// (existing + newly picked combined) — extra picks beyond the cap are
   /// dropped with a message rather than silently accepted.
   Future<void> _addHomePhotos() async {
-    final picked = await _picker.pickMultiImage(imageQuality: 80);
+    final picked = await pickImagesWithSource(context, _picker);
     if (picked.isEmpty) return;
 
     final currentTotal = _existingHomePhotoUrls.length + _homePhotosFiles.length;

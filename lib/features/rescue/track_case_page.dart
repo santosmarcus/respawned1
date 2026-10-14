@@ -98,17 +98,10 @@ class _TrackCasePageState extends State<TrackCasePage> {
             normalizedStatus.contains('completed') ||
             normalizedStatus.contains('ended');
 
-        // A rejected report gets the same one-time success/acknowledgment
-        // screen as a closed/completed case — but only until the reporter
-        // has actually acknowledged it (tapped Close there, which sets
-        // hiddenFromExplore, same flag CaseSummaryPage._close already
-        // uses). After that, re-opening it from History goes straight to
-        // the normal read-only Track Case view below instead of looping
-        // back to this screen every time.
-        final isUnacknowledgedRejection =
-            normalizedStatus == 'rejected' && data?['hiddenFromExplore'] != true;
+        // A rejected report gets the same one-time success/acknowledgment screen
+        normalizedStatus.contains('ended') || normalizedStatus == 'rejected';
 
-        if (isReporter && (isFinalStatus || isUnacknowledgedRejection)) {
+        if (isReporter && isFinalStatus) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             Navigator.pushReplacement(
               context,

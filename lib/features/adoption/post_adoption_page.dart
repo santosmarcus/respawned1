@@ -14,7 +14,7 @@ import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
-
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 
 String _formatDate(DateTime d) {
   const months = [
@@ -1292,11 +1292,7 @@ class _PostAdoptionCheckinFormState extends State<PostAdoptionCheckinForm> {
 
   Future<void> _addImage() async {
     if (_images.length >= 5) return;
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-      maxWidth: 1280,
-    );
+    final picked = await pickImageWithSource(context, _picker, maxWidth: 1280);
     if (picked != null) setState(() => _images.add(File(picked.path)));
   }
 
@@ -1609,11 +1605,7 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
 
   Future<void> _addImage() async {
     if (_images.length >= 5) return;
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-      maxWidth: 1280,
-    );
+    final picked = await pickImageWithSource(context, _picker, maxWidth: 1280);
     if (picked != null) setState(() => _images.add(File(picked.path)));
   }
 

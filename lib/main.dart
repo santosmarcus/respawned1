@@ -120,7 +120,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
         if (!snapshot.hasData) {
           return const LoginScreen();
         }
-        PushTokenService.register();
 
         final uid = snapshot.data!.uid;
         return _UserDocRouter(key: ValueKey(uid), uid: uid);
@@ -141,7 +140,7 @@ class _UserDocRouterState extends State<_UserDocRouter> {
   late Stream<DocumentSnapshot<Map<String, dynamic>>> _userDoc = _subscribe();
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> _subscribe() =>
-      FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots();
+      FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(includeMetadataChanges: true);
 
   @override
   Widget build(BuildContext context) {
@@ -187,6 +186,11 @@ class _UserDocRouterState extends State<_UserDocRouter> {
         // Onboarding not finished yet (new user, or social sign-in with
         // no role) — only these users see the onboarding questions.
         if (!AuthService.hasCompletedOnboarding(data)) {
+          if (doc.metadata.isFromCache || doc.metadata.hasPendingWrites) {
+            return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+            );
+          }
           return const EnterDetailsScreen();
         }
 

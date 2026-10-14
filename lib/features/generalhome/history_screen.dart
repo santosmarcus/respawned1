@@ -185,11 +185,9 @@ class _RescueHistoryCard extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => _isRejected
-                ? (_communityAdoptionEligible
-                    ? CommunityAdoptionTrackPage(caseId: caseId)
-                    : TrackCasePage(caseId: caseId))
-                : _isFinal
+              builder: (_) => _isRejected && _communityAdoptionEligible
+                  ? CommunityAdoptionTrackPage(caseId: caseId)
+                  : (_isFinal || _isRejected)
                     ? CaseSummaryPage(
                         caseId: caseId,
                         caseData: data,

@@ -6,7 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
@@ -158,7 +158,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
   };
 
   Future<void> _pickImage() async {
-    final file = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final file = await pickImageWithSource(context, _picker);
     if (file != null && mounted) {
       setState(() => _pickedImage = file);
     }
