@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 
 class CaseCompletedPage extends StatelessWidget {
@@ -21,6 +22,17 @@ class CaseCompletedPage extends StatelessWidget {
   bool get _isRejected {
     final s = (caseData['status'] as String? ?? '').toLowerCase();
     return s == 'rejected';
+  }
+
+  String? get _rejectionReasonLabel {
+    final name = caseData['rejectionReason'] as String?;
+    if (name == null || name.isEmpty) return null;
+    final reason = RejectionReason.fromName(name);
+    if (reason == RejectionReason.other) {
+      final other = caseData['rejectionReasonOther'] as String?;
+      return (other?.trim().isNotEmpty ?? false) ? other!.trim() : 'Other';
+    }
+    return reason.label;
   }
 
   @override
@@ -78,7 +90,9 @@ class CaseCompletedPage extends StatelessWidget {
 
                     Text(
                       _isRejected
-                          ? 'Thank you for reporting this. Our team reviewed it and determined it doesn\'t require rescue intervention at this time.'
+                          ? (_rejectionReasonLabel != null
+                            ? 'Thank you for reporting this case! The team reviewd it and determined it does not require rescue intervention at this time. Reason: $_rejectionReasonLabel'
+                            : 'No reason was provided for this rejection.')
                           : (_isClosed
                           ? 'With heavy hearts, we share that this animal passed away despite everyone\'s rescue efforts.'
                           : 'The animal is now in treatment and in the care of our partner organization. Thank you for your compassion and for helping make this rescue possible.'),
