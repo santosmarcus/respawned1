@@ -591,3 +591,6 @@ exports.cancelZoomMeeting = onCall({secrets: [zoomAccountId, zoomClientId, zoomC
   });
   return {cancelled: true};
 });
+
+// PayMongo donations & sponsorships — see functions/paymongo.js.
+Object.assign(exports, require('./paymongo'));

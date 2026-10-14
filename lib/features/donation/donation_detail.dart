@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
 import 'package:intl/intl.dart';
-import 'donation_cards.dart';
+import 'donation_payment_service.dart';
 import 'donation_review.dart';
 import 'donation_review_inkind.dart';
 import 'models.dart';
@@ -497,7 +497,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
   String? _selectedPayment;
 
   final List<double> _quickAmounts = [50, 100, 200, 500];
-  final List<String> _paymentMethods = ['Credit Card', 'GCash', 'Maya'];
+  final List<String> _paymentMethods = kDonationPaymentMethods.map((m) => m.label).toList();
 
   @override
   Widget build(BuildContext context) {
@@ -605,13 +605,9 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
     final nav = Navigator.of(context);
     final donation = widget.donation;
     final amount = _selectedAmount;
-    final payment = _selectedPayment;
+    final payment = _selectedPayment!;
     nav.pop(); // Dismiss sheet
-    if (payment == 'Credit Card') {
-      nav.push(MaterialPageRoute(builder: (context) => DonationCreditCardScreen(fundraiserId: donation.id, organizationName: donation.organizer, campaignName: donation.title, amount: amount, isAnonymous: _isAnonymous)));
-    } else {
-      nav.push(MaterialPageRoute(builder: (context) => DonationReviewScreen(params: DonationReviewParams(fundraiserId: donation.id, organizationName: donation.organizer, donationMethod: payment!, item: DonationItem(description: donation.title, amount: amount), isAnonymous: _isAnonymous))));
-    }
+    nav.push(MaterialPageRoute(builder: (context) => DonationReviewScreen(params: DonationReviewParams(fundraiserId: donation.id, organizationName: donation.organizer, donationMethod: payment, item: DonationItem(description: donation.title, amount: amount), isAnonymous: _isAnonymous))));
   }
 }
 

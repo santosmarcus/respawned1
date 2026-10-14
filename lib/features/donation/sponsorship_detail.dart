@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
 import 'models.dart';
-import 'donation_cards.dart';
+import 'donation_payment_service.dart';
 import 'donation_review.dart';
 import 'sponsorship_summary.dart';
 
@@ -377,7 +377,7 @@ class SponsorshipReviewSheet extends StatefulWidget {
 
 class _SponsorshipReviewSheetState extends State<SponsorshipReviewSheet> {
   String? _selectedPayment;
-  final List<String> _paymentMethods = ['Credit Card', 'GCash', 'Maya'];
+  final List<String> _paymentMethods = kDonationPaymentMethods.map((m) => m.label).toList();
 
   @override
   Widget build(BuildContext context) {
@@ -391,7 +391,7 @@ class _SponsorshipReviewSheetState extends State<SponsorshipReviewSheet> {
           const SizedBox(height: 16),
           Text('Review Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.textPrimary)),
           const SizedBox(height: 8),
-          Text('Your will be charged every 30 days, but you can cancel at any time.', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+          Text('This payment covers 30 days of sponsorship. It does not renew automatically.', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
           const SizedBox(height: 20),
           Row(
             children: [
@@ -445,10 +445,6 @@ class _SponsorshipReviewSheetState extends State<SponsorshipReviewSheet> {
     final amount = widget.amount;
     final payment = _selectedPayment!;
     nav.pop(); // Close sheet
-    if (payment == 'Credit Card') {
-      nav.push(MaterialPageRoute(builder: (context) => DonationCreditCardScreen(fundraiserId: sponsorship.id, organizationName: sponsorship.organizer, campaignName: 'Monthly Sponsorship: ${sponsorship.animalName ?? "Pet"}', amount: amount, isAnonymous: false, sponsorship: sponsorship, isSponsorship: true)));
-    } else {
-      nav.push(MaterialPageRoute(builder: (context) => DonationReviewScreen(params: DonationReviewParams(fundraiserId: sponsorship.id, organizationName: sponsorship.organizer, donationMethod: payment, item: DonationItem(description: 'Monthly Sponsorship: ${sponsorship.animalName ?? "Pet"}', amount: amount), isAnonymous: false, sponsorship: sponsorship, isSponsorship: true))));
-    }
+    nav.push(MaterialPageRoute(builder: (context) => DonationReviewScreen(params: DonationReviewParams(fundraiserId: sponsorship.id, organizationName: sponsorship.organizer, donationMethod: payment, item: DonationItem(description: 'Monthly Sponsorship: ${sponsorship.animalName ?? "Pet"}', amount: amount), isAnonymous: false, sponsorship: sponsorship, isSponsorship: true))));
   }
 }
