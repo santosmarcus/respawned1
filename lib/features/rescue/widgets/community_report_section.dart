@@ -4,11 +4,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
 
 /// Community sighting-update section — "Animal still here" / "Animal
@@ -25,15 +28,20 @@ import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
 /// close/complete of the case (a Community-Adoption-eligible case in
 /// particular must stay open until its own completion rule is met, not
 /// because someone reported "still here"/"moved").
-class CommunityReportSection extends StatefulWidget {
+///
+/// Reads (count badge + list) go through the same [caseCommunityReportsProvider]
+/// / [CommunityReport] model the admin side's `CommunityReportsSection` uses,
+/// instead of a second raw-map Firestore parser — Priority 2 spec §5. Only
+/// the submission form below still writes directly to Firestore.
+class CommunityReportSection extends ConsumerStatefulWidget {
   final String caseId;
   const CommunityReportSection({super.key, required this.caseId});
 
   @override
-  State<CommunityReportSection> createState() => _CommunityReportSectionState();
+  ConsumerState<CommunityReportSection> createState() => _CommunityReportSectionState();
 }
 
-class _CommunityReportSectionState extends State<CommunityReportSection> {
+class _CommunityReportSectionState extends ConsumerState<CommunityReportSection> {
   bool _sectionExpanded = false;
   bool _expanded = false;
   String? _selectedType;
@@ -661,16 +669,16 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
 
   // Community Location Approval spec §9 — never implies the case's
   // official location changed while still pending.
-  Widget? _approvalBadge(Map<String, dynamic> r) {
-    final status = r['approvalStatus'] as String?;
+  Widget? _approvalBadge(CommunityReport r) {
+    final status = r.approvalStatus;
     if (status == null) return null;
     final (label, color) = switch (status) {
       'approved' => ('Location change approved', AppColors.greenrspwn),
       'rejected' => ('Location change rejected', Colors.redAccent),
       _ => ('Pending approval', const Color(0xFF9C6B10)),
     };
-    final approvedAt = r['approvedAt'] as Timestamp?;
-    final approvedBy = r['approvedBy'] as String?;
+    final approvedAt = r.approvedAt;
+    final approvedBy = r.approvedBy;
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Column(
@@ -695,7 +703,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
-                'Approved by $approvedBy${approvedAt != null ? ' on ${_formatDate(approvedAt.toDate())}' : ''}',
+                'Approved by $approvedBy${approvedAt != null ? ' on ${_formatDate(approvedAt)}' : ''}',
                 style: GoogleFonts.zain(
                   fontSize: 10,
                   color: AppColors.textSecondary,
@@ -707,12 +715,11 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
     );
   }
 
-  Widget _reportTile(Map<String, dynamic> r) {
-    final ts = r['timestamp'] as Timestamp?;
-    final date = ts?.toDate();
-    final newAddress = r['newAddress'] as String?;
-    final comment = r['comment'] as String?;
-    final photoUrl = r['photoUrl'] as String?;
+  Widget _reportTile(CommunityReport r) {
+    final date = r.timestamp;
+    final newAddress = r.newAddress;
+    final comment = r.comment;
+    final photoUrl = r.photoUrl;
     final approvalBadge = _approvalBadge(r);
 
     return Padding(
@@ -729,7 +736,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                 child: Padding(
                   padding: const EdgeInsets.all(9),
                   child: Image.asset(
-                    _typeIconAsset(r['type'] as String?),
+                    _typeIconAsset(r.type),
                     fit: BoxFit.contain,
                   ),
                 ),
@@ -744,7 +751,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                       children: [
                         Expanded(
                           child: Text(
-                            '${r['reporterName'] ?? 'Someone'} · ${_typeLabel(r['type'] as String?)}',
+                            '${r.reporterName ?? 'Someone'} · ${_typeLabel(r.type)}',
                             style: GoogleFonts.zain(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -841,6 +848,8 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
 
   @override
   Widget build(BuildContext context) {
+    final reportsAsync = ref.watch(caseCommunityReportsProvider(widget.caseId));
+    final count = reportsAsync.asData?.value.length;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -851,19 +860,13 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
             Row(
               children: [
                 Expanded(
-                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _reportsRef.snapshots(),
-                    builder: (context, snap) {
-                      final count = snap.data?.docs.length;
-                      return Text(
-                        'Community Reports${count == null ? '' : '  $count'}',
-                        style: GoogleFonts.tiltWarp(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
-                      );
-                    },
+                  child: Text(
+                    'Community Reports${count == null ? '' : '  $count'}',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
                 GestureDetector(
@@ -939,36 +942,39 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
               const SizedBox(height: 12),
               const Divider(color: AppColors.slaterspwn),
               const SizedBox(height: 4),
-              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _reportsRef
-                    .orderBy('timestamp', descending: true)
-                    .limit(20)
-                    .snapshots(),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    );
-                  }
-                  if (snap.hasError) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
+              reportsAsync.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+                error: (e, _) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
                         'Could not load community reports.',
                         style: GoogleFonts.zain(
                           fontSize: 12,
                           color: AppColors.textSecondary,
                         ),
                       ),
-                    );
-                  }
-                  final docs = snap.data?.docs ?? [];
-                  if (docs.isEmpty) {
+                      const SizedBox(height: 4),
+                      OutlinedButton(
+                        onPressed: () => ref.invalidate(
+                          caseCommunityReportsProvider(widget.caseId),
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+                data: (reports) {
+                  if (reports.isEmpty) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       child: Text(
@@ -981,7 +987,7 @@ class _CommunityReportSectionState extends State<CommunityReportSection> {
                     );
                   }
                   return Column(
-                    children: docs.map((d) => _reportTile(d.data())).toList(),
+                    children: reports.take(20).map(_reportTile).toList(),
                   );
                 },
               ),

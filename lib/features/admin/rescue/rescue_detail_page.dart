@@ -11,7 +11,6 @@ import 'package:video_player/video_player.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
-import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -506,21 +505,13 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         ?.value;
     final hasActiveAssignment = currentAssignment?.isActive ?? false;
 
-    final membership = ref.watch(currentOrgMembershipProvider).asData?.value;
-    // TODO(org-roles): Admin-vs-Staff enforcement is intentionally disabled
-    // for this testing phase. `organizations/{orgId}/members/{uid}` isn't
-    // populated for any real admin/NGO account yet, so this fails OPEN
-    // (membership == null => treated as allowed) instead of locking every
-    // existing tester out of Merge/Refer. This is a FRONTEND-ONLY gate —
-    // it does not read or write any Firestore rule, and current rules do
-    // not restrict these writes by role either (see org_membership_service.dart).
-    // Before production: (1) backfill organizations/{orgId}/members for
-    // every real admin/staff user, (2) flip this to fail CLOSED
-    // (`membership != null && membership.role == OrgRole.admin`), and
-    // (3) add the matching security-rule checks from the rescue-module
-    // security-rule guidance so the server enforces this too, not just the UI.
+    // Temporary Organization Admin/Member Access Model spec — Merge/Refer
+    // are ordinary organization operations, not the narrowly-scoped
+    // Facebook-publish action, so Owner/Admin/Member all get parity here
+    // via the centralized capability resolver instead of a direct
+    // `membership.role == OrgRole.admin` comparison.
     final canManageOrgActions =
-        membership == null || membership.role == OrgRole.admin;
+        ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canManageRescues ?? true;
 
     final d = c.raw;
     final rescueType = d['rescueType'] as String?;

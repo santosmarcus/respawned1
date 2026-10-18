@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
@@ -15,6 +16,8 @@ import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 import 'package:respawnd1/core/repos/clinic_search_repository.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/core/models/organization/facebook_integration.dart';
+import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/repos/saved_clinics_repository.dart';
@@ -54,6 +57,43 @@ final currentOrgMembershipProvider = StreamProvider.autoDispose<OrgMembership?>(
   final uid = FirebaseAuth.instance.currentUser?.uid;
   if (uid == null) return Stream.value(null);
   return ref.watch(orgMembershipServiceProvider).streamMembership(uid);
+});
+
+/// Temporary Organization Admin/Member Access Model spec — the centralized
+/// capability resolver every org-scoped screen should watch instead of
+/// comparing `membership.role` directly. Same autoDispose lifecycle as
+/// [currentOrgMembershipProvider] and invalidated alongside it on sign-out
+/// (see admin_drawer.dart).
+final currentOrganizationCapabilitiesProvider = StreamProvider.autoDispose<OrganizationCapabilities>((ref) {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return Stream.value(OrganizationCapabilities.none);
+  return ref.watch(orgMembershipServiceProvider).streamCapabilities(uid);
+});
+
+/// Which organization the signed-in account is linked to — reuses
+/// [OrgMembershipService.resolveOrganizationId] (the same "just which org"
+/// lookup admin_dashboard_home_widgets.dart already calls directly) so
+/// call sites that only need the id (e.g. gating Facebook publishing on
+/// Animal Records) don't each re-derive it separately.
+final currentOrganizationIdProvider = FutureProvider.autoDispose<String?>((ref) async {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return null;
+  return ref.watch(orgMembershipServiceProvider).resolveOrganizationId(uid);
+});
+
+/// Facebook Page Sharing spec — safe connection metadata for one
+/// organization's connected Page, or null if never connected. A failed
+/// read surfaces as this provider's error state (never silently treated as
+/// "not connected"), so Organization Profile's Facebook section and Animal
+/// Records' publish gating can each tell "not connected" apart from
+/// "couldn't check."
+final facebookIntegrationRepositoryProvider = Provider<FacebookIntegrationRepository>((ref) {
+  return FacebookIntegrationRepository();
+});
+
+final organizationFacebookIntegrationProvider =
+    StreamProvider.family.autoDispose<FacebookIntegration?, String>((ref, organizationId) {
+  return ref.watch(facebookIntegrationRepositoryProvider).streamIntegration(organizationId);
 });
 
 // ---- Case list / detail streams ---------------------------------------

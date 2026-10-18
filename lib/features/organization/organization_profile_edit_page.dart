@@ -11,7 +11,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/constants/service_areas.dart';
 import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
-import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/audit_log_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
@@ -20,6 +19,7 @@ import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 import 'package:respawnd1/features/organization/staff_members_page.dart';
+import 'package:respawnd1/features/organization/widgets/facebook_integration_section.dart';
 
 /// Admin-facing Organization Profile editor (spec §7-9) — distinct from
 /// lib/features/organization/organization_profile_page.dart, which is the
@@ -197,10 +197,14 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
 
     // Shelter Capacity is admin-only to edit (spec §8) — resolved via the
     // existing OrgMembershipService, never a second membership model.
+    // Temporary Organization Admin/Member Access Model spec — Organization
+    // Profile is an equal-access module during this phase; resolved via the
+    // centralized capability model instead of a direct admin-role check so
+    // Owner/Admin/Member all get parity here.
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      final membership = await OrgMembershipService().getMembership(uid);
-      _isOrgAdmin = membership != null && membership.organizationId == orgId && membership.role == OrgRole.admin;
+      final capabilities = await OrgMembershipService().resolveCapabilities(uid);
+      _isOrgAdmin = capabilities.canManageTeam;
     }
     final shelterDoc = await FirebaseFirestore.instance.collection('settings').doc('shelter').get();
     final maxCapacity = (shelterDoc.data()?['maxCapacity'] as num?)?.toInt();
@@ -804,6 +808,12 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   Text(_capacityController.text.isEmpty ? 'Not configured' : _capacityController.text,
                       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                 const SizedBox(height: 24),
+                // Facebook Page Sharing spec §4 — only rendered once a real
+                // organization exists (not during the pre-creation
+                // bootstrap flow, where there's no organizationId yet to
+                // scope a connection to).
+                if (_organizationId != null)
+                  FacebookIntegrationSection(organizationId: _organizationId!, canManage: _isOrgAdmin),
                 _sectionTitle('Contact Details'),
                 _field('Email Address', _emailController, hint: 'org@example.com'),
                 _field('Mobile Number', _phoneController, hint: '09171234567'),

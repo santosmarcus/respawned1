@@ -86,14 +86,15 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     if (widget.organizationId != null) _loadIsOrgAdmin();
   }
 
+  // Temporary Organization Admin/Member Access Model spec — Staff Members
+  // and invitations is an equal-access module during this phase, resolved
+  // via the centralized capability model instead of a direct admin-role
+  // comparison, so Owner/Admin/Member all get parity managing staff here.
   Future<void> _loadIsOrgAdmin() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final membership = await OrgMembershipService().getMembership(uid);
-    if (mounted) {
-      setState(() => _isOrgAdmin =
-          membership != null && membership.organizationId == widget.organizationId && membership.role == OrgRole.admin);
-    }
+    final capabilities = await OrgMembershipService().resolveCapabilities(uid);
+    if (mounted) setState(() => _isOrgAdmin = capabilities.canManageTeam);
   }
 
   Future<void> _resolveEmailIfNeeded(String uid, {String? invitationId}) async {

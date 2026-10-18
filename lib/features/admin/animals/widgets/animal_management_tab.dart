@@ -5,10 +5,12 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_logs_section.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_record_export_sheet.dart';
 import 'package:respawnd1/features/admin/animals/widgets/transfer_animal_record_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 
 /// Organization-management actions — deliberately separate from the
@@ -116,6 +118,61 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     );
   }
 
+  // Facebook Page Publishing Compatibility spec — Animal Records viewing
+  // and every other management action here stays open to Owner/Admin/
+  // Member alike; only this one action is gated to Owner/active-Admin
+  // (canPublishToFacebook), and the Cloud Function independently
+  // re-verifies that regardless of what this UI shows.
+  Future<void> _publishToFacebook() async {
+    final orgId = ref.read(currentOrganizationIdProvider).asData?.value;
+    if (orgId == null) return;
+    final messageController = TextEditingController(
+      text: 'Meet ${widget.animal.name.isNotEmpty ? widget.animal.name : 'this animal'}, available for adoption!',
+    );
+    final message = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: const Text('Publish to Facebook Page'),
+        content: TextField(controller: messageController, maxLines: 4, decoration: const InputDecoration(labelText: 'Post caption')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, messageController.text.trim()),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            child: const Text('Publish'),
+          ),
+        ],
+      ),
+    );
+    if (message == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(facebookIntegrationRepositoryProvider).publishAnimalRecords(
+            organizationId: orgId,
+            animalRecordIds: [widget.animal.id],
+            message: message,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Published to Facebook Page.'), backgroundColor: AppColors.greenrspwn),
+        );
+      }
+    } on FacebookOperationException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.redAccent));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not publish to Facebook.'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _viewLogs() {
     showModalBottomSheet(
       context: context,
@@ -137,6 +194,8 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     // enforces this same rule server-side so a stale UI can never bypass
     // it.
     final deceasedBlocked = animal.isDeceased || animal.isAdopted || animal.isTransferredOut;
+    final canPublishToFacebook =
+        ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canPublishToFacebook ?? false;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -175,6 +234,15 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
             label: 'Export Record (PDF)',
             enabled: !_busy,
             onTap: _exportRecord,
+          ),
+          _ActionTile(
+            icon: Icons.facebook,
+            label: 'Publish to Facebook Page',
+            enabled: !_busy && canPublishToFacebook,
+            subtitle: canPublishToFacebook
+                ? null
+                : 'Only an Organization Owner or Admin can publish to the connected Facebook Page.',
+            onTap: _publishToFacebook,
           ),
           _ActionTile(
             icon: Icons.qr_code_2_outlined,

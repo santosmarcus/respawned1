@@ -5,18 +5,16 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
-import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/features/admin/audit/state/audit_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
-/// Read-only audit trail across six categories. Admin-only: gated the same
-/// way every other org-role check in this codebase currently is (see
-/// OrgMembershipService's own TODO — no `organizations/{id}/members/{uid}`
-/// docs exist for real users yet, so a membership lookup resolving to null
-/// fails OPEN here too, matching every existing OrgRole gate elsewhere;
-/// only an EXPLICIT staff membership blocks access). Nothing in this page
-/// can edit or delete an entry — every row is plain, non-interactive text.
+/// Read-only audit trail across six categories. Temporary Organization
+/// Admin/Member Access Model spec — access is resolved via the centralized
+/// OrganizationCapabilities model (Owner/Admin/Member all get parity
+/// during this phase); only accounts with no active organization
+/// relationship at all are blocked. Nothing in this page can edit or delete
+/// an entry — every row is plain, non-interactive text.
 class AuditPage extends ConsumerStatefulWidget {
   const AuditPage({super.key});
 
@@ -43,15 +41,16 @@ class _AuditPageState extends ConsumerState<AuditPage> {
     }
     try {
       final service = OrgMembershipService();
-      final membership = await service.getMembership(uid);
-      final orgId = membership?.organizationId ?? await service.resolveOrganizationId(uid);
+      final orgId = await service.resolveOrganizationId(uid);
+      // Temporary Organization Admin/Member Access Model spec — Audits is
+      // an equal-access module during this phase, resolved via the
+      // centralized capability model instead of a direct admin-role check
+      // so Owner/Admin/Member all get parity viewing audit records.
+      final capabilities = await service.resolveCapabilities(uid);
       if (!mounted) return;
       setState(() {
         _organizationId = orgId;
-        // Fails OPEN only when membership is unresolved (matches every
-        // other OrgRole gate in this codebase today) — an EXPLICIT staff
-        // role is the one case that actually blocks access.
-        _allowed = membership == null || membership.role == OrgRole.admin;
+        _allowed = capabilities.canViewAudits;
         _loading = false;
       });
     } catch (_) {

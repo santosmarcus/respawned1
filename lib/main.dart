@@ -189,6 +189,18 @@ class OrganizationRoleRouter extends StatelessWidget {
         }
         final data = snapshot.data?.data() as Map<String, dynamic>?;
         final status = OrgVerificationStatus.fromName(data?['verificationStatus'] as String?);
+        // Organization Invitations spec §3/§7 — an invited admin or member
+        // joining an EXISTING organization must never be routed into the
+        // owner's document-upload wizard just because that org hasn't
+        // submitted verification yet. Only the org's own owner/creator
+        // (the account `createOrUpdateDraft` set as `ownerId`) goes through
+        // the draft upload step; everyone else lands straight in the admin
+        // shell regardless of the shared org doc's verification progress.
+        final currentUid = FirebaseAuth.instance.currentUser?.uid;
+        final isOwner = currentUid != null && currentUid == data?['ownerId'];
+        if (status == OrgVerificationStatus.draft && !isOwner) {
+          return const AdminHomeScreen();
+        }
         switch (status) {
           case OrgVerificationStatus.approved:
           case OrgVerificationStatus.pending:

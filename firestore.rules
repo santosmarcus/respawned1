@@ -9,8 +9,16 @@ rules_version = '2';
 // deployed today are NOT visible from this checkout, and this file has never
 // been deployed or tested against the live project or the Firestore emulator.
 //
-// Scope of what's actually enforced here (Organization Invitations spec §16):
-//   - organizationInvitations/{invitationId}
+// Scope of what's actually enforced here (Organization Invitations spec §16,
+// extended by the Temporary Organization Admin/Member Access Model spec):
+//   - organizationInvitations/{invitationId} — create/read/update now also
+//     allow an active org member (any role) or the org's ownerId, not just
+//     an admin membership doc, matching the app-side temporary equal-access
+//     phase for Owner/Admin/Member. No change to organizationInvitations
+//     delete (still always false) or to organizations/{orgId}/members
+//     create/update/delete (still admin/owner-only — removing or promoting
+//     real staff stays a stricter operation than inviting/managing pending
+//     invitations).
 //   - organizations/{orgId}/members/{uid}
 // Every other collection keeps the same effectively-open
 // "any signed-in user" access the rest of this codebase already assumes,
@@ -105,6 +113,62 @@ service cloud.firestore {
       allow delete: if isOrgAdmin() && !(uid == get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId);
     }
 
+    // organizations/{orgId}/integrations/facebook — Facebook Page Sharing
+    // spec. SAFE connection metadata only (pageId/pageName/pagePictureUrl/
+    // connectionStatus/etc) — the raw Page access token is never written
+    // here (it lives only in Google Secret Manager, touched exclusively by
+    // the facebookConnectPage/facebookConfirmPageSelection/
+    // facebookTestConnection/facebookDisconnectPage/
+    // facebookPublishAnimalRecords Cloud Functions via the Admin SDK,
+    // which bypasses these rules entirely). Reads: any active org member,
+    // admin, or the owner may see connection status (spec: "Active Members
+    // may also read basic safe connection status when the existing UI
+    // needs it"). Writes: always false from the client — connecting,
+    // reconnecting, disconnecting, and publishing are exclusively
+    // Cloud-Function operations; nothing here needs a client write path.
+    match /organizations/{orgId}/integrations/{docId} {
+      function isOrgAdminOfIntegration() {
+        return signedIn() &&
+          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
+      }
+      function isActiveOrgMemberOfIntegration() {
+        return signedIn() &&
+          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
+          !(get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.status in
+            ['inactive', 'removed', 'disabled']);
+      }
+      function isOwnerOfIntegration() {
+        return signedIn() &&
+          get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
+      }
+      allow read: if isOrgAdminOfIntegration() || isActiveOrgMemberOfIntegration() || isOwnerOfIntegration();
+      allow write: if false;
+    }
+
+    // facebookConnectRequests/{requestId} — Facebook Page Sharing spec.
+    // Backend-only bookkeeping for the multi-Page-selection step of
+    // connecting a Page (uid/organizationId/status/expiry + non-sensitive
+    // page id/name/picture for display — never a token). The Flutter
+    // client only ever learns its contents via the facebookConnectPage
+    // callable's OWN return value, never by reading this collection
+    // directly, so there is no legitimate client access path to close a
+    // gap for — denied outright rather than scoped to "the requesting
+    // uid" since no code anywhere reads it from the client SDK.
+    match /facebookConnectRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    // facebookShares/{shareId} — Facebook Page Sharing spec. Publish
+    // history written only by facebookPublishAnimalRecords via the Admin
+    // SDK. No client read path is used by any code in this change (no
+    // share-history UI exists yet) — denied outright rather than opened
+    // for a feature that doesn't read it, per "add a rule only for the
+    // exact path a reproducible client operation needs."
+    match /facebookShares/{shareId} {
+      allow read, write: if false;
+    }
+
     // organizationInvitations/{invitationId} — spec §16:
     //   - A user may read invitations addressed to their authenticated email.
     //   - A user may accept or reject only their own invitation.
@@ -117,22 +181,56 @@ service cloud.firestore {
           get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
       }
 
-      // An org admin managing their own organization's invitations, OR the
-      // invited person reading/acting on an invitation addressed to their
-      // own authenticated email — never a third party's.
+      // Temporary Organization Admin/Member Access Model spec — Staff
+      // Members and invitations is an equal-access module during this
+      // phase, so an active member (any status other than an explicit
+      // 'inactive'/'removed'/'disabled') may also create/manage
+      // invitations for their own organization, not just an admin. A
+      // missing `status` field (every pre-existing membership doc) counts
+      // as active, matching this app's existing fail-open behavior for
+      // accounts that predate the `status` field entirely.
+      function isActiveOrgMemberOf(orgId) {
+        return signedIn() &&
+          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
+          !(get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.status in
+            ['inactive', 'removed', 'disabled']);
+      }
+
+      // Facebook Page Publishing Compatibility / Temporary Access Model
+      // spec — a legacy organization owner may have no membership subdoc
+      // at all yet (see organizations/{orgId}/members block above); never
+      // block them from managing their own organization's invitations just
+      // because isOrgAdminOf/isActiveOrgMemberOf both require an existing
+      // member doc.
+      function isOwnerOf(orgId) {
+        return signedIn() &&
+          get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
+      }
+
+      // An org admin/member/owner managing their own organization's
+      // invitations, OR the invited person reading/acting on an invitation
+      // addressed to their own authenticated email — never a third party's.
       allow read: if signedIn() &&
-        (resource.data.normalizedEmail == normalizedEmail() || isOrgAdminOf(resource.data.organizationId));
+        (resource.data.normalizedEmail == normalizedEmail() ||
+          isOrgAdminOf(resource.data.organizationId) ||
+          isActiveOrgMemberOf(resource.data.organizationId) ||
+          isOwnerOf(resource.data.organizationId));
 
-      allow create: if isOrgAdminOf(request.resource.data.organizationId);
+      allow create: if isOrgAdminOf(request.resource.data.organizationId) ||
+        isActiveOrgMemberOf(request.resource.data.organizationId) ||
+        isOwnerOf(request.resource.data.organizationId);
 
-      // Admin actions (resend/change role/cancel) vs. the invited person's
-      // own accept/reject are distinguished by which fields change:
-      // the invited person may only ever flip status pending -> accepted
-      // or pending -> rejected on their OWN invitation, never touch an
-      // invitation addressed to someone else, and never resurrect/alter a
-      // non-pending one. An org admin may update anything on their own
-      // organization's invitations (resend/cancel/change intended role).
+      // Admin/member staff actions (resend/change role/cancel) vs. the
+      // invited person's own accept/reject are distinguished by which
+      // fields change: the invited person may only ever flip status
+      // pending -> accepted or pending -> rejected on their OWN
+      // invitation, never touch an invitation addressed to someone else,
+      // and never resurrect/alter a non-pending one. An org admin or
+      // active member may update anything on their own organization's
+      // invitations (resend/cancel/change intended role).
       allow update: if isOrgAdminOf(resource.data.organizationId) ||
+        isActiveOrgMemberOf(resource.data.organizationId) ||
+        isOwnerOf(resource.data.organizationId) ||
         (
           resource.data.normalizedEmail == normalizedEmail() &&
           resource.data.status == 'pending' &&
@@ -146,15 +244,25 @@ service cloud.firestore {
     }
 
     // Everything else: unchanged from this app's existing documented
-    // behavior — any signed-in user. Explicitly excludes the two
-    // collections above so their tighter rules above are the ones that
-    // actually govern those paths (a broader match here would otherwise
-    // OR together with the specific rules and defeat them).
+    // behavior — any signed-in user. Explicitly excludes the collections
+    // above so their tighter rules are the ones that actually govern those
+    // paths (a broader match here would otherwise OR together with the
+    // specific rules and defeat them) — 'facebookConnectRequests' and
+    // 'facebookShares' added by the Facebook Page Sharing spec, same
+    // pattern as the pre-existing 'organizationInvitations' exclusion; no
+    // other collection name changed.
     match /{collection}/{docId} {
-      allow read, write: if signedIn() && collection != 'organizationInvitations';
+      allow read, write: if signedIn() &&
+        collection != 'organizationInvitations' &&
+        collection != 'facebookConnectRequests' &&
+        collection != 'facebookShares';
     }
+    // 'integrations' added by the Facebook Page Sharing spec, same pattern
+    // as the pre-existing 'members' exclusion; every other organization
+    // subcollection (communityReports, activityLogs, etc.) keeps exactly
+    // the same access it had before this change.
     match /organizations/{orgId}/{subcollection}/{docId} {
-      allow read, write: if signedIn() && subcollection != 'members';
+      allow read, write: if signedIn() && subcollection != 'members' && subcollection != 'integrations';
     }
   }
 }

@@ -156,8 +156,10 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
       // autoDispose (see rescue_reports_providers.dart / adoption_providers.dart)
       // so their Firestore listeners tear themselves down as soon as the
       // pages watching them are removed below. currentOrgMembershipProvider
-      // is global (not tied to a specific page) so it's cleared explicitly.
+      // and currentOrganizationCapabilitiesProvider are global (not tied to
+      // a specific page) so they're cleared explicitly.
       ref.invalidate(currentOrgMembershipProvider);
+      ref.invalidate(currentOrganizationCapabilitiesProvider);
 
       // Remove every pushed admin route so the stale authenticated screen
       // can't linger on top of AuthWrapper's now-signed-out content —

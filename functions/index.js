@@ -583,3 +583,14 @@ exports.cancelZoomMeeting = onCall({secrets: [zoomAccountId, zoomClientId, zoomC
   });
   return {cancelled: true};
 });
+
+// Facebook Page Sharing spec — Animal Records → Facebook Page publishing.
+// See functions/facebook.js for the full implementation; kept in its own
+// module rather than growing this file further, same reasoning as every
+// other self-contained integration here (Zoom, rescue sessions).
+const facebook = require('./facebook');
+exports.facebookConnectPage = facebook.facebookConnectPage;
+exports.facebookConfirmPageSelection = facebook.facebookConfirmPageSelection;
+exports.facebookTestConnection = facebook.facebookTestConnection;
+exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
+exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
