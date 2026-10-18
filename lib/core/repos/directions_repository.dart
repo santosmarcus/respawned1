@@ -7,11 +7,109 @@ import 'package:http/http.dart' as http;
 import 'package:respawnd1/core/constants/maps_config.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
 import 'package:respawnd1/core/utils/geo.dart';
-// Reuses the exact same polyline decoder already used (and proven working)
-// by the pet-transporter's own Directions calls — not duplicating that
-// algorithm a second time. `decodePolyline` is a top-level, non-underscore
-// function in that file, so it's importable as-is.
-import 'package:respawnd1/features/pettransporter/transit_progress_page.dart' show decodePolyline;
+
+/// Route returned by [fetchDirectionsRoute] (moved here from
+/// transit_progress_page.dart, which re-exports it). The transporter's
+/// transit screen uses this plain, uncached call; Track Case uses the
+/// cached [DirectionsRepository] below. Both share [decodePolyline].
+class DirectionsRoute {
+  final List<LatLng> points;
+  final double distanceMeters;
+  final String distanceText;
+  final String durationText;
+
+  const DirectionsRoute({
+    required this.points,
+    required this.distanceMeters,
+    required this.distanceText,
+    required this.durationText,
+  });
+}
+
+Future<DirectionsRoute?> fetchDirectionsRoute(
+  LatLng origin,
+  LatLng destination,
+) async {
+  try {
+    final uri = Uri.https('maps.googleapis.com', '/maps/api/directions/json', {
+      'origin': '${origin.latitude},${origin.longitude}',
+      'destination': '${destination.latitude},${destination.longitude}',
+      'mode': 'driving',
+      'key': MapsConfig.directionsApiKey,
+    });
+    final res = await http.get(uri);
+    if (res.statusCode != 200) {
+      debugPrint('fetchDirectionsRoute: HTTP ${res.statusCode} — ${res.body}');
+      return null;
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (body['status'] != 'OK') {
+      debugPrint(
+        'fetchDirectionsRoute: status=${body['status']} '
+        'error_message=${body['error_message']}',
+      );
+      return null;
+    }
+    final routes = body['routes'] as List<dynamic>;
+    if (routes.isEmpty) {
+      debugPrint('fetchDirectionsRoute: status OK but routes list empty.');
+      return null;
+    }
+    final route = routes.first as Map<String, dynamic>;
+    final legs = route['legs'] as List<dynamic>;
+    if (legs.isEmpty) {
+      debugPrint('fetchDirectionsRoute: route has no legs.');
+      return null;
+    }
+    final leg = legs.first as Map<String, dynamic>;
+    final overview = route['overview_polyline']?['points'] as String?;
+    if (overview == null) {
+      debugPrint('fetchDirectionsRoute: no overview_polyline in response.');
+      return null;
+    }
+
+    return DirectionsRoute(
+      points: decodePolyline(overview),
+      distanceMeters: (leg['distance']?['value'] as num?)?.toDouble() ?? 0,
+      distanceText: (leg['distance']?['text'] as String?) ?? '',
+      durationText: (leg['duration']?['text'] as String?) ?? '',
+    );
+  } catch (e) {
+    debugPrint('fetchDirectionsRoute: threw $e');
+    return null;
+  }
+}
+
+// Standard Google encoded-polyline decoder.
+List<LatLng> decodePolyline(String encoded) {
+  final points = <LatLng>[];
+  int index = 0, lat = 0, lng = 0;
+  final len = encoded.length;
+
+  while (index < len) {
+    int shift = 0, result = 0, b;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    final dLat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    lat += dLat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    final dLng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    lng += dLng;
+
+    points.add(LatLng(lat / 1e5, lng / 1e5));
+  }
+  return points;
+}
 
 /// Legacy Google Directions API wrapper for road-following routes (Track
 /// Case's rider->case polyline). This project already calls this exact
@@ -40,13 +138,23 @@ class DirectionsRepository {
   LatLng? _cachedDestination;
 
   bool _isSameAsCached(LatLng origin, LatLng destination) {
-    if (_cachedOrigin == null || _cachedDestination == null || _cachedResult == null) {
+    if (_cachedOrigin == null ||
+        _cachedDestination == null ||
+        _cachedResult == null) {
       return false;
     }
     final originDelta = haversineDistanceKm(
-        _cachedOrigin!.latitude, _cachedOrigin!.longitude, origin.latitude, origin.longitude);
-    final destDelta = haversineDistanceKm(_cachedDestination!.latitude, _cachedDestination!.longitude,
-        destination.latitude, destination.longitude);
+      _cachedOrigin!.latitude,
+      _cachedOrigin!.longitude,
+      origin.latitude,
+      origin.longitude,
+    );
+    final destDelta = haversineDistanceKm(
+      _cachedDestination!.latitude,
+      _cachedDestination!.longitude,
+      destination.latitude,
+      destination.longitude,
+    );
     return originDelta < _meaningfulChangeKm && destDelta < _meaningfulChangeKm;
   }
 
@@ -57,7 +165,9 @@ class DirectionsRepository {
     required LatLng destination,
   }) async {
     if (_isSameAsCached(origin, destination)) {
-      _log('using cached route (origin/destination within ${_meaningfulChangeKm}km of last request)');
+      _log(
+        'using cached route (origin/destination within ${_meaningfulChangeKm}km of last request)',
+      );
       return _cachedResult!;
     }
 
@@ -67,8 +177,10 @@ class DirectionsRepository {
         _cachedOrigin = origin;
         _cachedDestination = destination;
         _cachedResult = fresh;
-        _log('road route accepted: polylineAdded=true, points=${fresh.polylinePoints.length}, '
-            'distanceKm=${fresh.distanceKm.toStringAsFixed(2)}, durationSec=${fresh.duration?.inSeconds}');
+        _log(
+          'road route accepted: polylineAdded=true, points=${fresh.polylinePoints.length}, '
+          'distanceKm=${fresh.distanceKm.toStringAsFixed(2)}, durationSec=${fresh.duration?.inSeconds}',
+        );
         return fresh;
       }
     } catch (e) {
@@ -84,18 +196,27 @@ class DirectionsRepository {
       return _cachedResult!;
     }
 
-    _log('falling back to straight-line polyline: polylineAdded=true, isRoadFollowing=false '
-        '(road route unavailable — see prior log line for HTTP/API result)');
+    _log(
+      'falling back to straight-line polyline: polylineAdded=true, isRoadFollowing=false '
+      '(road route unavailable — see prior log line for HTTP/API result)',
+    );
     return RouteResult(
       polylinePoints: [origin, destination],
-      distanceKm:
-          haversineDistanceKm(origin.latitude, origin.longitude, destination.latitude, destination.longitude),
+      distanceKm: haversineDistanceKm(
+        origin.latitude,
+        origin.longitude,
+        destination.latitude,
+        destination.longitude,
+      ),
       duration: null,
       isRoadFollowing: false,
     );
   }
 
-  Future<RouteResult?> _fetchFromDirectionsApi(LatLng origin, LatLng destination) async {
+  Future<RouteResult?> _fetchFromDirectionsApi(
+    LatLng origin,
+    LatLng destination,
+  ) async {
     MapsConfig.logDirectionsKeySourceOnce();
 
     final uri = Uri.https(_baseUrl, '/maps/api/directions/json', {
@@ -105,7 +226,9 @@ class DirectionsRepository {
       'key': MapsConfig.directionsApiKey,
     });
 
-    _log('requesting route: origin=${_maskCoord(origin)}, destination=${_maskCoord(destination)}');
+    _log(
+      'requesting route: origin=${_maskCoord(origin)}, destination=${_maskCoord(destination)}',
+    );
 
     final res = await http.get(uri).timeout(const Duration(seconds: 12));
     if (res.statusCode != 200) {
@@ -121,7 +244,9 @@ class DirectionsRepository {
       // status/error_message (never the key) here is what makes that
       // diagnosable from a device log instead of silently drawing a
       // straight line with no explanation.
-      _log('Directions API status=$apiStatus, error_message=${body['error_message']} — falling back');
+      _log(
+        'Directions API status=$apiStatus, error_message=${body['error_message']} — falling back',
+      );
       return null;
     }
 
@@ -141,14 +266,20 @@ class DirectionsRepository {
 
     final overview = route['overview_polyline']?['points'] as String?;
     if (overview == null || overview.isEmpty) {
-      _log('route present but overview_polyline.points is missing/empty — falling back');
+      _log(
+        'route present but overview_polyline.points is missing/empty — falling back',
+      );
       return null;
     }
 
     final points = decodePolyline(overview);
-    _log('decoded polyline: encodedLength=${overview.length}, decodedPoints=${points.length}');
+    _log(
+      'decoded polyline: encodedLength=${overview.length}, decodedPoints=${points.length}',
+    );
     if (points.isEmpty) {
-      _log('decodePolyline returned 0 points from a non-empty encoded string — falling back');
+      _log(
+        'decodePolyline returned 0 points from a non-empty encoded string — falling back',
+      );
       return null;
     }
 
@@ -159,8 +290,15 @@ class DirectionsRepository {
       polylinePoints: points,
       distanceKm: distanceMeters != null
           ? distanceMeters / 1000
-          : haversineDistanceKm(origin.latitude, origin.longitude, destination.latitude, destination.longitude),
-      duration: durationSeconds != null ? Duration(seconds: durationSeconds) : null,
+          : haversineDistanceKm(
+              origin.latitude,
+              origin.longitude,
+              destination.latitude,
+              destination.longitude,
+            ),
+      duration: durationSeconds != null
+          ? Duration(seconds: durationSeconds)
+          : null,
       isRoadFollowing: true,
     );
   }
