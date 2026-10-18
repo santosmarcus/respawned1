@@ -162,7 +162,7 @@ class PublicRescueCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: AppColors.greenrspwn.withOpacity(0.15),
+                        color: AppColors.greenrspwn.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(

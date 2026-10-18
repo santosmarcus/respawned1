@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'volunteer_page.dart';
 import 'volunteer_signup_success.dart';
@@ -183,7 +183,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
                   backgroundColor: AppColors.yellowrspwn,
                   foregroundColor: AppColors.textPrimary,
                   disabledBackgroundColor:
-                  AppColors.yellowrspwn.withOpacity(0.6),
+                  AppColors.yellowrspwn.withValues(alpha: 0.6),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30)),

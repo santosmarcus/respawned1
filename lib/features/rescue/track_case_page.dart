@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
@@ -534,7 +534,7 @@ class _EtaCardState extends State<_EtaCard> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.12),
+                    color: Colors.black.withValues(alpha: 0.12),
                     blurRadius: 10,
                     offset: const Offset(0, 3),
                   ),
@@ -1389,7 +1389,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
               width: double.infinity,
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: AppColors.lavenderrspwn.withOpacity(0.2),
+                color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -1693,7 +1693,7 @@ class _RejectionDetailsSection extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFE05353).withOpacity(0.08),
+        color: const Color(0xFFE05353).withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(

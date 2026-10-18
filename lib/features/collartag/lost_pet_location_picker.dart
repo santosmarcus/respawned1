@@ -7,7 +7,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:respawnd1/core/constants/maps_config.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 
 /// Result handed back to whoever pushed [LastSeenLocationPicker].
 class PickedLostLocation {
@@ -356,7 +356,7 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
                       borderRadius: BorderRadius.circular(10),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
+                          color: Colors.black.withValues(alpha: 0.15),
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),

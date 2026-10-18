@@ -5,7 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
 import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
@@ -172,7 +172,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                     color: (isReturnApproved
                                         ? AppColors.greenrspwn
                                         : AppColors.pinkrspwn)
-                                        .withOpacity(0.5),
+                                        .withValues(alpha: 0.5),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Row(
@@ -1087,7 +1087,7 @@ class _DialogOptionButton extends StatelessWidget {
           size: 18,
           color: enabled
               ? AppColors.textPrimary
-              : AppColors.textPrimary.withOpacity(0.4),
+              : AppColors.textPrimary.withValues(alpha: 0.4),
         ),
         label: Text(
           label,
@@ -1096,7 +1096,7 @@ class _DialogOptionButton extends StatelessWidget {
             fontWeight: FontWeight.w600,
             color: enabled
                 ? AppColors.textPrimary
-                : AppColors.textPrimary.withOpacity(0.4),
+                : AppColors.textPrimary.withValues(alpha: 0.4),
           ),
         ),
         style: OutlinedButton.styleFrom(
@@ -2088,7 +2088,7 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: AppColors.yellowrspwn.withOpacity(0.35),
+                            color: AppColors.yellowrspwn.withValues(alpha: 0.35),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: pickupDate != null
@@ -2523,10 +2523,10 @@ class _ImageGrid extends StatelessWidget {
               width: 84,
               height: 84,
               decoration: BoxDecoration(
-                color: AppColors.yellowrspwn.withOpacity(0.2),
+                color: AppColors.yellowrspwn.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: AppColors.greenrspwn.withOpacity(0.6), width: 1.2),
+                    color: AppColors.greenrspwn.withValues(alpha: 0.6), width: 1.2),
               ),
               child: const Center(
                 child: Icon(Icons.add, size: 26, color: AppColors.greenrspwn),

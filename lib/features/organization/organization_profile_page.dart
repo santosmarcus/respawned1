@@ -183,7 +183,7 @@ class _OrganizationProfilePageState extends State<OrganizationProfilePage>
           const SizedBox(height: 8),
           CircleAvatar(
             radius: 34,
-            backgroundColor: AppColors.background.withOpacity(0.6),
+            backgroundColor: AppColors.background.withValues(alpha: 0.6),
             backgroundImage: org.avatarUrl != null && org.avatarUrl!.isNotEmpty
                 ? NetworkImage(org.avatarUrl!)
                 : null,
@@ -267,7 +267,7 @@ class _SocialIcon extends StatelessWidget {
       width: 32,
       height: 32,
       decoration: BoxDecoration(
-        color: AppColors.background.withOpacity(enabled ? 0.9 : 0.4),
+        color: AppColors.background.withValues(alpha: enabled ? 0.9 : 0.4),
         shape: BoxShape.circle,
       ),
       child: Icon(icon, size: 16, color: AppColors.textPrimary),
@@ -467,7 +467,7 @@ class _OrgAnimalCard extends StatelessWidget {
                 width: 90,
                 height: 90,
                 decoration: BoxDecoration(
-                  color: AppColors.background.withOpacity(0.55),
+                  color: AppColors.background.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(14),
                   image: animal.imageUrl != null && animal.imageUrl!.isNotEmpty
                       ? DecorationImage(
@@ -551,7 +551,7 @@ class _OrgAnimalCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
+                      color: Colors.black.withValues(alpha: 0.08),
                       blurRadius: 4,
                       offset: const Offset(0, 2)),
                 ],
@@ -579,7 +579,7 @@ class _MiniTag extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: AppColors.background.withOpacity(0.6),
+        color: AppColors.background.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
@@ -1231,7 +1231,7 @@ class _ReviewsTab extends StatelessWidget {
                     decoration: InputDecoration(
                       hintText: 'Share your experience...',
                       filled: true,
-                      fillColor: AppColors.yellowrspwn.withOpacity(0.3),
+                      fillColor: AppColors.yellowrspwn.withValues(alpha: 0.3),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -1403,7 +1403,7 @@ class _AboutTab extends StatelessWidget {
             height: 260,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: AppColors.textSecondary.withOpacity(0.3),
+              color: AppColors.textSecondary.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(16),
               image: organization.coverImageUrl != null &&
                   organization.coverImageUrl!.isNotEmpty

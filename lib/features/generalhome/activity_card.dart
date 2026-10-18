@@ -119,7 +119,7 @@ class ActivityCard extends StatelessWidget{
       width: 56,
       height: 56,
       decoration: BoxDecoration(
-        color: _accentColor.withOpacity(0.35),
+        color: _accentColor.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Icon(_icon, color: AppColors.textPrimary, size: 24),
@@ -271,7 +271,7 @@ class ActivityCard extends StatelessWidget{
                             margin: const EdgeInsets.only(bottom: 6),
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE05353).withOpacity(0.15),
+                              color: const Color(0xFFE05353).withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Row(

@@ -2,7 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'donation_page.dart';
 import 'package:intl/intl.dart';
 
@@ -197,7 +197,7 @@ class _DonationDetailPageState extends State<DonationDetail> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
                   foregroundColor: AppColors.textPrimary,
-                  disabledBackgroundColor: AppColors.yellowrspwn.withOpacity(0.5),
+                  disabledBackgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.5),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30)),
                   padding: const EdgeInsets.symmetric(vertical: 16),
@@ -275,7 +275,7 @@ class _FundTrackingPanel extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.background,
-        border: Border.all(color: AppColors.textPrimary.withOpacity(0.12)),
+        border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.12)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -287,7 +287,7 @@ class _FundTrackingPanel extends StatelessWidget {
               Text('Fund Tracking',
                   style: GoogleFonts.tiltWarp(fontSize: 13, color: AppColors.textPrimary)),
               Text('As of March 12, 2026',
-                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withOpacity(0.6))),
+                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withValues(alpha: 0.6))),
             ],
           ),
           const SizedBox(height: 10),
@@ -303,7 +303,7 @@ class _FundTrackingPanel extends StatelessWidget {
                       Text(e['label'],
                           style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                       Text(e['category'],
-                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withOpacity(0.6))),
+                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withValues(alpha: 0.6))),
                     ],
                   ),
                 ),
@@ -313,7 +313,7 @@ class _FundTrackingPanel extends StatelessWidget {
                     Text('₱${e['amount']}',
                         style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     Text(e['date'],
-                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withOpacity(0.6))),
+                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary.withValues(alpha: 0.6))),
                   ],
                 ),
               ],
@@ -391,7 +391,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.textPrimary.withOpacity(0.2),
+                  color: AppColors.textPrimary.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -431,11 +431,11 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                       Text(donation.organizer,
                           style: GoogleFonts.zain(
                               fontSize: 14,
-                              color: AppColors.textPrimary.withOpacity(0.7))),
+                              color: AppColors.textPrimary.withValues(alpha: 0.7))),
                       Text('Write your wishes...',
                           style: GoogleFonts.zain(
                               fontSize: 14,
-                              color: AppColors.textPrimary.withOpacity(0.5),
+                              color: AppColors.textPrimary.withValues(alpha: 0.5),
                               fontStyle: FontStyle.italic)),
                     ],
                   ),
@@ -470,7 +470,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
             Container(
               height: 44,
               decoration: BoxDecoration(
-                border: Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
+                border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.3)),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -507,7 +507,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                     color: _selectedAmount == amt
                         ? AppColors.textPrimary
                         : AppColors.background,
-                    border: Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
+                    border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.3)),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   alignment: Alignment.center,
@@ -538,12 +538,12 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                     border: Border.all(
                       color: _selectedPayment == method
                           ? AppColors.textPrimary
-                          : AppColors.textPrimary.withOpacity(0.2),
+                          : AppColors.textPrimary.withValues(alpha: 0.2),
                       width: _selectedPayment == method ? 1.5 : 1,
                     ),
                     borderRadius: BorderRadius.circular(8),
                     color: _selectedPayment == method
-                        ? AppColors.yellowrspwn.withOpacity(0.3)
+                        ? AppColors.yellowrspwn.withValues(alpha: 0.3)
                         : Colors.transparent,
                   ),
                   child: Row(
@@ -589,7 +589,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
                   foregroundColor: AppColors.textPrimary,
-                  disabledBackgroundColor: AppColors.yellowrspwn.withOpacity(0.5),
+                  disabledBackgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.5),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30)),
                   padding: const EdgeInsets.symmetric(vertical: 16),

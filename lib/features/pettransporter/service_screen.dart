@@ -11,7 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 
 const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
 
@@ -323,7 +323,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
                   center: _currentLocation!,
                   radius: _serviceRangeKm * 1000,
                   fillColor:
-                  AppColors.greenrspwn.withOpacity(0.12),
+                  AppColors.greenrspwn.withValues(alpha: 0.12),
                   strokeColor: AppColors.greenrspwn,
                   strokeWidth: 1,
                 ),

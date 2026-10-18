@@ -1091,7 +1091,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.yellowrspwn.withOpacity(0.15),
+                        color: AppColors.yellowrspwn.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: CheckboxListTile(
@@ -1850,7 +1850,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                           width: 1.5,
                         ),
                         borderRadius: BorderRadius.circular(10),
-                        color: AppColors.tearspwn.withOpacity(0.15),
+                        color: AppColors.tearspwn.withValues(alpha: 0.15),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: _clinicImages[i] != null
@@ -2023,7 +2023,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.lavenderrspwn.withOpacity(0.2),
+                color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -2258,7 +2258,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                           width: 1.5,
                         ),
                         borderRadius: BorderRadius.circular(10),
-                        color: AppColors.tearspwn.withOpacity(0.15),
+                        color: AppColors.tearspwn.withValues(alpha: 0.15),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: images[i] != null
@@ -2530,7 +2530,7 @@ class _OnlineBadge extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)
         ],
       ),
       child: Row(
@@ -2566,7 +2566,7 @@ class _AddressCard extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6)
+            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
           ],
         ),
         child: Row(
@@ -2640,7 +2640,7 @@ class _ContactRow extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6),
           ],
         ),
         child: Row(
@@ -2776,9 +2776,9 @@ class _ClinicHistoryNote extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 4),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.12),
+            color: Colors.orange.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.orange.withOpacity(0.4)),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3000,7 +3000,7 @@ class _TrackingMapState extends State<_TrackingMap> {
           polylines.add(Polyline(
             polylineId: const PolylineId('route_trail'),
             points: points,
-            color: AppColors.textPrimary.withOpacity(0.35),
+            color: AppColors.textPrimary.withValues(alpha: 0.35),
             width: 3,
             zIndex: 0,
           ));
@@ -3050,7 +3050,7 @@ class _TrackingMapState extends State<_TrackingMap> {
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                            color: Colors.black.withOpacity(0.12),
+                            color: Colors.black.withValues(alpha: 0.12),
                             blurRadius: 6)
                       ],
                     ),

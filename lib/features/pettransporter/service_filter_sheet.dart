@@ -8,7 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 
 
 class ServiceFilterSheet extends StatefulWidget {
@@ -209,7 +209,7 @@ class _ServiceFilterSheetState
                   circleId: const CircleId('service_range'),
                   center: _center!,
                   radius: _range * 1000,
-                  fillColor: AppColors.greenrspwn.withOpacity(0.15),
+                  fillColor: AppColors.greenrspwn.withValues(alpha: 0.15),
                   strokeColor: AppColors.greenrspwn,
                   strokeWidth: 2,
                 ),
@@ -226,7 +226,7 @@ class _ServiceFilterSheetState
               inactiveTrackColor: AppColors.slaterspwn,
               thumbColor: AppColors.textPrimary,
               overlayColor:
-              AppColors.textPrimary.withOpacity(0.12),
+              AppColors.textPrimary.withValues(alpha: 0.12),
               trackHeight: 3,
             ),
             child: Slider(

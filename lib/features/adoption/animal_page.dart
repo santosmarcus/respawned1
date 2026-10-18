@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
 import 'package:respawnd1/core/widgets/animal_image_gallery.dart';

@@ -379,7 +379,7 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
                     borderRadius: BorderRadius.circular(18),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.12),
+                        color: Colors.black.withValues(alpha: 0.12),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -417,7 +417,7 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
                               _current!.message,
                               style: GoogleFonts.zain(
                                 fontSize: 13,
-                                color: AppColors.textPrimary.withOpacity(0.75),
+                                color: AppColors.textPrimary.withValues(alpha: 0.75),
                               ),
                             ),
                           ],

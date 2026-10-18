@@ -74,7 +74,7 @@ class AppTheme {
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: AppColors.yellowrspwn,
         selectedItemColor: AppColors.textPrimary,
-        unselectedItemColor: AppColors.textPrimary.withOpacity(0.8),
+        unselectedItemColor: AppColors.textPrimary.withValues(alpha: 0.8),
         selectedLabelStyle: GoogleFonts.zain(
             fontSize: 12, fontWeight: FontWeight.bold),
         unselectedLabelStyle: GoogleFonts.zain(
@@ -90,7 +90,7 @@ class AppTheme {
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: AppColors.textPrimary,
         selectedItemColor: AppColors.background,
-        unselectedItemColor: AppColors.background.withOpacity(0.8),
+        unselectedItemColor: AppColors.background.withValues(alpha: 0.8),
         selectedLabelStyle:
         GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.bold),
         unselectedLabelStyle:

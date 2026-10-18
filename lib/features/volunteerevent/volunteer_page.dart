@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'event_detail_page.dart';
 
@@ -330,7 +330,7 @@ class _VolunteerPageState extends State<VolunteerPage> {
                         hintStyle: GoogleFonts.zain(
                             fontSize: 15,
                             color: AppColors.textPrimary
-                                .withOpacity(0.6)),
+                                .withValues(alpha: 0.6)),
                         prefixIcon: const Icon(Icons.search,
                             color: AppColors.textPrimary, size: 20),
                         border: InputBorder.none,

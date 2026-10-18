@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'donation_detail.dart';
 import 'package:intl/intl.dart';
@@ -377,7 +377,7 @@ class _DonationPageState extends State<DonationPage> {
                         hintText: 'Search',
                         hintStyle: GoogleFonts.zain(
                             fontSize: 15,
-                            color: AppColors.textPrimary.withOpacity(0.6)),
+                            color: AppColors.textPrimary.withValues(alpha: 0.6)),
                         prefixIcon: const Icon(Icons.search,
                             color: AppColors.textPrimary, size: 20),
                         border: InputBorder.none,
@@ -722,7 +722,7 @@ class _SponsorPetCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: AppColors.yellowrspwn.withOpacity(0.4),
+                      color: AppColors.yellowrspwn.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(tag,

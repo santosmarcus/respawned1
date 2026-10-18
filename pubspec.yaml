@@ -48,6 +48,7 @@ dependencies:
   flutter_stripe: ^12.3.0  # for PayMongo integration via Stripe
   google_fonts: ^8.0.2
   http: ^1.6.0
+  intl: ^0.20.2 # date/number formatting (was only available transitively)
   url_launcher: ^6.3.1
   fl_chart: ^0.69.2  # charts for the admin Analytics dashboard
   #sign in

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 
 class PetFoundChatScreen extends StatefulWidget {
   final String tagId;
@@ -647,7 +647,7 @@ class _ChatThread extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: fromMe
                       ? AppColors.yellowrspwn
-                      : AppColors.tearspwn.withOpacity(0.5),
+                      : AppColors.tearspwn.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Text(

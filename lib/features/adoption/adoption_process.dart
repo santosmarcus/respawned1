@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'adoption_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -1109,7 +1109,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                   padding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.slaterspwn.withOpacity(0.35),
+                    color: AppColors.slaterspwn.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
@@ -1634,7 +1634,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         // calendar
         Container(
           decoration: BoxDecoration(
-            color: AppColors.yellowrspwn.withOpacity(0.25),
+            color: AppColors.yellowrspwn.withValues(alpha: 0.25),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.greenrspwn, width: 1.2),
           ),
@@ -1689,7 +1689,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
               padding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: AppColors.slaterspwn.withOpacity(0.4),
+                color: AppColors.slaterspwn.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -1750,7 +1750,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.yellowrspwn.withOpacity(0.35),
+              color: AppColors.yellowrspwn.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -1897,7 +1897,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppColors.yellowrspwn.withOpacity(0.35),
+              color: AppColors.yellowrspwn.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -1923,7 +1923,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             width: double.infinity,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppColors.lavenderrspwn.withOpacity(0.4),
+              color: AppColors.lavenderrspwn.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -1990,7 +1990,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 14),
             decoration: BoxDecoration(
-              color: AppColors.slaterspwn.withOpacity(0.35),
+              color: AppColors.slaterspwn.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(30),
             ),
             child: Center(
@@ -2018,13 +2018,13 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
     final attemptsColor = useGrayAttempts
         ? Colors.grey.shade600
-        : AppColors.textPrimary.withOpacity(0.75);
+        : AppColors.textPrimary.withValues(alpha: 0.75);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.lavenderrspwn.withOpacity(0.35),
+        color: AppColors.lavenderrspwn.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -2532,7 +2532,7 @@ class _InfoTooltipState extends State<_InfoTooltip> {
         showDuration: const Duration(seconds: 10),
         textStyle: GoogleFonts.zain(fontSize: 14, color: Colors.white),
         decoration: BoxDecoration(
-          color: AppColors.textPrimary.withOpacity(0.95),
+          color: AppColors.textPrimary.withValues(alpha: 0.95),
           borderRadius: BorderRadius.circular(10),
         ),
         padding: const EdgeInsets.all(12),
@@ -2609,7 +2609,7 @@ class _FormField extends StatelessWidget {
                 fontSize: 14, color: AppColors.textPrimary),
             filled: true,
             fillColor: readOnly
-                ? AppColors.slaterspwn.withOpacity(0.3) : AppColors.yellowrspwn.withOpacity(0.3),
+                ? AppColors.slaterspwn.withValues(alpha: 0.3) : AppColors.yellowrspwn.withValues(alpha: 0.3),
             contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             border: OutlineInputBorder(
@@ -2677,7 +2677,7 @@ class _DropdownField<T> extends StatelessWidget {
           onChanged: onChanged,
           decoration: InputDecoration(
             filled: true,
-            fillColor: AppColors.yellowrspwn.withOpacity(0.3),
+            fillColor: AppColors.yellowrspwn.withValues(alpha: 0.3),
             contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             border: OutlineInputBorder(
@@ -2821,14 +2821,14 @@ class _CounterButton extends StatelessWidget {
           shape: BoxShape.circle,
           border: Border.all(
             color: onTap == null
-                ? AppColors.slaterspwn.withOpacity(0.5)
+                ? AppColors.slaterspwn.withValues(alpha: 0.5)
                 : AppColors.slaterspwn,
           ),
         ),
         child: Icon(icon,
             size: 14,
             color: onTap == null
-                ? AppColors.textPrimary.withOpacity(0.5)
+                ? AppColors.textPrimary.withValues(alpha: 0.5)
                 : AppColors.textPrimary),
       ),
     );
@@ -2896,9 +2896,9 @@ class _HomePhotosPicker extends StatelessWidget {
                 width: 90,
                 height: 90,
                 decoration: BoxDecoration(
-                  color: AppColors.yellowrspwn.withOpacity(0.2),
+                  color: AppColors.yellowrspwn.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.greenrspwn.withOpacity(0.6), width: 1.2),
+                  border: Border.all(color: AppColors.greenrspwn.withValues(alpha: 0.6), width: 1.2),
                 ),
                 child: isUploading
                     ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
@@ -2982,12 +2982,12 @@ class _UploadBox extends StatelessWidget {
               width: 130,
               height: 110,
               decoration: BoxDecoration(
-                color: AppColors.yellowrspwn.withOpacity(0.2),
+                color: AppColors.yellowrspwn.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: file != null
                       ? AppColors.greenrspwn
-                      : AppColors.greenrspwn.withOpacity(0.6),
+                      : AppColors.greenrspwn.withValues(alpha: 0.6),
                   width: 1.2,
                 ),
               ),

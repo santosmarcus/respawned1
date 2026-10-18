@@ -740,7 +740,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                             borderRadius: BorderRadius.circular(30),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.15),
+                                color: Colors.black.withValues(alpha: 0.15),
                                 blurRadius: 4,
                                 offset: const Offset(0, 2),
                               ),
@@ -1038,7 +1038,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: AppColors.lavenderrspwn.withOpacity(0.25),
+                    color: AppColors.lavenderrspwn.withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
@@ -1116,7 +1116,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     return Container(
       width: 60,
       height: 60,
-      color: category.color.withOpacity(0.15),
+      color: category.color.withValues(alpha: 0.15),
       child: Icon(category.icon, color: category.color),
     );
   }
@@ -1197,9 +1197,9 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? color : color.withOpacity(0.12),
+          color: selected ? color : color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: color.withOpacity(selected ? 0 : 0.4)),
+          border: Border.all(color: color.withValues(alpha: selected ? 0 : 0.4)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

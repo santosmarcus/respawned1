@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/utils/validators.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_id_tag_screen.dart';
 
@@ -356,10 +356,10 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                       height: 90,
                       decoration: BoxDecoration(
                         border: Border.all(
-                            color: AppColors.textPrimary.withOpacity(0.3),
+                            color: AppColors.textPrimary.withValues(alpha: 0.3),
                             style: BorderStyle.solid),
                         borderRadius: BorderRadius.circular(8),
-                        color: AppColors.tearspwn.withOpacity(0.3),
+                        color: AppColors.tearspwn.withValues(alpha: 0.3),
                       ),
                       child: _petImage != null
                           ? ClipRRect(
@@ -495,10 +495,10 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                         height: 80,
                         decoration: BoxDecoration(
                           border: Border.all(
-                              color: AppColors.textPrimary.withOpacity(0.3),
+                              color: AppColors.textPrimary.withValues(alpha: 0.3),
                               style: BorderStyle.solid),
                           borderRadius: BorderRadius.circular(8),
-                          color: AppColors.tearspwn.withOpacity(0.3),
+                          color: AppColors.tearspwn.withValues(alpha: 0.3),
                         ),
                         child: _vaccinationImage != null
                             ? ClipRRect(
@@ -650,7 +650,7 @@ Widget _field(
             ),
 
             filled: true,
-            fillColor: AppColors.background.withOpacity(0.3),
+            fillColor: AppColors.background.withValues(alpha: 0.3),
 
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 14,
@@ -724,7 +724,7 @@ Widget _datePickerField({
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: AppColors.background.withOpacity(0.3),
+              color: AppColors.background.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.slaterspwn, width: 1),
             ),

@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -652,7 +652,7 @@ class _RescuePageState extends State<RescuePage> {
                   controller: scrollController,
                   itemCount: _rescueTypeOptions.length,
                   separatorBuilder: (_, __) =>
-                      Divider(height: 1, color: AppColors.slaterspwn.withOpacity(0.4)),
+                      Divider(height: 1, color: AppColors.slaterspwn.withValues(alpha: 0.4)),
                   itemBuilder: (context, index) {
                     final option = _rescueTypeOptions[index];
                     final isSelected = option['label'] == _selectedRescueType;
@@ -677,7 +677,7 @@ class _RescuePageState extends State<RescuePage> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
-                                color: _urgencyColor(urgency).withOpacity(0.15),
+                                color: _urgencyColor(urgency).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
                                     color: _urgencyColor(urgency), width: 1),
@@ -1261,7 +1261,7 @@ class _RescuePageState extends State<RescuePage> {
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.15),
+                            color: Colors.black.withValues(alpha: 0.15),
                             blurRadius: 6,
                             offset: const Offset(0, 2),
                           ),
@@ -2098,7 +2098,7 @@ class _RescuePageState extends State<RescuePage> {
         decoration: BoxDecoration(
           border: Border.all(color: item != null ? AppColors.greenrspwn : AppColors.textPrimary, width: 1.5),
           borderRadius: BorderRadius.circular(8),
-          color: item != null ? AppColors.greenrspwn.withOpacity(0.05) : Colors.transparent,
+          color: item != null ? AppColors.greenrspwn.withValues(alpha: 0.05) : Colors.transparent,
         ),
 
         clipBehavior: Clip.hardEdge,
@@ -2334,7 +2334,7 @@ class _RescuePageState extends State<RescuePage> {
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppColors.yellowrspwn.withOpacity(0.2),
+            color: AppColors.yellowrspwn.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
@@ -2471,7 +2471,7 @@ class _RescuePageState extends State<RescuePage> {
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppColors.greenrspwn.withOpacity(0.15),
+            color: AppColors.greenrspwn.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
@@ -2753,7 +2753,7 @@ class _RescuePageState extends State<RescuePage> {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppColors.pinkrspwn.withOpacity(0.4),
+          color: AppColors.pinkrspwn.withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(

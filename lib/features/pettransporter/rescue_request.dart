@@ -475,7 +475,7 @@ class _RescueRequestState extends State<RescueRequest> {
                     '~4KM from you',
                     style: GoogleFonts.zain(
                       fontSize: 12,
-                      color: AppColors.background.withOpacity(0.8),
+                      color: AppColors.background.withValues(alpha: 0.8),
                     ),
                   ),
                 ),
@@ -536,7 +536,7 @@ class _RescueRequestState extends State<RescueRequest> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.lavenderrspwn.withOpacity(0.2),
+                          color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: AppColors.lavenderrspwn),
                         ),

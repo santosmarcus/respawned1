@@ -148,7 +148,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
                         color: selected ? AppColors.textPrimary : Colors.transparent,
-                        border: Border.all(color: AppColors.textPrimary.withOpacity(0.3)),
+                        border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.3)),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       alignment: Alignment.center,

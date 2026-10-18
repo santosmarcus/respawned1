@@ -526,7 +526,7 @@ class _TransporterNotificationTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.5),
+              color: Colors.grey.withValues(alpha: 0.5),
               blurRadius: 15,
               offset: const Offset(0.0, 0.75),
             ),

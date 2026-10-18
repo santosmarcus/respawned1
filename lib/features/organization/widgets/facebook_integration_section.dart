@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+//import 'package:flutter_facebook_auth/flutter_facebook_auth.dart'; // disabled: dependency commented out in pubspec.yaml
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -41,6 +41,7 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
     );
   }
 
+/*
   String? _friendlyLoginError(LoginStatus status) => switch (status) {
         LoginStatus.cancelled => null, // user backed out — not an error to report
         LoginStatus.failed => 'Facebook login failed. Please try again.',
@@ -48,9 +49,16 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
         LoginStatus.success => null,
       };
 
+*/
+
   Future<void> _connect() async {
     setState(() => _busy = true);
     try {
+      // Facebook login is disabled while flutter_facebook_auth is commented out
+      // in pubspec.yaml. Restore the dependency + the block below to re-enable.
+      _showMessage('Facebook integration is temporarily disabled.', isError: true);
+      return;
+      /*
       final result = await FacebookAuth.instance.login(
         permissions: const ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'],
       );
@@ -66,6 +74,9 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
         return;
       }
 
+      */
+      // ignore: dead_code
+      const tokenString = '';
       final connectResult = await ref.read(facebookIntegrationRepositoryProvider).connect(
             organizationId: widget.organizationId,
             userAccessToken: tokenString,

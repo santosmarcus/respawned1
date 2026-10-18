@@ -412,7 +412,7 @@ class _VehicleTypeDropdown extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.textSecondary.withOpacity(0.4)),
+        border: Border.all(color: AppColors.textSecondary.withValues(alpha: 0.4)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButtonFormField<String>(
@@ -476,9 +476,9 @@ Widget _uploadBox({
           width: double.infinity,
           height: 130,
           decoration: BoxDecoration(
-            color: AppColors.slaterspwn.withOpacity(0.5),
+            color: AppColors.slaterspwn.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.textSecondary.withOpacity(0.4)),
+            border: Border.all(color: AppColors.textSecondary.withValues(alpha: 0.4)),
           ),
           child: file != null
               ? ClipRRect(

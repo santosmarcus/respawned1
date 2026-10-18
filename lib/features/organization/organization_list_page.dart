@@ -165,7 +165,7 @@ class _OrganizationsListPageState extends State<OrganizationsListPage> {
                         hintText: 'Search',
                         hintStyle: GoogleFonts.zain(
                           fontSize: 15,
-                          color: AppColors.textPrimary.withOpacity(0.6),
+                          color: AppColors.textPrimary.withValues(alpha: 0.6),
                         ),
                         prefixIcon: const Icon(
                           Icons.search,
