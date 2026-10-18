@@ -24,6 +24,14 @@ exports.getOrCreateRescueSession = onCall(async (request) => {
   }
   const tagData = tagSnap.data();
 
+  // Only a pet its owner has marked lost gets a rescue session. Previously
+  // any scan created one AND flipped the tag to status 'lost' below, so
+  // scanning a pet that wasn't lost marked it lost and opened the lost-pet
+  // chat.
+  if (tagData.status !== 'lost') {
+    throw new HttpsError('failed-precondition', 'This pet is not marked as lost.');
+  }
+
   const lat = location && typeof location.lat === 'number' ? location.lat : null;
   const lng = location && typeof location.lng === 'number' ? location.lng : null;
   const address = location && typeof location.address === 'string' ? location.address : null;

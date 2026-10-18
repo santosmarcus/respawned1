@@ -10,9 +10,11 @@ import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/rescue/rescue_page.dart'
     show QRScannerPage, RescuePage;
 import '../../../app_theme.dart';
+import 'collar_id_tag_screen.dart';
+import 'collar_tag_data_model.dart';
 import 'pet_found_chat.dart';
 
-const String _geocodingApiKey = 'AIzaSyChQ9xBxn59vAehhzsPuMgCqJoW_qbVOs0';
+const String _geocodingApiKey = 'AIzaSyCh•••••••••••••••••••••••••••••••';
 
 
 class TagScanOutcome {
@@ -21,19 +23,28 @@ class TagScanOutcome {
   final String? sessionId;
   final String? petName;
   final bool isOwner;
+  // Only a tag whose status is 'lost' gets a rescue session (finder
+  // tracking + owner-enabled chat). For any other status sessionId is null
+  // and the scan opens the regular collar ID tag screen instead.
+  final bool isLost;
+  final CollarTagData? tagData;
 
   const TagScanOutcome.notFound()
       : tagExists = false,
         tagId = null,
         sessionId = null,
         petName = null,
-        isOwner = false;
+        isOwner = false,
+        isLost = false,
+        tagData = null;
 
   const TagScanOutcome.found({
     required this.tagId,
     required this.sessionId,
     required this.petName,
     required this.isOwner,
+    required this.isLost,
+    required this.tagData,
   }) : tagExists = true;
 }
 
@@ -55,7 +66,8 @@ Future<TagScanOutcome> resolveScannedTagId(
   if (!tagSnap.exists) return const TagScanOutcome.notFound();
 
   final tagData = tagSnap.data() as Map<String, dynamic>;
-  final petName = tagData['name'] as String? ?? '';
+  final tag = CollarTagData.fromFirestore(tagData, tagSnap.id);
+  final petName = tag.name;
 
   // Whoever is scanning gets the owner-side experience (the "tap to
   // enable live chat" control) only if they're actually signed in as this
@@ -67,13 +79,23 @@ Future<TagScanOutcome> resolveScannedTagId(
   final currentUid = FirebaseAuth.instance.currentUser?.uid;
   final isOwner = currentUid != null && currentUid == tagData['ownerId'];
 
-  final sessionId = await _getOrCreateRescueSession(tagId, location: location);
+  // Previously a rescue session was started for every scan regardless of
+  // the tag's status, so a pet that wasn't lost still sent the scanner to
+  // the lost-pet chat and recorded their location. Only a tag the owner has
+  // explicitly marked 'lost' starts (or reuses) a session now.
+  final isLost = tag.status == 'lost';
+
+  final sessionId = isLost
+      ? await _getOrCreateRescueSession(tagId, location: location)
+      : null;
 
   return TagScanOutcome.found(
     tagId: tagId,
     sessionId: sessionId,
     petName: petName,
     isOwner: isOwner,
+    isLost: isLost,
+    tagData: tag,
   );
 }
 
@@ -123,6 +145,22 @@ Future<void> startTagScan(BuildContext context) async {
 
     if (!outcome.tagExists) {
       _openNoPetFound(context);
+      return;
+    }
+
+    if (!outcome.isLost) {
+      // Not lost: show the pet's regular collar ID tag. Finders get the
+      // read-only card (no edit / mark-as-lost controls); the owner
+      // scanning their own tag gets their normal card.
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CollarIdTagCardScreen(
+            tagData: outcome.tagData!,
+            readOnly: !outcome.isOwner,
+          ),
+        ),
+      );
       return;
     }
 

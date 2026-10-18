@@ -52,7 +52,7 @@ dependencies:
   fl_chart: ^0.69.2  # charts for the admin Analytics dashboard
   #sign in
   google_sign_in: ^6.2.1
-  flutter_facebook_auth: ^7.1.5
+  #flutter_facebook_auth: ^7.1.5
 
   # UI
   lottie: ^3.3.2  # animated illustrations (loading, empty states)

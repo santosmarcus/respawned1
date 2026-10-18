@@ -325,25 +325,45 @@ class _ActivityCarouselState extends State<_ActivityCarousel> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Activity Card Overflow spec §12 — PageView forces every page to
-        // exactly this height, so it must safely fit the tallest supported
-        // card (a rejected rescue report, now trimmed to a compact
-        // single-line reason/date block in ActivityCard). Raised from the
-        // original 190 to fit that content with margin, and each page is
-        // additionally wrapped in a SingleChildScrollView as a safety net
-        // against any remaining overflow under larger text-scale factors —
-        // vertical scroll doesn't conflict with PageView's horizontal swipe.
-        SizedBox(
-          height: 260,
-          child: PageView.builder(
-            controller: _controller,
-            onPageChanged: (i) => setState(() => _page = i),
-            itemCount: widget.items.length,
-            itemBuilder: (context, i) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: SingleChildScrollView(child: ActivityCard(item: widget.items[i])),
-            ),
-          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cardWidth = constraints.maxWidth * 0.88 - 12;
+            return SizedBox(
+              width: double.infinity,
+              child: Stack(
+                children: [
+                  for (final item in widget.items)
+                    Visibility(
+                      visible: false,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: SizedBox(
+                          width: cardWidth,
+                          child: ActivityCard(item: item),
+                        ),
+                      ),
+                    ),
+                  Positioned.fill(
+                    child: PageView.builder(
+                      controller: _controller,
+                      onPageChanged: (i) => setState(() => _page = i),
+                      itemCount: widget.items.length,
+                      itemBuilder: (context, i) =>
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: SingleChildScrollView(
+                              child: ActivityCard(item: widget.items[i]),
+                            ),
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
         if (widget.items.length > 1) ...[
           const SizedBox(height: 10),
