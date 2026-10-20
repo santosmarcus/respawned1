@@ -8,6 +8,7 @@ import '../../app_theme.dart';
 import '../generalhome/history_provider.dart';
 import '../generalhome/history_screen.dart';
 import 'cancel_dialog.dart';
+import 'certificate_view.dart';
 import 'donation_page.dart';
 import 'models.dart';
 
@@ -118,16 +119,16 @@ class DonationSummaryScreen extends ConsumerWidget {
     final donation = ref.watch(donationSummaryProvider(params));
     // Watch history to react to cancellation/un-cancellation
     final history = ref.watch(historyProvider);
-    
+
     // Find the latest state of this history item if available
-    final currentHistoryItem = donation.historyItem != null 
+    final currentHistoryItem = donation.historyItem != null
         ? history.firstWhere((item) => item.id == donation.historyItem!.id, orElse: () => donation.historyItem!)
         : null;
 
     final isSponsorship = currentHistoryItem?.type == HistoryType.sponsorship;
     final isInactive = currentHistoryItem?.sponsorshipStatus == 'inactive';
-    final bool isBeforeExpiry = currentHistoryItem?.nextChargeDate != null && 
-                                DateTime.now().isBefore(currentHistoryItem!.nextChargeDate!);
+    final bool isBeforeExpiry = currentHistoryItem?.nextChargeDate != null &&
+        DateTime.now().isBefore(currentHistoryItem!.nextChargeDate!);
 
     return PopScope(
       canPop: false,
@@ -173,16 +174,16 @@ class DonationSummaryScreen extends ConsumerWidget {
                         style: GoogleFonts.tiltWarp(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                       ),
                       Text(
-                        isSponsorship 
-                          ? (isInactive ? 'This sponsorship will end soon.' : 'Your sponsorship is now active.')
-                          : 'Your donation was successful.',
+                        isSponsorship
+                            ? (isInactive ? 'This sponsorship will end soon.' : 'Your sponsorship is now active.')
+                            : 'Your donation was successful.',
                         style: GoogleFonts.zain(fontSize: 18, color: AppColors.textPrimary),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 30),
-                
+
                 if (isSponsorship && currentHistoryItem?.pet != null) ...[
                   DonationSummarySectionCard(
                     title: 'Sponsored Pet',
@@ -219,7 +220,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 18),
                 ],
-  
+
                 DonationSummarySectionCard(
                   title: 'Organization',
                   icon: Icons.volunteer_activism_outlined,
@@ -266,9 +267,9 @@ class DonationSummaryScreen extends ConsumerWidget {
                           Text(
                             DateFormat('MMMM dd, yyyy').format(currentHistoryItem!.nextChargeDate!),
                             style: GoogleFonts.zain(
-                              fontSize: 15, 
-                              fontWeight: FontWeight.bold, 
-                              color: isInactive ? Colors.red : AppColors.greenrspwn
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: isInactive ? Colors.red : AppColors.greenrspwn
                             ),
                           ),
                         ],
@@ -285,9 +286,9 @@ class DonationSummaryScreen extends ConsumerWidget {
                             Text(
                               '₱${(currentHistoryItem.nextChargeAmount ?? donation.item.amount).toStringAsFixed(2)}',
                               style: GoogleFonts.zain(
-                                fontSize: 15, 
-                                fontWeight: FontWeight.bold, 
-                                color: AppColors.greenrspwn
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.greenrspwn
                               ),
                             ),
                           ],
@@ -386,7 +387,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
-                
+
                 if (isSponsorship && (!isInactive || isBeforeExpiry)) ...[
                   const SizedBox(height: 24),
                   SizedBox(
@@ -415,8 +416,8 @@ class DonationSummaryScreen extends ConsumerWidget {
                     ),
                   ),
                 ],
-  
-                if (currentHistoryItem?.type == HistoryType.inKindDonation && 
+
+                if (currentHistoryItem?.type == HistoryType.inKindDonation &&
                     currentHistoryItem?.status == InKindStatus.inProgress) ...[
                   const SizedBox(height: 24),
                   SizedBox(
@@ -439,7 +440,32 @@ class DonationSummaryScreen extends ConsumerWidget {
                     ),
                   ),
                 ],
-  
+
+                // Certificate of Donation (issued by the backend for verified
+                // payments, and for in-kind donations once received).
+                if (currentHistoryItem != null &&
+                    (currentHistoryItem.type != HistoryType.inKindDonation ||
+                        currentHistoryItem.status == InKindStatus.complete)) ...[
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => CertificateScreen(certificateId: currentHistoryItem.id)),
+                      ),
+                      icon: const Icon(Icons.workspace_premium_outlined),
+                      label: Text('View Certificate', style: GoogleFonts.tiltWarp(fontSize: 15)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.textPrimary),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      ),
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 25),
                 Row(
                   children: <Widget>[
@@ -475,7 +501,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                             context,
                             MaterialPageRoute(
                                 builder: (context) => const DonationPage()),
-                            (route) => false,
+                                (route) => false,
                           );
                         },
                         style: ElevatedButton.styleFrom(

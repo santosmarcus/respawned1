@@ -10,6 +10,7 @@ import '../../app_theme.dart';
 import '../generalhome/history_provider.dart';
 import 'models.dart';
 import 'donation_summary.dart';
+import 'campaign_completed_page.dart';
 import 'donation_payment_service.dart';
 
 final donationReviewProvider = ChangeNotifierProvider.autoDispose.family<DonationReviewNotifier, DonationReviewParams>((ref, params) {
@@ -157,7 +158,13 @@ class DonationReviewNotifier extends ChangeNotifier {
 
       switch (data['status'] as String?) {
         case 'paid':
-          _finish({'docId': paymentId, 'refNumber': (data['refNumber'] as String?) ?? ''});
+          _finish({
+            'docId': paymentId,
+            'refNumber': (data['refNumber'] as String?) ?? '',
+            // Set by the backend when this payment completed the campaign's goal.
+            'completedCampaign': data['completedCampaign'] == true ? 'true' : '',
+            'campaignName': (data['campaignName'] as String?) ?? '',
+          });
         case 'cancelled':
           _paymentId = null;
           _finish(null); // user cancelled — no error dialog
@@ -638,19 +645,29 @@ class DonationReviewScreen extends ConsumerWidget {
 
                           ref.read(historyProvider.notifier).addHistoryItem(historyItem);
 
+                          final summaryParams = DonationSummaryParams(
+                            charityName: donation.organizationName,
+                            donationMethod: donation.donationMethod,
+                            item: donation.item,
+                            referenceNumber: refNumber,
+                            timestamp: now,
+                            historyItem: historyItem,
+                          );
+                          // This donation reached the goal: thank-you page
+                          // (receipt and certificate are linked from it).
+                          final completed = result['completedCampaign'] == 'true';
                           Navigator.pushReplacement(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => DonationSummaryScreen(
-                                params: DonationSummaryParams(
-                                  charityName: donation.organizationName,
-                                  donationMethod: donation.donationMethod,
-                                  item: donation.item,
-                                  referenceNumber: refNumber,
-                                  timestamp: now,
-                                  historyItem: historyItem,
-                                ),
-                              ),
+                              builder: (context) => completed
+                                  ? CampaignCompletedPage(
+                                campaignTitle: (result['campaignName'] ?? '').isNotEmpty
+                                    ? result['campaignName']!
+                                    : 'this campaign',
+                                paymentId: docId,
+                                summary: summaryParams,
+                              )
+                                  : DonationSummaryScreen(params: summaryParams),
                             ),
                           );
                         } else if (result == null && context.mounted && notifier.errorMessage != null) {

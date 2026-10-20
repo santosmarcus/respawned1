@@ -31,7 +31,8 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
   static const _tabs = ['All', 'Donations', 'Sponsorships'];
   late int _tab = widget.initialTab;
   String _query = '';
-  // Filter sheet: which lifecycle statuses to show (all by default).
+  // Filter sheet: which lifecycle statuses to show (all but archived by
+  // default — archived listings are fully allocated; tick it to audit them).
   late Set<String> _statuses =
   Set.of(widget.initialStatuses ?? const {'draft', 'active', 'paused', 'goal_met', 'goal_not_met', 'closed'});
 
@@ -46,7 +47,7 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
           title: 'Filter',
           onDone: () => Navigator.pop(ctx, picked),
           children: [
-            for (final s in const ['draft', 'active', 'paused', 'goal_met', 'goal_not_met', 'closed'])
+            for (final s in const ['draft', 'active', 'paused', 'goal_met', 'goal_not_met', 'closed', 'archived'])
               CheckRow(
                 label: campaignStatusLabel(s),
                 value: picked.contains(s),

@@ -7,6 +7,7 @@ import '../../../app_theme.dart';
 import 'models.dart';
 import 'donation_payment_service.dart';
 import 'donation_review.dart';
+import 'fund_tracking_section.dart';
 import 'sponsorship_summary.dart';
 
 class SponsorshipDetail extends StatefulWidget {
@@ -55,7 +56,7 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
           final s = HistoryItem.fromFirestore(doc);
           final isActiveStatus = s.sponsorshipStatus == 'active';
           final isStillValid = isActiveStatus || (s.nextChargeDate != null && s.nextChargeDate!.isAfter(now));
-          
+
           if (isStillValid) {
             if (mounted) {
               setState(() {
@@ -117,7 +118,7 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
             Container(
               height: 220, width: double.infinity,
               decoration: BoxDecoration(color: sponsorship.backgroundColor, borderRadius: BorderRadius.circular(20)),
-              child: sponsorship.imageUrl != null 
+              child: sponsorship.imageUrl != null
                   ? ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.network(sponsorship.imageUrl!, fit: BoxFit.cover))
                   : const Icon(Icons.pets, size: 60, color: AppColors.textPrimary),
             ),
@@ -207,6 +208,11 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
               const SizedBox(height: 24),
             ],
 
+            // Where this pet's sponsorship money went (allocations on this
+            // sponsorship listing, which belongs to this animal only).
+            FundTrackingSection(listing: sponsorship),
+            const SizedBox(height: 24),
+
             // Recent Updates
             Text('Recent Updates', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
             const SizedBox(height: 12),
@@ -217,37 +223,37 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
             // Sponsor Button
             SizedBox(
               width: double.infinity,
-              child: _isLoading 
-                ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
-                : (sponsorship.isEnded && _activeSponsorship == null)
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
+                  : (sponsorship.isEnded && _activeSponsorship == null)
                   ? Container(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      decoration: BoxDecoration(color: AppColors.textPrimary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(30)),
-                      child: Text('This sponsorship campaign has ended.', textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary.withValues(alpha: 0.6))),
-                    )
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(color: AppColors.textPrimary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(30)),
+                child: Text('This sponsorship campaign has ended.', textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary.withValues(alpha: 0.6))),
+              )
                   : ElevatedButton(
-                      onPressed: _activeSponsorship != null 
-                        ? _redirectToSummary
-                        : () {
-                          final amount = double.tryParse(_amountController.text);
-                          if (amount == null || amount <= 0) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount')));
-                            return;
-                          }
-                          _openSponsorshipSheet(context, amount);
-                        },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _activeSponsorship != null ? AppColors.greenrspwn : AppColors.yellowrspwn, 
-                        foregroundColor: _activeSponsorship != null ? Colors.white : AppColors.textPrimary, 
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), 
-                        padding: const EdgeInsets.symmetric(vertical: 16), 
-                        elevation: 0
-                      ),
-                      child: Text(
-                        _activeSponsorship != null ? 'View Current Sponsorship' : 'Continue', 
-                        style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold)
-                      ),
-                    ),
+                onPressed: _activeSponsorship != null
+                    ? _redirectToSummary
+                    : () {
+                  final amount = double.tryParse(_amountController.text);
+                  if (amount == null || amount <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount')));
+                    return;
+                  }
+                  _openSponsorshipSheet(context, amount);
+                },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _activeSponsorship != null ? AppColors.greenrspwn : AppColors.yellowrspwn,
+                    foregroundColor: _activeSponsorship != null ? Colors.white : AppColors.textPrimary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    elevation: 0
+                ),
+                child: Text(
+                    _activeSponsorship != null ? 'View Current Sponsorship' : 'Continue',
+                    style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold)
+                ),
+              ),
             ),
             const SizedBox(height: 32),
           ],
@@ -275,7 +281,7 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
 
   void _redirectToSummary() {
     if (_activeSponsorship == null) return;
-    
+
     final s = _activeSponsorship!;
     Navigator.push(
       context,

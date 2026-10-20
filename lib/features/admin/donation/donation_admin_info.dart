@@ -150,7 +150,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
         Row(
           children: [
             Expanded(child: Text('Fund Tracking', style: GoogleFonts.zain(fontSize: 17, color: AppColors.textPrimary))),
-            if (canFinance && !c.isDraft)
+            if (canFinance && !c.isDraft && !c.isArchived)
               IconButton(
                 tooltip: 'Allocate funds',
                 icon: const Icon(Icons.add_circle_outline, color: AppColors.textPrimary),
@@ -199,7 +199,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
               child: Text(isSponsorship ? 'Sponsors' : 'Recent Donations',
                   style: GoogleFonts.zain(fontSize: 17, color: AppColors.textPrimary)),
             ),
-            if (canFinance && !isSponsorship && !c.isDraft)
+            if (canFinance && !isSponsorship && !c.isDraft && !c.isArchived)
               TextButton.icon(
                 onPressed: () => showAdminSheet(context, OfflineDonationSheet(campaign: c)),
                 icon: const Icon(Icons.add, size: 18, color: AppColors.textPrimary),
@@ -292,13 +292,31 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
         onTap: () => showAdminSheet(context, ResolveDeadlineSheet(campaign: c)),
       ));
     }
-    if (c.status == 'goal_met') {
+    // Finished listings stay in the admin and general views until every peso
+    // is allocated (or transferred); only then can they be archived.
+    if (c.isArchived) {
       widgets.add(_banner(
-        color: AppColors.greenrspwn,
-        icon: Icons.verified_outlined,
-        text: 'Goal met at the deadline.',
-        action: 'Close',
-        onTap: () => _status('close', title: 'Close', message: 'Close "${c.title}"? Its records stay visible.'),
+        color: AppColors.slaterspwn,
+        icon: Icons.inventory_2_outlined,
+        text: 'Archived — every peso was allocated. Hidden from the admin home and from users.',
+      ));
+    } else if (c.status == 'goal_met' || c.status == 'closed') {
+      final left = c.availableBalance;
+      final done = left < 0.005;
+      final lead = c.status == 'goal_met' ? 'Goal reached!' : 'Closed.';
+      widgets.add(_banner(
+        color: done ? AppColors.greenrspwn : AppColors.yellowrspwn,
+        icon: done ? Icons.task_alt : Icons.account_balance_wallet_outlined,
+        text: done
+            ? '$lead All funds are allocated, so it can now be archived.'
+            : '$lead ${formatPesoExact(left)} still to allocate. It stays visible to admins and users until every peso is allocated.',
+        action: done ? 'Archive' : (canFinance ? 'Allocate' : null),
+        onTap: done
+            ? () => _status('archive',
+            title: 'Archive',
+            message: 'Archive "${c.title}"? It will be removed from the admin home and from the general view. '
+                'Its records and history are kept and remain searchable by admins.')
+            : (canFinance ? () => showAdminSheet(context, AllocateFundsSheet(campaign: c)) : null),
       ));
     }
     if (canFinance && isDonation && c.eligibleExcess > 0 && !c.restricted) {
@@ -312,7 +330,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
     }
 
     final buttons = <Widget>[
-      if (c.status != 'closed')
+      if (c.status != 'closed' && !c.isArchived)
         _ActionChip('Edit', Icons.edit_outlined, _busy
             ? null
             : () => Navigator.push(context, MaterialPageRoute(builder: (_) => DonationAdminCreatePage(existing: c)))),
@@ -342,7 +360,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
         _ActionChip('Relaunch', Icons.restart_alt, _busy
             ? null
             : () => showAdminSheet(context, ResolveDeadlineSheet(campaign: c, mode: 'relaunch'))),
-      if (!c.isDraft)
+      if (!c.isDraft && !c.isArchived)
         _ActionChip('Post update', Icons.campaign_outlined, _busy ? null : () => showAdminSheet(context, PostUpdateSheet(campaign: c))),
     ];
 
@@ -359,7 +377,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
     ];
   }
 
-  Widget _banner({required Color color, required IconData icon, required String text, required String action, required VoidCallback onTap}) {
+  Widget _banner({required Color color, required IconData icon, required String text, String? action, VoidCallback? onTap}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
@@ -373,10 +391,13 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           Icon(icon, color: AppColors.textPrimary, size: 20),
           const SizedBox(width: 8),
           Expanded(child: Text(text, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))),
-          TextButton(
-            onPressed: _busy ? null : onTap,
-            child: Text(action, style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-          ),
+          if (action != null && onTap != null)
+            TextButton(
+              onPressed: _busy ? null : onTap,
+              child: Text(action, style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+            )
+          else
+            const SizedBox(width: 8),
         ],
       ),
     );

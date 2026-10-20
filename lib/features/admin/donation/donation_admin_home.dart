@@ -17,6 +17,10 @@ import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 /// find and publish them). Ended listings are reached through View All.
 const _currentStatuses = {'draft', 'active', 'paused'};
 
+/// Finished listings that stay on the home screen until every peso is
+/// allocated and an admin archives them.
+const _completedStatuses = {'goal_met', 'goal_not_met', 'closed'};
+
 /// Ongoing listings shown per section on the home screen; the rest are in View All.
 const _homeListLimit = 3;
 
@@ -34,6 +38,13 @@ class DonationAdminHomeScreen extends ConsumerWidget {
         initialTab: sponsorships ? 2 : 1,
         title: sponsorships ? 'All Sponsorships' : 'All Donations',
       ),
+    ),
+  );
+
+  void _openCompleted(BuildContext context) => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => DonationAdminSearchPage(initialStatuses: _completedStatuses, title: 'Completed Campaigns'),
     ),
   );
 
@@ -99,6 +110,17 @@ class DonationAdminHomeScreen extends ConsumerWidget {
                   const SizedBox(height: 6),
                   _trackingList(context, campaigns, type: 'sponsorship', empty: 'No active sponsorships.'),
 
+                  const SizedBox(height: 16),
+                  _SectionHeader(
+                    title: 'Completed',
+                    action: 'View All Completed',
+                    onAction: () => _openCompleted(context),
+                  ),
+                  Text('Stays here until every peso is allocated, then it can be archived.',
+                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                  const SizedBox(height: 6),
+                  _completedList(context, campaigns),
+
                   const SizedBox(height: 28),
                   Row(
                     children: [
@@ -131,6 +153,23 @@ class DonationAdminHomeScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Finished, not yet archived listings; the most unallocated money first.
+  /// (Ones still waiting for an extend/close decision are listed above.)
+  Widget _completedList(BuildContext context, AsyncValue<List<DonationListing>> campaigns) {
+    final all = campaigns.asData?.value ?? const <DonationListing>[];
+    final items = all.where((l) => _completedStatuses.contains(l.status) && !l.needsExtensionDecision).toList()
+      ..sort((a, b) => b.availableBalance.compareTo(a.availableBalance));
+    if (items.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text('No completed campaigns.', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary)),
+      );
+    }
+    return Column(children: [
+      for (final l in items.take(_homeListLimit)) CampaignCard(listing: l, onTap: () => _openListing(context, l)),
+    ]);
   }
 
   Widget _trackingList(BuildContext context, AsyncValue<List<DonationListing>> campaigns,

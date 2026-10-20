@@ -242,6 +242,16 @@ class DonationListing {
   /// Unpublished admin drafts — never shown in the general view.
   bool get isDraft => status == 'draft';
 
+  /// Fully allocated and archived by an admin — hidden from both views.
+  bool get isArchived => status == 'archived';
+
+  /// Reached its funding goal (set by the backend on the completing payment).
+  bool get isGoalMet => status == 'goal_met';
+
+  /// Finished listings users can still open to see where funds went
+  /// ("Past Campaigns"). Temporarily deactivated ones are excluded.
+  bool get isPast => isEnded && !isDraft && !isArchived && status != 'paused';
+
   /// collected + transferred in − transferred out − allocated. Transfers in
   /// are existing funds moved from another campaign, never donations.
   double get availableBalance => collected + transferredInAmount - transferredOutAmount - allocatedAmount;

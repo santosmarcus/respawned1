@@ -232,6 +232,7 @@ class StatusChip extends StatelessWidget {
       'goal_not_met' => Colors.deepOrange,
       'draft' => AppColors.textSecondary,
       'paused' => const Color(0xFF9C6B10),
+      'archived' => AppColors.textSecondary,
       _ => Colors.redAccent,
     };
     return Container(
@@ -257,6 +258,12 @@ class CampaignCard extends StatelessWidget {
   String get _timeLeft {
     if (listing.type == 'sponsorship' && listing.endDate == null) return 'Ongoing';
     if (listing.isDraft) return 'Not published';
+    // Finished listings: what's left to allocate matters more than time.
+    if (listing.isArchived) return 'Archived';
+    if (listing.status == 'goal_met' || listing.status == 'closed') {
+      final left = listing.availableBalance;
+      return left < 0.005 ? 'Fully allocated' : '${formatPesoExact(left)} to allocate';
+    }
     if (listing.isEnded) return 'Ended';
     if (listing.endDate == null) return 'No deadline';
     final days = listing.daysRemaining;

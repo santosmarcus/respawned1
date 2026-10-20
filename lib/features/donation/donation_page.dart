@@ -25,7 +25,6 @@ class _DonationPageState extends State<DonationPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _selectedCategory = 'All';
-  bool _showEnded = false;
 
   Set<String> _donatedIds = {};
   Set<String> _favoriteIds = {};
@@ -192,6 +191,13 @@ class _DonationPageState extends State<DonationPage> {
             Text('Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
             const SizedBox(height: 10),
             _buildSponsorshipList(),
+            const SizedBox(height: 20),
+            Text('Past Campaigns', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            const SizedBox(height: 2),
+            Text('Completed campaigns stay here so you can see where the funds went.',
+                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary.withValues(alpha: 0.6))),
+            const SizedBox(height: 8),
+            _buildPastList(),
             const SizedBox(height: 32),
           ],
         ),
@@ -219,19 +225,6 @@ class _DonationPageState extends State<DonationPage> {
               ),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        PopupMenuButton<bool>(
-          icon: Icon(
-            _showEnded ? Icons.visibility : Icons.visibility_off,
-            color: _showEnded ? AppColors.greenrspwn : AppColors.textPrimary,
-            size: 20,
-          ),
-          onSelected: (val) => setState(() => _showEnded = val),
-          itemBuilder: (context) => [
-            const PopupMenuItem(value: false, child: Text('Hide Ended')),
-            const PopupMenuItem(value: true, child: Text('Show Ended')),
-          ],
         ),
       ],
     );
@@ -270,11 +263,12 @@ class _DonationPageState extends State<DonationPage> {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No donations found.'));
 
         final donations = snapshot.data!.docs.map((doc) => DonationListing.fromFirestore(doc)).where((d) {
-          if (d.isDraft) return false; // unpublished admin drafts
+          // Only campaigns still taking donations; finished ones (goal
+          // reached, deadline passed, closed) are under Past Campaigns, and
+          // drafts / archived listings are never shown.
+          if (d.isEnded) return false;
           final q = _searchQuery.toLowerCase();
           final matchesSearch = q.isEmpty || d.title.toLowerCase().contains(q) || d.organizer.toLowerCase().contains(q);
-
-          if (!_showEnded && d.isEnded) return false;
 
           return matchesSearch;
         }).toList();
@@ -298,6 +292,65 @@ class _DonationPageState extends State<DonationPage> {
     );
   }
 
+  /// Finished donation campaigns and sponsorships (not drafts, not archived):
+  /// title + arrow only, opening the usual detail page with its Fund Tracking.
+  Widget _buildPastList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('campaigns').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) return const SizedBox.shrink();
+        final q = _searchQuery.toLowerCase();
+        final past = (snapshot.data?.docs ?? const [])
+            .map((doc) => DonationListing.fromFirestore(doc))
+            .where((c) => c.isPast)
+            .where((c) =>
+        q.isEmpty ||
+            c.title.toLowerCase().contains(q) ||
+            (c.animalName?.toLowerCase().contains(q) ?? false) ||
+            c.organizer.toLowerCase().contains(q))
+            .toList()
+          ..sort((a, b) => (b.endDate ?? b.createdAt ?? DateTime(0)).compareTo(a.endDate ?? a.createdAt ?? DateTime(0)));
+        if (past.isEmpty) {
+          return Text('No past campaigns yet.',
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary.withValues(alpha: 0.6)));
+        }
+        return Column(
+          children: [
+            for (final c in past)
+              InkWell(
+                onTap: () => c.type == 'sponsorship' ? _openSponsorDetail(c) : _openDetail(c),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.12))),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          c.type == 'sponsorship' ? (c.animalName ?? c.title) : c.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                        ),
+                      ),
+                      if (_donatedIds.contains(c.id) || _activeSponsorships.containsKey(c.id))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Text('Donated',
+                              style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.greenrspwn)),
+                        ),
+                      const Icon(Icons.chevron_right, color: AppColors.textPrimary),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildSponsorshipList() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('campaigns').where('type', isEqualTo: 'sponsorship').snapshots(),
@@ -306,8 +359,7 @@ class _DonationPageState extends State<DonationPage> {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No sponsorships found.'));
 
         final campaigns = snapshot.data!.docs.map((doc) => DonationListing.fromFirestore(doc)).where((c) {
-          if (c.isDraft) return false; // unpublished admin drafts
-          if (!_showEnded && c.isEnded) return false;
+          if (c.isEnded) return false; // drafts, archived and finished listings
           final q = _searchQuery.toLowerCase();
           return q.isEmpty || (c.animalName?.toLowerCase().contains(q) ?? false) || c.organizer.toLowerCase().contains(q);
         }).toList();

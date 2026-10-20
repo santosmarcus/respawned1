@@ -44,6 +44,7 @@ String campaignStatusLabel(String status) => switch (status) {
   'goal_met' => 'Goal Met',
   'goal_not_met' => 'Goal Not Met',
   'closed' => 'Closed',
+  'archived' => 'Archived',
   _ => status,
 };
 
@@ -242,6 +243,8 @@ class CampaignHistoryEntry {
     'deactivate' => 'Deactivated',
     'reactivate' => 'Reactivated',
     'close' => 'Closed',
+    'archive' => 'Archived (all funds allocated)',
+    'goal_completed' => 'Goal reached — donations closed',
     'deadline_reached' => 'Deadline reached',
     'extended' => 'Deadline extended',
     'relaunched' => 'Relaunched',

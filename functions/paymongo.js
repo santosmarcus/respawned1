@@ -12,6 +12,7 @@ const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {defineSecret, defineString} = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
+const {completedCampaignFields, certificateBenefit, issueCertificate, formatPeso} = require('./donation_common');
 
 // index.js calls admin.initializeApp() before requiring this module.
 const db = admin.firestore();
@@ -230,18 +231,44 @@ async function finalizePaidDonation(paymentRef, session) {
     });
 
     let goal = null;
+    const c = campaignSnap.exists ? campaignSnap.data() : {};
     if (campaignSnap.exists) {
-      const c = campaignSnap.data();
       const before = Number(c.collectedAmount) || 0;
       const target = Number(c.targetAmount) || 0;
-      tx.update(campaignRef, {
+      const campaignUpdate = {
         collectedAmount: FieldValue.increment(p.amount),
         numdonors: FieldValue.increment(1),
-      });
+      };
       if (target > 0 && before < target && before + p.amount >= target) {
         goal = {campaignId: p.campaignId, title: c.title || 'this campaign'};
+        // This payment completed the goal: stop taking donations now (the
+        // general view moves it to Past Campaigns) and tell the donor's app.
+        // Funds stay on the campaign until admins allocate them.
+        Object.assign(campaignUpdate, completedCampaignFields());
+        tx.set(campaignRef.collection('history').doc(), {
+          type: 'goal_completed',
+          to: 'goal_met',
+          paymentId: paymentRef.id,
+          byUid: 'system',
+          byName: 'System',
+          at: now,
+        });
+        tx.update(paymentRef, {completedCampaign: true});
       }
+      tx.update(campaignRef, campaignUpdate);
     }
+    issueCertificate(tx, {
+      uid: p.donorId,
+      id: paymentRef.id,
+      type: isSponsorship ? 'sponsorship' : 'donation',
+      recipientName: donorDisplayName(userSnap.data()),
+      organizationName: p.organizer,
+      contribution: formatPeso(p.amount),
+      benefit: certificateBenefit(c, p.campaignName),
+      campaignId: p.campaignId,
+      campaignTitle: p.campaignName,
+      refNumber,
+    });
     return {outcome: 'paid', goal};
   });
 
@@ -479,9 +506,6 @@ exports.cancelDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (r
 });
 
 // ── Webhook ─────────────────────────────────────────────────────────────────
-
-// Paymongo-Signature: t=<timestamp>,te=<test sig>,li=<live sig>
-// sig = hex HMAC-SHA256(webhook secret, `${t}.${rawBody}`)
 function verifyPaymongoSignature(header, rawBody) {
   if (typeof header !== 'string' || !rawBody) return false;
   const parts = {};

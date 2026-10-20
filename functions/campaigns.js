@@ -15,12 +15,19 @@
 //   transferredOutAmount  excess moved to other campaigns
 //   transferredInAmount   excess received from other campaigns (NOT a donation)
 //   available = collected + transferredIn - transferredOut - allocated
+//
+// Lifecycle: draft → active → goal_met (target reached, set by the payment
+// that completes it) / goal_not_met (deadline) → closed → archived. A
+// finished campaign stays visible (admin + general "Past Campaigns") until
+// it is archived, and it can only be archived once every peso is allocated
+// or transferred (available == 0).
 
 const crypto = require('crypto');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
+const {completedCampaignFields, certificateBenefit, issueCertificate} = require('./donation_common');
 
 // index.js calls admin.initializeApp() before requiring this module.
 const db = admin.firestore();
@@ -332,6 +339,7 @@ exports.saveCampaign = onCall(async (request) => {
   assertSameOrg(actor, existing);
   const status = statusOf(existing);
   if (status === 'closed') throw new HttpsError('failed-precondition', 'Closed listings cannot be edited. Relaunch it first.');
+  if (status === 'archived') throw new HttpsError('failed-precondition', 'Archived listings cannot be edited.');
 
   const {type, fields} = await buildListingFields(data, existing);
   if (existing.restricted === true && fields.restricted === false && num(existing.collectedAmount) > 0) {
@@ -393,7 +401,19 @@ exports.setCampaignStatus = onCall(async (request) => {
     } else if (action === 'close') {
       if (status === 'closed') return {status};
       if (status === 'draft') throw new HttpsError('failed-precondition', 'Drafts are not published; edit or leave them.');
+      if (status === 'archived') throw new HttpsError('failed-precondition', 'This listing is archived.');
       next = {status: 'closed', isActive: false, needsExtensionDecision: false, closedAt: now};
+    } else if (action === 'archive') {
+      // Removes it from both views — only once every peso is accounted for.
+      if (!['goal_met', 'closed'].includes(status)) {
+        throw new HttpsError('failed-precondition', 'Only completed or closed listings can be archived.');
+      }
+      const m = moneyOf(c);
+      if (m.available > 0) {
+        throw new HttpsError('failed-precondition',
+            `Allocate the remaining ₱${pesos(m.available).toFixed(2)} before archiving this listing.`);
+      }
+      next = {status: 'archived', isActive: false, needsExtensionDecision: false, archivedAt: now};
     } else {
       throw new HttpsError('invalid-argument', 'Unknown action.');
     }
@@ -595,12 +615,17 @@ exports.recordOfflineDonation = onCall(async (request) => {
       receiptUrl,
     });
     tx.set(refDoc, {campaignId: d.campaignId, donationId: donationRef.id, method: d.method, reference, createdAt: now});
-    tx.update(campaignRef, {
+    const campaignUpdate = {
       collectedAmount: FieldValue.increment(amount),
       numdonors: FieldValue.increment(1),
       updatedAt: now,
-    });
+    };
+    const m = moneyOf(c);
+    const completes = statusOf(c) === 'active' && m.target > 0 && m.collected < m.target && m.collected + centavos(amount) >= m.target;
+    if (completes) Object.assign(campaignUpdate, completedCampaignFields());
+    tx.update(campaignRef, campaignUpdate);
     historyEntry(tx, campaignRef, actor, 'offline_donation_recorded', {donationId: donationRef.id, amount, method: d.method, reference});
+    if (completes) historyEntry(tx, campaignRef, actor, 'goal_completed', {to: 'goal_met', donationId: donationRef.id});
   });
   return {donationId: donationRef.id};
 });
@@ -803,6 +828,9 @@ exports.manageInKindDonation = onCall(async (request) => {
     const p = snap.data();
     const campaignRef = p.campaignId ? campaignsCol().doc(p.campaignId) : null;
     const campaignSnap = campaignRef ? await tx.get(campaignRef) : null;
+    // Donor name for the certificate (all reads before any write).
+    const donorSnap = action === 'received' && typeof p.userId === 'string' ?
+      await tx.get(db.collection('users').doc(p.userId)) : null;
     if (campaignSnap && campaignSnap.exists) assertSameOrg(actor, campaignSnap.data());
     const current = String(p.status || '').toLowerCase();
     if (current === 'complete' || current === 'completed' || current === 'cancelled') {
@@ -831,6 +859,23 @@ exports.manageInKindDonation = onCall(async (request) => {
     tx.update(donationRef, update);
     if (typeof p.userId === 'string') {
       tx.set(db.collection('users').doc(p.userId).collection('history').doc(donationId), {status: update.status}, {merge: true});
+    }
+    if (donorSnap) {
+      const c = campaignSnap && campaignSnap.exists ? campaignSnap.data() : {};
+      const items = [p.category, p.clarification].filter((s) => typeof s === 'string' && s.trim()).join(': ');
+      const qty = update.quantityReceived ? `${update.quantityReceived} × ` : '';
+      issueCertificate(tx, {
+        uid: p.userId,
+        id: donationId,
+        type: 'inkind',
+        recipientName: displayName(donorSnap.data()) === 'Admin' ? 'Our Supporter' : displayName(donorSnap.data()),
+        organizationName: c.organizer || p.organizer || p.organizationName,
+        contribution: `${qty}${items || 'in-kind goods'}`.slice(0, 200),
+        benefit: certificateBenefit(c, c.title),
+        campaignId: p.campaignId || null,
+        campaignTitle: c.title || null,
+        refNumber: p.refNumber || null,
+      });
     }
     if (campaignRef && campaignSnap && campaignSnap.exists) {
       historyEntry(tx, campaignRef, actor, action === 'received' ? 'inkind_received' : 'inkind_cancelled', {donationId, quantityReceived: update.quantityReceived || null});
