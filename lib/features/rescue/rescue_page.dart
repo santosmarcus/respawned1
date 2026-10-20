@@ -269,13 +269,6 @@ class _RescuePageState extends State<RescuePage> {
       'Suspected animal cruelty, starvation, chaining, hoarding',
       'urgency': 'Critical',
     },
-
-    {
-      'label': 'Trapped/Disaster',
-      'description':
-      'Affected by natural disasters / Stuck in debris, infrastructure',
-      'urgency': 'Critical',
-    },
     {
       'label': 'Aggressive Animal',
       'description':

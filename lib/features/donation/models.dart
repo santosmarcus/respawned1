@@ -96,17 +96,17 @@ class DonationReviewParams {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is DonationReviewParams &&
-          runtimeType == other.runtimeType &&
-          fundraiserId == other.fundraiserId &&
-          organizationName == other.organizationName &&
-          donationMethod == other.donationMethod &&
-          item.amount == other.item.amount &&
-          item.description == other.item.description &&
-          isAnonymous == other.isAnonymous &&
-          pet?.id == other.pet?.id &&
-          sponsorship?.id == other.sponsorship?.id &&
-          isSponsorship == other.isSponsorship;
+          other is DonationReviewParams &&
+              runtimeType == other.runtimeType &&
+              fundraiserId == other.fundraiserId &&
+              organizationName == other.organizationName &&
+              donationMethod == other.donationMethod &&
+              item.amount == other.item.amount &&
+              item.description == other.item.description &&
+              isAnonymous == other.isAnonymous &&
+              pet?.id == other.pet?.id &&
+              sponsorship?.id == other.sponsorship?.id &&
+              isSponsorship == other.isSponsorship;
 
   @override
   int get hashCode =>
@@ -161,6 +161,25 @@ class DonationListing {
   final bool acceptInKind;
   final DateTime? createdAt;
   final String? createdBy;
+
+  // Admin lifecycle & finance fields (written by functions/campaigns.js).
+  // All optional: listings created before the admin module still parse.
+  /// 'draft' | 'active' | 'paused' | 'goal_met' | 'goal_not_met' | 'closed'
+  final String status;
+  /// 'campaign' | 'animal' | 'medical' | 'shelter_resource' | 'general'
+  final String fundKind;
+  final List<String> purposeTags;
+  final bool restricted;
+  final double? monthlyAmount;
+  final String? intendedUse;
+  final double allocatedAmount;
+  final double transferredOutAmount;
+  final double transferredInAmount;
+  final bool needsExtensionDecision;
+  final int extensionCount;
+  final String? organizationId;
+  final String? linkedCaseId;
+  final DateTime? startDate;
   bool favorited;
   bool donated;
 
@@ -186,6 +205,20 @@ class DonationListing {
     this.acceptInKind = false,
     this.createdAt,
     this.createdBy,
+    this.status = 'active',
+    this.fundKind = 'campaign',
+    this.purposeTags = const [],
+    this.restricted = false,
+    this.monthlyAmount,
+    this.intendedUse,
+    this.allocatedAmount = 0,
+    this.transferredOutAmount = 0,
+    this.transferredInAmount = 0,
+    this.needsExtensionDecision = false,
+    this.extensionCount = 0,
+    this.organizationId,
+    this.linkedCaseId,
+    this.startDate,
     this.favorited = false,
     this.donated = false,
   });
@@ -204,6 +237,23 @@ class DonationListing {
     if (!isActive) return true;
     if (endDate == null) return false;
     return endDate!.isBefore(DateTime.now());
+  }
+
+  /// Unpublished admin drafts — never shown in the general view.
+  bool get isDraft => status == 'draft';
+
+  /// collected + transferred in − transferred out − allocated. Transfers in
+  /// are existing funds moved from another campaign, never donations.
+  double get availableBalance => collected + transferredInAmount - transferredOutAmount - allocatedAmount;
+
+  /// Verified collections above the goal not yet moved elsewhere (capped by
+  /// what is still available). Mirrors moneyOf() in functions/campaigns.js;
+  /// the backend recomputes it before any transfer.
+  double get eligibleExcess {
+    if (target <= 0 || collected <= target) return 0;
+    final excess = collected - target - transferredOutAmount;
+    final capped = excess < availableBalance ? excess : availableBalance;
+    return capped > 0 ? capped : 0;
   }
 
   factory DonationListing.fromFirestore(DocumentSnapshot doc) {
@@ -229,6 +279,13 @@ class DonationListing {
     final inKindData = data['inKindItems'] as List<dynamic>? ?? [];
     final inKindItems = inKindData.map((item) => InKindItem.fromMap(item as Map<String, dynamic>)).toList();
 
+    double money(String key) => (data[key] is num) ? (data[key] as num).toDouble() : 0;
+    final isActive = data['isActive'] ?? true;
+    // Listings created before the admin module have no `status`.
+    final status = (data['status'] is String && (data['status'] as String).isNotEmpty)
+        ? data['status'] as String
+        : (isActive == false ? 'closed' : 'active');
+
     return DonationListing(
       id: doc.id,
       title: data['title'] ?? '',
@@ -247,10 +304,24 @@ class DonationListing {
       backgroundColor: Color(data['backgroundColor'] ?? 0xFFE2E0B5),
       inKindItems: inKindItems,
       isDog: data['isDog'] ?? true,
-      isActive: data['isActive'] ?? true,
+      isActive: isActive,
       acceptInKind: data['acceptInKind'] ?? false,
       createdAt: createdAt,
       createdBy: data['createdBy'],
+      status: status,
+      fundKind: data['fundKind'] as String? ?? ((data['type'] ?? 'donation') == 'sponsorship' ? 'animal' : 'campaign'),
+      purposeTags: List<String>.from(data['purposeTags'] ?? const []),
+      restricted: data['restricted'] == true,
+      monthlyAmount: (data['monthlyAmount'] is num) ? (data['monthlyAmount'] as num).toDouble() : null,
+      intendedUse: data['intendedUse'] as String?,
+      allocatedAmount: money('allocatedAmount'),
+      transferredOutAmount: money('transferredOutAmount'),
+      transferredInAmount: money('transferredInAmount'),
+      needsExtensionDecision: data['needsExtensionDecision'] == true,
+      extensionCount: (data['extensionCount'] is num) ? (data['extensionCount'] as num).toInt() : 0,
+      organizationId: data['organizationId'] as String?,
+      linkedCaseId: data['linkedCaseId'] as String?,
+      startDate: data['startDate'] is Timestamp ? (data['startDate'] as Timestamp).toDate() : null,
     );
   }
 
@@ -276,6 +347,20 @@ class DonationListing {
       'acceptInKind': acceptInKind,
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
       'createdBy': createdBy,
+      'status': status,
+      'fundKind': fundKind,
+      'purposeTags': purposeTags,
+      'restricted': restricted,
+      'monthlyAmount': monthlyAmount,
+      'intendedUse': intendedUse,
+      'allocatedAmount': allocatedAmount,
+      'transferredOutAmount': transferredOutAmount,
+      'transferredInAmount': transferredInAmount,
+      'needsExtensionDecision': needsExtensionDecision,
+      'extensionCount': extensionCount,
+      'organizationId': organizationId,
+      'linkedCaseId': linkedCaseId,
+      'startDate': startDate != null ? Timestamp.fromDate(startDate!) : null,
     };
   }
 }
@@ -283,16 +368,36 @@ class DonationListing {
 class InKindItem {
   final String category;
   final String description;
+  // Optional (admin module). Pledges stay in donations/ (status 'inprogress')
+  // until an admin confirms receipt, which increments quantityReceived.
+  final int? quantityNeeded;
+  final String? unit;
+  final String? instructions;
+  final int quantityReceived;
 
   InKindItem({
     required this.category,
     required this.description,
+    this.quantityNeeded,
+    this.unit,
+    this.instructions,
+    this.quantityReceived = 0,
   });
+
+  int? get quantityRemaining {
+    if (quantityNeeded == null) return null;
+    final r = quantityNeeded! - quantityReceived;
+    return r > 0 ? r : 0;
+  }
 
   factory InKindItem.fromMap(Map<String, dynamic> map) {
     return InKindItem(
       category: map['category'] ?? '',
       description: map['description'] ?? '',
+      quantityNeeded: (map['quantityNeeded'] is num) ? (map['quantityNeeded'] as num).toInt() : null,
+      unit: map['unit'] as String?,
+      instructions: map['instructions'] as String?,
+      quantityReceived: (map['quantityReceived'] is num) ? (map['quantityReceived'] as num).toInt() : 0,
     );
   }
 
@@ -300,6 +405,10 @@ class InKindItem {
     return {
       'category': category,
       'description': description,
+      'quantityNeeded': quantityNeeded,
+      'unit': unit,
+      'instructions': instructions,
+      'quantityReceived': quantityReceived,
     };
   }
 }
@@ -443,7 +552,7 @@ class HistoryItem {
 
   factory HistoryItem.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    
+
     // Robust type mapping
     final rawType = data['type'] as String? ?? 'donation';
     HistoryType type;
@@ -454,7 +563,7 @@ class HistoryItem {
     } else {
       type = HistoryType.donation;
     }
-    
+
     // Robust status mapping for In-Kind
     InKindStatus? inKindStatus;
     if (type == HistoryType.inKindDonation) {
@@ -467,7 +576,7 @@ class HistoryItem {
         inKindStatus = InKindStatus.inProgress; // Default to inProgress if inkind
       }
     }
-    
+
     return HistoryItem(
       id: doc.id,
       type: type,
@@ -486,7 +595,7 @@ class HistoryItem {
       campaignId: data['campaignId'],
       nextChargeDate: data['nextChargeDate'] != null ? (data['nextChargeDate'] as Timestamp).toDate() : null,
       sponsorshipStatus: data['sponsorshipStatus'] ?? (rawType == 'sponsorship' ? 'active' : null),
-      pet: data['pet'] != null ? SponsorPet.fromFirestore(data['pet']) : null, 
+      pet: data['pet'] != null ? SponsorPet.fromFirestore(data['pet']) : null,
       nextChargeAmount: (data['nextChargeAmount'] ?? 0).toDouble(),
     );
   }

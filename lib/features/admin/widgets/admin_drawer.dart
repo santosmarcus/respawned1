@@ -6,10 +6,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
-import 'package:respawnd1/features/admin/admin_adoption_page.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
@@ -179,7 +179,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             _DrawerItem(
               label: 'Donations',
               selected: widget.active == AdminModule.donations,
-              onTap: () => _openModule(context, (_) => const AdminAdoptionPage(showDonations: true)),
+              onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
             ),
             _DrawerItem(
               label: 'Records',

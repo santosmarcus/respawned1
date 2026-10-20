@@ -26,7 +26,7 @@ class _DonationPageState extends State<DonationPage> {
   String _searchQuery = '';
   String _selectedCategory = 'All';
   bool _showEnded = false;
-  
+
   Set<String> _donatedIds = {};
   Set<String> _favoriteIds = {};
   Set<String> _petFavoriteIds = {};
@@ -69,7 +69,7 @@ class _DonationPageState extends State<DonationPage> {
           // A sponsorship is active if it's "active" OR if it's "inactive" but before next charge date
           final isActiveStatus = s.sponsorshipStatus == 'active';
           final isStillValid = isActiveStatus || (s.nextChargeDate != null && s.nextChargeDate!.isAfter(now));
-          
+
           if (isStillValid && s.campaignId != null) {
             activeMap[s.campaignId!] = s;
           }
@@ -176,26 +176,26 @@ class _DonationPageState extends State<DonationPage> {
       body: _userDataLoading
           ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
           : SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 8),
-                  _buildSearchBar(),
-                  const SizedBox(height: 16),
-                  Text('Donations', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-                  const SizedBox(height: 10),
-                  _buildCategoryChips(),
-                  const SizedBox(height: 14),
-                  _buildDonationList(),
-                  const SizedBox(height: 8),
-                  Text('Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-                  const SizedBox(height: 10),
-                  _buildSponsorshipList(),
-                  const SizedBox(height: 32),
-                ],
-              ),
-            ),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            _buildSearchBar(),
+            const SizedBox(height: 16),
+            Text('Donations', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            const SizedBox(height: 10),
+            _buildCategoryChips(),
+            const SizedBox(height: 14),
+            _buildDonationList(),
+            const SizedBox(height: 8),
+            Text('Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            const SizedBox(height: 10),
+            _buildSponsorshipList(),
+            const SizedBox(height: 32),
+          ],
+        ),
+      ),
     );
   }
 
@@ -270,11 +270,12 @@ class _DonationPageState extends State<DonationPage> {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No donations found.'));
 
         final donations = snapshot.data!.docs.map((doc) => DonationListing.fromFirestore(doc)).where((d) {
+          if (d.isDraft) return false; // unpublished admin drafts
           final q = _searchQuery.toLowerCase();
           final matchesSearch = q.isEmpty || d.title.toLowerCase().contains(q) || d.organizer.toLowerCase().contains(q);
-          
+
           if (!_showEnded && d.isEnded) return false;
-          
+
           return matchesSearch;
         }).toList();
 
@@ -305,6 +306,7 @@ class _DonationPageState extends State<DonationPage> {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No sponsorships found.'));
 
         final campaigns = snapshot.data!.docs.map((doc) => DonationListing.fromFirestore(doc)).where((c) {
+          if (c.isDraft) return false; // unpublished admin drafts
           if (!_showEnded && c.isEnded) return false;
           final q = _searchQuery.toLowerCase();
           return q.isEmpty || (c.animalName?.toLowerCase().contains(q) ?? false) || c.organizer.toLowerCase().contains(q);
@@ -444,8 +446,8 @@ class _SponsorPetCard extends StatelessWidget {
               decoration: BoxDecoration(color: sponsorship.backgroundColor, borderRadius: BorderRadius.circular(12)),
               child: Stack(
                 children: [
-                  sponsorship.imageUrl != null 
-                      ? ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(sponsorship.imageUrl!, fit: BoxFit.cover, width: 56, height: 56)) 
+                  sponsorship.imageUrl != null
+                      ? ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(sponsorship.imageUrl!, fit: BoxFit.cover, width: 56, height: 56))
                       : const Center(child: Icon(Icons.pets, size: 28, color: AppColors.textPrimary)),
                   if (sponsorship.isEnded)
                     Container(

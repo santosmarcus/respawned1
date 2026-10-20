@@ -76,7 +76,6 @@ const List<ReportCategory> kReportCategories = [
   ReportCategory('Neglect or Abuse', Color(0xFFAD1457), Icons.report),
   ReportCategory('Pet Surrender', Color(0xFF00897B), Icons.pets),
   ReportCategory('Lost Pet', Color(0xFF1E88E5), Icons.search),
-  ReportCategory('Trapped/Disaster', Color(0xFFFFB300), Icons.warning_amber),
   ReportCategory('Aggressive Animal', Color(0xFF37474F), Icons.pets),
 ];
 
@@ -109,12 +108,6 @@ class ReportMapEntry {
   final String? rawStatus;
   final String? rejectionReason;
   final String? collarTagId;
-  // True for entries sourced from the `petAlerts` collection (the owner
-  // "report my pet lost" flow) rather than `cases` — the map previously
-  // only ever queried `cases`, so a lost-pet alert (and its collar tag)
-  // had no path onto the Explore Map at all, regardless of filter. This
-  // flag lets the preview sheet route "View Details" to the correct
-  // tracking page for whichever collection the entry actually came from.
   final bool isPetAlert;
 
   const ReportMapEntry({
