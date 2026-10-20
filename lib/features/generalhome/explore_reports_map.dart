@@ -76,7 +76,6 @@ const List<ReportCategory> kReportCategories = [
   ReportCategory('Neglect or Abuse', Color(0xFFAD1457), Icons.report),
   ReportCategory('Pet Surrender', Color(0xFF00897B), Icons.pets),
   ReportCategory('Lost Pet', Color(0xFF1E88E5), Icons.search),
-  ReportCategory('Trapped/Disaster', Color(0xFFFFB300), Icons.warning_amber),
   ReportCategory('Aggressive Animal', Color(0xFF37474F), Icons.pets),
 ];
 
@@ -85,7 +84,7 @@ ReportCategory('Other', AppColors.textSecondary, Icons.location_on);
 
 ReportCategory categoryForRescueType(String? rescueType) {
   for (final c in kReportCategories) {
-    if (c.label.toLowerCase() == (type ?? '').toLowerCase()) return c;
+    if (c.label.toLowerCase() == (rescueType ?? '').toLowerCase()) return c;
   }
   return kFallbackReportCategory;
 }
