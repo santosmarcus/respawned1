@@ -271,9 +271,9 @@ class _RescuePageState extends State<RescuePage> {
     },
 
     {
-      'label': 'Trapped/Disaster',
+      'label': 'Trapped',
       'description':
-      'Affected by natural disasters / Stuck in debris, infrastructure',
+      'Stuck in drains, debris, fences, or other infrastructure',
       'urgency': 'Critical',
     },
     {
