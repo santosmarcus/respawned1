@@ -113,12 +113,6 @@ const List<Map<String, String>> kRescueTypeOptions = [
   },
 
   {
-    'label': 'Trapped/Disaster',
-    'description':
-        'Affected by natural disasters / Stuck in debris, infrastructure',
-    'urgency': 'Critical',
-  },
-  {
     'label': 'Aggressive Animal',
     'description': 'Displaying aggressive behavior and posing a safety concern',
     'urgency': 'Critical',

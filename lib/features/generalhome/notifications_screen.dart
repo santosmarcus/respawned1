@@ -155,7 +155,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         .doc(uid)
         .snapshots()
         .listen((userDoc) {
-      final data = userDoc.data() as Map<String, dynamic>?;
+      final data = userDoc.data();
       final lat = (data?['lastLat'] as num?)?.toDouble();
       final lng = (data?['lastLng'] as num?)?.toDouble();
       if (lat == null || lng == null) return;

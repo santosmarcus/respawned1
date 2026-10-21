@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
-import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 import 'package:respawnd1/features/donation/donation_summary.dart' as ds;

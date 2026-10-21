@@ -137,7 +137,7 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
       QueryDocumentSnapshot? myCompletedDoc;
 
       for (final doc in docsById.values) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final status = data['status'] as String? ?? '';
         if (status == 'rejected' || status == 'withdrawn') continue;
 

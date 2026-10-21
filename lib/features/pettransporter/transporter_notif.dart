@@ -283,7 +283,7 @@ class _TransporterNotificationsState
           .get()
           .then((doc) {
         if (!mounted) return;
-        final data = doc.data() as Map<String, dynamic>? ?? {};
+        final data = doc.data() ?? {};
         Navigator.push(
           context,
           MaterialPageRoute(

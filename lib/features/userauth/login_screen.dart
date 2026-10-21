@@ -5,7 +5,6 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:respawnd1/features/userauth/signup_screen.dart';
 import 'package:respawnd1/features/userauth/phonelogin_screen.dart';

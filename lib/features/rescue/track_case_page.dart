@@ -1346,8 +1346,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
 
   @override
   Widget build(BuildContext context) {
-    final photoUrls = List<String>.from(data['photoUrls'] ?? []);
-
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(

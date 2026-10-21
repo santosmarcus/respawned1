@@ -151,7 +151,6 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
 
   void _listenNearbyCases() {
     final lat = _userLat!;
-    final lng = _userLng!;
     final latDelta = _kNearbyRadiusKm / 111;
 
     _casesSub = FirebaseFirestore.instance
@@ -178,7 +177,7 @@ class _NearbyReportBannerState extends State<NearbyReportBanner>
         // Deduped by a persisted cursor so the same old case doesn't pop a
         // banner again on every subsequent app open.
         final data = doc.data();
-        final createdTs = data?['createdAt'];
+        final createdTs = data['createdAt'];
         final createdAt = createdTs is Timestamp ? createdTs.toDate() : null;
         final isNewSinceLastCheck =
             _bannerCursor == null || (createdAt != null && createdAt.isAfter(_bannerCursor!));

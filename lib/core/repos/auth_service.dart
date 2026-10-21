@@ -204,6 +204,11 @@ class AuthService {
     });
   }
 
+  static bool hasCompletedOnboarding(Map<String, dynamic>? userData) {
+    final role = userData?['role'];
+    return role is String && role.isNotEmpty;
+  }
+
   Future<bool> isNewUser(String uid) async {
     final doc = await _firestore.collection('users').doc(uid).get();
     if (!doc.exists) return true;

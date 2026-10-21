@@ -5,9 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
-import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
+import 'package:respawnd1/features/admin/audit/audit_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
@@ -18,7 +18,10 @@ import 'package:respawnd1/features/organization/organization_profile_edit_page.d
 /// The full set of admin root modules the drawer can open, in the required
 /// order — the single source of truth for labels/ordering/highlighting so
 /// no page can drift into its own separately-ordered/labeled copy again.
-enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, shelterResources, collarTags }
+/// `shelterResources` removed — it was a permanent no-op placeholder with
+/// no destination page at all; shelter-capacity now lives in Organization
+/// Profile. `audit` added for the new Audit module.
+enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit }
 
 /// Pops back to AdminHomeScreen (the app's first/root route) before pushing
 /// the requested module — every drawer module item uses this so switching
@@ -32,27 +35,12 @@ void _openModule(BuildContext context, WidgetBuilder builder) {
   rootNavigator.push(MaterialPageRoute(builder: builder));
 }
 
-/// Resolves the current admin's organization (via the existing
-/// OrgMembershipService — never a second lookup) and pushes Organization
-/// Profile — a settings-style page, so this uses a normal push (back
-/// returns to wherever the admin was), not [_openModule]. An account with
-/// no organization membership yet is never left at a dead end: it's still
-/// pushed into the same page with `organizationId: null`, which handles
-/// checking for a pending invitation and the temporary standalone-admin
-/// bootstrap flow itself (spec §7-9) — no separate page, no broken screen,
-/// no silent no-op.
-Future<void> _openOrganizationProfile(BuildContext context) async {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  Navigator.pop(context); // close the drawer
-  if (uid == null) return;
-  final membership = await OrgMembershipService().getMembership(uid);
-  if (context.mounted) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: membership?.organizationId)),
-    );
-  }
-}
+// _openOrganizationProfile used to be a bare top-level async function with
+// no re-entrancy guard, no loading feedback, and a silent `if
+// (context.mounted)` no-op if the widget unmounted mid-flight (see
+// _AdminDrawerState._handleOpenOrganizationProfile below for the fixed,
+// guarded version — this is the root cause the "sometimes does not open
+// even after repeated taps" bug report pointed at).
 
 /// The one shared admin navigation drawer — every admin root page
 /// (`AdminHomeScreen`, `RescueReportsPage`, `AdminAdoptionPage`,
@@ -78,6 +66,79 @@ class AdminDrawer extends ConsumerStatefulWidget {
 class _AdminDrawerState extends ConsumerState<AdminDrawer> {
   bool _signingOut = false;
 
+  // Root cause of "Organization Profile sometimes does not open even after
+  // repeated taps" (first pass): the old top-level `_openOrganizationProfile`
+  // did two chained Firestore reads with no re-entrancy guard, no loading
+  // feedback, and a bare `if (context.mounted)` before pushing. Fixed by a
+  // guard flag that disables the row and shows a spinner while resolving,
+  // resetting the guard in `finally`, and an explicit error snackbar
+  // instead of a silent no-op.
+  //
+  // Root cause of the SECOND bug ("Bad state: The provider
+  // StreamProvider<OrgMembership?> was disposed during loading state, yet
+  // no value could be emitted."): that fix read
+  // `currentOrgMembershipProvider.future` — a `StreamProvider.autoDispose`
+  // — via `ref.read` from inside this tap callback. `ref.read` does not
+  // register a listener, so with nothing else on screen watching that
+  // provider (e.g. no rescue_detail_page.dart open), autoDispose tears it
+  // down again almost immediately — often before its underlying Firestore
+  // stream has emitted a first value, which is exactly the disposed-while-
+  // loading crash. The membership value was only ever used for its
+  // `organizationId` field anyway, and per OrgMembershipService's own
+  // doc comment, [getMembership]/the membership stream return null for
+  // every real account today (no `organizations/{orgId}/members/{uid}`
+  // subdocs exist yet) — so this always fell through to
+  // [resolveOrganizationId] regardless. Fixed by dropping the disposable
+  // stream read entirely for this one-time "which org do I open" lookup
+  // and going straight to the plain repository Future
+  // (OrgMembershipService.resolveOrganizationId), which has no Riverpod
+  // provider lifecycle to be disposed out from under. Role-gated actions
+  // elsewhere (e.g. rescue_detail_page.dart's `canManageOrgActions`) are
+  // unaffected — they still `ref.watch` the membership stream directly on
+  // a page that stays mounted, which is the safe pattern this callback
+  // was not following.
+  bool _openingOrgProfile = false;
+
+  Future<void> _handleOpenOrganizationProfile() async {
+    if (_openingOrgProfile) return; // re-entrancy guard — no duplicate route pushes
+    setState(() => _openingOrgProfile = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final organizationId = uid == null
+          ? null
+          : await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
+
+      if (!mounted) return;
+      Navigator.pop(context); // close the drawer only once the destination is ready
+      if (!context.mounted) return;
+      // organizationId == null legitimately reaches this page too — it
+      // runs its own pending-invitation/bootstrap flow for an admin not
+      // yet linked to an organization (see OrganizationProfileEditPage's
+      // own doc comment), which is a real, meaningful screen, not a blank
+      // error state.
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OrganizationProfileEditPage(organizationId: organizationId)),
+      );
+    } catch (e, st) {
+      debugPrint('[AdminDrawer] Could not resolve organization membership: $e\n$st');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('Could not load the organization profile.'),
+            action: SnackBarAction(label: 'Retry', onPressed: _handleOpenOrganizationProfile),
+          ),
+        );
+      }
+    } finally {
+      // Reset the guard even if this screen is no longer mounted (e.g. the
+      // admin navigated away while this was resolving) — never leaves the
+      // row permanently disabled for the next time this Drawer is opened.
+      if (mounted) setState(() => _openingOrgProfile = false);
+    }
+  }
+
   Future<void> _logOut() async {
     if (_signingOut) return; // disable repeated taps while processing
     setState(() => _signingOut = true);
@@ -95,8 +156,10 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
       // autoDispose (see rescue_reports_providers.dart / adoption_providers.dart)
       // so their Firestore listeners tear themselves down as soon as the
       // pages watching them are removed below. currentOrgMembershipProvider
-      // is global (not tied to a specific page) so it's cleared explicitly.
+      // and currentOrganizationCapabilitiesProvider are global (not tied to
+      // a specific page) so they're cleared explicitly.
       ref.invalidate(currentOrgMembershipProvider);
+      ref.invalidate(currentOrganizationCapabilitiesProvider);
 
       // Remove every pushed admin route so the stale authenticated screen
       // can't linger on top of AuthWrapper's now-signed-out content —
@@ -144,11 +207,13 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
 
             // Menu items — order matches the project's required admin menu
             // order: Dashboard, Rescue, Adoptions, Donations, Records,
-            // Events, Volunteers, Transporters, Shelter Resources, Collar
-            // Tags. Volunteers now opens VolunteersPage (role ==
-            // 'rescue_volunteer' directory). Events, Transporters, and
-            // Shelter Resources still have no admin screen built yet, so
-            // they stay no-op placeholders.
+            // Events, Volunteers, Transporters, Collar Tags, Audit.
+            // Volunteers now opens VolunteersPage (role ==
+            // 'rescue_volunteer' directory). Events and Transporters still
+            // have no admin screen built yet, so they stay no-op
+            // placeholders. Shelter Resources was removed entirely — it
+            // was a permanent no-op with no destination page; shelter
+            // capacity is edited from Organization Profile.
             _DrawerItem(
               label: 'Dashboard',
               selected: widget.active == AdminModule.dashboard,
@@ -194,16 +259,20 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             ),
             _DrawerItem(label: 'Transporters', selected: widget.active == AdminModule.transporters, onTap: () {}),
             _DrawerItem(
-                label: 'Shelter Resources', selected: widget.active == AdminModule.shelterResources, onTap: () {}),
-            _DrawerItem(
               label: 'Collar Tags',
               selected: widget.active == AdminModule.collarTags,
               onTap: () => _openModule(context, (_) => const AdminCollarTagScreen()),
             ),
+            _DrawerItem(
+              label: 'Audit',
+              selected: widget.active == AdminModule.audit,
+              onTap: () => _openModule(context, (_) => const AuditPage()),
+            ),
             const Divider(color: Colors.white24),
             _DrawerItem(
               label: 'Organization Profile',
-              onTap: () => _openOrganizationProfile(context),
+              loading: _openingOrgProfile,
+              onTap: _openingOrgProfile ? null : _handleOpenOrganizationProfile,
             ),
 
             const Spacer(),
@@ -242,10 +311,15 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
 
 class _DrawerItem extends StatelessWidget {
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool selected;
+  // Shows a spinner instead of the chevron and disables taps — used by
+  // Organization Profile while its async membership lookup resolves, so a
+  // slow lookup reads as "in progress" instead of "nothing happened",
+  // and can't be re-triggered by an impatient repeated tap.
+  final bool loading;
 
-  const _DrawerItem({required this.label, required this.onTap, this.selected = false});
+  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.loading = false});
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +333,9 @@ class _DrawerItem extends StatelessWidget {
                 fontSize: 15,
                 color: AppColors.background,
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w500)),
-        trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+        trailing: loading
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
+            : const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
         dense: true,
       ),
     );

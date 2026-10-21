@@ -172,9 +172,9 @@ class _RescueRequestState extends State<RescueRequest> {
       final caseRef =
       FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
       final snap = await caseRef.get();
-      final currentStatus = (snap.data() as Map<String, dynamic>?)?['status'];
+      final currentStatus = snap.data()?['status'];
       final wasAssignedToMe =
-          (snap.data() as Map<String, dynamic>?)?['assignedVolunteerId'] == uid;
+          snap.data()?['assignedVolunteerId'] == uid;
 
       final reasonText = reasons.join('; ');
 

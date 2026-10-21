@@ -38,19 +38,6 @@ Color urgencyRingColor(String? urgency) {
   }
 }
 
-double _hueForUrgency(String? urgency) {
-  switch (urgency) {
-    case 'Critical':
-      return BitmapDescriptor.hueRed;
-    case 'Medium':
-      return BitmapDescriptor.hueYellow;
-    case 'Low':
-      return BitmapDescriptor.hueGreen;
-    default:
-      return BitmapDescriptor.hueAzure;
-  }
-}
-
 /// Converts any rescue-type category color into the nearest Google Maps
 /// default-marker hue — used as the instant fallback pin before the
 /// custom-colored ring icon (which can render any exact color) finishes

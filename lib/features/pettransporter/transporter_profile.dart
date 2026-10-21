@@ -155,7 +155,7 @@ class TransporterProfile extends StatelessWidget {
                   const SizedBox(height: 24),
 
                   // Stats
-                  if (uid != null) _StatsRow(uid: uid),
+                  _StatsRow(uid: uid),
 
                   const SizedBox(height: 24),
 
