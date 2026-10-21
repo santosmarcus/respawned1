@@ -9,6 +9,7 @@ import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
 import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
 import 'package:respawnd1/features/generalhome/history_screen.dart';
+import 'package:respawnd1/features/generalhome/certificates_page.dart';
 import 'package:respawnd1/features/generalhome/profile/profile_edit_page.dart';
 import 'package:respawnd1/features/generalhome/profile/location_sharing_page.dart';
 import 'package:respawnd1/features/generalhome/profile/communications_setting_page.dart';
@@ -205,7 +206,10 @@ class _UserProfileState extends State<UserProfile> {
                   _ProfileTile(
                     icon: Icons.workspace_premium_outlined,
                     label: 'Certificates',
-                    onTap: (){},
+                    onTap: (){
+                      Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const CertificatesPage()),);
+                    },
                   ),
                   _ProfileTile(
                     icon: Icons.sell,

@@ -76,7 +76,6 @@ const List<ReportCategory> kReportCategories = [
   ReportCategory('Neglect or Abuse', Color(0xFFAD1457), Icons.report),
   ReportCategory('Pet Surrender', Color(0xFF00897B), Icons.pets),
   ReportCategory('Lost Pet', Color(0xFF1E88E5), Icons.search),
-  ReportCategory('Trapped/Disaster', Color(0xFFFFB300), Icons.warning_amber),
   ReportCategory('Aggressive Animal', Color(0xFF37474F), Icons.pets),
 ];
 

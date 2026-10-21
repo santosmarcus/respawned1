@@ -602,3 +602,9 @@ exports.facebookConfirmPageSelection = facebook.facebookConfirmPageSelection;
 exports.facebookTestConnection = facebook.facebookTestConnection;
 exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
 exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
+
+// PayMongo donations & sponsorships — see functions/paymongo.js.
+Object.assign(exports, require('./paymongo'));
+
+// Admin campaign/sponsorship management, allocations & reallocation — see functions/campaigns.js.
+Object.assign(exports, require('./campaigns'));

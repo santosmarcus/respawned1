@@ -5,7 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
@@ -56,7 +56,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
   }
 
   Future<void> _pickFor(String group) async {
-    final picked = await _picker.pickMultiImage(imageQuality: 85);
+    final picked = await pickImagesWithSource(context, _picker, imageQuality: 85);
     if (picked.isEmpty) return;
     setState(() => _pendingFiles[group]!.addAll(picked.map((x) => File(x.path))));
   }

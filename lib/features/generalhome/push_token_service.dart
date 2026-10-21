@@ -15,8 +15,10 @@ class PushTokenService {
 
     try {
       final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission(alert: true, badge: true, sound: true);
-
+      final settings = await messaging.getNotificationSettings();
+      if (settings.authorizationStatus == AuthorizationStatus.notDetermined) {
+        await messaging.requestPermission(alert: true, badge: true, sound: true);
+      }
       final token = await messaging.getToken();
       if (token != null) {
         await _saveToken(uid, token);
