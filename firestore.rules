@@ -212,6 +212,75 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---- Volunteer events --------------------------------------------------
+    //
+    // Any signed-in user can browse events. The owning organization's staff
+    // (any active member, like invitations) create, edit, and cancel them;
+    // events are never deleted. goingCount only moves through a volunteer's
+    // own sign-up, which must add their registration and bump the count by
+    // exactly 1 in the same write (VolunteerEventRepository.register).
+
+    match /events/{eventId} {
+      function managesEventOrg(orgId) {
+        return isActiveMember(orgId) || isOrgOwner(orgId);
+      }
+
+      function registrationPath(uid) {
+        return /databases/$(database)/documents/events/$(eventId)/registrations/$(uid);
+      }
+
+      function capacityOk(data) {
+        return data.get('capacity', null) == null ||
+          (data.capacity is int && data.capacity >= data.get('goingCount', 0));
+      }
+
+      function signingUp() {
+        return signedIn() &&
+          changedOnly(['goingCount']) &&
+          resource.data.get('status', '') == 'published' &&
+          request.resource.data.goingCount == resource.data.get('goingCount', 0) + 1 &&
+          capacityOk(request.resource.data) &&
+          !exists(registrationPath(request.auth.uid)) &&
+          existsAfter(registrationPath(request.auth.uid));
+      }
+
+      allow read: if signedIn();
+
+      allow create: if managesEventOrg(request.resource.data.get('organizationId', '')) &&
+        request.resource.data.status == 'published' &&
+        request.resource.data.goingCount == 0 &&
+        capacityOk(request.resource.data);
+
+      allow update: if signingUp() || (
+        managesEventOrg(resource.data.organizationId) &&
+        request.resource.data.organizationId == resource.data.organizationId &&
+        request.resource.data.get('goingCount', 0) == resource.data.get('goingCount', 0) &&
+        request.resource.data.status in ['published', 'cancelled'] &&
+        // A cancelled event stays cancelled.
+        !(resource.data.status == 'cancelled' && request.resource.data.status != 'cancelled') &&
+        capacityOk(request.resource.data)
+      );
+
+      allow delete: if false;
+
+      // Sign-ups: the volunteer and the organization's staff can read them.
+      match /registrations/{uid} {
+        function eventBefore() {
+          return get(/databases/$(database)/documents/events/$(eventId)).data;
+        }
+
+        allow read: if isSelf(uid) || managesEventOrg(eventBefore().organizationId);
+
+        allow create: if isSelf(uid) &&
+          request.resource.data.uid == uid &&
+          eventBefore().get('status', '') == 'published' &&
+          getAfter(/databases/$(database)/documents/events/$(eventId)).data.goingCount ==
+            eventBefore().get('goingCount', 0) + 1;
+
+        allow update, delete: if false;
+      }
+    }
+
     // ---- Facebook backend bookkeeping --------------------------------------
 
     match /facebookConnectRequests/{requestId} {
@@ -392,7 +461,7 @@ service cloud.firestore {
 
     match /{collection}/{document=**} {
       allow read, write: if signedIn() && !(collection in [
-        'organizations', 'organizationInvitations',
+        'organizations', 'organizationInvitations', 'events',
         'facebookConnectRequests', 'facebookShares',
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
