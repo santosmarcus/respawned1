@@ -156,7 +156,9 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
       }
 
       final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       ).then<Position?>((p) => p).timeout(
         const Duration(seconds: 15),
         onTimeout: () => Geolocator.getLastKnownPosition(),

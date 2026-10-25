@@ -1530,7 +1530,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             Switch(
               value: _isAdoptable,
               onChanged: (v) => setState(() => _isAdoptable = v),
-              activeColor: AppColors.greenrspwn,
+              activeThumbColor: AppColors.greenrspwn,
             ),
             const SizedBox(height: 16),
 

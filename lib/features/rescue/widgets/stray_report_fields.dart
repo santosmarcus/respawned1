@@ -487,7 +487,7 @@ class StrayReportFields extends StatelessWidget {
               ),
               Switch(
                 value: form.reportAnonymously,
-                activeColor: AppColors.textPrimary,
+                activeThumbColor: AppColors.textPrimary,
                 onChanged: (v) => _set(() => form.reportAnonymously = v),
               ),
             ],

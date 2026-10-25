@@ -139,7 +139,7 @@ class _TrackingMapState extends State<TransitTrackingMap> {
               icon: BitmapDescriptor.defaultMarkerWithHue(
                 BitmapDescriptor.hueAzure,
               ),
-              zIndex: 2,
+              zIndexInt: 2,
               infoWindow: const InfoWindow(title: 'You'),
             ),
           );

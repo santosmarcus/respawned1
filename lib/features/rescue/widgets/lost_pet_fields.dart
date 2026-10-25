@@ -367,7 +367,7 @@ class OwnerFields extends StatelessWidget {
             ),
             Switch(
               value: form.offerReward,
-              activeColor: AppColors.textPrimary,
+              activeThumbColor: AppColors.textPrimary,
               onChanged: (v) => _set(() => form.offerReward = v),
             ),
           ],
@@ -488,7 +488,7 @@ class FinderFields extends StatelessWidget {
               ),
               Switch(
                 value: form.finderNeedsRescue,
-                activeColor: AppColors.textPrimary,
+                activeThumbColor: AppColors.textPrimary,
                 onChanged: (v) => _set(() => form.finderNeedsRescue = v),
               ),
             ],

@@ -474,7 +474,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       // Android/system back exits selection mode first instead of leaving
       // the page — only allowed to pop normally once nothing is selected.
       canPop: !_selecting,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _selecting) _clearSelection();
       },
       child: Scaffold(

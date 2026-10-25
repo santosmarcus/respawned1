@@ -66,7 +66,10 @@ class _ServiceFilterSheetState
       }
 
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
       if (mounted) {
         setState(() => _center = LatLng(pos.latitude, pos.longitude));
         // Wait a frame so the map's finished attaching before we move it.
