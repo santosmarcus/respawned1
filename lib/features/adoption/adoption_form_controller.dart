@@ -1,6 +1,7 @@
 // Extracted from adoption_process.dart (behavior-preserving refactor).
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import 'package:respawnd1/features/adoption/interview_scheduling.dart';
@@ -95,6 +96,178 @@ class AdoptionFormController {
   List<String> get slotsForDate {
     if (appointmentDate == null) return [];
     return interviewSlotsForDate(appointmentDate!);
+  }
+
+  /// Prefills the contact fields from the signed-in user's `users/{uid}`
+  /// doc ([authEmail] wins over the doc's own email).
+  void fillFromAccount(Map<String, dynamic> data, {String? authEmail}) {
+    nameCtrl.text = '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'
+        .trim();
+    phoneCtrl.text = data['phone'] ?? '';
+    emailCtrl.text = authEmail ?? data['email'] ?? '';
+    homeAddressCtrl.text =
+        data['homeAddress']?.toString() ??
+        data['address']?.toString() ??
+        data['city']?.toString() ??
+        '';
+  }
+
+  /// Reloads every saved answer from an `adoptions/{id}` doc.
+  void applySavedApplication(Map<String, dynamic> data) {
+    final personal = (data['personal'] as Map?) ?? {};
+    final household = (data['household'] as Map?) ?? {};
+    final petExperience = (data['petExperience'] as Map?) ?? {};
+    final currentPets = (petExperience['currentPets'] as Map?) ?? {};
+    final lifestyle = (data['lifestyle'] as Map?) ?? {};
+    final canAfford = (lifestyle['canAfford'] as Map?) ?? {};
+    final uploads = (data['uploads'] as Map?) ?? {};
+    final agreement = (data['agreement'] as Map?) ?? {};
+
+    // Personal Information
+    nameCtrl.text = personal['adopterName'] as String? ?? '';
+    emailCtrl.text = personal['adopterEmail'] as String? ?? '';
+    ageCtrl.text = personal['adopterAge'] as String? ?? '';
+    phoneCtrl.text = personal['adopterPhone'] as String? ?? '';
+    homeAddressCtrl.text =
+        personal['homeAddress']?.toString() ??
+        personal['adopterHomeAddress']?.toString() ??
+        personal['adopterCity']?.toString() ??
+        '';
+
+    // Household & Living Information
+    residenceType = household['residenceType'] as String?;
+    residenceOtherCtrl.text = household['residenceOther'] as String? ?? '';
+    ownershipStatus = household['ownershipStatus'] as String?;
+    householdMembers = household['householdMembers'] as int? ?? 0;
+
+    // Pet Experience
+    hadPetsBefore = petExperience['hadPetsBefore'] as bool? ?? false;
+    currentDogs = currentPets['dogs'] as int? ?? 0;
+    currentCats = currentPets['cats'] as int? ?? 0;
+    currentBirds = currentPets['birds'] as int? ?? 0;
+    currentFish = currentPets['fish'] as int? ?? 0;
+    currentReptiles = currentPets['reptiles'] as int? ?? 0;
+    currentOther = currentPets['other'] as int? ?? 0;
+    currentOtherTypeCtrl.text = currentPets['otherType'] as String? ?? '';
+    petsVaccinated = petExperience['currentPetsVaccinated'] as String?;
+    petsSpayedNeutered = petExperience['currentPetsSpayedNeutered'] as String?;
+
+    // Lifestyle & Care
+    hoursAlone = lifestyle['hoursAlone'] as String?;
+    // Only accepted if it matches one of the dropdown's own options —
+    // an older application may have freeform text here from before
+    // this became a closed set; that legacy value just isn't
+    // preselected rather than being force-mapped to a guess.
+    final savedCaregiver = lifestyle['primaryCaregiver'] as String?;
+    primaryCaregiver = kCaregiverOptions.contains(savedCaregiver)
+        ? savedCaregiver
+        : null;
+    petStayLocation = lifestyle['petStayLocation'] as String?;
+    canAffordFood = canAfford['food'] as bool? ?? false;
+    canAffordVaccinations = canAfford['vaccinations'] as bool? ?? false;
+    canAffordVetVisits = canAfford['vetVisits'] as bool? ?? false;
+    canAffordEmergencyCare =
+        canAfford['emergencyMedicalCare'] as bool? ?? false;
+    canAffordGrooming = canAfford['grooming'] as bool? ?? false;
+    canAffordCareSupplies = canAfford['careSupplies'] as bool? ?? false;
+    reasonCtrl.text = agreement['reason'] as String? ?? '';
+
+    // Required Uploads (already uploaded — keep the saved URLs)
+    governmentIdUrl = uploads['governmentId'] as String?;
+    proofOfAddressUrl = uploads['proofOfAddress'] as String?;
+    //_digitalSignatureUrl = uploads['digitalSignature'] as String?;
+    // homePhotos may be a single legacy String or the current List —
+    // same dual-shape tolerance the admin document reader already has.
+    final homePhotosRaw = uploads['homePhotos'];
+    existingHomePhotoUrls = homePhotosRaw is List
+        ? homePhotosRaw.whereType<String>().toList()
+        : (homePhotosRaw is String && homePhotosRaw.isNotEmpty
+              ? [homePhotosRaw]
+              : []);
+
+    // Agreements
+    agreeCare = agreement['care'] as bool? ?? false;
+    agreeNoAbandon = agreement['noAbandon'] as bool? ?? false;
+    agreeFollowup = agreement['followUp'] as bool? ?? false;
+    agreeAccurate = agreement['infoAccurate'] as bool? ?? false;
+    agreeNotGuaranteed = agreement['approvalNotGuaranteed'] as bool? ?? false;
+
+    // Appointment
+    final appointmentTs = data['appointmentDate'];
+    if (appointmentTs is Timestamp) {
+      appointmentDate = appointmentTs.toDate();
+    }
+    appointmentType = data['appointmentType'] as String? ?? appointmentType;
+    appointmentTime = data['appointmentTime'] as String?;
+  }
+
+  /// Radio questions and the caregiver dropdown aren't FormFields, so
+  /// `formKey.validate()` never sees them — these are the unanswered ones.
+  List<String> missingRequiredAnswers() => [
+    if (residenceType == null) 'Residence Type',
+    if (ownershipStatus == null) 'Ownership Status',
+    if (petsVaccinated == null) 'current pets vaccinated status',
+    if (petsSpayedNeutered == null) 'current pets spayed/neutered status',
+    if (hoursAlone == null) 'hours animal will be left alone',
+    if (primaryCaregiver == null) 'Primary Caregiver',
+    if (petStayLocation == null) 'where pet will stay',
+  ];
+
+  bool get allAgreementsAccepted =>
+      agreeCare &&
+      agreeNoAbandon &&
+      agreeFollowup &&
+      agreeAccurate &&
+      agreeNotGuaranteed;
+
+  /// Clears every answer back to a blank application (contact details are
+  /// kept, as before).
+  void reset() {
+    residenceType = null;
+    residenceOtherCtrl.clear();
+    ownershipStatus = null;
+    householdMembers = 0;
+
+    hadPetsBefore = false;
+    currentDogs = 0;
+    currentCats = 0;
+    currentBirds = 0;
+    currentFish = 0;
+    currentReptiles = 0;
+    currentOther = 0;
+    currentOtherTypeCtrl.clear();
+    petsVaccinated = null;
+    petsSpayedNeutered = null;
+
+    hoursAlone = null;
+    primaryCaregiver = null;
+    petStayLocation = null;
+    canAffordFood = false;
+    canAffordVaccinations = false;
+    canAffordVetVisits = false;
+    canAffordEmergencyCare = false;
+    canAffordGrooming = false;
+    canAffordCareSupplies = false;
+    reasonCtrl.clear();
+
+    governmentIdFile = null;
+    proofOfAddressFile = null;
+    //_digitalSignatureFile = null;
+    homePhotosFiles.clear();
+    existingHomePhotoUrls = [];
+    governmentIdUrl = null;
+    proofOfAddressUrl = null;
+    //_digitalSignatureUrl = null;
+
+    agreeCare = false;
+    agreeNoAbandon = false;
+    agreeFollowup = false;
+    agreeAccurate = false;
+    agreeNotGuaranteed = false;
+
+    appointmentDate = null;
+    appointmentType = 'On-site Visit';
+    appointmentTime = null;
   }
 
   void dispose() {
