@@ -9,6 +9,7 @@ import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
+import 'package:respawnd1/core/repos/rescue_case/transport_assignment_rules.dart';
 
 /// Pet-transporter roster and the transport-assignment lifecycle: offer,
 /// accept, reject, cancel, reconcile, complete, and safety follow-ups.
@@ -250,11 +251,11 @@ class TransportAssignmentRepository {
         final online = riderData?['online'] as bool? ?? false;
         final lastSeen = riderData?['lastSeenAt'];
         final lastSeenAt = lastSeen is Timestamp ? lastSeen.toDate() : null;
-        final stillOnline =
-            online &&
-            lastSeenAt != null &&
-            DateTime.now().difference(lastSeenAt) <=
-                kTransporterPresenceThreshold;
+        final stillOnline = isTransporterStillOnline(
+          online: online,
+          lastSeenAt: lastSeenAt,
+          now: DateTime.now(),
+        );
         if (!stillOnline) {
           throw const TransporterNoLongerOnlineException();
         }
@@ -264,20 +265,18 @@ class TransportAssignmentRepository {
         final currentSnap = await tx.get(assignmentsCol.doc(currentId));
         final currentData = currentSnap.data();
         final currentStatus = currentData?['status'] as String?;
+        final resolution = resolveOfferConflict(
+          currentStatus,
+          allowReassign: allowReassign,
+        );
 
-        if (currentStatus == 'pending') {
+        if (resolution == OfferConflictResolution.block) {
           throw ActiveAssignmentConflictException.fromMap(
             currentId,
             currentData!,
           );
         }
-        if (currentStatus == 'accepted') {
-          if (!allowReassign) {
-            throw ActiveAssignmentConflictException.fromMap(
-              currentId,
-              currentData!,
-            );
-          }
+        if (resolution == OfferConflictResolution.supersede) {
           // Explicit Reassign Transporter workflow: supersede the prior
           // accepted assignment rather than leaving it dangling as
           // "accepted" forever (which would otherwise keep that
@@ -355,28 +354,23 @@ class TransportAssignmentRepository {
         final snap = await tx.get(assignmentRef);
         final caseSnap = await tx.get(caseRef);
 
-        if (!snap.exists) {
-          throw const OfferNoLongerAvailableException(
-            'assignment no longer exists',
-          );
+        // A stale/superseded offer trying to resurrect itself is ignored
+        // rather than accepted.
+        final blockReason = offerResponseBlockReason(
+          exists: snap.exists,
+          status: snap.data()?['status']?.toString(),
+          assignmentId: assignmentId,
+          currentAssignmentId:
+              caseSnap.data()?['currentAssignmentId'] as String?,
+          requireCurrent: true,
+        );
+        if (blockReason != null) {
+          throw OfferNoLongerAvailableException(blockReason);
         }
         final data = snap.data()!;
-        if (data['status'] != 'pending') {
-          throw OfferNoLongerAvailableException(
-            'status is ${data['status']}, not pending',
-          );
-        }
-        if (caseSnap.data()?['currentAssignmentId'] != assignmentId) {
-          // The case has moved on to a newer offer (or none) since this one
-          // was created — a stale/superseded offer trying to resurrect
-          // itself. Ignore rather than accept.
-          throw const OfferNoLongerAvailableException(
-            'a newer offer has superseded this one',
-          );
-        }
         final expiresAt = data['expiresAt'];
         final now = Timestamp.now();
-        if (expiresAt is Timestamp && now.compareTo(expiresAt) > 0) {
+        if (isOfferExpired(expiresAt, now)) {
           // Clean up in place instead of accepting a stale offer.
           tx.update(assignmentRef, {'status': 'expired', 'respondedAt': now});
           tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
@@ -437,20 +431,18 @@ class TransportAssignmentRepository {
       await _store.db.runTransaction((tx) async {
         final snap = await tx.get(assignmentRef);
         final caseSnap = await tx.get(caseRef);
-        if (!snap.exists) {
-          throw const OfferNoLongerAvailableException(
-            'assignment no longer exists',
-          );
+        final blockReason = offerResponseBlockReason(
+          exists: snap.exists,
+          status: snap.data()?['status']?.toString(),
+          assignmentId: assignmentId,
+        );
+        if (blockReason != null) {
+          throw OfferNoLongerAvailableException(blockReason);
         }
         final data = snap.data()!;
-        if (data['status'] != 'pending') {
-          throw OfferNoLongerAvailableException(
-            'status is ${data['status']}, not pending',
-          );
-        }
         final expiresAt = data['expiresAt'];
         final now = Timestamp.now();
-        if (expiresAt is Timestamp && now.compareTo(expiresAt) > 0) {
+        if (isOfferExpired(expiresAt, now)) {
           tx.update(assignmentRef, {'status': 'expired', 'respondedAt': now});
           if (caseSnap.data()?['currentAssignmentId'] == assignmentId) {
             tx.update(caseRef, {'currentAssignmentId': FieldValue.delete()});
@@ -557,9 +549,7 @@ class TransportAssignmentRepository {
       if (!snap.exists) return;
       final data = snap.data()!;
       if (data['status'] != 'pending') return;
-      final expiresAt = data['expiresAt'];
-      if (expiresAt is! Timestamp) return;
-      if (Timestamp.now().compareTo(expiresAt) <= 0) return;
+      if (!isOfferExpired(data['expiresAt'], Timestamp.now())) return;
       tx.update(assignmentRef, {
         'status': 'expired',
         'respondedAt': Timestamp.now(),
