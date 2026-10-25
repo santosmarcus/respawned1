@@ -120,9 +120,9 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
 
   // Facebook Page Publishing Compatibility spec — Animal Records viewing
   // and every other management action here stays open to Owner/Admin/
-  // Member alike; only this one action is gated to Owner/active-Admin
-  // (canPublishToFacebook), and the Cloud Function independently
-  // re-verifies that regardless of what this UI shows.
+  // Member alike; only this one action is gated to Owner/active-Admin or a
+  // Member granted Facebook sharing (canPublishToFacebook), and the Cloud
+  // Function independently re-verifies that regardless of what this UI shows.
   Future<void> _publishToFacebook() async {
     final orgId = ref.read(currentOrganizationIdProvider).asData?.value;
     if (orgId == null) return;
@@ -241,7 +241,7 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
             enabled: !_busy && canPublishToFacebook,
             subtitle: canPublishToFacebook
                 ? null
-                : 'Only an Organization Owner or Admin can publish to the connected Facebook Page.',
+                : 'Ask an Organization Admin to allow you to share to the connected Facebook Page.',
             onTap: _publishToFacebook,
           ),
           _ActionTile(

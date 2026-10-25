@@ -154,6 +154,37 @@ async function requireOwnerOrActiveAdmin(uid, organizationId) {
   );
 }
 
+/// Publishing is wider than managing the connection: the owner, an active
+/// admin, or an active member an admin granted `facebookPublisher` to. The
+/// grant is an app-level permission only — posts go out as the Page via the
+/// stored Page token, so the member needs no Facebook role on the Page.
+async function requireFacebookPublisher(uid, organizationId) {
+  if (!organizationId) {
+    throw new HttpsError('invalid-argument', 'organizationId is required.');
+  }
+  const orgSnap = await db().collection('organizations').doc(organizationId).get();
+  if (!orgSnap.exists) {
+    throw new HttpsError('not-found', 'Organization not found.');
+  }
+  if (orgSnap.data().ownerId === uid) return;
+
+  const memberSnap = await db()
+      .collection('organizations')
+      .doc(organizationId)
+      .collection('members')
+      .doc(uid)
+      .get();
+  const member = memberSnap.data();
+  const status = member && member.status;
+  const isActive = !status || !['inactive', 'removed', 'disabled'].includes(status);
+  if (memberSnap.exists && isActive && (member.role === 'admin' || member.facebookPublisher === true)) return;
+
+  throw new HttpsError(
+      'permission-denied',
+      'Only the organization owner, an Organization Admin, or a member allowed to share to Facebook can publish to the Page.',
+  );
+}
+
 /// Animal Records viewing/managing itself stays open to any active member —
 /// this only re-verifies the caller has SOME active relationship with the
 /// organization (owner, admin, or active member) so a completely unrelated
@@ -415,7 +446,7 @@ exports.facebookTestConnection = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
   const uid = request.auth.uid;
   const {organizationId} = request.data || {};
-  await requireOwnerOrActiveAdmin(uid, organizationId);
+  await requireFacebookPublisher(uid, organizationId);
 
   const integrationRef = db().collection('organizations').doc(organizationId).collection('integrations').doc('facebook');
   const integrationSnap = await integrationRef.get();
@@ -483,10 +514,9 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
   if (!organizationId || !Array.isArray(animalRecordIds) || animalRecordIds.length === 0) {
     throw new HttpsError('invalid-argument', 'organizationId and at least one animalRecordId are required.');
   }
-  // Publish specifically requires Owner/active-Admin (Animal Records
-  // viewing/managing itself stays open to Members — only this action is
-  // narrower, per the Facebook Page Publishing Compatibility spec).
-  await requireOwnerOrActiveAdmin(uid, organizationId);
+  // Owner, active Admin, or a member granted facebookPublisher (Animal
+  // Records viewing/managing itself stays open to every Member).
+  await requireFacebookPublisher(uid, organizationId);
 
   const integrationSnap = await db()
       .collection('organizations').doc(organizationId).collection('integrations').doc('facebook').get();
@@ -581,4 +611,41 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
   }
 
   return {postId, postUrl, animalRecordIds: publishedAnimalIds};
+});
+
+// ---- 6. Grant / revoke Facebook publishing to a member ----------------------
+//
+// Server-side so the grant stays owner/admin-only regardless of what the
+// deployed Firestore rules allow on members docs. Only touches the
+// facebookPublisher fields — the member's app role is left as-is.
+exports.facebookSetPublisher = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const uid = request.auth.uid;
+  const {organizationId, memberUid, enabled} = request.data || {};
+  if (!organizationId || !memberUid || typeof enabled !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'organizationId, memberUid, and enabled are required.');
+  }
+  await requireOwnerOrActiveAdmin(uid, organizationId);
+
+  const memberRef = db().collection('organizations').doc(organizationId).collection('members').doc(memberUid);
+  const memberSnap = await memberRef.get();
+  if (!memberSnap.exists) {
+    throw new HttpsError('not-found', 'That person is not a member of this organization.');
+  }
+
+  await memberRef.update({
+    facebookPublisher: enabled,
+    facebookPublisherGrantedBy: enabled ? uid : null,
+    facebookPublisherGrantedAt: enabled ? admin.firestore.FieldValue.serverTimestamp() : null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  await writeOrgAuditLog({
+    action: enabled ? 'Facebook sharing granted to member' : 'Facebook sharing revoked from member',
+    actorId: uid,
+    actorEmail: request.auth.token.email,
+    organizationId,
+    newValues: {memberUid, facebookPublisher: enabled},
+  });
+  return {facebookPublisher: enabled};
 });

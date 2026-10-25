@@ -80,6 +80,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   // can never disagree about what "capacity" means.
   final _capacityController = TextEditingController();
   bool _isOrgAdmin = false;
+  bool _canManageFacebook = false;
 
   List<ServiceArea> _serviceAreas = [];
   final Set<String> _acceptedSpecies = {};
@@ -205,6 +206,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     if (uid != null) {
       final capabilities = await OrgMembershipService().resolveCapabilities(uid);
       _isOrgAdmin = capabilities.canManageTeam;
+      _canManageFacebook = capabilities.canManageFacebookConnection;
     }
     final shelterDoc = await FirebaseFirestore.instance.collection('settings').doc('shelter').get();
     final maxCapacity = (shelterDoc.data()?['maxCapacity'] as num?)?.toInt();
@@ -813,7 +815,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                 // bootstrap flow, where there's no organizationId yet to
                 // scope a connection to).
                 if (_organizationId != null)
-                  FacebookIntegrationSection(organizationId: _organizationId!, canManage: _isOrgAdmin),
+                  FacebookIntegrationSection(organizationId: _organizationId!, canManage: _canManageFacebook),
                 _sectionTitle('Contact Details'),
                 _field('Email Address', _emailController, hint: 'org@example.com'),
                 _field('Mobile Number', _phoneController, hint: '09171234567'),

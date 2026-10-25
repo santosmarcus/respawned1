@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/core/utils/validators.dart';
@@ -79,6 +80,9 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
   // stored organizationName (legacy docs) — spec §15's fallback chain.
   final Map<String, String?> _resolvedOrgNames = {};
   final Set<String> _resolvingOrgIds = {};
+  // Owner/Admin only — unlike _isOrgAdmin, not part of the equal-access
+  // phase. Gates role changes, removal, and the Facebook sharing grant.
+  bool _canManageMembers = false;
 
   @override
   void initState() {
@@ -94,7 +98,27 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final capabilities = await OrgMembershipService().resolveCapabilities(uid);
-    if (mounted) setState(() => _isOrgAdmin = capabilities.canManageTeam);
+    if (mounted) {
+      setState(() {
+        _isOrgAdmin = capabilities.canManageTeam;
+        _canManageMembers = capabilities.canManageMembers;
+      });
+    }
+  }
+
+  Future<void> _setFacebookPublisher(String uid, bool enabled) async {
+    final organizationId = widget.organizationId;
+    if (organizationId == null) return;
+    try {
+      await FacebookIntegrationRepository().setPublisher(
+        organizationId: organizationId,
+        memberUid: uid,
+        enabled: enabled,
+      );
+      _snack(enabled ? 'This member can now share to Facebook.' : 'Facebook sharing removed for this member.');
+    } on FacebookOperationException catch (e) {
+      _snack(e.message, error: true);
+    }
   }
 
   Future<void> _resolveEmailIfNeeded(String uid, {String? invitationId}) async {
@@ -500,6 +524,10 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                           role: OrgRole.fromName(data['role'] as String?),
                           status: data['status'] as String? ?? 'active',
                           isSelf: uid == currentUid,
+                          facebookPublisher: data['facebookPublisher'] == true,
+                          canManage: _canManageMembers,
+                          onToggleFacebookPublisher: () =>
+                              _setFacebookPublisher(uid, data['facebookPublisher'] != true),
                           onEditRole: () => _editMemberRole(uid, OrgRole.fromName(data['role'] as String?)),
                           onRemove: () => _removeMember(uid),
                         );
@@ -635,6 +663,9 @@ class _MemberRow extends StatelessWidget {
   final OrgRole role;
   final String status;
   final bool isSelf;
+  final bool facebookPublisher;
+  final bool canManage;
+  final VoidCallback onToggleFacebookPublisher;
   final VoidCallback onEditRole;
   final VoidCallback onRemove;
   const _MemberRow({
@@ -643,6 +674,9 @@ class _MemberRow extends StatelessWidget {
     required this.role,
     required this.status,
     required this.isSelf,
+    required this.facebookPublisher,
+    required this.canManage,
+    required this.onToggleFacebookPublisher,
     required this.onEditRole,
     required this.onRemove,
   });
@@ -682,19 +716,32 @@ class _MemberRow extends StatelessWidget {
                   role == OrgRole.admin ? 'Organization Admin' : 'Organization Member',
                   style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                 ),
+                // Admins can always publish, so the grant only shows for Members.
+                if (role == OrgRole.staff && facebookPublisher)
+                  Text('Can share to Facebook', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                 if (status != 'active')
                   Text(status[0].toUpperCase() + status.substring(1),
                       style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
-          PopupMenuButton<String>(
-            onSelected: (v) => v == 'edit' ? onEditRole() : onRemove(),
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit Role')),
-              PopupMenuItem(value: 'remove', child: Text('Remove')),
-            ],
-          ),
+          if (canManage)
+            PopupMenuButton<String>(
+              onSelected: (v) => switch (v) {
+                'edit' => onEditRole(),
+                'facebook' => onToggleFacebookPublisher(),
+                _ => onRemove(),
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'edit', child: Text('Edit Role')),
+                if (role == OrgRole.staff)
+                  PopupMenuItem(
+                    value: 'facebook',
+                    child: Text(facebookPublisher ? 'Stop Facebook Sharing' : 'Allow Facebook Sharing'),
+                  ),
+                const PopupMenuItem(value: 'remove', child: Text('Remove')),
+              ],
+            ),
         ],
       ),
     );
