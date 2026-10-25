@@ -17,6 +17,15 @@ class CaseIntakeRepository {
   final RescueCaseStore _store;
   final TransportAssignmentRepository _transport;
 
+  /// Cases opened from an existing animal record belong to that record's
+  /// organization.
+  Future<String?> _organizationIdOfAnimal(String animalId) async {
+    if (animalId.isEmpty) return null;
+    final snap = await FirebaseFirestore.instance.collection('animals').doc(animalId).get();
+    final orgId = snap.data()?['organizationId'] as String?;
+    return (orgId == null || orgId.isEmpty) ? null : orgId;
+  }
+
   /// Creates a `cases` doc directly in the "needs a clinic + transporter"
   /// state — the entry point for AdmitAnimalPage (Animal Record -> Medical
   /// -> Admit Animal), for an animal already owned/managed by the
@@ -43,8 +52,10 @@ class CaseIntakeRepository {
   }) async {
     final ref = _store.cases.doc();
     final now = Timestamp.now();
+    final organizationId = await _organizationIdOfAnimal(sourceAnimalRecordId);
     await ref.set({
       'status': RescueStatus.awaitingAssignment.firestoreValue,
+      if (organizationId != null) 'organizationId': organizationId,
       'sourceType': 'animalRecordAdmission',
       'sourceAnimalRecordId': sourceAnimalRecordId,
       'admissionReason': admissionReason,
@@ -108,8 +119,10 @@ class CaseIntakeRepository {
   }) async {
     final ref = _store.cases.doc();
     final now = Timestamp.now();
+    final organizationId = await _organizationIdOfAnimal(sourceAnimalRecordId);
     await ref.set({
       'status': RescueStatus.intake.firestoreValue,
+      if (organizationId != null) 'organizationId': organizationId,
       'sourceType': 'adoptionReturn',
       'sourceAnimalRecordId': sourceAnimalRecordId,
       'returnRequestId': returnRequestId,

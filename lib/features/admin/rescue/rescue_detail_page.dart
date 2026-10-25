@@ -76,12 +76,14 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
     setState(() => _isLoading = true);
     try {
+      final organizationId = await ref.read(currentOrganizationIdProvider.future);
       await ref
           .read(rescueCaseRepositoryProvider)
           .acceptCase(
             caseId: c.id,
             actorUid: _actorUid,
             actorName: _actorName,
+            organizationId: organizationId,
             openForTransfer: openForTransfer,
           );
     } catch (e) {

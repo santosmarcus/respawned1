@@ -21,13 +21,19 @@ class CaseStatusRepository {
   /// [openForTransfer] only saves a flag on the case (RescueCase.openForTransfer)
   /// — there is no open-transfer listing, cross-org browsing, or transfer
   /// request/acceptance workflow yet. That's intentionally deferred.
+  ///
+  /// [organizationId] is the accepting organization — it becomes the case's
+  /// owner (`cases/{id}.organizationId`). A referred case re-stamps it when
+  /// the receiving organization accepts.
   Future<void> acceptCase({
     required String caseId,
     required String actorUid,
     required String actorName,
+    String? organizationId,
     bool openForTransfer = false,
   }) async {
     await _store.caseDoc(caseId).update({
+      if (organizationId != null && organizationId.isNotEmpty) 'organizationId': organizationId,
       // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
       // jumping straight to awaitingAssignment — the case stays visible
       // under Rescue Review until assignClinic actually saves a clinic and

@@ -156,7 +156,16 @@ class AdoptionApplicationService {
     );
     final homePhotoUrls = [...form.existingHomePhotoUrls, ...newHomePhotoUrls];
 
+    // The application belongs to the organization that owns the animal.
+    String? organizationId;
+    if (animal.animalRecordId.isNotEmpty) {
+      final animalSnap = await _db.collection('animals').doc(animal.animalRecordId).get();
+      final orgId = animalSnap.data()?['organizationId'] as String?;
+      if (orgId != null && orgId.isNotEmpty) organizationId = orgId;
+    }
+
     await docRef.set({
+      if (organizationId != null) 'organizationId': organizationId,
       'personal': {
         'adopterId': uid,
         // Legacy join key — a stringified stableIntIdFor hash, kept only

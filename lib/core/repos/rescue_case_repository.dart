@@ -246,11 +246,13 @@ class RescueCaseRepository {
     required String caseId,
     required String actorUid,
     required String actorName,
+    String? organizationId,
     bool openForTransfer = false,
   }) => status.acceptCase(
     caseId: caseId,
     actorUid: actorUid,
     actorName: actorName,
+    organizationId: organizationId,
     openForTransfer: openForTransfer,
   );
 

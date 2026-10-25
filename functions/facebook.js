@@ -506,6 +506,11 @@ exports.facebookDisconnectPage = onCall(async (request) => {
   return {status: 'disconnected'};
 });
 
+function firstImageUrl(animal) {
+  const photoUrls = animal.photoUrls || animal.images || animal.imageUrls;
+  return (Array.isArray(photoUrls) && photoUrls[0]) || animal.photoUrl || animal.imageUrl || null;
+}
+
 // ---- 5. Publish Animal Records ----------------------------------------------
 exports.facebookPublishAnimalRecords = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -538,33 +543,29 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
   const animalDocs = await Promise.all(
       animalRecordIds.map((id) => db().collection('animals').doc(id).get()),
   );
-  const mediaFbids = [];
-  const publishedAnimalIds = [];
+  // Validated up front so a rejected record never leaves earlier photos
+  // uploaded to the Page. Records written before the app stamped
+  // organizationId need scripts/backfill_organization_ids.js first.
   for (const snap of animalDocs) {
     if (!snap.exists) throw new HttpsError('not-found', `Animal record ${snap.id} not found.`);
     const animal = snap.data();
-    // NOTE: `animals/{id}` documents in this codebase currently carry no
-    // `organizationId` field anywhere (confirmed: no writer sets it, no
-    // query filters by it) — Animal Records is effectively a single global
-    // collection today, a pre-existing gap that predates and is outside
-    // this Facebook publishing feature's scope to fix (it would require
-    // retrofitting organizationId onto every animal record, every query,
-    // and the Firestore rules — a separate, much larger migration). This
-    // check only enforces isolation for records that DO carry the field
-    // (forward-compatible with a future migration); it cannot reject
-    // today's unscoped records without breaking publishing entirely for
-    // every organization. See the final report's "Known limitation" note.
-    if (animal.organizationId && animal.organizationId !== organizationId) {
+    if (animal.organizationId !== organizationId) {
       throw new HttpsError(
           'permission-denied',
-          'One or more selected Animal Records do not belong to this organization.',
+          animal.organizationId
+            ? 'One or more selected Animal Records do not belong to this organization.'
+            : `${animal.name || snap.id} is not linked to an organization yet. Ask an admin to run the organization backfill.`,
       );
     }
-    const photoUrls = animal.photoUrls || animal.images || animal.imageUrls;
-    const imageUrl = (Array.isArray(photoUrls) && photoUrls[0]) || animal.photoUrl || animal.imageUrl;
-    if (!imageUrl) {
+    if (!firstImageUrl(animal)) {
       throw new HttpsError('failed-precondition', `${animal.name || snap.id} has no image to publish.`);
     }
+  }
+
+  const mediaFbids = [];
+  const publishedAnimalIds = [];
+  for (const snap of animalDocs) {
+    const imageUrl = firstImageUrl(snap.data());
     const photo = await graphFetch(`/${pageId}/photos`, {
       method: 'POST',
       params: {url: imageUrl, published: 'false', access_token: token},
