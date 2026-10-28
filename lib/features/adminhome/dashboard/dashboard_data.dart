@@ -1,417 +1,310 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/core/utils/currency.dart';
-import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
-import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
+import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/expense.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
+import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
+import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 
-/// Admin-entered shelter numbers the dashboard needs: safe capacity,
-/// isolation spots, monthly care budget, daily food use and how many riders
-/// the organization wants free at once.
-///
-/// Stored in the shared `settings/shelter` document — the SAME document
-/// the dev branch's Organization Profile "Shelter Capacity" field and its
-/// dashboard Capacity card already use (`maxCapacity`). This sheet only
-/// adds sibling fields to that document with a merge write; it never
-/// overwrites anything else there. Every value is nullable — a missing
-/// value means "not set", never zero, and the dashboard shows a setup
-/// prompt instead of guessing.
-class ShelterSettings {
+/// Shared, derived dashboard data. Everything here is computed from the
+/// SAME providers the module screens already stream, plus three
+/// collection-group listeners (vaccinations, expenses, and the existing
+/// transport-assignment one) — no writes, no invented values.
+
+// ─── Rescue snapshot ─────────────────────────────────────────────────────
+
+class RescueSnapshot {
+  final Map<RescueStage, List<RescueCase>> byStage;
+  const RescueSnapshot(this.byStage);
+
+  /// Every active case once, even if it appears under two stages.
+  List<RescueCase> get all {
+    final seen = <String, RescueCase>{};
+    for (final list in byStage.values) {
+      for (final c in list) {
+        seen.putIfAbsent(c.id, () => c);
+      }
+    }
+    return seen.values.toList();
+  }
+
+  int count(RescueStage s) => byStage[s]?.length ?? 0;
+  List<RescueCase> of(RescueStage s) => byStage[s] ?? const [];
+}
+
+final dashboardRescueSnapshotProvider = Provider.autoDispose<AsyncValue<RescueSnapshot>>((ref) {
+  final review = ref.watch(casesForTabProvider(RescuePipelineTab.review));
+  final assign = ref.watch(casesForTabProvider(RescuePipelineTab.assign));
+  final ongoing = ref.watch(casesForTabProvider(RescuePipelineTab.ongoing));
+  final treatment = ref.watch(casesForTabProvider(RescuePipelineTab.treatment));
+  final intake = ref.watch(casesForTabProvider(RescuePipelineTab.intake));
+  final field = ref.watch(casesByStatusesProvider(kFieldIssueStatuses));
+  final parts = [review, assign, ongoing, treatment, intake, field];
+  for (final p in parts) {
+    if (p.hasError) return AsyncValue.error(p.error!, p.stackTrace ?? StackTrace.current);
+  }
+  if (parts.any((p) => !p.hasValue)) return const AsyncValue.loading();
+  final reviewCases = review.requireValue;
+  return AsyncValue.data(
+    RescueSnapshot({
+      RescueStage.review: reviewCases.where((c) => c.status == RescueStatus.pendingReview).toList(),
+      RescueStage.clinic: reviewCases.where((c) => c.status == RescueStatus.accepted).toList(),
+      RescueStage.transporter: assign.requireValue,
+      RescueStage.transit: ongoing.requireValue,
+      RescueStage.treatment: treatment.requireValue,
+      RescueStage.intake: intake.requireValue,
+      RescueStage.fieldIssue: field.requireValue,
+    }),
+  );
+});
+
+// ─── Transport supply ────────────────────────────────────────────────────
+
+class TransportSupply {
+  final int registered;
+  final int verified;
+  final int free;
+  final int onAssignment;
+  const TransportSupply({
+    required this.registered,
+    required this.verified,
+    required this.free,
+    required this.onAssignment,
+  });
+}
+
+/// "Free" = online now (fresh presence) with no pending/accepted offer —
+/// the same rule Assign Transporter uses.
+final transportSupplyProvider = Provider.autoDispose<AsyncValue<TransportSupply>>((ref) {
+  final transporters = ref.watch(petTransportersProvider);
+  final active = ref.watch(activeAssignmentsByRiderProvider);
+  if (transporters.hasError) return AsyncValue.error(transporters.error!, StackTrace.current);
+  if (active.hasError) return AsyncValue.error(active.error!, StackTrace.current);
+  if (!transporters.hasValue || !active.hasValue) return const AsyncValue.loading();
+  final busy = active.requireValue;
+  bool isBusy(String uid) {
+    final s = busy[uid];
+    return s == TransportAssignmentStatus.pending || s == TransportAssignmentStatus.accepted;
+  }
+
+  final list = transporters.requireValue;
+  return AsyncValue.data(
+    TransportSupply(
+      registered: list.length,
+      verified: list.where((t) => t.isVerified).length,
+      free: list.where((t) => t.isOnline && !isBusy(t.uid)).length,
+      onAssignment: list.where((t) => isBusy(t.uid)).length,
+    ),
+  );
+});
+
+// ─── Shelter occupancy ───────────────────────────────────────────────────
+
+/// Where shelter space is going right now. Animals at the vet keep a
+/// reserved space (they return to the shelter after discharge); animals in
+/// an active quarantine count against isolation; intake-stage animals and
+/// approved adoption returns are "arriving".
+class ShelterOccupancy {
+  final int inShelter;
+  final int atVet;
+  final int isolation;
+  final int arriving;
   final int? capacity;
   final int? isolationCapacity;
-  final double? monthlyBudget;
-  final double? foodPerDayKg;
-  final int? ridersNeeded;
-  final DateTime? updatedAt;
-  final String? updatedByName;
 
-  const ShelterSettings({
+  const ShelterOccupancy({
+    required this.inShelter,
+    required this.atVet,
+    required this.isolation,
+    required this.arriving,
     this.capacity,
     this.isolationCapacity,
-    this.monthlyBudget,
-    this.foodPerDayKg,
-    this.ridersNeeded,
-    this.updatedAt,
-    this.updatedByName,
   });
 
-  static const empty = ShelterSettings();
+  int get used => inShelter + atVet + isolation;
 
-  bool get isConfigured => capacity != null;
+  /// Null when capacity hasn't been set — never assumed.
+  int? get free => capacity == null ? null : capacity! - used - arriving;
 
-  factory ShelterSettings.fromMap(Map<String, dynamic>? m) {
-    if (m == null) return empty;
-    final ts = m['updatedAt'];
-    return ShelterSettings(
-      capacity: (m['maxCapacity'] as num?)?.toInt(),
-      isolationCapacity: (m['isolationCapacity'] as num?)?.toInt(),
-      monthlyBudget: (m['monthlyBudget'] as num?)?.toDouble(),
-      foodPerDayKg: (m['foodPerDayKg'] as num?)?.toDouble(),
-      ridersNeeded: (m['ridersNeeded'] as num?)?.toInt(),
-      updatedAt: ts is Timestamp ? ts.toDate() : null,
-      updatedByName: m['updatedByName'] as String?,
-    );
-  }
+  bool get isolationFull => isolationCapacity != null && isolation >= isolationCapacity!;
 }
 
-/// The signed-in admin's organization id from `users/{uid}.organizationId`
-/// — the same field AdminHomeScreen and OrgMembershipService already read.
-final dashboardOrgIdProvider = StreamProvider.autoDispose<String?>((ref) {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return Stream.value(null);
-  return FirebaseFirestore.instance.collection('users').doc(uid).snapshots().map((d) {
-    final id = d.data()?['organizationId'] as String?;
-    return (id == null || id.isEmpty) ? null : id;
-  });
-});
+final shelterOccupancyProvider = Provider.autoDispose<AsyncValue<ShelterOccupancy>>((ref) {
+  final snapAsync = ref.watch(dashboardRescueSnapshotProvider);
+  final recordsAsync = ref.watch(allAnimalRecordsProvider);
+  final adopted = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.adopted)));
+  final settings = ref.watch(shelterSettingsProvider).asData?.value ?? ShelterSettings.empty;
+  if (snapAsync.hasError) return AsyncValue.error(snapAsync.error!, StackTrace.current);
+  if (recordsAsync.hasError) return AsyncValue.error(recordsAsync.error!, StackTrace.current);
+  if (!snapAsync.hasValue || !recordsAsync.hasValue) return const AsyncValue.loading();
 
-final shelterSettingsProvider = StreamProvider.autoDispose<ShelterSettings>((ref) {
-  return FirebaseFirestore.instance
-      .collection('settings')
-      .doc('shelter')
-      .snapshots()
-      .map((d) => ShelterSettings.fromMap(d.data()));
-});
+  final snap = snapAsync.requireValue;
+  final inCare = recordsAsync.requireValue.where(isInCare).toList();
+  final treatment = snap.of(RescueStage.treatment);
+  final treatmentIds = treatment.map((c) => c.id).toSet();
+  final atVetFromCases = treatment.fold<int>(0, (s, c) => s + animalsInTreatment(c));
+  // An animal record whose open medical case isn't (yet) in the treatment
+  // stage — e.g. still in transit to the clinic — is also away at the vet.
+  final atVetRecordsOutsideCases = inCare
+      .where((a) => hasOpenMedicalCase(a) && !treatmentIds.contains(a.currentCaseId))
+      .length;
+  final inShelter = inCare.where((a) => !hasOpenMedicalCase(a)).length;
 
-Future<void> saveShelterSettings({
-  required int capacity,
-  required int isolationCapacity,
-  double? monthlyBudget,
-  double? foodPerDayKg,
-  int? ridersNeeded,
-}) {
-  final user = FirebaseAuth.instance.currentUser;
-  return FirebaseFirestore.instance.collection('settings').doc('shelter').set({
-    'maxCapacity': capacity,
-    'isolationCapacity': isolationCapacity,
-    'monthlyBudget': monthlyBudget,
-    'foodPerDayKg': foodPerDayKg,
-    'ridersNeeded': ridersNeeded,
-    'updatedAt': FieldValue.serverTimestamp(),
-    'updatedBy': user?.uid,
-    'updatedByName': user?.displayName,
-  }, SetOptions(merge: true));
-}
+  final quarantined = [...snap.of(RescueStage.intake), ...treatment].where((c) => c.isQuarantineActive);
+  final quarantineIds = quarantined.map((c) => c.id).toSet();
+  final isolation = quarantined.fold<int>(0, (s, c) => s + c.animalCount);
+  final intakeArriving = snap
+      .of(RescueStage.intake)
+      .where((c) => !quarantineIds.contains(c.id))
+      .fold<int>(0, (s, c) => s + (c.animalStageCounts['intake'] ?? c.animalCount));
+  final returnsArriving = adopted.asData?.value == null
+      ? 0
+      : activeReturnsIn(adopted.asData!.value).where((a) => returnExpectedBack(a.returnRequest!)).length;
 
-/// Opens the setup sheet. Only admins who can manage the organization
-/// (same UI gate as the Donations module) may save; others see why not.
-Future<void> showShelterSetupSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: AppColors.background,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-    builder: (_) => const _ShelterSetupSheet(),
+  return AsyncValue.data(
+    ShelterOccupancy(
+      inShelter: inShelter,
+      atVet: atVetFromCases + atVetRecordsOutsideCases,
+      isolation: isolation,
+      arriving: intakeArriving + returnsArriving,
+      capacity: settings.capacity,
+      isolationCapacity: settings.isolationCapacity,
+    ),
   );
-}
+});
 
-class _ShelterSetupSheet extends ConsumerStatefulWidget {
-  const _ShelterSetupSheet();
+// ─── Health records (vaccinations) ───────────────────────────────────────
 
-  @override
-  ConsumerState<_ShelterSetupSheet> createState() => _ShelterSetupSheetState();
-}
-
-class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
-  int _capacity = 20;
-  int _isolation = 2;
-  int _riders = 2;
-  double _foodKg = 3;
-  final _budget = TextEditingController();
-  bool _seeded = false;
-  bool _saving = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _budget.dispose();
-    super.dispose();
-  }
-
-  void _seed(ShelterSettings s) {
-    if (_seeded) return;
-    _seeded = true;
-    _capacity = s.capacity ?? _capacity;
-    _isolation = s.isolationCapacity ?? _isolation;
-    _riders = s.ridersNeeded ?? _riders;
-    _foodKg = s.foodPerDayKg ?? _foodKg;
-    if (s.monthlyBudget != null) _budget.text = s.monthlyBudget!.round().toString();
-  }
-
-  Future<void> _save() async {
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await saveShelterSettings(
-        capacity: _capacity,
-        isolationCapacity: _isolation,
-        monthlyBudget: double.tryParse(_budget.text.replaceAll(',', '')),
-        foodPerDayKg: _foodKg,
-        ridersNeeded: _riders,
-      );
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Could not save: $e');
-    } finally {
-      if (mounted) setState(() => _saving = false);
+/// Every vaccination record, grouped by animal id. One collection-group
+/// listener instead of one listener per animal.
+final vaccinationsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<VaccinationRecord>>>((ref) {
+  return FirebaseFirestore.instance.collectionGroup('vaccinations').snapshots().map((snap) {
+    final out = <String, List<VaccinationRecord>>{};
+    for (final d in snap.docs) {
+      final animalId = d.reference.parent.parent?.id;
+      if (animalId == null) continue;
+      try {
+        out.putIfAbsent(animalId, () => []).add(VaccinationRecord.fromFirestore(d, animalId));
+      } catch (e) {
+        debugPrint('[Dashboard] skipping unparseable vaccination ${d.id}: $e');
+      }
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
-    final current = ref.watch(shelterSettingsProvider).asData?.value;
-    if (current != null) _seed(current);
-
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 14),
-                  decoration: BoxDecoration(color: const Color(0xFFCFCBBE), borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              Center(
-                child: Container(
-                  width: 68,
-                  height: 68,
-                  decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(20)),
-                  child: const Icon(Icons.house, size: 36, color: AppColors.textPrimary),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text('Set up your shelter', textAlign: TextAlign.center, style: dashTitle(21)),
-              const SizedBox(height: 4),
-              Text(
-                'These answer “can we take more?”, “will money last?” and “how long will food last?”.',
-                textAlign: TextAlign.center,
-                style: dashMuted(14),
-              ),
-              const SizedBox(height: 14),
-              _StepField(
-                icon: Icons.pets,
-                title: 'Spaces',
-                hint: 'Animals you can safely house',
-                value: '$_capacity',
-                onMinus: () => setState(() => _capacity = (_capacity - 1).clamp(1, 999)),
-                onPlus: () => setState(() => _capacity = (_capacity + 1).clamp(1, 999)),
-              ),
-              _StepField(
-                icon: Icons.medical_services,
-                title: 'Isolation',
-                hint: 'Quarantine spots',
-                value: '$_isolation',
-                onMinus: () => setState(() => _isolation = (_isolation - 1).clamp(0, 99)),
-                onPlus: () => setState(() => _isolation = (_isolation + 1).clamp(0, 99)),
-              ),
-              _FieldShell(
-                icon: Icons.account_balance_wallet,
-                title: 'Monthly budget',
-                hint: 'Care, food & vet',
-                trailing: SizedBox(
-                  width: 110,
-                  child: TextField(
-                    controller: _budget,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    textAlign: TextAlign.right,
-                    style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary),
-                    decoration: const InputDecoration(prefixText: '₱ ', hintText: 'Not set', isDense: true),
-                  ),
-                ),
-              ),
-              _StepField(
-                icon: Icons.rice_bowl,
-                title: 'Food per day',
-                hint: 'All animals together',
-                value: '${_foodKg % 1 == 0 ? _foodKg.toInt() : _foodKg} kg',
-                onMinus: () => setState(() => _foodKg = (_foodKg - 0.5).clamp(0.5, 999)),
-                onPlus: () => setState(() => _foodKg = (_foodKg + 0.5).clamp(0.5, 999)),
-              ),
-              _StepField(
-                icon: Icons.two_wheeler,
-                title: 'Riders needed',
-                hint: 'Free at once, ideally',
-                value: '$_riders',
-                onMinus: () => setState(() => _riders = (_riders - 1).clamp(0, 99)),
-                onPlus: () => setState(() => _riders = (_riders + 1).clamp(0, 99)),
-              ),
-              if (current?.updatedAt != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Last updated ${current!.updatedAt!.day}/${current.updatedAt!.month}/${current.updatedAt!.year}'
-                        '${current.updatedByName == null ? '' : ' by ${current.updatedByName}'}'
-                        '${current.monthlyBudget == null ? '' : ' · budget ${formatPeso(current.monthlyBudget!)}'}',
-                    textAlign: TextAlign.center,
-                    style: dashMuted(),
-                  ),
-                ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!, style: dashBody(color: Colors.red)),
-                ),
-              if (!canManage)
-                const Padding(
-                  padding: EdgeInsets.only(top: 10),
-                  child: RestrictedNotice('Only organization admins can change shelter settings.'),
-                ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textPrimary,
-                        minimumSize: const Size(0, 48),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: () => Navigator.pop(context),
-                      child: Text('Later', style: dashBody(size: 15, weight: FontWeight.w700)),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.textPrimary,
-                        minimumSize: const Size(0, 48),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: (!canManage || _saving) ? null : _save,
-                      child: _saving
-                          ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                          : Text(
-                        'Save',
-                        style: dashBody(size: 15, weight: FontWeight.w700, color: AppColors.background),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FieldShell extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String hint;
-  final Widget trailing;
-  const _FieldShell({required this.icon, required this.title, required this.hint, required this.trailing});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.08)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(11)),
-            child: Icon(icon, size: 20, color: AppColors.textPrimary),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: dashBody(size: 15, weight: FontWeight.w700)),
-                Text(hint, style: dashMuted()),
-              ],
-            ),
-          ),
-          trailing,
-        ],
-      ),
-    );
-  }
-}
-
-class _StepField extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String hint;
-  final String value;
-  final VoidCallback onMinus;
-  final VoidCallback onPlus;
-  const _StepField({
-    required this.icon,
-    required this.title,
-    required this.hint,
-    required this.value,
-    required this.onMinus,
-    required this.onPlus,
+    return out;
   });
+});
 
-  @override
-  Widget build(BuildContext context) {
-    Widget btn(IconData i, VoidCallback onTap, String label) => Semantics(
-      button: true,
-      label: label,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.2), width: 1.5),
-          ),
-          child: Icon(i, size: 18, color: AppColors.textPrimary),
-        ),
-      ),
-    );
-    return _FieldShell(
-      icon: icon,
-      title: title,
-      hint: hint,
-      trailing: Row(
-        children: [
-          btn(Icons.remove, onMinus, 'Decrease $title'),
-          SizedBox(
-            width: 52,
-            child: Text(
-              value,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary),
-            ),
-          ),
-          btn(Icons.add, onPlus, 'Increase $title'),
-        ],
-      ),
-    );
+/// "Not recorded" means no vaccination record exists — it never means the
+/// animal wasn't vaccinated. Due-soon uses an explicit 14-day window that
+/// the UI labels as such.
+enum HealthRecordStatus { completed, dueSoon, overdue, notRecorded }
+
+const int kDueSoonDays = 14;
+
+HealthRecordStatus healthStatusOf(List<VaccinationRecord>? records, {DateTime? now}) {
+  if (records == null || records.isEmpty) return HealthRecordStatus.notRecorded;
+  final today = now ?? DateTime.now();
+  // Latest dose per vaccine decides whether that vaccine is current.
+  final latest = <String, VaccinationRecord>{};
+  for (final r in records) {
+    final key = r.vaccineName.toLowerCase();
+    if (!latest.containsKey(key) || r.dateAdministered.isAfter(latest[key]!.dateAdministered)) latest[key] = r;
   }
+  if (latest.values.any((r) => r.nextDueDate.isBefore(today))) return HealthRecordStatus.overdue;
+  if (latest.values.any((r) => r.nextDueDate.difference(today).inDays <= kDueSoonDays)) {
+    return HealthRecordStatus.dueSoon;
+  }
+  return HealthRecordStatus.completed;
 }
+
+DateTime? nextVaccineDue(List<VaccinationRecord>? records) {
+  if (records == null || records.isEmpty) return null;
+  return records.map((r) => r.nextDueDate).reduce((a, b) => a.isBefore(b) ? a : b);
+}
+
+// ─── Expenses (authorized viewers only) ──────────────────────────────────
+
+/// All case expenses via one collection-group listener. Only watched by
+/// widgets that are already behind canManageFinancesProvider.
+final allCaseExpensesProvider = StreamProvider.autoDispose<List<Expense>>((ref) {
+  return FirebaseFirestore.instance.collectionGroup('expenses').snapshots().map((snap) {
+    final out = <Expense>[];
+    for (final d in snap.docs) {
+      final caseId = d.reference.parent.parent?.id;
+      if (caseId == null || d.reference.parent.parent?.parent.id != 'cases') continue;
+      try {
+        out.add(Expense.fromFirestore(d, caseId));
+      } catch (e) {
+        debugPrint('[Dashboard] skipping unparseable expense ${d.id}: $e');
+      }
+    }
+    return out;
+  });
+});
+
+// ─── Closed cases (outcomes / diversion) ─────────────────────────────────
+
+/// Terminal statuses — `const` for a stable family key.
+const List<RescueStatus> kClosedCaseStatuses = [
+  RescueStatus.completed,
+  RescueStatus.cancelled,
+  RescueStatus.rejected,
+  RescueStatus.referred,
+];
+
+final closedCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((ref) {
+  return ref.watch(casesByStatusesProvider(kClosedCaseStatuses));
+});
+
+// ─── Small helpers ───────────────────────────────────────────────────────
+
+DateTime? tsOf(Object? v) => v is Timestamp ? v.toDate() : null;
+
+bool inPeriod(DateTime? t, DateTime from, DateTime to) => t != null && !t.isBefore(from) && t.isBefore(to);
+
+double? median(List<num> values) {
+  if (values.isEmpty) return null;
+  final s = [...values]..sort();
+  final m = s.length ~/ 2;
+  return s.length.isOdd ? s[m].toDouble() : (s[m - 1] + s[m]) / 2;
+}
+
+/// Very small groups are flagged, not hidden — the UI greys them out.
+const int kMinGroupSize = 10;
+
+/// The age strings animal records store look like "2 Years" / "6 Months"
+/// (create_animal_record_page.dart). Returns null when unparseable so it
+/// lands in "age not recorded" instead of a guessed bucket.
+double? ageInYears(String age) {
+  final m = RegExp(r'(\d+(?:\.\d+)?)\s*([a-zA-Z]+)').firstMatch(age);
+  if (m == null) return null;
+  final n = double.tryParse(m.group(1)!);
+  if (n == null) return null;
+  final unit = m.group(2)!.toLowerCase();
+  if (unit.startsWith('y')) return n;
+  if (unit.startsWith('m')) return n / 12;
+  if (unit.startsWith('w')) return n / 52;
+  if (unit.startsWith('d')) return n / 365;
+  return null;
+}
+
+/// Same buckets the adoption listing already uses (adoption_page.dart).
+String? ageGroupOf(AnimalRecord a) {
+  final y = ageInYears(a.age);
+  if (y == null) return null;
+  if (y < 0.5) return 'Baby (0–6 mo)';
+  if (y < 2) return 'Young (6 mo–2 y)';
+  if (y < 7) return 'Adult (2–7 y)';
+  return 'Senior (7+ y)';
+}
+
+bool isLargeAdultDog(AnimalRecord a) =>
+    a.species.toLowerCase() == 'dog' && a.size.toLowerCase().contains('large') && (ageInYears(a.age) ?? 0) >= 2;
