@@ -468,7 +468,11 @@ class _ServiceRequestList extends StatelessWidget {
           .where('status', isEqualTo: 'pending')
           .snapshots(),
       builder: (context, offersSnapshot) {
-        if (offersSnapshot.hasError) {
+        // Admin-assigned offers only reach this list through this query, so
+        // a failure here (security rules / missing index) must be visible —
+        // otherwise it reads as "no requests" and the offer is silently lost.
+        final offersFailed = offersSnapshot.hasError;
+        if (offersFailed) {
           debugPrint(
               'ServiceRequestList: transportAssignments offers query failed: '
                   '${offersSnapshot.error}');
@@ -555,7 +559,9 @@ class _ServiceRequestList extends StatelessWidget {
                         style: GoogleFonts.tiltWarp(
                             fontSize: 16, color: AppColors.textPrimary)),
                     const SizedBox(height: 10),
-                    _emptyState('There are no requests for now.'),
+                    _emptyState(offersFailed
+                        ? 'Could not load your assigned requests. Please try again later.'
+                        : 'There are no requests for now.'),
                   ],
                 ),
               );

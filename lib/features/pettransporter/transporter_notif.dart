@@ -101,9 +101,10 @@ class _TransporterNotificationsState
     // case's own assignedVolunteerId — so the listener above alone never
     // sees a freshly-offered case. This collectionGroup query is what
     // actually notifies this rider that the admin has something for them.
-    // Requires a Firestore composite collection-group index on
-    // transportAssignments (riderId, status) — the first live query prints
-    // the console's direct create-index link if it's still missing.
+    // Requires a security rule on `{path=**}/transportAssignments/{id}`
+    // (collection-group queries ignore the nested cases/... rules) and
+    // possibly a composite collection-group index on (riderId, status) —
+    // the error below says which one is missing.
     _offersSub = FirebaseFirestore.instance
         .collectionGroup('transportAssignments')
         .where('riderId', isEqualTo: uid)
@@ -112,9 +113,10 @@ class _TransporterNotificationsState
         .listen(
       _onOffersUpdate,
       onError: (e) => debugPrint(
-          'TransporterNotifications: offers query failed (likely a '
-              'missing Firestore composite index on transportAssignments '
-              'riderId+status): $e'),
+          'TransporterNotifications: offers query failed — permission-denied '
+              'means the {path=**}/transportAssignments security rule is '
+              'missing; failed-precondition means the riderId+status '
+              'collection-group index is missing: $e'),
     );
 
     FirebaseFirestore.instance.collection('users').doc(uid).set(

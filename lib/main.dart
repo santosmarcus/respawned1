@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 //import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,11 +17,11 @@ import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
-import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
+import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
+import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/push_token_service.dart';
-import 'package:respawnd1/features/organization/organization_member_pending_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -119,8 +120,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
         if (!snapshot.hasData) {
           return const LoginScreen();
         }
-
-        PushTokenService.register();
 
         final uid = snapshot.data!.uid;
         return _UserDocRouter(key: ValueKey(uid), uid: uid);
@@ -222,13 +221,7 @@ class _UserDocRouterState extends State<_UserDocRouter> {
               // one, so this is safe to send them back to.
               return const OrganizationAboutScreen();
             }
-            return OrganizationRoleRouter(organizationId: organizationId);
-          case 'organization_member':
-            final organizationId = data?['organizationId'] as String?;
-            if (organizationId == null || organizationId.isEmpty) {
-              return const OrganizationMemberPendingPage();
-            }
-            return OrganizationRoleRouter(organizationId: organizationId);
+            return _OrganizationRoleRouter(organizationId: organizationId);
           case 'general':
           default:
             return const HomeScreen();
@@ -238,9 +231,9 @@ class _UserDocRouterState extends State<_UserDocRouter> {
   }
 }
 
-class OrganizationRoleRouter extends StatelessWidget {
+class _OrganizationRoleRouter extends StatelessWidget {
   final String organizationId;
-  const OrganizationRoleRouter({super.key, required this.organizationId});
+  const _OrganizationRoleRouter({required this.organizationId});
 
   @override
   Widget build(BuildContext context) {
@@ -252,24 +245,12 @@ class OrganizationRoleRouter extends StatelessWidget {
         }
         final data = snapshot.data?.data() as Map<String, dynamic>?;
         final status = OrgVerificationStatus.fromName(data?['verificationStatus'] as String?);
-        // Organization Invitations spec §3/§7 — an invited admin or member
-        // joining an EXISTING organization must never be routed into the
-        // owner's document-upload wizard just because that org hasn't
-        // submitted verification yet. Only the org's own owner/creator
-        // (the account `createOrUpdateDraft` set as `ownerId`) goes through
-        // the draft upload step; everyone else lands straight in the admin
-        // shell regardless of the shared org doc's verification progress.
-        final currentUid = FirebaseAuth.instance.currentUser?.uid;
-        final isOwner = currentUid != null && currentUid == data?['ownerId'];
-        if (status == OrgVerificationStatus.draft && !isOwner) {
-          return const AdminHomeScreen();
-        }
         switch (status) {
           case OrgVerificationStatus.approved:
-          case OrgVerificationStatus.pending:
             return const AdminHomeScreen();
           case OrgVerificationStatus.draft:
             return OrganizationVerificationScreen(organizationId: organizationId);
+          case OrgVerificationStatus.pending:
           case OrgVerificationStatus.rejected:
           case OrgVerificationStatus.requiresChanges:
             return OrganizationVerificationPendingPage(organizationId: organizationId);

@@ -4,7 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
-import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
+import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_screen.dart';
 
 /// Step 3 of the Organization signup flow (spec §5) — a live status view
