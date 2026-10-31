@@ -401,7 +401,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
       setState(() {
         _currentLocation = LatLng(pos.latitude, pos.longitude);
         _isOnline = true;

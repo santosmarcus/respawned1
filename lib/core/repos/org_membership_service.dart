@@ -155,8 +155,9 @@ class OrgMembershipService {
     if (!memberDoc.exists) {
       // No membership subdoc yet for an org-linked account — fail open
       // (see class doc comment), same as the legacy ad hoc checks this
-      // resolver replaces.
-      return OrganizationCapabilities.forRole(ResolvedOrgRole.admin);
+      // resolver replaces. Owner/admin-only actions stay off: facebook.js
+      // and firestore.rules both fail closed on a missing membership doc.
+      return OrganizationCapabilities.forRole(ResolvedOrgRole.admin, confirmedMembership: false);
     }
 
     final membership = OrgMembership(
@@ -165,7 +166,10 @@ class OrgMembershipService {
       status: memberDoc.data()?['status'] as String?,
     );
     if (!membership.isActive) return OrganizationCapabilities.none;
-    return OrganizationCapabilities.forRole(resolvedRoleFromOrgRole(membership.role));
+    return OrganizationCapabilities.forRole(
+      resolvedRoleFromOrgRole(membership.role),
+      facebookPublisher: memberDoc.data()?['facebookPublisher'] == true,
+    );
   }
 
   /// Firestore has no built-in "combine latest" across two document

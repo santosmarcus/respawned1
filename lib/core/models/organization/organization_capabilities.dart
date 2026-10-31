@@ -15,9 +15,9 @@ enum ResolvedOrgRole { owner, admin, member }
 /// resolves operational access from, instead of scattering
 /// `membership.role == OrgRole.admin` checks across widgets and
 /// repositories. For the current phase, Owner/Admin/Member get identical
-/// operational capabilities; only [canPublishToFacebook] is narrower
-/// (Owner/Admin only) since that's the one action with an actual backend
-/// authorization boundary. Future role restrictions should be introduced by
+/// operational capabilities; only the Facebook capabilities are narrower
+/// since those are the actions with an actual backend authorization
+/// boundary (functions/facebook.js). Future role restrictions should be introduced by
 /// changing [OrganizationCapabilities.forRole] alone, not by editing every
 /// call site again.
 class OrganizationCapabilities {
@@ -33,11 +33,19 @@ class OrganizationCapabilities {
   final bool canViewAudits;
   final bool canManageTeam;
 
-  /// Facebook Page Publishing Compatibility spec — the one capability that
-  /// is NOT equal across roles during this phase. True only for Owner and
-  /// active Admin. This is a UX/UI convenience only; it does not by itself
-  /// authorize anything server-side (no such callable function exists yet
-  /// in this codebase — see PROJECT NOTES).
+  /// Change member roles, remove members. Owner and active Admin with a
+  /// confirmed membership only — firestore.rules denies these writes to
+  /// everyone else, so the UI must not offer them.
+  final bool canManageMembers;
+
+  /// Connect/reconnect/disconnect the org's Facebook Page and grant or
+  /// revoke [canPublishToFacebook] for members. Owner and active Admin only.
+  final bool canManageFacebookConnection;
+
+  /// Publish Animal Records to the connected Page. Owner, active Admin, or
+  /// a Member granted `facebookPublisher` on their membership doc — that
+  /// grant adds nothing else, they keep Member privileges everywhere.
+  /// UI convenience only; functions/facebook.js re-checks server-side.
   final bool canPublishToFacebook;
 
   const OrganizationCapabilities._({
@@ -51,6 +59,8 @@ class OrganizationCapabilities {
     required this.canViewAnalytics,
     required this.canViewAudits,
     required this.canManageTeam,
+    required this.canManageMembers,
+    required this.canManageFacebookConnection,
     required this.canPublishToFacebook,
   });
 
@@ -69,11 +79,24 @@ class OrganizationCapabilities {
     canViewAnalytics: false,
     canViewAudits: false,
     canManageTeam: false,
+    canManageMembers: false,
+    canManageFacebookConnection: false,
     canPublishToFacebook: false,
   );
 
-  factory OrganizationCapabilities.forRole(ResolvedOrgRole role) {
-    final canPublishToFacebook = role == ResolvedOrgRole.owner || role == ResolvedOrgRole.admin;
+  /// [facebookPublisher] is the member doc's grant; it only matters for
+  /// [ResolvedOrgRole.member] since Owner/Admin can always publish.
+  /// [confirmedMembership] false is the fail-open no-membership-doc case:
+  /// the app treats it as Admin, but the backend and firestore.rules don't,
+  /// so it gets none of the owner/admin-only capabilities.
+  factory OrganizationCapabilities.forRole(
+    ResolvedOrgRole role, {
+    bool facebookPublisher = false,
+    bool confirmedMembership = true,
+  }) {
+    final isOwnerOrAdmin =
+        confirmedMembership && (role == ResolvedOrgRole.owner || role == ResolvedOrgRole.admin);
+    final canPublishToFacebook = isOwnerOrAdmin || (confirmedMembership && facebookPublisher);
     return OrganizationCapabilities._(
       isActive: true,
       role: role,
@@ -85,6 +108,8 @@ class OrganizationCapabilities {
       canViewAnalytics: true,
       canViewAudits: true,
       canManageTeam: true,
+      canManageMembers: isOwnerOrAdmin,
+      canManageFacebookConnection: isOwnerOrAdmin,
       canPublishToFacebook: canPublishToFacebook,
     );
   }

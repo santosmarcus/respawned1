@@ -180,7 +180,9 @@ class _RescuePageState extends State<RescuePage> {
       // default coordinate as if it were a real resolved location.
       final pos =
           await Geolocator.getCurrentPosition(
-                desiredAccuracy: LocationAccuracy.high,
+                locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy.high,
+                ),
               )
               .then<Position?>((p) => p)
               .timeout(

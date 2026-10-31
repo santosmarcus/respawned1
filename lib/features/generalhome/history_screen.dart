@@ -565,7 +565,7 @@ class _DonationHistoryCard extends ConsumerWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -594,7 +594,7 @@ class _DonationHistoryCard extends ConsumerWidget {
                     subTitle,
                     style: GoogleFonts.zain(
                       fontSize: 16,
-                      color: const Color(0xFF4A4512).withOpacity(0.8),
+                      color: const Color(0xFF4A4512).withValues(alpha: 0.8),
                     ),
                   ),
                 ],

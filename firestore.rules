@@ -1,268 +1,472 @@
 rules_version = '2';
 
-// ---------------------------------------------------------------------------
-// NEWLY AUTHORED — no firestore.rules file existed in this repository before
-// this change, even though firebase.json already points "firestore.rules" at
-// this exact path. Numerous code comments across lib/core/repos/*.dart
-// describe "this app's existing wide-open Firestore rules" as the current
-// live behavior for most collections — meaning whatever rules are actually
-// deployed today are NOT visible from this checkout, and this file has never
-// been deployed or tested against the live project or the Firestore emulator.
+// Merged from the rules deployed in the Firebase console (campaigns,
+// donations, users, collar tags, rescue sessions) and the repo's previous
+// firestore.rules (organizations, members, invitations, Facebook). Overlapping
+// matches OR together, so each path below is matched by exactly one block
+// that actually grants access — the catch-alls exclude every collection that
+// has its own block.
 //
-// Scope of what's actually enforced here (Organization Invitations spec §16,
-// extended by the Temporary Organization Admin/Member Access Model spec):
-//   - organizationInvitations/{invitationId} — create/read/update now also
-//     allow an active org member (any role) or the org's ownerId, not just
-//     an admin membership doc, matching the app-side temporary equal-access
-//     phase for Owner/Admin/Member. No change to organizationInvitations
-//     delete (still always false) or to organizations/{orgId}/members
-//     create/update/delete (still admin/owner-only — removing or promoting
-//     real staff stays a stricter operation than inviting/managing pending
-//     invitations).
-//   - organizations/{orgId}/members/{uid}
-// Every other collection keeps the same effectively-open
-// "any signed-in user" access the rest of this codebase already assumes,
-// specifically so deploying this file cannot newly break any of the
-// dozens of other collections (cases, adoptions, animalRecords, donations,
-// auditLogs, collarTags, settings, etc.) this rules file was not written
-// against a full audit of. Tightening those is a separate, larger security
-// review outside this feature's scope — do not treat this file as a
-// comprehensive lockdown.
+// Intentionally still open to any signed-in user (pending the security pass):
+// users/{uid} docs, organizations/{orgId} profile fields, organization
+// subcollections other than members/integrations, and every collection not
+// named below (cases, adoptions, animals, collarTags, rescueSessions, ...).
+// collarTags/rescueSessions have specific rules further down, but the app
+// still creates and edits tags directly, so the catch-all keeps them open.
 //
-// BEFORE DEPLOYING (`firebase deploy --only firestore:rules`): review this
-// file against the Firestore Rules Playground or emulator with real data,
-// since an incorrect rule here can silently break legitimate reads/writes
-// app-wide. This was authored from static code inspection only.
-// ---------------------------------------------------------------------------
+// Cloud Functions use the Admin SDK and bypass these rules.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---- Shared helpers ----------------------------------------------------
+
     function signedIn() {
       return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
     }
 
     function normalizedEmail() {
       return request.auth.token.email.lower();
     }
 
-    // organizations/{orgId} document itself (profile/verification fields) —
-    // unchanged from the app's existing effectively-open behavior. Does NOT
-    // cascade to the members subcollection below — Firestore rules never
-    // apply to subcollections unless explicitly matched.
-    match /organizations/{orgId} {
-      allow read, write: if signedIn();
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
 
-    // organizations/{orgId}/members/{uid} — spec §16:
-    //   - Users cannot create arbitrary memberships for themselves.
-    //   - Membership creation through acceptance must verify the invitation.
-    //   - Ordinary members cannot change their own role to admin.
-    //   - Organization admins cannot remove the last active admin.
-    // Reads stay open to any signed-in user (Staff Members / duplicate-org
-    // checks already read across organizations client-side, matching the
-    // rest of this app's current privacy posture) — only writes are gated.
+    function changedAny(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Same roles main.dart routes into the admin shell.
+    function isOrgStaff() {
+      return signedIn() && userDoc().get('role', '') in ['admin', 'ngo_staff', 'organization'];
+    }
+
+    // ---- Organization membership helpers -----------------------------------
+    //
+    // Mirrors functions/facebook.js: the org's ownerId always counts, a
+    // members doc counts while its status isn't inactive/removed/disabled
+    // (missing status = active, for docs that predate the field).
+
+    function orgPath(orgId) {
+      return /databases/$(database)/documents/organizations/$(orgId);
+    }
+
+    function memberPath(orgId, uid) {
+      return /databases/$(database)/documents/organizations/$(orgId)/members/$(uid);
+    }
+
+    function orgOwnerId(orgId) {
+      return get(orgPath(orgId)).data.get('ownerId', '');
+    }
+
+    function isOrgOwner(orgId) {
+      return signedIn() && orgOwnerId(orgId) == request.auth.uid;
+    }
+
+    function isActiveMember(orgId) {
+      return signedIn() &&
+        exists(memberPath(orgId, request.auth.uid)) &&
+        !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']);
+    }
+
+    function isOrgAdmin(orgId) {
+      return isOrgOwner(orgId) ||
+        (isActiveMember(orgId) && get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin');
+    }
+
+    // Mirrors loadActor({finance: true}) in functions/campaigns.js.
+    function isFinanceAdmin() {
+      let u = userDoc();
+      let orgId = u.get('organizationId', '');
+      return signedIn() && (
+        u.get('role', '') == 'admin' ||
+        (orgId != '' &&
+          exists(memberPath(orgId, request.auth.uid)) &&
+          get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin')
+      );
+    }
+
+    // ---- Organizations -----------------------------------------------------
+
+    // Profile fields stay open to signed-in users, but ownerId is fixed: it
+    // must be the creator on create and can never change afterwards, since
+    // the owner gets admin rights over the members subcollection.
+    match /organizations/{orgId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.get('ownerId', '') == request.auth.uid;
+      allow update: if signedIn() &&
+        request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '');
+      allow delete: if false;
+    }
+
+    // organizations/{orgId}/members/{uid}
+    //   - Only the owner or an active admin adds, edits, or removes members.
+    //   - An invited person may create only their own doc, with the role
+    //     their pending invitation names.
+    //   - Nobody writes facebookPublisher* from the client; the
+    //     facebookSetPublisher callable owns those fields.
+    //   - Only the owner may change the owner's own membership, and it can
+    //     never be deleted.
+    // Reads stay open to signed-in users (Staff Members list, duplicate-email
+    // checks).
     match /organizations/{orgId}/members/{uid} {
+      function fbPublisherKeys() {
+        return ['facebookPublisher', 'facebookPublisherGrantedBy', 'facebookPublisherGrantedAt'];
+      }
+
+      function noFbPublisherFields() {
+        return !request.resource.data.keys().hasAny(fbPublisherKeys());
+      }
+
+      // getAfter so the bootstrap transaction (org doc + owner's member doc
+      // written together) sees the new org's ownerId.
+      function isOwnerAfter() {
+        return signedIn() &&
+          getAfter(orgPath(orgId)).data.get('ownerId', '') == request.auth.uid;
+      }
+
+      // ensureOwnerMembership() can run for any org viewer and only ever
+      // creates the owner's own admin doc.
+      function creatingOwnersAdminDoc() {
+        return signedIn() &&
+          uid == getAfter(orgPath(orgId)).data.get('ownerId', '') &&
+          request.resource.data.get('role', '') == 'admin';
+      }
+
+      function acceptingOwnValidInvitation() {
+        let invitationId = request.resource.data.get('invitationId', '');
+        let invitation = get(/databases/$(database)/documents/organizationInvitations/$(invitationId)).data;
+        return request.auth.uid == uid &&
+          invitationId is string && invitationId.size() > 0 &&
+          exists(/databases/$(database)/documents/organizationInvitations/$(invitationId)) &&
+          invitation.organizationId == orgId &&
+          invitation.normalizedEmail == normalizedEmail() &&
+          invitation.status == 'pending' &&
+          request.resource.data.get('role', 'staff') == invitation.get('role', 'staff');
+      }
+
       allow read: if signedIn();
 
-      function isOrgAdmin() {
-        return signedIn() &&
-          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
-      }
+      allow create: if noFbPublisherFields() &&
+        (isOrgAdmin(orgId) || isOwnerAfter() || creatingOwnersAdminDoc() || acceptingOwnValidInvitation());
 
-      function isOwner() {
-        return signedIn() &&
-          get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
-      }
+      allow update: if isOrgAdmin(orgId) &&
+        !changedAny(fbPublisherKeys()) &&
+        !changedAny(['uid', 'organizationId']) &&
+        (uid != orgOwnerId(orgId) || isOrgOwner(orgId) || !changedAny(['role', 'status']));
 
-      // A brand-new membership doc may only be created by:
-      //  (a) an org admin directly adding someone (invite-less legacy path /
-      //      admin tooling), or
-      //  (b) the invited person themselves, but ONLY when a matching
-      //      pending invitation for their own email actually exists for
-      //      this organization+uid — this is the "verify the invitation"
-      //      requirement; a user can never simply write themselves in.
-      function acceptingOwnValidInvitation() {
-        let invitationId = request.resource.data.invitationId;
-        return invitationId is string && invitationId.size() > 0 &&
-          exists(/databases/$(database)/documents/organizationInvitations/$(invitationId)) &&
-          get(/databases/$(database)/documents/organizationInvitations/$(invitationId)).data.organizationId == orgId &&
-          get(/databases/$(database)/documents/organizationInvitations/$(invitationId)).data.normalizedEmail == normalizedEmail() &&
-          get(/databases/$(database)/documents/organizationInvitations/$(invitationId)).data.status == 'pending' &&
-          request.auth.uid == uid;
-      }
-
-      allow create: if isOrgAdmin() || isOwner() || acceptingOwnValidInvitation();
-
-      // Updates (role changes / status changes): only an org admin, EXCEPT
-      // an ordinary member may never grant themselves admin — closes the
-      // specific "members cannot change their own role to admin" gap even
-      // for an admin-looking write that isn't actually coming from a real
-      // admin account.
-      allow update: if isOrgAdmin() &&
-        !(request.auth.uid == uid && resource.data.role != 'admin' && request.resource.data.role == 'admin' && !isOrgAdmin());
-
-      // Deletes (removal): only an org admin, and never the last one.
-      // Counting admins requires a query, which rules can't run directly —
-      // the client-side isFinalAdmin() pre-check
-      // (OrganizationInvitationRepository) is the primary guard; this rule
-      // additionally blocks an admin from deleting their OWN membership
-      // when they are the organization's `ownerId`, since the owner must
-      // always remain a member per spec §3.
-      allow delete: if isOrgAdmin() && !(uid == get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId);
+      // The last-admin check needs a query, so it stays client-side
+      // (OrganizationInvitationRepository.isFinalAdmin).
+      allow delete: if isOrgAdmin(orgId) && uid != orgOwnerId(orgId);
     }
 
-    // organizations/{orgId}/integrations/facebook — Facebook Page Sharing
-    // spec. SAFE connection metadata only (pageId/pageName/pagePictureUrl/
-    // connectionStatus/etc) — the raw Page access token is never written
-    // here (it lives only in Google Secret Manager, touched exclusively by
-    // the facebookConnectPage/facebookConfirmPageSelection/
-    // facebookTestConnection/facebookDisconnectPage/
-    // facebookPublishAnimalRecords Cloud Functions via the Admin SDK,
-    // which bypasses these rules entirely). Reads: any active org member,
-    // admin, or the owner may see connection status (spec: "Active Members
-    // may also read basic safe connection status when the existing UI
-    // needs it"). Writes: always false from the client — connecting,
-    // reconnecting, disconnecting, and publishing are exclusively
-    // Cloud-Function operations; nothing here needs a client write path.
+    // Safe Facebook connection metadata only (the Page token lives in Secret
+    // Manager). Every write goes through the facebook* callables.
     match /organizations/{orgId}/integrations/{docId} {
-      function isOrgAdminOfIntegration() {
-        return signedIn() &&
-          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
-      }
-      function isActiveOrgMemberOfIntegration() {
-        return signedIn() &&
-          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
-          !(get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.status in
-            ['inactive', 'removed', 'disabled']);
-      }
-      function isOwnerOfIntegration() {
-        return signedIn() &&
-          get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
-      }
-      allow read: if isOrgAdminOfIntegration() || isActiveOrgMemberOfIntegration() || isOwnerOfIntegration();
+      allow read: if isActiveMember(orgId) || isOrgOwner(orgId);
       allow write: if false;
     }
 
-    // facebookConnectRequests/{requestId} — Facebook Page Sharing spec.
-    // Backend-only bookkeeping for the multi-Page-selection step of
-    // connecting a Page (uid/organizationId/status/expiry + non-sensitive
-    // page id/name/picture for display — never a token). The Flutter
-    // client only ever learns its contents via the facebookConnectPage
-    // callable's OWN return value, never by reading this collection
-    // directly, so there is no legitimate client access path to close a
-    // gap for — denied outright rather than scoped to "the requesting
-    // uid" since no code anywhere reads it from the client SDK.
-    match /facebookConnectRequests/{requestId} {
-      allow read, write: if false;
+    // Every other organization subcollection (communityReports,
+    // activityLogs, ...) keeps its current open access.
+    match /organizations/{orgId}/{sub}/{document=**} {
+      allow read, write: if signedIn() && !(sub in ['members', 'integrations']);
     }
 
-    // facebookShares/{shareId} — Facebook Page Sharing spec. Publish
-    // history written only by facebookPublishAnimalRecords via the Admin
-    // SDK. No client read path is used by any code in this change (no
-    // share-history UI exists yet) — denied outright rather than opened
-    // for a feature that doesn't read it, per "add a rule only for the
-    // exact path a reproducible client operation needs."
-    match /facebookShares/{shareId} {
-      allow read, write: if false;
-    }
+    // ---- Organization invitations ------------------------------------------
 
-    // organizationInvitations/{invitationId} — spec §16:
-    //   - A user may read invitations addressed to their authenticated email.
-    //   - A user may accept or reject only their own invitation.
-    //   - Only authorized organization admins may create or cancel
-    //     organization invitations.
     match /organizationInvitations/{invitationId} {
-      function isOrgAdminOf(orgId) {
-        return signedIn() &&
-          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
+      function managesOrg(orgId) {
+        return isActiveMember(orgId) || isOrgOwner(orgId);
       }
 
-      // Temporary Organization Admin/Member Access Model spec — Staff
-      // Members and invitations is an equal-access module during this
-      // phase, so an active member (any status other than an explicit
-      // 'inactive'/'removed'/'disabled') may also create/manage
-      // invitations for their own organization, not just an admin. A
-      // missing `status` field (every pre-existing membership doc) counts
-      // as active, matching this app's existing fail-open behavior for
-      // accounts that predate the `status` field entirely.
-      function isActiveOrgMemberOf(orgId) {
-        return signedIn() &&
-          exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)) &&
-          !(get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.status in
-            ['inactive', 'removed', 'disabled']);
-      }
-
-      // Facebook Page Publishing Compatibility / Temporary Access Model
-      // spec — a legacy organization owner may have no membership subdoc
-      // at all yet (see organizations/{orgId}/members block above); never
-      // block them from managing their own organization's invitations just
-      // because isOrgAdminOf/isActiveOrgMemberOf both require an existing
-      // member doc.
-      function isOwnerOf(orgId) {
-        return signedIn() &&
-          get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
-      }
-
-      // An org admin/member/owner managing their own organization's
-      // invitations, OR the invited person reading/acting on an invitation
-      // addressed to their own authenticated email — never a third party's.
+      // Staff Members is an equal-access module in this phase, so any active
+      // member may manage invitations; the invited person may read and act
+      // on invitations addressed to their own email.
       allow read: if signedIn() &&
-        (resource.data.normalizedEmail == normalizedEmail() ||
-          isOrgAdminOf(resource.data.organizationId) ||
-          isActiveOrgMemberOf(resource.data.organizationId) ||
-          isOwnerOf(resource.data.organizationId));
+        (resource.data.normalizedEmail == normalizedEmail() || managesOrg(resource.data.organizationId));
 
-      allow create: if isOrgAdminOf(request.resource.data.organizationId) ||
-        isActiveOrgMemberOf(request.resource.data.organizationId) ||
-        isOwnerOf(request.resource.data.organizationId);
+      allow create: if managesOrg(request.resource.data.organizationId);
 
-      // Admin/member staff actions (resend/change role/cancel) vs. the
-      // invited person's own accept/reject are distinguished by which
-      // fields change: the invited person may only ever flip status
-      // pending -> accepted or pending -> rejected on their OWN
-      // invitation, never touch an invitation addressed to someone else,
-      // and never resurrect/alter a non-pending one. An org admin or
-      // active member may update anything on their own organization's
-      // invitations (resend/cancel/change intended role).
-      allow update: if isOrgAdminOf(resource.data.organizationId) ||
-        isActiveOrgMemberOf(resource.data.organizationId) ||
-        isOwnerOf(resource.data.organizationId) ||
+      // The invited person may only flip their own pending invitation to
+      // accepted/rejected without touching org, email, or role.
+      allow update: if managesOrg(resource.data.organizationId) ||
         (
           resource.data.normalizedEmail == normalizedEmail() &&
           resource.data.status == 'pending' &&
-          (request.resource.data.status == 'accepted' || request.resource.data.status == 'rejected') &&
+          request.resource.data.status in ['accepted', 'rejected'] &&
           request.resource.data.organizationId == resource.data.organizationId &&
           request.resource.data.email == resource.data.email &&
           request.resource.data.role == resource.data.role
         );
 
-      allow delete: if false; // history is kept, not deleted (spec §9)
+      allow delete: if false;
     }
 
-    // Everything else: unchanged from this app's existing documented
-    // behavior — any signed-in user. Explicitly excludes the collections
-    // above so their tighter rules are the ones that actually govern those
-    // paths (a broader match here would otherwise OR together with the
-    // specific rules and defeat them) — 'facebookConnectRequests' and
-    // 'facebookShares' added by the Facebook Page Sharing spec, same
-    // pattern as the pre-existing 'organizationInvitations' exclusion; no
-    // other collection name changed.
-    match /{collection}/{docId} {
-      allow read, write: if signedIn() &&
-        collection != 'organizationInvitations' &&
-        collection != 'facebookConnectRequests' &&
-        collection != 'facebookShares';
+    // ---- Volunteer events --------------------------------------------------
+    //
+    // Any signed-in user can browse events. The owning organization's staff
+    // (any active member, like invitations) create, edit, and cancel them;
+    // events are never deleted. goingCount only moves through a volunteer's
+    // own sign-up, which must add their registration and bump the count by
+    // exactly 1 in the same write (VolunteerEventRepository.register).
+
+    match /events/{eventId} {
+      function managesEventOrg(orgId) {
+        return isActiveMember(orgId) || isOrgOwner(orgId);
+      }
+
+      function registrationPath(uid) {
+        return /databases/$(database)/documents/events/$(eventId)/registrations/$(uid);
+      }
+
+      function capacityOk(data) {
+        return data.get('capacity', null) == null ||
+          (data.capacity is int && data.capacity >= data.get('goingCount', 0));
+      }
+
+      function signingUp() {
+        return signedIn() &&
+          changedOnly(['goingCount']) &&
+          resource.data.get('status', '') == 'published' &&
+          request.resource.data.goingCount == resource.data.get('goingCount', 0) + 1 &&
+          capacityOk(request.resource.data) &&
+          !exists(registrationPath(request.auth.uid)) &&
+          existsAfter(registrationPath(request.auth.uid));
+      }
+
+      allow read: if signedIn();
+
+      allow create: if managesEventOrg(request.resource.data.get('organizationId', '')) &&
+        request.resource.data.status == 'published' &&
+        request.resource.data.goingCount == 0 &&
+        capacityOk(request.resource.data);
+
+      allow update: if signingUp() || (
+        managesEventOrg(resource.data.organizationId) &&
+        request.resource.data.organizationId == resource.data.organizationId &&
+        request.resource.data.get('goingCount', 0) == resource.data.get('goingCount', 0) &&
+        request.resource.data.status in ['published', 'cancelled'] &&
+        // A cancelled event stays cancelled.
+        !(resource.data.status == 'cancelled' && request.resource.data.status != 'cancelled') &&
+        capacityOk(request.resource.data)
+      );
+
+      allow delete: if false;
+
+      // Sign-ups: the volunteer and the organization's staff can read them.
+      match /registrations/{uid} {
+        function eventBefore() {
+          return get(/databases/$(database)/documents/events/$(eventId)).data;
+        }
+
+        allow read: if isSelf(uid) || managesEventOrg(eventBefore().organizationId);
+
+        allow create: if isSelf(uid) &&
+          request.resource.data.uid == uid &&
+          eventBefore().get('status', '') == 'published' &&
+          getAfter(/databases/$(database)/documents/events/$(eventId)).data.goingCount ==
+            eventBefore().get('goingCount', 0) + 1;
+
+        allow update, delete: if false;
+      }
     }
-    // 'integrations' added by the Facebook Page Sharing spec, same pattern
-    // as the pre-existing 'members' exclusion; every other organization
-    // subcollection (communityReports, activityLogs, etc.) keeps exactly
-    // the same access it had before this change.
-    match /organizations/{orgId}/{subcollection}/{docId} {
-      allow read, write: if signedIn() && subcollection != 'members' && subcollection != 'integrations';
+
+    // ---- Facebook backend bookkeeping --------------------------------------
+
+    match /facebookConnectRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /facebookShares/{shareId} {
+      allow read, write: if false;
+    }
+
+    // ---- Campaigns ---------------------------------------------------------
+
+    match /campaigns/{campaignId} {
+      // The general view queries by type only, so reads cannot be narrowed by
+      // status here (rules are not filters). Drafts are hidden in the app.
+      allow read: if signedIn();
+      // donation_review_inkind.dart increments numdonors by exactly 1.
+      allow update: if signedIn()
+        && changedOnly(['numdonors'])
+        && request.resource.data.numdonors == resource.data.get('numdonors', 0) + 1;
+      allow create, delete: if false;
+
+      // Public Fund Tracking and progress updates.
+      match /allocations/{allocationId} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+      match /updates/{updateId} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+      // Audit trail: staff only.
+      match /history/{entryId} {
+        allow read: if isOrgStaff();
+        allow write: if false;
+      }
+    }
+
+    // ---- Donations ---------------------------------------------------------
+
+    // history_provider.cancelInKindDonation
+    function inKindCancel() {
+      return resource.data.type == 'inkind'
+        && changedOnly(['status'])
+        && request.resource.data.status == 'cancelled';
+    }
+    // history_provider.cancelSponsorship / unCancelSponsorship / updateSponsorshipAmount
+    function sponsorshipEdit() {
+      return resource.data.type == 'sponsorship'
+        && changedOnly(['sponsorshipStatus', 'nextChargeAmount'])
+        && request.resource.data.sponsorshipStatus in ['active', 'cancelled']
+        && (request.resource.data.sponsorshipStatus == 'cancelled'
+            || resource.data.nextChargeDate > request.time)
+        && request.resource.data.nextChargeAmount is number
+        && request.resource.data.nextChargeAmount > 0;
+    }
+    // Donor self-service on a top-level donation doc: cancel own in-kind
+    // pledge, cancel/resume own sponsorship, change next amount.
+    function donorSelfServiceEdit() {
+      return changedOnly(['status', 'sponsorshipStatus', 'nextChargeAmount'])
+        && (!changedAny(['status'])
+            || request.resource.data.status == 'cancelled')
+        && (!changedAny(['sponsorshipStatus'])
+            || request.resource.data.sponsorshipStatus == 'cancelled'
+            || (request.resource.data.sponsorshipStatus == 'active' && resource.data.get('sponsorshipStatus', '') == 'cancelled'))
+        && (!changedAny(['nextChargeAmount'])
+            || (request.resource.data.nextChargeAmount is number && request.resource.data.nextChargeAmount > 0));
+    }
+    // donation_review_inkind.dart (no money involved)
+    function inKindCreate(uid) {
+      return request.resource.data.userId == uid
+        && request.resource.data.type == 'inkind'
+        && request.resource.data.amount == 0;
+    }
+
+    match /donations/{donationId} {
+      // donation_detail.dart counts donors for any campaign.
+      allow read: if signedIn();
+      // Monetary records are only ever created by the backend.
+      allow create: if signedIn() && inKindCreate(request.auth.uid);
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && (donorSelfServiceEdit() || inKindCancel() || sponsorshipEdit());
+      allow delete: if false;
+    }
+
+    // PayMongo attempts
+    match /donationPayments/{paymentId} {
+      allow read: if signedIn() && (resource.data.donorId == request.auth.uid || isFinanceAdmin());
+      allow write: if false;
+    }
+
+    // Reallocation audit records.
+    match /fundTransfers/{transferId} {
+      allow read: if isOrgStaff();
+      allow write: if false;
+    }
+
+    // Backend-only bookkeeping.
+    match /manualDonationRefs/{key} {
+      allow read, write: if false;
+    }
+    match /paymongoWebhookEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    // ---- Users -------------------------------------------------------------
+
+    match /users/{uid} {
+      // Still open: admins write other users' organizationId when adding or
+      // removing members. Locked down in the security pass.
+      allow read, write: if signedIn();
+
+      match /{sub}/{doc=**} {
+        allow read, write: if signedIn() && !(sub in ['history', 'donated', 'cards', 'certificates']);
+      }
+      match /history/{itemId} {
+        allow read: if isSelf(uid);
+        allow create: if isSelf(uid) && inKindCreate(uid);
+        allow update: if isSelf(uid) && (inKindCancel() || sponsorshipEdit());
+        allow delete: if false;
+      }
+      match /donated/{campaignId} {
+        allow read, write: if isSelf(uid);
+      }
+      match /cards/{cardId} {
+        allow read, delete: if isSelf(uid);
+        allow create, update: if false;
+      }
+      // Certificates of Donation: issued only by the backend (paymongo.js /
+      // campaigns.js); each donor reads their own.
+      match /certificates/{certificateId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+    }
+
+    // ---- Collar tags / rescue sessions -------------------------------------
+    // Not excluded from the catch-all below (see the header note), so these
+    // only add to its open access today.
+
+    match /collarTags/{tagId} {
+      allow get: if signedIn() &&
+        (resource.data.qrEnabled == true || request.auth.uid == resource.data.ownerId);
+
+      allow update: if signedIn() &&
+        request.auth.uid == resource.data.ownerId &&
+        changedOnly(['status', 'lastSeenLat', 'lastSeenLng', 'lastSeenAddress', 'lostAt', 'activeRescueSessionId']);
+    }
+
+    match /rescueSessions/{sessionId} {
+      allow create: if false;
+      allow get: if signedIn();
+      allow list: if false;
+      allow update: if signedIn() &&
+        request.auth.uid == get(/databases/$(database)/documents/collarTags/$(resource.data.tagId)).data.ownerId &&
+        changedOnly(['chatEnabledByOwner', 'status']);
+
+      match /messages/{messageId} {
+        allow read: if signedIn();
+        allow create: if signedIn() &&
+          get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.chatEnabledByOwner == true &&
+          get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.status != 'resolved' &&
+          request.resource.data.keys().hasOnly(['sender', 'text', 'sentAt']) &&
+          request.resource.data.sender in ['owner', 'finder'] &&
+          (request.resource.data.sender == 'finder' ||
+           request.auth.uid == get(
+             /databases/$(database)/documents/collarTags/$(
+               get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.tagId
+             )
+           ).data.ownerId);
+        allow update, delete: if false;
+      }
+    }
+
+    // ---- Everything else ---------------------------------------------------
+    // Any signed-in user, except the collections with their own blocks above.
+
+    match /{collection}/{document=**} {
+      allow read, write: if signedIn() && !(collection in [
+        'organizations', 'organizationInvitations', 'events',
+        'facebookConnectRequests', 'facebookShares',
+        'campaigns', 'donations', 'donationPayments', 'fundTransfers',
+        'manualDonationRefs', 'paymongoWebhookEvents',
+        'users'
+      ]);
     }
   }
 }

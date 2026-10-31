@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
+import 'package:respawnd1/core/repos/org_membership_service.dart';
 
 /// The existing animal-record form — reused as-is by both a standalone
 /// "Create Record" entry point and, with [prefillData]/[linkedCaseId]/
@@ -66,6 +67,19 @@ class CreateAnimalRecordPage extends StatefulWidget {
 }
 
 class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
+  /// The organization that owns a new record: the linked rescue case's
+  /// organization when there is one, otherwise the creator's own.
+  Future<String?> _resolveOwningOrganizationId(String uid) async {
+    final caseId = widget.linkedCaseId;
+    if (caseId != null && caseId.isNotEmpty) {
+      final caseSnap = await FirebaseFirestore.instance.collection('cases').doc(caseId).get();
+      final caseOrgId = caseSnap.data()?['organizationId'] as String?;
+      if (caseOrgId != null && caseOrgId.isNotEmpty) return caseOrgId;
+    }
+    if (uid.isEmpty) return null;
+    return OrgMembershipService().resolveOrganizationId(uid);
+  }
+
   // Images — required for brand-new records (at least one), never required
   // to correct/re-save a legacy record that already opens without one — see
   // _createRecord's validation, gated on `!widget.isEditing`.
@@ -870,8 +884,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         });
       } else {
         final fallbackPhotoUrl = widget.prefillData?['photoUrl'] as String?;
+        final organizationId = await _resolveOwningOrganizationId(uid);
         await docRef.set({
           ...sharedFields,
+          if (organizationId != null) 'organizationId': organizationId,
           'status': 'intake',
           'linkedCaseId': widget.linkedCaseId ?? '',
           if (widget.sourceAnimalIndex != null)
@@ -1530,7 +1546,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             Switch(
               value: _isAdoptable,
               onChanged: (v) => setState(() => _isAdoptable = v),
-              activeColor: AppColors.greenrspwn,
+              activeThumbColor: AppColors.greenrspwn,
             ),
             const SizedBox(height: 16),
 

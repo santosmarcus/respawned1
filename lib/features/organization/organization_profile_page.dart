@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
+import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
+import 'package:respawnd1/features/volunteerevent/event_detail_page.dart';
 
 import 'organization_model.dart';
 
@@ -871,42 +874,6 @@ class _OrgPercentCircle extends StatelessWidget {
 
 // Events tab
 
-class _OrgEvent {
-  final String id;
-  final String title;
-  final String organizer;
-  final String date;
-  final String time;
-  final String location;
-  final bool favorited;
-
-  _OrgEvent({
-    required this.id,
-    required this.title,
-    required this.organizer,
-    required this.date,
-    required this.time,
-    required this.location,
-    this.favorited = false,
-  });
-
-  factory _OrgEvent.fromFirestore(
-      QueryDocumentSnapshot<Map<String, dynamic>> doc,
-      bool favorited,
-      ) {
-    final data = doc.data();
-    return _OrgEvent(
-      id: doc.id,
-      title: data['title'] as String? ?? '',
-      organizer: data['organizer'] as String? ?? '',
-      date: data['date'] as String? ?? '',
-      time: data['time'] as String? ?? '',
-      location: data['location'] as String? ?? '',
-      favorited: favorited,
-    );
-  }
-}
-
 class _EventsTab extends StatefulWidget {
   final String organizationId;
   const _EventsTab({required this.organizationId});
@@ -915,84 +882,85 @@ class _EventsTab extends StatefulWidget {
   State<_EventsTab> createState() => _EventsTabState();
 }
 
+/// This organization's upcoming, non-cancelled events from `events`.
 class _EventsTabState extends State<_EventsTab> {
+  final _repo = VolunteerEventRepository();
+  late final Stream<List<VolunteerEvent>> _eventsStream =
+      _repo.streamOrganizationEvents(widget.organizationId);
+  Set<String> _joinedIds = {};
   Set<String> _favoriteIds = {};
-  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadFavorites();
+    _loadMine();
   }
 
-  String get _uid => FirebaseAuth.instance.currentUser!.uid;
-
-  CollectionReference<Map<String, dynamic>> get _favRef => FirebaseFirestore
-      .instance
-      .collection('users')
-      .doc(_uid)
-      .collection('volunteerFavorites');
-
-  Future<void> _loadFavorites() async {
+  Future<void> _loadMine() async {
     try {
-      final snap = await _favRef.get();
+      final mine = await _repo.loadMyEventIds();
       if (mounted) {
         setState(() {
-          _favoriteIds = snap.docs.map((d) => d.id).toSet();
-          _loading = false;
+          _joinedIds = mine.joined;
+          _favoriteIds = mine.favorites;
         });
       }
-    } catch (e) {
-      if (mounted) setState(() => _loading = false);
+    } catch (_) {
+      // Events still list; joined/favorite markers just won't show.
     }
   }
 
-  Future<void> _toggleFavorite(_OrgEvent event) async {
+  Future<void> _toggleFavorite(VolunteerEvent event) async {
     final isFav = _favoriteIds.contains(event.id);
     setState(() {
       isFav ? _favoriteIds.remove(event.id) : _favoriteIds.add(event.id);
+      event.favorited = !isFav;
     });
-    final doc = _favRef.doc(event.id);
-    if (isFav) {
-      await doc.delete();
-    } else {
-      await doc.set({
-        'eventId': event.id,
-        'title': event.title,
-        'organizationId': widget.organizationId,
-        'savedAt': FieldValue.serverTimestamp(),
-      });
-    }
+    await _repo.setFavorite(event, !isFav);
+  }
+
+  void _openDetail(VolunteerEvent event) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VolunteerEventDetailPage(
+          event: event,
+          onFavorite: () => _toggleFavorite(event),
+        ),
+      ),
+    ).then((_) {
+      if (event.joined && mounted) setState(() => _joinedIds.add(event.id));
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColors.greenrspwn));
-    }
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('volunteers')
-          .where('organizationId', isEqualTo: widget.organizationId)
-          .snapshots(),
+    return StreamBuilder<List<VolunteerEvent>>(
+      stream: _eventsStream,
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Could not load events.',
+                style: GoogleFonts.zain(color: AppColors.textSecondary)),
+          );
+        }
         if (!snapshot.hasData) {
           return const Center(
               child: CircularProgressIndicator(color: AppColors.greenrspwn));
         }
-        final docs = snapshot.data!.docs;
-        if (docs.isEmpty) {
+        final events = snapshot.data!
+            .where((e) => !e.isCancelled && !e.isPast)
+            .toList();
+        for (final e in events) {
+          e.joined = _joinedIds.contains(e.id);
+          e.favorited = _favoriteIds.contains(e.id);
+        }
+        if (events.isEmpty) {
           return Center(
             child: Text('No events scheduled yet.',
                 style: GoogleFonts.zain(color: AppColors.textSecondary)),
           );
         }
-
-        final events = docs
-            .map((d) => _OrgEvent.fromFirestore(d, _favoriteIds.contains(d.id)))
-            .toList();
 
         return ListView.separated(
           padding: const EdgeInsets.all(16),
@@ -1000,9 +968,12 @@ class _EventsTabState extends State<_EventsTab> {
           separatorBuilder: (_, __) => const SizedBox(height: 16),
           itemBuilder: (context, index) {
             final event = events[index];
-            return _OrgEventCard(
-              event: event,
-              onFavorite: () => _toggleFavorite(event),
+            return GestureDetector(
+              onTap: () => _openDetail(event),
+              child: _OrgEventCard(
+                event: event,
+                onFavorite: () => _toggleFavorite(event),
+              ),
             );
           },
         );
@@ -1012,7 +983,7 @@ class _EventsTabState extends State<_EventsTab> {
 }
 
 class _OrgEventCard extends StatelessWidget {
-  final _OrgEvent event;
+  final VolunteerEvent event;
   final VoidCallback onFavorite;
   const _OrgEventCard({required this.event, required this.onFavorite});
 

@@ -10,6 +10,7 @@ import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/audit/audit_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
+import 'package:respawnd1/features/admin/events/admin_events_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
@@ -209,9 +210,9 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             // order: Dashboard, Rescue, Adoptions, Donations, Records,
             // Events, Volunteers, Transporters, Collar Tags, Audit.
             // Volunteers now opens VolunteersPage (role ==
-            // 'rescue_volunteer' directory). Events and Transporters still
-            // have no admin screen built yet, so they stay no-op
-            // placeholders. Shelter Resources was removed entirely — it
+            // 'rescue_volunteer' directory), Events opens AdminEventsPage.
+            // Transporters still has no admin screen built yet, so it stays
+            // a no-op placeholder. Shelter Resources was removed entirely — it
             // was a permanent no-op with no destination page; shelter
             // capacity is edited from Organization Profile.
             _DrawerItem(
@@ -251,7 +252,11 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
               selected: widget.active == AdminModule.records,
               onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
             ),
-            _DrawerItem(label: 'Events', selected: widget.active == AdminModule.events, onTap: () {}),
+            _DrawerItem(
+              label: 'Events',
+              selected: widget.active == AdminModule.events,
+              onTap: () => _openModule(context, (_) => const AdminEventsPage()),
+            ),
             _DrawerItem(
               label: 'Volunteers',
               selected: widget.active == AdminModule.volunteers,

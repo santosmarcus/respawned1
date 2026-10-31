@@ -102,7 +102,9 @@ Future<TagScanOutcome> resolveScannedTagId(
 Future<ScanLocation?> fetchBestEffortScanLocation() async {
   try {
     final pos = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.medium,
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.medium,
+      ),
     ).then<Position?>((p) => p).timeout(
       const Duration(seconds: 8),
       onTimeout: () => Geolocator.getLastKnownPosition(),

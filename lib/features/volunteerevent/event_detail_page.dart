@@ -3,20 +3,17 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'volunteer_page.dart';
 import 'volunteer_signup_page.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'volunteer_eticket.dart';
 
 class VolunteerEventDetailPage extends StatefulWidget {
   final VolunteerEvent event;
   final VoidCallback onFavorite;
-  final MarkJoinedCallback onMarkJoined;
 
   const VolunteerEventDetailPage({
     super.key,
     required this.event,
     required this.onFavorite,
-    required this.onMarkJoined,
   });
 
   @override
@@ -224,20 +221,30 @@ class _VolunteerEventDetailPageState
 
             const SizedBox(height: 28),
 
+            if (event.isCancelled) ...[
+              Text(
+                'This event has been cancelled by the organizer.',
+                style: GoogleFonts.zain(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.redAccent),
+              ),
+              const SizedBox(height: 12),
+            ],
+
             // Joined / View E-Ticket button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: event.joined
                     ? () => _openETicket(context)
+                    : !event.isOpen
+                    ? null
                     : () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => VolunteerSignUpPage(
-                        event: event,
-                        onMarkJoined: widget.onMarkJoined,
-                      ),
+                      builder: (_) => VolunteerSignUpPage(event: event),
                     ),
                   ).then((_) => setState(() {}));
                 },
@@ -251,7 +258,15 @@ class _VolunteerEventDetailPageState
                   elevation: 0,
                 ),
                 child: Text(
-                  event.joined ? 'View E-Ticket' : 'Join event',
+                  event.joined
+                      ? 'View E-Ticket'
+                      : event.isCancelled
+                      ? 'Event cancelled'
+                      : event.isPast
+                      ? 'Event ended'
+                      : event.isFull
+                      ? 'Event full'
+                      : 'Join event',
                   style: GoogleFonts.tiltWarp(
                       fontSize: 16, color: AppColors.textPrimary),
                 ),
@@ -267,25 +282,16 @@ class _VolunteerEventDetailPageState
 
 
   Future<void> _openETicket(BuildContext context) async {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('volunteerRegistrations')
-        .doc(widget.event.id.toString())
-        .get();
+    final data = await VolunteerEventRepository().getMyRegistration(widget.event.id);
 
     if (!mounted) return;
 
-    if (!doc.exists) {
+    if (data == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Registration details not found.')),
       );
       return;
     }
-
-    final data = doc.data()!;
 
     Navigator.push(
       context,

@@ -125,6 +125,20 @@ class FacebookIntegrationRepository {
     }, (data) => (postId: data['postId'] as String? ?? '', postUrl: data['postUrl'] as String? ?? ''));
   }
 
+  /// Owner/Admin only (enforced by the callable). Lets a Member publish to
+  /// the Page without changing their app role.
+  Future<void> setPublisher({
+    required String organizationId,
+    required String memberUid,
+    required bool enabled,
+  }) {
+    return _call('facebookSetPublisher', {
+      'organizationId': organizationId,
+      'memberUid': memberUid,
+      'enabled': enabled,
+    }, (_) {});
+  }
+
   FacebookIntegration _integrationFromCallableMap(Map<String, dynamic> page) {
     return FacebookIntegration(
       pageId: page['pageId'] as String? ?? '',
