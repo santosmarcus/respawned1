@@ -48,7 +48,15 @@ class AnimalProfileTab extends StatelessWidget {
             const InfoField('Color / Markings', _kNA),
           ]),
 
+          // Description above Temperament (spec section 7) — applies on
+          // both admin and user profile displays; medical fields stay out
+          // of this profile area entirely (they live on the Medical tab).
           const SizedBox(height: 12),
+          _SectionLabel('Description'),
+          const SizedBox(height: 6),
+          Text(_orNA(animal.description), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary, height: 1.4)),
+
+          const SizedBox(height: 16),
           _SectionLabel('Temperament'),
           const SizedBox(height: 6),
           _ChipsOrNA(items: temperament),
@@ -67,11 +75,6 @@ class AnimalProfileTab extends StatelessWidget {
           _SectionLabel('Rescue Background'),
           const SizedBox(height: 6),
           _ChipsOrNA(items: animal.rescueBackground),
-
-          const SizedBox(height: 16),
-          _SectionLabel('Description'),
-          const SizedBox(height: 6),
-          Text(_orNA(animal.description), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary, height: 1.4)),
 
           const SizedBox(height: 16),
           Row(

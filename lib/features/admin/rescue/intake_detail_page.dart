@@ -6,15 +6,24 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/core/utils/animal_treatment_state.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_records_flow_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 
-typedef ShelterDestination = ({String name, String? address, String? placeId, double? lat, double? lng});
+typedef ShelterDestination = ({
+  String name,
+  String? address,
+  String? placeId,
+  double? lat,
+  double? lng,
+});
 
 class IntakeDetailPage extends ConsumerStatefulWidget {
   final String caseId;
@@ -30,7 +39,12 @@ class IntakeDetailPage extends ConsumerStatefulWidget {
   /// post-treatment paths).
   final List<int>? animalIndexes;
 
-  const IntakeDetailPage({super.key, required this.caseId, required this.data, this.animalIndexes});
+  const IntakeDetailPage({
+    super.key,
+    required this.caseId,
+    required this.data,
+    this.animalIndexes,
+  });
 
   @override
   ConsumerState<IntakeDetailPage> createState() => _IntakeDetailPageState();
@@ -42,6 +56,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   bool _isStartingQuarantine = false;
   bool _isEndingQuarantine = false;
   bool _isSkippingQuarantine = false;
+  bool _isClosingCase = false;
   final _quarantineDaysController = TextEditingController(text: '7');
   bool _hasCheckedQuarantineAutoComplete = false;
   bool _quarantineExpanded = false;
@@ -105,7 +120,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => ShelterLocationPickerPage(organizationId: orgId, userId: orgId == null ? uid : null),
+        builder: (_) => ShelterLocationPickerPage(
+          organizationId: orgId,
+          userId: orgId == null ? uid : null,
+        ),
       ),
     );
     if (saved == true) _resolveDestination();
@@ -118,7 +136,9 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     if (_hasCheckedQuarantineAutoComplete) return;
     _hasCheckedQuarantineAutoComplete = true;
     if (c.quarantineStatus == 'active' && !c.isQuarantineActive) {
-      await ref.read(rescueCaseRepositoryProvider).checkAndCompleteQuarantineIfDue(c);
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .checkAndCompleteQuarantineIfDue(c);
     }
   }
 
@@ -130,8 +150,14 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   /// RescueCaseRepository.checkAndCompleteIntakeIfDue is cheap/idempotent
   /// (its own guards make every call a no-op once already complete, or
   /// before intake is received / before every record exists).
-  Future<void> _checkIntakeAutoComplete(RescueCase c, {required int completedCount, required int totalAnimals}) async {
-    await ref.read(rescueCaseRepositoryProvider).checkAndCompleteIntakeIfDue(
+  Future<void> _checkIntakeAutoComplete(
+    RescueCase c, {
+    required int completedCount,
+    required int totalAnimals,
+  }) async {
+    await ref
+        .read(rescueCaseRepositoryProvider)
+        .checkAndCompleteIntakeIfDue(
           c,
           totalAnimalsExpected: totalAnimals,
           completedCount: completedCount,
@@ -147,7 +173,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   }) async {
     if (_isConfirmingIntake) return;
     final destination = _resolvedDestination;
-    if (destination == null || destination.lat == null || destination.lng == null) return;
+    if (destination == null ||
+        destination.lat == null ||
+        destination.lng == null)
+      return;
     if (transporterUid == null) return;
 
     final confirmed = await showDialog<bool>(
@@ -155,27 +184,43 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.background,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Confirm Intake', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+        title: Text(
+          'Confirm Intake',
+          style: GoogleFonts.tiltWarp(
+            fontSize: 17,
+            color: AppColors.textPrimary,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _ConfirmRow('Intake Destination', destination.name),
             _ConfirmRow('Transporter', '$transporterName ($transporterType)'),
-            _ConfirmRow('Clinic Pickup Location', c.vetClinicName ?? 'Not on file'),
+            _ConfirmRow(
+              'Clinic Pickup Location',
+              c.vetClinicName ?? 'Not on file',
+            ),
             _ConfirmRow('Case ID', '#${c.shortCaseId}'),
             _ConfirmRow('Species Summary', c.speciesSummary),
             _ConfirmRow(
-                'Discharge Date',
-                c.dischargedAt != null
-                    ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'
-                    : 'Not on file'),
+              'Discharge Date',
+              c.dischargedAt != null
+                  ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'
+                  : 'Not on file',
+            ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.zain(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -183,9 +228,14 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
               backgroundColor: AppColors.yellowrspwn,
               foregroundColor: AppColors.textPrimary,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
             ),
-            child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+            child: Text(
+              'Confirm',
+              style: GoogleFonts.zain(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -194,7 +244,9 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
     setState(() => _isConfirmingIntake = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).confirmIntake(
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .confirmIntake(
             caseId: widget.caseId,
             destinationName: destination.name,
             destinationAddress: destination.address,
@@ -211,7 +263,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       if (mounted) {
         setState(() => _isConfirmingIntake = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not confirm intake: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not confirm intake: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     }
@@ -230,7 +285,8 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Confirm Animal Received',
-      message: 'Confirm that the animal has arrived at the shelter?\n\n'
+      message:
+          'Confirm that the animal has arrived at the shelter?\n\n'
           'This will complete the transport assignment and allow animal records to be created.',
       confirmLabel: 'Confirm Received',
     );
@@ -238,15 +294,24 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
     setState(() => _isConfirmingReceived = true);
     try {
-      final assignment = ref.read(currentAssignmentProvider(widget.caseId)).asData?.value;
-      await ref.read(rescueCaseRepositoryProvider).confirmAnimalReceived(
+      final assignment = ref
+          .read(currentAssignmentProvider(widget.caseId))
+          .asData
+          ?.value;
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .confirmAnimalReceived(
             caseId: widget.caseId,
             currentAssignmentId: assignment?.id,
+            animalIndexes: widget.animalIndexes,
           );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not confirm receipt: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not confirm receipt: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -254,21 +319,60 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
   }
 
+  Future<void> _closeCase(RescueCase c) async {
+    if (_isClosingCase) return;
+    setState(() => _isClosingCase = true);
+    try {
+      final outcome = await performCloseCase(context, ref, c);
+      if (outcome.acted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              outcome.wholeCaseClosed
+                  ? 'Case closed.'
+                  : 'Animal marked deceased.',
+            ),
+          ),
+        );
+        if (outcome.wholeCaseClosed) Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not close case: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isClosingCase = false);
+    }
+  }
+
   Future<void> _startQuarantine() async {
     final days = int.tryParse(_quarantineDaysController.text.trim());
     if (days == null || days <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a quarantine duration in days.'), backgroundColor: Colors.redAccent),
+        const SnackBar(
+          content: Text('Enter a quarantine duration in days.'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
       return;
     }
     setState(() => _isStartingQuarantine = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).startQuarantine(caseId: widget.caseId, durationDays: days);
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .startQuarantine(caseId: widget.caseId, durationDays: days);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not start quarantine: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not start quarantine: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -280,17 +384,26 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'End Quarantine?',
-      message: 'This marks quarantine complete right now, ahead of its scheduled end.',
+      message:
+          'This marks quarantine complete right now, ahead of its scheduled end.',
       confirmLabel: 'End Quarantine',
     );
     if (!confirmed) return;
     setState(() => _isEndingQuarantine = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).endQuarantine(caseId: widget.caseId, reason: 'Manually ended early.');
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .endQuarantine(
+            caseId: widget.caseId,
+            reason: 'Manually ended early.',
+          );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not end quarantine: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not end quarantine: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -301,11 +414,16 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   Future<void> _skipQuarantine() async {
     setState(() => _isSkippingQuarantine = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).skipQuarantine(caseId: widget.caseId);
+      await ref
+          .read(rescueCaseRepositoryProvider)
+          .skipQuarantine(caseId: widget.caseId);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not skip quarantine: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Could not skip quarantine: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -318,9 +436,14 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final liveCase = ref.watch(caseDetailProvider(widget.caseId)).asData?.value;
     final c = liveCase ?? RescueCase.fromMap(widget.caseId, widget.data);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuarantineAutoComplete(c));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _checkQuarantineAutoComplete(c),
+    );
 
-    final latestAssignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
+    final latestAssignment = ref
+        .watch(currentAssignmentProvider(widget.caseId))
+        .asData
+        ?.value;
 
     // Default transporter priority: most recent accepted/completed
     // transport assignment -> the case's own flat assignedVolunteer*
@@ -358,15 +481,27 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final totalAnimals = widget.animalIndexes?.length ?? c.animalCount;
     final allCompletedIndexes = sourceAnimalRecordId != null
         ? Set<int>.from(List.generate(c.animalCount, (i) => i))
-        : (ref.watch(completedAnimalRecordIndexesProvider(widget.caseId)).asData?.value ?? <int>{});
+        : (ref
+                  .watch(completedAnimalRecordIndexesProvider(widget.caseId))
+                  .asData
+                  ?.value ??
+              <int>{});
     final completedIndexes = widget.animalIndexes != null
         ? allCompletedIndexes.where(widget.animalIndexes!.contains).toSet()
         : allCompletedIndexes;
+    final intakeAnimalIndexes =
+        widget.animalIndexes ?? List<int>.generate(c.animalCount, (i) => i);
+    final selectedAnimalsReceived =
+        intakeAnimalIndexes.isNotEmpty &&
+        intakeAnimalIndexes.every((i) => animalIsReceived(c, i));
 
     if (widget.animalIndexes != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (completedIndexes.length >= totalAnimals && c.intakeReceivedAt != null) {
-          await ref.read(rescueCaseRepositoryProvider).completeIntakeForAnimals(
+        if (completedIndexes.length >= totalAnimals &&
+            selectedAnimalsReceived) {
+          await ref
+              .read(rescueCaseRepositoryProvider)
+              .completeIntakeForAnimals(
                 caseId: widget.caseId,
                 animalIndexes: widget.animalIndexes!,
               );
@@ -374,7 +509,11 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       });
     } else {
       WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _checkIntakeAutoComplete(c, completedCount: completedIndexes.length, totalAnimals: totalAnimals),
+        (_) => _checkIntakeAutoComplete(
+          c,
+          completedCount: completedIndexes.length,
+          totalAnimals: totalAnimals,
+        ),
       );
     }
 
@@ -390,7 +529,13 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
           icon: const Icon(Icons.arrow_back, color: AppColors.background),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Intake Details', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+        title: Text(
+          'Intake Details',
+          style: GoogleFonts.tiltWarp(
+            fontSize: 18,
+            color: AppColors.background,
+          ),
+        ),
         // Reassign Transporter / Change Intake Destination live here instead
         // of as standalone buttons in the body — Reassign is only offered
         // while there's still something to reassign (before the animal is
@@ -420,8 +565,14 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
               },
               itemBuilder: (context) => [
                 if (c.intakeReceivedAt == null)
-                  const PopupMenuItem(value: 'reassign', child: Text('Reassign Transporter')),
-                const PopupMenuItem(value: 'change_destination', child: Text('Change Intake Destination')),
+                  const PopupMenuItem(
+                    value: 'reassign',
+                    child: Text('Reassign Transporter'),
+                  ),
+                const PopupMenuItem(
+                  value: 'change_destination',
+                  child: Text('Change Intake Destination'),
+                ),
               ],
             ),
         ],
@@ -432,29 +583,69 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header — same hierarchy as Treatment Details / Rescue Reports.
-            Text('#${c.shortCaseId}', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.textPrimary)),
+            Text(
+              '#${c.shortCaseId}',
+              style: GoogleFonts.tiltWarp(
+                fontSize: 22,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(c.speciesSummary,
-                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text(
+              c.speciesSummary,
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
             if ((c.vetClinicName ?? '').isNotEmpty) ...[
               const SizedBox(height: 2),
-              Text(c.vetClinicName!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              Text(
+                c.vetClinicName!,
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ],
             const SizedBox(height: 2),
-            Text('Discharged $dischargeDateStr', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+            Text(
+              'Discharged $dischargeDateStr',
+              style: GoogleFonts.zain(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
 
             if (c.raw['sourceType'] == 'adoptionReturn') ...[
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(color: AppColors.pinkrspwn.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.pinkrspwn.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Row(
                   children: [
-                    const Icon(Icons.assignment_return_outlined, size: 16, color: AppColors.textPrimary),
+                    const Icon(
+                      Icons.assignment_return_outlined,
+                      size: 16,
+                      color: AppColors.textPrimary,
+                    ),
                     const SizedBox(width: 8),
-                    Text('Intake Source: Adoption Return',
-                        style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    Text(
+                      'Intake Source: Adoption Return',
+                      style: GoogleFonts.zain(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -497,12 +688,26 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 _InfoItem('Address', c.intakeDestinationAddress!),
               const SizedBox(height: 16),
 
-              // Compact transport summary only — the full transporter card
-              // (avatar, vehicle, Message/Call, Busy chip) already lives on
-              // Track Case and isn't repeated here. Reassign Transporter
-              // moved to the overflow menu (see AppBar actions above).
+              // Transporter Card Regression spec §4 — restores the shared
+              // transporter card here too (it previously showed only a
+              // compact text summary, deferring to Track Case for the full
+              // card). Reuses `latestAssignment` — the SAME
+              // currentAssignmentProvider value _confirmIntake itself uses
+              // for transporterUid/Name/Type — so this can never disagree
+              // with what intake actually records, and tolerates legacy
+              // case-level assignments the same way that fallback already
+              // does. Stays visible (with a "Completed" chip) after
+              // delivery for historical context; Reassign Transporter
+              // stays in the overflow menu (see AppBar actions above) —
+              // not re-added to the card itself.
               _SectionHeader('Clinic-to-Shelter Transport'),
-              if (c.intakeReceivedAt != null)
+              if (latestAssignment != null &&
+                  (latestAssignment.status == TransportAssignmentStatus.accepted ||
+                      latestAssignment.status == TransportAssignmentStatus.completed)) ...[
+                TransporterDetailsCard(assignment: latestAssignment),
+                const SizedBox(height: 8),
+              ],
+              if (selectedAnimalsReceived)
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -511,19 +716,34 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 20),
+                      const Icon(
+                        Icons.check_circle,
+                        color: AppColors.greenrspwn,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Animal received',
-                                style: GoogleFonts.zain(
-                                    fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                             Text(
-                                'Received ${_monthName(c.intakeReceivedAt!.month)} '
-                                '${c.intakeReceivedAt!.day}, ${c.intakeReceivedAt!.year}',
-                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                              'Animal received',
+                              style: GoogleFonts.zain(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              c.intakeReceivedAt == null
+                                  ? 'Receipt confirmed'
+                                  : 'Received ${_monthName(c.intakeReceivedAt!.month)} '
+                                        '${c.intakeReceivedAt!.day}, ${c.intakeReceivedAt!.year}',
+                              style: GoogleFonts.zain(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -531,7 +751,13 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                   ),
                 )
               else
-                Text('Transport in progress.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                Text(
+                  'Transport in progress.',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: () => Navigator.push(
@@ -545,44 +771,22 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                   ),
                 ),
                 icon: const Icon(Icons.map_outlined, size: 18),
-                label: Text('View Transport Tracking', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                label: Text(
+                  'View Transport Tracking',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.textPrimary),
                   minimumSize: const Size(double.infinity, 44),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
-              ),
-              // Prominent — only shown before receipt is confirmed; once
-              // intakeReceivedAt is set, the green "Animal received" card
-              // above replaces this entirely (derived from the live case
-              // stream, not local state, so it flips automatically).
-              if (c.intakeReceivedAt == null) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isConfirmingReceived ? null : () => _confirmAnimalReceived(c),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      disabledBackgroundColor: AppColors.slaterspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      disabledForegroundColor: AppColors.textSecondary,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    child: _isConfirmingReceived
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                        : Text('Confirm Animal Received',
-                            style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
                   ),
                 ),
-              ],
-
+              ),
               const SizedBox(height: 20),
               _QuarantineSection(
                 rescueCase: c,
@@ -591,21 +795,86 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 isEnding: _isEndingQuarantine,
                 isSkipping: _isSkippingQuarantine,
                 expanded: _quarantineExpanded,
-                onToggleExpand: () => setState(() => _quarantineExpanded = !_quarantineExpanded),
+                onToggleExpand: () =>
+                    setState(() => _quarantineExpanded = !_quarantineExpanded),
                 onStart: _startQuarantine,
                 onEnd: _endQuarantine,
                 onSkip: _skipQuarantine,
               ),
 
               const SizedBox(height: 20),
+              if (!selectedAnimalsReceived) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isConfirmingReceived
+                        ? null
+                        : () => _confirmAnimalReceived(c),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellowrspwn,
+                      disabledBackgroundColor: AppColors.slaterspwn,
+                      foregroundColor: AppColors.textPrimary,
+                      disabledForegroundColor: AppColors.textSecondary,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: _isConfirmingReceived
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.textPrimary,
+                            ),
+                          )
+                        : Text(
+                            'Confirm Animal Received',
+                            style: GoogleFonts.tiltWarp(
+                              fontSize: 15,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
               _AnimalRecordsSection(
                 caseId: widget.caseId,
                 data: c.raw,
                 totalAnimals: totalAnimals,
                 completedCount: completedIndexes.length,
-                received: c.intakeReceivedAt != null,
+                received: selectedAnimalsReceived,
                 sourceAnimalRecordId: sourceAnimalRecordId,
                 animalIndexes: widget.animalIndexes,
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isClosingCase ? null : () => _closeCase(c),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFE05353),
+                    side: const BorderSide(color: Color(0xFFE05353)),
+                    disabledForegroundColor: AppColors.textSecondary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                  ),
+                  child: _isClosingCase
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          'Close Case',
+                          style: GoogleFonts.tiltWarp(fontSize: 15),
+                        ),
+                ),
               ),
             ],
 
@@ -642,7 +911,10 @@ class _ConfirmIntakeSection extends StatelessWidget {
     required this.onConfirm,
   });
 
-  bool get _hasUsableDestination => destination != null && destination!.lat != null && destination!.lng != null;
+  bool get _hasUsableDestination =>
+      destination != null &&
+      destination!.lat != null &&
+      destination!.lng != null;
 
   @override
   Widget build(BuildContext context) {
@@ -652,19 +924,33 @@ class _ConfirmIntakeSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionHeader('Confirm Intake'),
-        _DestinationCard(destination: destination, onChangeShelter: onChangeShelter),
+        _DestinationCard(
+          destination: destination,
+          onChangeShelter: onChangeShelter,
+        ),
         const SizedBox(height: 16),
-        _InfoItem('Selected Transporter', defaultUid != null ? '$defaultName ($defaultType)' : 'None selected'),
-        _InfoItem('Clinic Pickup Location', rescueCase.vetClinicName ?? 'Not on file'),
+        _InfoItem(
+          'Selected Transporter',
+          defaultUid != null ? '$defaultName ($defaultType)' : 'None selected',
+        ),
+        _InfoItem(
+          'Clinic Pickup Location',
+          rescueCase.vetClinicName ?? 'Not on file',
+        ),
         const SizedBox(height: 8),
         OutlinedButton(
           onPressed: onReassign,
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.textPrimary,
             side: const BorderSide(color: AppColors.textPrimary),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
           ),
-          child: Text('Reassign Transporter', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+          child: Text(
+            'Reassign Transporter',
+            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
         ),
         const SizedBox(height: 20),
         if (!canConfirm) ...[
@@ -672,7 +958,10 @@ class _ConfirmIntakeSection extends StatelessWidget {
             !_hasUsableDestination
                 ? 'Set a shelter location before confirming intake.'
                 : 'Select a transporter before confirming intake.',
-            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+            style: GoogleFonts.zain(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
           ),
           const SizedBox(height: 8),
         ],
@@ -681,20 +970,35 @@ class _ConfirmIntakeSection extends StatelessWidget {
           child: ElevatedButton(
             onPressed: isConfirming
                 ? null
-                : (!_hasUsableDestination ? onChangeShelter : (canConfirm ? onConfirm : null)),
+                : (!_hasUsableDestination
+                      ? onChangeShelter
+                      : (canConfirm ? onConfirm : null)),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellowrspwn,
               disabledBackgroundColor: AppColors.slaterspwn,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
             child: isConfirming
                 ? const SizedBox(
-                    height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.textPrimary,
+                    ),
+                  )
                 : Text(
-                    !_hasUsableDestination ? 'Set Shelter Location' : 'Confirm Intake',
-                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                    !_hasUsableDestination
+                        ? 'Set Shelter Location'
+                        : 'Confirm Intake',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 15,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
           ),
         ),
@@ -711,7 +1015,10 @@ class _DestinationCard extends StatelessWidget {
   final ShelterDestination? destination;
   final VoidCallback onChangeShelter;
 
-  const _DestinationCard({required this.destination, required this.onChangeShelter});
+  const _DestinationCard({
+    required this.destination,
+    required this.onChangeShelter,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -727,32 +1034,63 @@ class _DestinationCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.home_work_outlined, color: hasCoords ? AppColors.textPrimary : AppColors.textSecondary, size: 22),
+          Icon(
+            Icons.home_work_outlined,
+            color: hasCoords ? AppColors.textPrimary : AppColors.textSecondary,
+            size: 22,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Intake Destination',
-                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                Text(
+                  'Intake Destination',
+                  style: GoogleFonts.zain(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
                 const SizedBox(height: 2),
                 Text(
                   d == null ? 'No shelter location configured.' : d.name,
-                  style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  style: GoogleFonts.zain(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
                 if (d != null && (d.address ?? '').isNotEmpty)
-                  Text(d.address!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  Text(
+                    d.address!,
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
                 if (d != null && !hasCoords)
-                  Text('No coordinates on file — set an exact location.',
-                      style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent)),
+                  Text(
+                    'No coordinates on file — set an exact location.',
+                    style: GoogleFonts.zain(
+                      fontSize: 11,
+                      color: Colors.redAccent,
+                    ),
+                  ),
               ],
             ),
           ),
           const SizedBox(width: 8),
           TextButton(
             onPressed: onChangeShelter,
-            child: Text(d == null ? 'Set Shelter Location' : 'Change Location',
-                style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            child: Text(
+              d == null ? 'Set Shelter Location' : 'Change Location',
+              style: GoogleFonts.zain(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
           ),
         ],
       ),
@@ -795,12 +1133,19 @@ class _QuarantineSection extends StatelessWidget {
   ({String title, String subtitle}) _summary(RescueCase c) {
     if (c.quarantineStatus == 'active' && c.isQuarantineActive) {
       final end = c.quarantineScheduledEndAt;
-      return (title: 'Quarantine', subtitle: end != null ? 'Active · Ends ${_fmtDate(end)}' : 'Active');
+      return (
+        title: 'Quarantine',
+        subtitle: end != null ? 'Active · Ends ${_fmtDate(end)}' : 'Active',
+      );
     }
     if (c.hasQuarantineDecision) {
-      if (c.quarantineStatus == 'skipped') return (title: 'Quarantine', subtitle: 'Skipped');
+      if (c.quarantineStatus == 'skipped')
+        return (title: 'Quarantine', subtitle: 'Skipped');
       final end = c.quarantineEndedAt;
-      return (title: 'Quarantine', subtitle: end != null ? 'Completed ${_fmtDate(end)}' : 'Completed');
+      return (
+        title: 'Quarantine',
+        subtitle: end != null ? 'Completed ${_fmtDate(end)}' : 'Completed',
+      );
     }
     return (title: 'Quarantine — Optional', subtitle: 'Not started');
   }
@@ -827,13 +1172,30 @@ class _QuarantineSection extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(summary.title, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                      Text(
+                        summary.title,
+                        style: GoogleFonts.tiltWarp(
+                          fontSize: 15,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text(summary.subtitle, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                      Text(
+                        summary.subtitle,
+                        style: GoogleFonts.zain(
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textPrimary),
+                Icon(
+                  expanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  color: AppColors.textPrimary,
+                ),
               ],
             ),
           ),
@@ -852,10 +1214,14 @@ class _QuarantineSection extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (c.quarantineStartedAt != null) _InfoItem('Started', _fmtDate(c.quarantineStartedAt!)),
-          if (c.quarantineDurationDays != null) _InfoItem('Duration', '${c.quarantineDurationDays} days'),
-          if (c.quarantineScheduledEndAt != null) _InfoItem('Scheduled End', _fmtDate(c.quarantineScheduledEndAt!)),
-          if (remaining != null) _InfoItem('Remaining', '${remaining.inDays} day(s)'),
+          if (c.quarantineStartedAt != null)
+            _InfoItem('Started', _fmtDate(c.quarantineStartedAt!)),
+          if (c.quarantineDurationDays != null)
+            _InfoItem('Duration', '${c.quarantineDurationDays} days'),
+          if (c.quarantineScheduledEndAt != null)
+            _InfoItem('Scheduled End', _fmtDate(c.quarantineScheduledEndAt!)),
+          if (remaining != null)
+            _InfoItem('Remaining', '${remaining.inDays} day(s)'),
           const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
@@ -864,11 +1230,23 @@ class _QuarantineSection extends StatelessWidget {
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFE05353),
                 side: const BorderSide(color: Color(0xFFE05353)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
               ),
               child: isEnding
-                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text('End Quarantine', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(
+                      'End Quarantine',
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -880,7 +1258,7 @@ class _QuarantineSection extends StatelessWidget {
       final detail = isSkipped
           ? 'Quarantine was skipped for this case.'
           : 'Quarantine completed'
-              '${c.quarantineEndedAt != null ? ' on ${_fmtDate(c.quarantineEndedAt!)}' : ''}.';
+                '${c.quarantineEndedAt != null ? ' on ${_fmtDate(c.quarantineEndedAt!)}' : ''}.';
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -889,13 +1267,27 @@ class _QuarantineSection extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               disabledForegroundColor: AppColors.textSecondary,
               side: const BorderSide(color: AppColors.slaterspwn),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
             ),
-            child: Text(isSkipped ? 'Quarantine Skipped' : 'Quarantine Completed',
-                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            child: Text(
+              isSkipped ? 'Quarantine Skipped' : 'Quarantine Completed',
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
           ),
           const SizedBox(height: 6),
-          Text(detail, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          Text(
+            detail,
+            style: GoogleFonts.zain(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
+          ),
         ],
       );
     }
@@ -914,14 +1306,26 @@ class _QuarantineSection extends StatelessWidget {
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: 'Days',
-                  labelStyle: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  labelStyle: GoogleFonts.zain(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
                   isDense: true,
                   contentPadding: const EdgeInsets.only(bottom: 6),
-                  enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
-                  focusedBorder:
-                      const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+                  enabledBorder: const UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.textPrimary),
+                  ),
+                  focusedBorder: const UnderlineInputBorder(
+                    borderSide: BorderSide(
+                      color: AppColors.textPrimary,
+                      width: 1.5,
+                    ),
+                  ),
                 ),
-                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  color: AppColors.textPrimary,
+                ),
               ),
             ),
           ],
@@ -944,12 +1348,27 @@ class _QuarantineSection extends StatelessWidget {
                   foregroundColor: AppColors.textPrimary,
                   disabledForegroundColor: AppColors.textSecondary,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
                 ),
                 child: isStarting
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                    : Text('Start Quarantine',
-                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.textPrimary,
+                        ),
+                      )
+                    : Text(
+                        'Start Quarantine',
+                        style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
               ),
             ),
             const SizedBox(width: 10),
@@ -959,11 +1378,23 @@ class _QuarantineSection extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textSecondary,
                   side: const BorderSide(color: AppColors.slaterspwn),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
                 ),
                 child: isSkipping
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text('Skip', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(
+                        'Skip',
+                        style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
               ),
             ),
           ],
@@ -1016,10 +1447,12 @@ class _AnimalRecordsSection extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionHeader('Animal Records'),
           Text(
             'This case was admitted from an existing Animal Record — no new record is created.',
-            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
           ),
           const SizedBox(height: 8),
           SizedBox(
@@ -1027,16 +1460,26 @@ class _AnimalRecordsSection extends StatelessWidget {
             child: ElevatedButton(
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => AnimalRecordDetailPage(animalId: recordId, data: const {})),
+                MaterialPageRoute(
+                  builder: (_) => AnimalRecordDetailPage(
+                    animalId: recordId,
+                    data: const {},
+                  ),
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
                 foregroundColor: AppColors.textPrimary,
                 elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              child: Text('View Animal Record', style: GoogleFonts.tiltWarp(fontSize: 15)),
+              child: Text(
+                'View Animal Record',
+                style: GoogleFonts.tiltWarp(fontSize: 15),
+              ),
             ),
           ),
         ],
@@ -1044,14 +1487,19 @@ class _AnimalRecordsSection extends StatelessWidget {
     }
 
     final allDone = completedCount >= totalAnimals;
-    final buttonLabel = allDone ? 'View Animal Records' : (completedCount == 0 ? 'Create Animal Records' : 'Continue Animal Records');
+    final buttonLabel = allDone
+        ? 'View Animal Records'
+        : (completedCount == 0
+              ? 'Create Animal Records'
+              : 'Continue Animal Records');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader('Animal Records'),
         Text(
-          received ? '$completedCount of $totalAnimals records created' : 'Waiting for the animal to arrive.',
+          received
+              ? '$completedCount of $totalAnimals records created'
+              : 'Confirm that the animal has been received before creating its record.',
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 8),
@@ -1061,22 +1509,30 @@ class _AnimalRecordsSection extends StatelessWidget {
             onPressed: !received
                 ? null
                 : () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) =>
-                              AnimalRecordsFlowPage(caseId: caseId, caseData: data, animalIndexes: animalIndexes)),
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AnimalRecordsFlowPage(
+                        caseId: caseId,
+                        caseData: data,
+                        animalIndexes: animalIndexes,
+                      ),
                     ),
+                  ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellowrspwn,
               disabledBackgroundColor: AppColors.slaterspwn,
               foregroundColor: AppColors.textPrimary,
               disabledForegroundColor: AppColors.textSecondary,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            child: Text(received ? buttonLabel : 'Create Animal Records',
-                style: GoogleFonts.tiltWarp(fontSize: 15)),
+            child: Text(
+              received ? buttonLabel : 'Create Animal Records',
+              style: GoogleFonts.tiltWarp(fontSize: 15),
+            ),
           ),
         ),
       ],
@@ -1092,7 +1548,10 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(text, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+      child: Text(
+        text,
+        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+      ),
     );
   }
 }
@@ -1109,8 +1568,21 @@ class _InfoItem extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          Text(value, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.zain(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
         ],
       ),
     );
@@ -1129,8 +1601,18 @@ class _ConfirmRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-          Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+          Text(
+            label,
+            style: GoogleFonts.zain(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+          ),
         ],
       ),
     );
@@ -1138,6 +1620,16 @@ class _ConfirmRow extends StatelessWidget {
 }
 
 String _monthName(int month) => const [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
-    ][month - 1];
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+][month - 1];

@@ -2,6 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/adoption/return_request.dart';
 
+/// Single source of truth for the delivery-attempt cap, shared by the
+/// adopter-side tracking page (adoption_process.dart) and the admin Release
+/// page (release_details_page.dart) so the two can never disagree.
+const int kMaxDeliveryAttempts = 3;
+
 /// Admin-facing pipeline phase. The user-side form (adoption_process.dart)
 /// already wrote a looser set of raw `status` strings before this module
 /// existed — [fromFirestoreValue] maps both the new canonical values this
@@ -166,6 +171,16 @@ class AdoptionApplication {
   final DateTime? postAdoptionCompletedAt;
   final String? postAdoptionCompletedBy;
 
+  // Delivery attempts — canonical counter shared by the adopter-side
+  // tracking page and the admin Release page (see kMaxDeliveryAttempts
+  // above). Incremented only by an actual failed/rescheduled delivery
+  // action, never by opening a page or editing a date before confirmation.
+  final int deliveryAttempts;
+  final bool rescheduleRequested;
+  final DateTime? rescheduleRequestedAt;
+  final DateTime? lastDeliveryAttemptAt;
+  final String? lastDeliveryAttemptBy;
+
   // Withdrawal
   final DateTime? withdrawnAt;
   final String? withdrawalReason;
@@ -217,6 +232,11 @@ class AdoptionApplication {
     this.postAdoptionStatus = 'inProgress',
     this.postAdoptionCompletedAt,
     this.postAdoptionCompletedBy,
+    this.deliveryAttempts = 0,
+    this.rescheduleRequested = false,
+    this.rescheduleRequestedAt,
+    this.lastDeliveryAttemptAt,
+    this.lastDeliveryAttemptBy,
     this.withdrawnAt,
     this.withdrawalReason,
     this.paymentStatus,
@@ -235,6 +255,9 @@ class AdoptionApplication {
       };
 
   bool get isOpen => status != AdoptionStatus.rejected && status != AdoptionStatus.withdrawn && status != AdoptionStatus.adopted;
+
+  int get deliveryAttemptsRemaining => (kMaxDeliveryAttempts - deliveryAttempts).clamp(0, kMaxDeliveryAttempts);
+  bool get deliveryAttemptsExhausted => deliveryAttempts >= kMaxDeliveryAttempts;
 
   ReturnRequest? get returnRequest => ReturnRequest.fromMap(raw['returnRequest'] as Map<String, dynamic>?);
 
@@ -298,6 +321,11 @@ class AdoptionApplication {
       postAdoptionStatus: data['postAdoptionStatus'] as String? ?? 'inProgress',
       postAdoptionCompletedAt: ts(data['postAdoptionCompletedAt']),
       postAdoptionCompletedBy: data['postAdoptionCompletedBy'] as String?,
+      deliveryAttempts: (data['deliveryAttempts'] as num?)?.toInt() ?? 0,
+      rescheduleRequested: data['rescheduleRequested'] as bool? ?? false,
+      rescheduleRequestedAt: ts(data['rescheduleRequestedAt']),
+      lastDeliveryAttemptAt: ts(data['lastDeliveryAttemptAt']),
+      lastDeliveryAttemptBy: data['lastDeliveryAttemptBy'] as String?,
       withdrawnAt: ts(data['withdrawnAt']),
       withdrawalReason: data['withdrawalReason'] as String?,
       paymentStatus: payment['status'] as String?,

@@ -42,6 +42,11 @@ class ReturnRequest {
   final String urgency;
   final String explanation;
   final List<String> images;
+  // Return Autofill spec §7 — the adopter's own contact number/pickup
+  // address, submitted at request time. Distinct from retrievalAddress
+  // below (set later by the org during scheduling).
+  final String? contactNumber;
+  final String? returnAddress;
   final String? requestedBy;
   final DateTime? requestedAt;
 
@@ -89,6 +94,8 @@ class ReturnRequest {
     required this.urgency,
     required this.explanation,
     required this.images,
+    this.contactNumber,
+    this.returnAddress,
     this.requestedBy,
     this.requestedAt,
     required this.status,
@@ -127,6 +134,8 @@ class ReturnRequest {
       urgency: map['urgency'] as String? ?? '',
       explanation: map['explanation'] as String? ?? '',
       images: List<String>.from(map['images'] ?? const []),
+      contactNumber: map['contactNumber'] as String?,
+      returnAddress: map['returnAddress'] as String?,
       requestedBy: map['requestedBy'] as String?,
       requestedAt: ts(map['requestedAt']),
       status: ReturnRequestStatus.fromName(map['status'] as String?),

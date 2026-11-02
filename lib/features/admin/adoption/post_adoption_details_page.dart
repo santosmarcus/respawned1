@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
+import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/core/utils/adoption_lifecycle.dart';
 import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
 import 'package:respawnd1/core/widgets/date_time_picker_sheet.dart' as picker;
@@ -252,6 +253,14 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
                     onInitiateReturn: _initiateReturn,
                   ),
                   const SizedBox(height: 12),
+                  // Post-Adoption Notes spec §5 — surfaces the SAME
+                  // notesLog/addPrivateNote history the "Add General
+                  // Post-Adoption Note" button above already writes to,
+                  // which previously had no display anywhere on this
+                  // screen at all (only visible, mislabeled "Interview
+                  // Notes", on the separate application-review page).
+                  _GeneralNotesSection(applicationId: widget.applicationId),
+                  const SizedBox(height: 12),
                   _WarningsSection(applicationId: widget.applicationId, busy: _busy, onResolve: _resolveWarning),
                   const SizedBox(height: 12),
                   if (app.noFollowUpsPlanned)
@@ -423,7 +432,10 @@ class _OrgActionsSection extends StatelessWidget {
                 OutlinedButton(
                   onPressed: busy ? null : onAddNote,
                   style: OutlinedButton.styleFrom(foregroundColor: AppColors.textPrimary, side: const BorderSide(color: AppColors.textPrimary)),
-                  child: const Text('Add Note'),
+                  // Post-Adoption Notes spec §5 — explicitly scoped as the
+                  // adoption-wide note, distinct from each follow-up's own
+                  // admin note below (_FollowUpCard's "Admin Note" field).
+                  child: const Text('Add General Post-Adoption Note'),
                 ),
                 OutlinedButton(
                   onPressed: busy ? null : onSendWarning,
@@ -534,6 +546,66 @@ class _WarningRow extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// General Post-Adoption Note history (Post-Adoption Notes spec §5) — the
+/// SAME `adoptions/{id}/notesLog` subcollection AdoptionApplicationRepository.
+/// addPrivateNote already writes to; this widget only reads it. Deliberately
+/// labeled to make the scope unambiguous against each follow-up's own
+/// separate Admin Note field below.
+class _GeneralNotesSection extends StatelessWidget {
+  final String applicationId;
+  const _GeneralNotesSection({required this.applicationId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('adoptions')
+          .doc(applicationId)
+          .collection('notesLog')
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
+      builder: (context, snap) {
+        final docs = snap.data?.docs ?? const [];
+        if (docs.isEmpty) return const SizedBox.shrink();
+        return SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('General Post-Adoption Note — History', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              for (final doc in docs) _GeneralNoteRow(data: doc.data()),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _GeneralNoteRow extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _GeneralNoteRow({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final createdAt = data['createdAt'];
+    final createdAtStr = createdAt is Timestamp ? _fmtDateTime(createdAt.toDate()) : 'Not set';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(data['text'] as String? ?? '', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          Text('$createdAtStr by ${data['createdBy'] ?? '—'}', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
         ],
       ),
     );
@@ -822,6 +894,136 @@ class _CompleteMonitoringButton extends StatelessWidget {
   }
 }
 
+/// Per-follow-up Admin Note editor (Post-Adoption Notes spec §4). Kept
+/// read-only once the follow-up reaches a terminal state (completed/
+/// cancelled) — this codebase's existing convention for other per-item
+/// notes (e.g. Interview Notes becoming read-only once an application is
+/// adopted) is to freeze history rather than keep it editable forever;
+/// flagged here as a deliberate policy choice, not an oversight, in case
+/// the org actually wants completed items to stay editable.
+class _FollowUpAdminNoteField extends StatefulWidget {
+  final String applicationId;
+  final FollowUpRecord followUp;
+  const _FollowUpAdminNoteField({required this.applicationId, required this.followUp});
+
+  @override
+  State<_FollowUpAdminNoteField> createState() => _FollowUpAdminNoteFieldState();
+}
+
+enum _NoteSaveState { idle, saving, saved, error }
+
+class _FollowUpAdminNoteFieldState extends State<_FollowUpAdminNoteField> {
+  late final TextEditingController _controller;
+  _NoteSaveState _saveState = _NoteSaveState.idle;
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.followUp.adminNote ?? '');
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String get _actorName {
+    final n = FirebaseAuth.instance.currentUser?.displayName;
+    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
+
+  Future<void> _save() async {
+    setState(() => _saveState = _NoteSaveState.saving);
+    try {
+      await AdoptionApplicationRepository().setFollowUpAdminNote(
+        applicationId: widget.applicationId,
+        followUpId: widget.followUp.id,
+        note: _controller.text.trim(),
+        actorName: _actorName,
+      );
+      if (!mounted) return;
+      setState(() {
+        _saveState = _NoteSaveState.saved;
+        _editing = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saveState = _NoteSaveState.error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final readOnly = widget.followUp.isTerminal && !_editing;
+    final hasNote = (widget.followUp.adminNote ?? '').trim().isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Admin Note', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const Spacer(),
+              if (_saveState == _NoteSaveState.saving)
+                const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+              else if (_saveState == _NoteSaveState.saved)
+                Text('Saved', style: GoogleFonts.zain(fontSize: 11, color: AppColors.greenrspwn))
+              else if (_saveState == _NoteSaveState.error)
+                Text('Could not save', style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (readOnly)
+            Text(hasNote ? widget.followUp.adminNote! : 'No note for this follow-up.',
+                style: GoogleFonts.zain(fontSize: 12, color: hasNote ? AppColors.textPrimary : AppColors.textSecondary))
+          else
+            TextField(
+              controller: _controller,
+              maxLines: 3,
+              onChanged: (_) => setState(() => _saveState = _NoteSaveState.idle),
+              decoration: InputDecoration(
+                hintText: 'Private note for this follow-up (never shown to the adopter)',
+                hintStyle: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                isDense: true,
+                contentPadding: const EdgeInsets.all(8),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.slaterspwn)),
+              ),
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+            ),
+          if (widget.followUp.adminNoteUpdatedAt != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Last updated ${_fmtDateTime(widget.followUp.adminNoteUpdatedAt)} by ${widget.followUp.adminNoteUpdatedBy ?? '—'}',
+                style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+              ),
+            ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: widget.followUp.isTerminal && !_editing
+                ? TextButton(
+                    onPressed: () => setState(() => _editing = true),
+                    child: Text('Edit anyway', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                  )
+                : TextButton(
+                    onPressed: _saveState == _NoteSaveState.saving ? null : _save,
+                    child: Text('Save Note', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FollowUpCard extends StatelessWidget {
   final String applicationId;
   final FollowUpRecord followUp;
@@ -906,7 +1108,13 @@ class _FollowUpCard extends StatelessWidget {
                   if (followUp.manualCompletionReason != null) _detail('Manually closed — reason', followUp.manualCompletionReason!),
                   if (followUp.rescheduledAt != null)
                     _detail('Rescheduled', '${_fmtDateTime(followUp.rescheduledAt)} by ${followUp.rescheduledBy ?? '—'}${followUp.rescheduleReason != null ? ' — ${followUp.rescheduleReason}' : ''}'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
+                  // Post-Adoption Notes spec §4 — belongs to THIS follow-up
+                  // only (never the adopter's confirmationNotes above, never
+                  // the adoption-wide General Post-Adoption Note), placed
+                  // before the communication/action row below.
+                  _FollowUpAdminNoteField(applicationId: applicationId, followUp: followUp),
+                  const SizedBox(height: 10),
                   Text('Adopter Responses', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                   const SizedBox(height: 6),
                   _AdopterResponseViewer(applicationId: applicationId, followUpId: followUp.id, submitted: followUp.submittedAt != null),

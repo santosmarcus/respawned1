@@ -45,6 +45,12 @@ class RescueCase {
   /// [animalCount] all fall back to [animalType] in that case.
   final List<Map<String, dynamic>> animals;
   final String? urgency; // 'Critical' | 'Medium' | 'Low', see UrgencyLevel
+  // Rescue Analytics Regression fix — written by rescue_page.dart at
+  // report time (e.g. 'Stray', 'Neglect/Abuse', 'Surrender', 'Lost Pet')
+  // but never parsed onto this model before, so nothing could read it by
+  // its real name — only ever reachable via `raw['rescueType']`. Case-
+  // level (one value per case doc), never repeated per animal.
+  final String? rescueType;
   final String? condition; // description
   final List<String> photoUrls;
   final List<String> videoUrls;
@@ -148,6 +154,7 @@ class RescueCase {
     this.animalType,
     this.animals = const [],
     this.urgency,
+    this.rescueType,
     this.condition,
     this.photoUrls = const [],
     this.videoUrls = const [],
@@ -229,6 +236,7 @@ class RescueCase {
           .map((e) => Map<String, dynamic>.from(e))
           .toList(),
       urgency: data['urgency'] as String?,
+      rescueType: data['rescueType'] as String?,
       condition: data['condition'] as String?,
       photoUrls: List<String>.from(data['photoUrls'] ?? const []),
       videoUrls: List<String>.from(data['videoUrls'] ?? const []),

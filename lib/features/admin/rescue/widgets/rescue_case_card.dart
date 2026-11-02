@@ -30,6 +30,18 @@ class RejectionCardInfo {
   });
 }
 
+/// Extra fields shown on a Closed-tab card only — the closure reason and
+/// closed date/by, read straight off the case's own closureReason/
+/// closedAt/closedByName fields (RescueCaseRepository.closeCase). Same
+/// no-Firestore-dependency-of-its-own shape as [RejectionCardInfo].
+class ClosureCardInfo {
+  final String reasonLabel;
+  final DateTime? closedDate;
+  final String? closedBy;
+
+  const ClosureCardInfo({required this.reasonLabel, this.closedDate, this.closedBy});
+}
+
 /// Compact rescue list card — image, case ID, species summary, priority,
 /// short location, reported date/time, current phase/status, and a "View
 /// Details" action, sized consistently with AnimalRecordCard/adoption cards
@@ -64,6 +76,10 @@ class RescueCaseCard extends StatelessWidget {
   /// below the usual card content. Null on every other tab.
   final RejectionCardInfo? rejectionInfo;
 
+  /// Closed-tab only — closure reason and closed date/by. Null on every
+  /// other tab.
+  final ClosureCardInfo? closureInfo;
+
   /// Restricts the species-summary/animal-count line to only the animals
   /// currently in this stage (spec §7: "card/page must show only the
   /// animals relevant to that stage") — e.g. 'intake' on the Intake tab so
@@ -80,6 +96,7 @@ class RescueCaseCard extends StatelessWidget {
     this.highlightBorder = false,
     this.pendingOfferNote,
     this.rejectionInfo,
+    this.closureInfo,
     this.stageFilter,
   });
 
@@ -189,6 +206,7 @@ class RescueCaseCard extends StatelessWidget {
                   if (dateTimeLine.isNotEmpty)
                     Text(dateTimeLine, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
                   if (rejectionInfo != null) ..._rejectionInfoLines(rejectionInfo!),
+                  if (closureInfo != null) ..._closureInfoLines(closureInfo!),
                   const SizedBox(height: 4),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -275,6 +293,24 @@ class RescueCaseCard extends StatelessWidget {
                     fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.greenrspwn)),
           ),
         ),
+    ];
+  }
+
+  List<Widget> _closureInfoLines(ClosureCardInfo info) {
+    final closedDate = info.closedDate;
+    final closedDateStr = closedDate != null
+        ? '${closedDate.month}/${closedDate.day}/${closedDate.year}'
+        : 'Unknown date';
+    return [
+      const SizedBox(height: 3),
+      Text('Reason: ${info.reasonLabel}',
+          style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      Text('Closed $closedDateStr${info.closedBy != null ? ' by ${info.closedBy}' : ''}',
+          style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
     ];
   }
 }

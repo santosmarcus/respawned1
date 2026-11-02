@@ -2,19 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'volunteer_page.dart';
 import 'volunteer_signup_success.dart';
 
 class VolunteerSignUpPage extends StatefulWidget {
   final VolunteerEvent event;
-  final MarkJoinedCallback onMarkJoined;
 
   const VolunteerSignUpPage({
     super.key,
     required this.event,
-    required this.onMarkJoined,
   });
 
   @override
@@ -37,7 +36,10 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
 
   String _generateParticipantNumber() {
     final ts = DateTime.now().millisecondsSinceEpoch % 100000;
-    return 'VOL-${widget.event.id}-$ts';
+    final eventCode = widget.event.id.length > 6
+        ? widget.event.id.substring(0, 6).toUpperCase()
+        : widget.event.id.toUpperCase();
+    return 'VOL-$eventCode-$ts';
   }
 
   Future<void> _handleSignUp() async {
@@ -56,13 +58,21 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
     final participantNumber = _generateParticipantNumber();
 
     try {
-      await widget.onMarkJoined(
+      await VolunteerEventRepository().register(
         event: widget.event,
         participantName: name,
         participantEmail: email,
         participantMobileNumber: mobile,
         participantNumber: participantNumber,
       );
+      widget.event.joined = true;
+    } on EventRegistrationException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent));
+      return;
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -183,7 +193,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
                   backgroundColor: AppColors.yellowrspwn,
                   foregroundColor: AppColors.textPrimary,
                   disabledBackgroundColor:
-                  AppColors.yellowrspwn.withOpacity(0.6),
+                  AppColors.yellowrspwn.withValues(alpha: 0.6),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30)),

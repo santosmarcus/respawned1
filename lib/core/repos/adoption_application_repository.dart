@@ -7,7 +7,9 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_schedule.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
+import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
+import 'package:respawnd1/core/repos/audit_log_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 
 /// Result of [AdoptionApplicationRepository.checkAvailability] — what a
@@ -57,18 +59,33 @@ class AnimalAvailabilityResult {
 /// lives in the adoption doc's `returnRequest` map — see
 /// core/models/adoption/{follow_up_schedule,follow_up_record,
 /// return_request}.dart for the field shapes.
+/// Thrown by [AdoptionApplicationRepository.releaseWithFollowUps] when no
+/// valid Post-Adoption follow-up schedule exists yet — a domain-specific
+/// error (spec §8) rather than a bare StateError, so callers can reliably
+/// distinguish "you forgot to schedule follow-ups" from any other release
+/// failure (animal already adopted, application not approved, etc.).
+class PostAdoptionScheduleRequiredException implements Exception {
+  static const code = 'post-adoption-schedule-required';
+  const PostAdoptionScheduleRequiredException();
+  @override
+  String toString() => code;
+}
+
 class AdoptionApplicationRepository {
   AdoptionApplicationRepository({
     FirebaseFirestore? firestore,
     AnimalRecordRepository? animalRecordRepository,
     RescueCaseRepository? rescueCaseRepository,
+    AuditLogRepository? auditLogRepository,
   })  : _db = firestore ?? FirebaseFirestore.instance,
         _animalRepo = animalRecordRepository ?? AnimalRecordRepository(firestore: firestore),
-        _caseRepo = rescueCaseRepository ?? RescueCaseRepository(firestore: firestore);
+        _caseRepo = rescueCaseRepository ?? RescueCaseRepository(firestore: firestore),
+        _auditLog = auditLogRepository ?? AuditLogRepository(firestore: firestore);
 
   final FirebaseFirestore _db;
   final AnimalRecordRepository _animalRepo;
   final RescueCaseRepository _caseRepo;
+  final AuditLogRepository _auditLog;
 
   CollectionReference<Map<String, dynamic>> get _adoptions => _db.collection('adoptions');
   CollectionReference<Map<String, dynamic>> get _animals => _db.collection('animals');
@@ -369,6 +386,17 @@ class AdoptionApplicationRepository {
         {'status': 'Application approved by $actorName.', 'timestamp': Timestamp.now()}
       ]),
     });
+    // Best-effort, after the real write — an audit-log failure must never
+    // roll back or block the actual approval.
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Application approved',
+      actorId: actorUid,
+      actorName: actorName,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      newValues: const {'status': 'approved'},
+    );
   }
 
   Future<void> reject({
@@ -388,6 +416,16 @@ class AdoptionApplicationRepository {
         {'status': 'Application rejected: ${reasons.join(', ')}.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Application rejected',
+      actorId: actorUid,
+      actorName: actorName,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      newValues: {'status': 'rejected', 'reasons': reasons},
+      metadata: notes != null && notes.isNotEmpty ? {'notes': notes} : null,
+    );
   }
 
   // ---- Reserve / Unreserve / Release (transactional) ---------------------
@@ -398,6 +436,9 @@ class AdoptionApplicationRepository {
   Future<void> reserve({
     required String applicationId,
     required String animalId,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
   }) async {
     final appRef = _adoptionDoc(applicationId);
     final animalRef = _animals.doc(animalId);
@@ -433,7 +474,33 @@ class AdoptionApplicationRepository {
           {'status': 'Animal reserved for this applicant.', 'timestamp': now}
         ]),
       });
+      // Same transaction as the status change itself, per the Animal Logs
+      // spec ("use the same transaction/batch as the business action where
+      // practical") — the log can never exist without the reservation
+      // actually having committed, or vice versa.
+      tx.set(animalRef.collection('managementLogs').doc(), {
+        'animalId': animalId,
+        'eventType': 'reserved',
+        'action': 'Reserved',
+        if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
+        if (actorName != null && actorName.isNotEmpty) 'actorName': actorName,
+        if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
+        'newValues': {'adoptionStatus': 'reserved'},
+        'sourceModule': 'adoption',
+        'sourceRecordId': applicationId,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
     });
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Animal reserved',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      metadata: {'animalId': animalId},
+    );
   }
 
   /// Clears only the reservation that matches [applicationId] — never
@@ -481,6 +548,8 @@ class AdoptionApplicationRepository {
     required String animalId,
     required String actorName,
     String? notes,
+    String? actorId,
+    String? actorEmail,
   }) async {
     final appRef = _adoptionDoc(applicationId);
     final animalRef = _animals.doc(animalId);
@@ -524,6 +593,20 @@ class AdoptionApplicationRepository {
         'statusHistory': FieldValue.arrayUnion([
           {'status': 'Animal released — adoption completed.', 'timestamp': now}
         ]),
+      });
+      // Same transaction as the adoption handoff itself — see reserve()'s
+      // matching comment above.
+      tx.set(animalRef.collection('managementLogs').doc(), {
+        'animalId': animalId,
+        'eventType': 'adopted',
+        'action': 'Adoption/release completed',
+        'actorName': actorName,
+        if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
+        if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
+        'newValues': {'adoptionStatus': 'adopted'},
+        'sourceModule': 'adoption',
+        'sourceRecordId': applicationId,
+        'timestamp': FieldValue.serverTimestamp(),
       });
     });
   }
@@ -624,21 +707,30 @@ class AdoptionApplicationRepository {
     required List<FollowUpScheduleRule> rules,
     bool noFollowUpsPlanned = false,
     String? notes,
+    String? actorId,
+    String? actorEmail,
   }) async {
-    if (!noFollowUpsPlanned) {
-      if (rules.isEmpty) {
-        throw StateError('Add at least one follow-up schedule, or turn on "No follow-ups needed".');
-      }
-      for (final r in rules) {
-        if (r.intervalValue <= 0 || r.durationValue <= 0) {
-          throw StateError('Every follow-up schedule needs a positive interval and duration.');
-        }
+    // Post-Adoption Release Gate spec §6-8 — release/handover must not
+    // complete without at least one actual scheduled follow-up. Re-checked
+    // here (not just in the calling page's UI) so a stale screen — or any
+    // future/direct caller — can never bypass it; this throws before any
+    // write happens, so the animal is never partially marked adopted.
+    // `noFollowUpsPlanned` no longer bypasses this: an "opt out of
+    // follow-ups entirely" release is exactly the state this rule
+    // forbids. The parameter is still accepted (and still written to the
+    // application doc) purely for backward-compatible field shape.
+    if (rules.isEmpty) {
+      throw const PostAdoptionScheduleRequiredException();
+    }
+    for (final r in rules) {
+      if (r.intervalValue <= 0 || r.durationValue <= 0) {
+        throw StateError('Every follow-up schedule needs a positive interval and duration.');
       }
     }
 
-    final generated = noFollowUpsPlanned ? const <GeneratedFollowUpDate>[] : generateFollowUpDates(rules, releaseDate);
-    if (!noFollowUpsPlanned && generated.isEmpty) {
-      throw StateError('This follow-up schedule produced no dates — check each rule\'s interval and duration.');
+    final generated = generateFollowUpDates(rules, releaseDate);
+    if (generated.isEmpty) {
+      throw const PostAdoptionScheduleRequiredException();
     }
 
     final appRef = _adoptionDoc(applicationId);
@@ -713,6 +805,70 @@ class AdoptionApplicationRepository {
           'createdAt': now,
         });
       }
+
+      // Same transaction as the release itself — see reserve()'s matching
+      // comment. This is the actual production release path (the Release
+      // Details page calls this, not the simpler [release] above).
+      tx.set(animalRef.collection('managementLogs').doc(), {
+        'animalId': animalId,
+        'eventType': 'adopted',
+        'action': 'Adoption/release completed',
+        'actorName': actorName,
+        if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
+        if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
+        'newValues': {'adoptionStatus': 'adopted'},
+        'sourceModule': 'adoption',
+        'sourceRecordId': applicationId,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    });
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: 'Adoption completed / animal released',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      metadata: {'animalId': animalId, 'noFollowUpsPlanned': noFollowUpsPlanned},
+    );
+  }
+
+  /// Admin-side counterpart to the adopter's own Request Reschedule action
+  /// (adoption_process.dart._requestDeliveryReschedule) — records an actual
+  /// unsuccessful/missed delivery so the SAME `deliveryAttempts` counter
+  /// used by the adopter's tracking screen advances by exactly one. Never
+  /// called for a plain date edit/preview — only when a real failed
+  /// delivery is being logged. Transactional so a duplicate tap (or a
+  /// concurrent adopter-side reschedule) can never push the count above
+  /// [kMaxDeliveryAttempts] or apply twice.
+  Future<void> recordDeliveryAttempt({
+    required String applicationId,
+    required String actorName,
+  }) async {
+    final ref = _adoptionDoc(applicationId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) throw StateError('Application not found.');
+      final data = snap.data()!;
+      final current = (data['deliveryAttempts'] as num?)?.toInt() ?? 0;
+      if (current >= kMaxDeliveryAttempts) {
+        throw StateError('All $kMaxDeliveryAttempts delivery attempts have already been used.');
+      }
+      final next = current + 1;
+      final now = Timestamp.now();
+      tx.update(ref, {
+        'deliveryAttempts': next,
+        'rescheduleRequested': false,
+        'lastDeliveryAttemptAt': now,
+        'lastDeliveryAttemptBy': actorName,
+        'statusHistory': FieldValue.arrayUnion([
+          {
+            'status': 'Admin recorded an unsuccessful delivery attempt (attempt $next of $kMaxDeliveryAttempts) — $actorName.',
+            'timestamp': now,
+          }
+        ]),
+      });
     });
   }
 
@@ -734,6 +890,25 @@ class AdoptionApplicationRepository {
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Follow-up submission confirmed by $actorName.', 'timestamp': Timestamp.now()}
       ]),
+    });
+  }
+
+  /// Sets (or clears, when [note] is empty) this specific follow-up's own
+  /// admin note (Post-Adoption Notes spec §4) — never the adopter's
+  /// [FollowUpRecord.confirmationNotes], and never the application-wide
+  /// General Post-Adoption Note ([addPrivateNote]/notesLog). Allowed
+  /// regardless of the follow-up's status — the UI decides whether to keep
+  /// completed items read-only.
+  Future<void> setFollowUpAdminNote({
+    required String applicationId,
+    required String followUpId,
+    required String note,
+    required String actorName,
+  }) async {
+    await _followUpsOf(applicationId).doc(followUpId).update({
+      'adminNote': note,
+      'adminNoteUpdatedAt': FieldValue.serverTimestamp(),
+      'adminNoteUpdatedBy': actorName,
     });
   }
 
@@ -914,6 +1089,13 @@ class AdoptionApplicationRepository {
     required String explanation,
     required List<String> images,
     required String actorUid,
+    // Return Autofill spec §7 — the adopter's own contact number/pickup
+    // address at request time. Deliberately separate from
+    // retrievalAddress/retrievalDateTime below, which the ORG sets later
+    // during scheduling (a different stage of the same state machine) —
+    // never conflated with each other.
+    String? contactNumber,
+    String? returnAddress,
   }) async {
     await _adoptionDoc(applicationId).update({
       'returnRequest': {
@@ -922,6 +1104,8 @@ class AdoptionApplicationRepository {
         'urgency': urgency,
         'explanation': explanation,
         'images': images,
+        if (contactNumber != null && contactNumber.isNotEmpty) 'contactNumber': contactNumber,
+        if (returnAddress != null && returnAddress.isNotEmpty) 'returnAddress': returnAddress,
         'requestedBy': actorUid,
         'requestedAt': Timestamp.now(),
         'status': ReturnRequestStatus.pendingReview.name,

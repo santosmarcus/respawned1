@@ -1,11 +1,16 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/animals/widgets/animal_logs_section.dart';
+import 'package:respawnd1/features/admin/animals/widgets/animal_record_export_sheet.dart';
 import 'package:respawnd1/features/admin/animals/widgets/transfer_animal_record_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 
 /// Organization-management actions — deliberately separate from the
@@ -38,6 +43,13 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     }
   }
 
+  String? get _actorId => FirebaseAuth.instance.currentUser?.uid;
+  String? get _actorEmail => FirebaseAuth.instance.currentUser?.email;
+  String get _actorName {
+    final n = FirebaseAuth.instance.currentUser?.displayName?.trim();
+    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
+
   Future<void> _toggleArchive() async {
     final animal = widget.animal;
     final confirmed = await showConfirmActionDialog(
@@ -49,7 +61,13 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
       confirmLabel: animal.archived ? 'Restore Record' : 'Archive',
     );
     if (!confirmed) return;
-    await _run(() => ref.read(animalRecordRepositoryProvider).setArchived(animalId: animal.id, archived: !animal.archived));
+    await _run(() => ref.read(animalRecordRepositoryProvider).setArchived(
+          animalId: animal.id,
+          archived: !animal.archived,
+          actorId: _actorId,
+          actorName: _actorName,
+          actorEmail: _actorEmail,
+        ));
   }
 
   Future<void> _transfer() async {
@@ -67,6 +85,9 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
           date: result.date,
           cause: result.cause,
           notes: result.notes,
+          actorId: _actorId,
+          actorName: _actorName,
+          actorEmail: _actorEmail,
         ));
   }
 
@@ -79,13 +100,16 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
       confirmLabel: 'Mark Adopted',
     );
     if (!confirmed) return;
-    await _run(() => ref.read(animalRecordRepositoryProvider).markAdopted(animalId: widget.animal.id));
+    await _run(() => ref.read(animalRecordRepositoryProvider).markAdopted(
+          animalId: widget.animal.id,
+          actorId: _actorId,
+          actorName: _actorName,
+          actorEmail: _actorEmail,
+        ));
   }
 
-  void _exportRecord() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Export Record (PDF) is not available yet.')),
-    );
+  Future<void> _exportRecord() async {
+    await showAnimalRecordExportSheet(context, animal: widget.animal);
   }
 
   void _generateTag() {
@@ -94,13 +118,68 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     );
   }
 
+  // Facebook Page Publishing Compatibility spec — Animal Records viewing
+  // and every other management action here stays open to Owner/Admin/
+  // Member alike; only this one action is gated to Owner/active-Admin or a
+  // Member granted Facebook sharing (canPublishToFacebook), and the Cloud
+  // Function independently re-verifies that regardless of what this UI shows.
+  Future<void> _publishToFacebook() async {
+    final orgId = ref.read(currentOrganizationIdProvider).asData?.value;
+    if (orgId == null) return;
+    final messageController = TextEditingController(
+      text: 'Meet ${widget.animal.name.isNotEmpty ? widget.animal.name : 'this animal'}, available for adoption!',
+    );
+    final message = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: const Text('Publish to Facebook Page'),
+        content: TextField(controller: messageController, maxLines: 4, decoration: const InputDecoration(labelText: 'Post caption')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, messageController.text.trim()),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            child: const Text('Publish'),
+          ),
+        ],
+      ),
+    );
+    if (message == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(facebookIntegrationRepositoryProvider).publishAnimalRecords(
+            organizationId: orgId,
+            animalRecordIds: [widget.animal.id],
+            message: message,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Published to Facebook Page.'), backgroundColor: AppColors.greenrspwn),
+        );
+      }
+    } on FacebookOperationException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.redAccent));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not publish to Facebook.'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _viewLogs() {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.background,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _LogsSheet(animalId: widget.animal.id),
+      builder: (_) => AnimalLogsSheet(animalId: widget.animal.id),
     );
   }
 
@@ -108,6 +187,15 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
   Widget build(BuildContext context) {
     final animal = widget.animal;
     final isTerminal = animal.isAdopted || animal.isDeceased;
+    // Once the animal has actually left this shelter's custody (adopted or
+    // transferred out), marking it deceased here would rewrite a since-
+    // closed record instead of correcting anything real — see
+    // AnimalRecordRepository.markDeceased's own re-read guard, which
+    // enforces this same rule server-side so a stale UI can never bypass
+    // it.
+    final deceasedBlocked = animal.isDeceased || animal.isAdopted || animal.isTransferredOut;
+    final canPublishToFacebook =
+        ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canPublishToFacebook ?? false;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -129,7 +217,10 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
           _ActionTile(
             icon: Icons.pets_outlined,
             label: 'Mark as Deceased',
-            enabled: !_busy && !animal.isDeceased,
+            enabled: !_busy && !deceasedBlocked,
+            subtitle: (!animal.isDeceased && deceasedBlocked)
+                ? 'Unavailable after the animal has been transferred or adopted.'
+                : null,
             onTap: _markDeceased,
           ),
           _ActionTile(
@@ -143,6 +234,15 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
             label: 'Export Record (PDF)',
             enabled: !_busy,
             onTap: _exportRecord,
+          ),
+          _ActionTile(
+            icon: Icons.facebook,
+            label: 'Publish to Facebook Page',
+            enabled: !_busy && canPublishToFacebook,
+            subtitle: canPublishToFacebook
+                ? null
+                : 'Ask an Organization Admin to allow you to share to the connected Facebook Page.',
+            onTap: _publishToFacebook,
           ),
           _ActionTile(
             icon: Icons.qr_code_2_outlined,
@@ -293,38 +393,3 @@ class _MarkDeceasedDialogState extends State<_MarkDeceasedDialog> {
   }
 }
 
-class _LogsSheet extends ConsumerWidget {
-  final String animalId;
-  const _LogsSheet({required this.animalId});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final logsAsync = ref.watch(managementLogsProvider(animalId));
-    final logs = logsAsync.asData?.value ?? const <Map<String, dynamic>>[];
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Management Logs', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-            const SizedBox(height: 12),
-            if (logs.isEmpty)
-              Text('No management actions recorded yet.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
-            else
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: logs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 16),
-                  itemBuilder: (context, i) => Text(logs[i]['action'] as String? ?? '-',
-                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}

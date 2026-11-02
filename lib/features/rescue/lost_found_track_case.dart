@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/app_theme.dart';
 
 
 class LostFoundTrackCasePage extends StatefulWidget {
@@ -234,14 +235,10 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                         const SizedBox(height: 4),
                         _CaseRow(
                           label: 'Reward',
-                          value: (data['offerReward'] == true)
-                              ? (((data['rewardAmount'] as String?)
-                              ?.trim()
-                              .isNotEmpty ==
-                              true)
-                              ? 'Yes (₱${data['rewardAmount']})'
-                              : 'Yes')
-                              : 'No',
+                          value: formatRewardDisplay(
+                            offerReward: data['offerReward'],
+                            rewardAmount: data['rewardAmount'],
+                          ),
                         ),
                       ],
 
@@ -440,7 +437,7 @@ class _PhotoHeaderState extends State<_PhotoHeader> {
                   borderRadius: BorderRadius.circular(8),
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
+                        color: Colors.black.withValues(alpha: 0.15),
                         blurRadius: 4,
                         offset: const Offset(0, 2)),
                   ],
@@ -485,7 +482,7 @@ class _PhotoHeaderState extends State<_PhotoHeader> {
                       shape: BoxShape.circle,
                       color: i == _page
                           ? AppColors.textPrimary
-                          : Colors.white.withOpacity(0.8),
+                          : Colors.white.withValues(alpha: 0.8),
                     ),
                   );
                 }),
@@ -756,7 +753,7 @@ class _MessagesList extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: fromMe
                       ? AppColors.yellowrspwn
-                      : AppColors.tearspwn.withOpacity(0.5),
+                      : AppColors.tearspwn.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Column(

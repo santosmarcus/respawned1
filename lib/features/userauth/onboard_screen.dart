@@ -4,7 +4,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/features/organization/organization_member_pending_page.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
+import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
@@ -53,10 +56,17 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
     ),
     _UserTypeOption(
       role: 'organization',
-      title: 'Organization',
+      title: 'Organization Admin',
       description:
-      'Manage rescues, animal records, adoptions, volunteers, transporters, and shelter operations for your organization.',
+      'Create or manage an organization — rescues, animal records, adoptions, volunteers, transporters, and shelter operations.',
       color: AppColors.yellowrspwn,
+    ),
+    _UserTypeOption(
+      role: 'organization_member',
+      title: 'Organization Member',
+      description:
+      'Join an existing organization you\'ve been invited to. No organization setup or verification documents required.',
+      color: AppColors.tearspwn,
     ),
   ];
 
@@ -100,6 +110,10 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       }, SetOptions(merge: true));
 
       if (mounted) {
+        // Matches AuthWrapper's role -> screen mapping in main.dart, so the
+        // very first screen after onboarding is the same one a restart
+        // would land on (previously 'rescue_volunteer' fell through to
+        // HomeScreen here but ServiceScreen on restart — an inconsistency).
         Widget nextPage;
 
         if (_selectedRole == 'pet_transporter') {
@@ -114,14 +128,28 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
             ),
           );
           return;
+        } else if (_selectedRole == 'rescue_volunteer') {
+          nextPage = const ServiceScreen();
         } else if (_selectedRole == 'organization') {
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const OrganizationAboutScreen()),
           );
           return;
+        } else if (_selectedRole == 'organization_member') {
+          // Organization Invitations spec §7 — a Member never goes through
+          // the organization-creation wizard at all; they land straight on
+          // the same "no organization joined yet" + invitations page
+          // AuthWrapper would show on a restart for this role.
+          nextPage = const OrganizationMemberPendingPage();
+        } else {
+          nextPage = const HomeScreen();
         }
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => nextPage),
+              (route) => false,
+        );
       }
     } catch (e) {
       // Previously this only printed to the debug console — on a real

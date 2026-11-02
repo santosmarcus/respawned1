@@ -4,9 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/adoption/adoption_page.dart' show kAgeGroupOptions, matchesAgeGroup;
 import 'animal_record_detail_page.dart';
 import 'create_animal_record_page.dart';
 
@@ -14,6 +16,12 @@ import 'create_animal_record_page.dart';
 // ultimately read createdAt for most records, since updatedAt is only set
 // on later edits) and added a confusing second "newest-first" option.
 enum _SortOption {
+  // Default — in-shelter animals first (newest intake first), then
+  // released/transferred/deceased animals last (newest terminal update
+  // first). Distinct from [newestIntake], which is a plain flat sort with
+  // no in-shelter partitioning — both stay available since a manual
+  // "just show newest first, don't group" option is still useful.
+  defaultOrder,
   nameAsc,
   nameDesc,
   newestIntake,
@@ -25,6 +33,7 @@ enum _SortOption {
 
 extension on _SortOption {
   String get label => switch (this) {
+        _SortOption.defaultOrder => 'Default (In Shelter First)',
         _SortOption.nameAsc => 'Name A–Z',
         _SortOption.nameDesc => 'Name Z–A',
         _SortOption.newestIntake => 'Newest Intake',
@@ -47,7 +56,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   String _statusFilter = 'All';
   String _searchQuery = '';
   final _searchController = TextEditingController();
-  _SortOption _sort = _SortOption.newestIntake;
+  _SortOption _sort = _SortOption.defaultOrder;
 
   // Extra filters — surfaced inside the Filter & Sort sheet, along with
   // _statusFilter (the old standalone "All ▾" dropdown next to the species
@@ -57,6 +66,13 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   bool? _inTreatmentOnly;
   bool? _vaccinatedOnly;
   bool? _hasRescueBackground;
+  // Tri-state: null = All, true = Has Special Needs, false = No Special Needs.
+  bool? _specialNeedsOnly;
+  // Reuses the exact same life-stage categories/helper the user Adoption
+  // page's own Age filter uses (kAgeGroupOptions/ageGroupOf via
+  // matchesAgeGroup) — replaces the old freeform/numeric age control so
+  // both sides classify any given animal's age identically.
+  final Set<String> _ageGroups = {};
   // Reuses the existing AnimalRecord.archived field — 'Active' (default)
   // excludes archived records the same way the old _includeArchived bool
   // did; 'Archived'/'All' are the new addition. Never a second archive
@@ -115,6 +131,8 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       (_inTreatmentOnly == true ? 1 : 0) +
       (_vaccinatedOnly == true ? 1 : 0) +
       (_hasRescueBackground == true ? 1 : 0) +
+      (_specialNeedsOnly != null ? 1 : 0) +
+      _ageGroups.length +
       (_recordStatus != 'Active' ? 1 : 0);
 
   @override
@@ -139,6 +157,13 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     if (_recordStatus == 'Active' && a.archived) return false;
     if (_recordStatus == 'Archived' && !a.archived) return false;
     if (_speciesFilter != 'All' && a.species != (_speciesFilter == 'Dogs' ? 'Dog' : 'Cat')) return false;
+    // Reads the exact same canonical fields AnimalRecord.statusLabel's
+    // precedence chain is built from (adoptionStatus/currentCaseId) — never
+    // a second interpretation of "Adopted"/"In Treatment". 'Adopted' only
+    // ever matches once adoptionStatus is actually 'adopted', which
+    // AdoptionApplicationRepository.release only sets after an approved
+    // application completes handoff — never merely applied/pending/
+    // approved-but-not-yet-released (that stays 'reserved').
     if (_statusFilter != 'All') {
       final want = _statusFilter.toLowerCase().replaceAll(' ', '_');
       if (want == 'in_treatment') {
@@ -151,6 +176,8 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     if (_inTreatmentOnly == true && a.currentCaseId == null) return false;
     if (_vaccinatedOnly == true && !a.vaccinated) return false;
     if (_hasRescueBackground == true && a.rescueBackground.isEmpty) return false;
+    if (_specialNeedsOnly != null && a.hasSpecialNeeds != _specialNeedsOnly) return false;
+    if (!matchesAgeGroup(_ageGroups, a)) return false;
     return true;
   }
 
@@ -163,6 +190,23 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     final list = [...records];
     int byDateDesc(DateTime? a, DateTime? b) => (b ?? DateTime(0)).compareTo(a ?? DateTime(0));
     switch (_sort) {
+      case _SortOption.defaultOrder:
+        // 1. In-shelter animals first (adoptable, unadoptable/"not ready",
+        //    reserved, in-treatment, quarantined — anything isInShelter
+        //    still counts as here), newest intake first.
+        // 2. Released (adopted)/transferred/deceased last, newest
+        //    terminal-status update first.
+        // A deterministic id-based tie-break guards against Dart's
+        // unstable List.sort reordering equal-date entries between builds.
+        list.sort((a, b) {
+          final aIn = isInShelter(a);
+          final bIn = isInShelter(b);
+          if (aIn != bIn) return aIn ? -1 : 1;
+          final dateCompare =
+              aIn ? byDateDesc(a.createdAt, b.createdAt) : byDateDesc(terminalDateOf(a), terminalDateOf(b));
+          return dateCompare != 0 ? dateCompare : a.id.compareTo(b.id);
+        });
+        break;
       case _SortOption.nameAsc:
         list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         break;
@@ -237,7 +281,10 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           _inTreatmentOnly = null;
                           _vaccinatedOnly = null;
                           _hasRescueBackground = null;
+                          _specialNeedsOnly = null;
+                          _ageGroups.clear();
                           _recordStatus = 'Active';
+                          _sort = _SortOption.defaultOrder;
                         }),
                         child: const Text('Clear'),
                       ),
@@ -322,6 +369,59 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                           onChanged: (v) => setSheetState(() => _hasRescueBackground = v),
                         ),
                         const SizedBox(height: 16),
+                        Text('Special Needs', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('All'),
+                              selected: _specialNeedsOnly == null,
+                              selectedColor: AppColors.greenrspwn,
+                              onSelected: (_) => setSheetState(() => _specialNeedsOnly = null),
+                            ),
+                            ChoiceChip(
+                              label: const Text('Has Special Needs'),
+                              selected: _specialNeedsOnly == true,
+                              selectedColor: AppColors.yellowrspwn,
+                              onSelected: (_) => setSheetState(() => _specialNeedsOnly = true),
+                            ),
+                            ChoiceChip(
+                              label: const Text('No Special Needs'),
+                              selected: _specialNeedsOnly == false,
+                              selectedColor: AppColors.yellowrspwn,
+                              onSelected: (_) => setSheetState(() => _specialNeedsOnly = false),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        // Same life-stage categories as the user Adoption
+                        // page's own Age filter (kAgeGroupOptions +
+                        // matchesAgeGroup/ageGroupOf) — not a second age
+                        // system. Multi-select, same as every other chip
+                        // group in this sheet.
+                        Text('Age', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: kAgeGroupOptions
+                              .map((o) => ChoiceChip(
+                                    label: Text(o),
+                                    selected: _ageGroups.contains(o),
+                                    selectedColor: AppColors.yellowrspwn,
+                                    onSelected: (sel) => setSheetState(() {
+                                      if (sel) {
+                                        _ageGroups.add(o);
+                                      } else {
+                                        _ageGroups.remove(o);
+                                      }
+                                    }),
+                                  ))
+                              .toList(),
+                        ),
+                        const SizedBox(height: 16),
                         Text('Record Status', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
                         const SizedBox(height: 8),
                         Wrap(
@@ -374,7 +474,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       // Android/system back exits selection mode first instead of leaving
       // the page — only allowed to pop normally once nothing is selected.
       canPop: !_selecting,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _selecting) _clearSelection();
       },
       child: Scaffold(
@@ -392,10 +492,14 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
-        title: _selecting
-            ? Text('${_selectedIds.length} selected',
-                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.background))
-            : null,
+        // Page title restored to the top header (spec) — same typography/
+        // placement as Volunteers/Collar Tags. The selection-mode "N
+        // selected" title takes over exactly as before. The body's own
+        // smaller title is removed below so it's never shown twice.
+        title: Text(
+          _selecting ? '${_selectedIds.length} selected' : 'Animal Records',
+          style: GoogleFonts.tiltWarp(fontSize: _selecting ? 16 : 18, color: AppColors.background),
+        ),
         actions: [
           if (_selecting)
             // Visible text label, not just a close icon — an icon alone
@@ -415,14 +519,6 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       ),
       body: Column(
         children: [
-          const SizedBox(height: 20),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Animal Records',
-                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-          ),
-
           const SizedBox(height: 16),
 
           // Search + filter — same styling as Rescue Reports (white
@@ -530,22 +626,44 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
           // layout is active, so switching view never loses or re-queries
           // anything.
           Expanded(
-            child: recordsAsync.when(
+            // Pull to Refresh spec §13 — allAnimalRecordsProvider is already
+            // a live stream; refreshing just re-subscribes it (matches the
+            // same manual-invalidate pattern used elsewhere), never a
+            // second/duplicate listener.
+            child: RefreshIndicator(
+              onRefresh: () async => ref.invalidate(allAnimalRecordsProvider),
+              child: recordsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                child: Text('Could not load animal records: $e',
-                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              error: (e, _) => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 80),
+                    child: Center(
+                      child: Text('Could not load animal records: $e',
+                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                    ),
+                  ),
+                ],
               ),
               data: (all) {
                 final filtered = all.where((a) => _matchesFilters(a) && _matchesSearch(a, _searchQuery)).toList();
                 final sorted = _sorted(filtered);
 
                 if (sorted.isEmpty) {
-                  return Center(
-                    child: Text('No animal records found.',
-                        style: GoogleFonts.zain(
-                            fontSize: 14,
-                            color: AppColors.textSecondary)),
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 80),
+                        child: Center(
+                          child: Text('No animal records found.',
+                              style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  color: AppColors.textSecondary)),
+                        ),
+                      ),
+                    ],
                   );
                 }
 
@@ -601,6 +719,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   },
                 );
               },
+              ),
             ),
           ),
 

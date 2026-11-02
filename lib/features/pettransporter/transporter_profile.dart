@@ -156,7 +156,7 @@ class TransporterProfile extends StatelessWidget {
                   const SizedBox(height: 24),
 
                   // Stats
-                  if (uid != null) _StatsRow(uid: uid),
+                  _StatsRow(uid: uid),
 
                   const SizedBox(height: 24),
 
@@ -371,7 +371,7 @@ class _VerificationBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
+        color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(30),
         border: Border.all(color: color),
       ),
@@ -521,7 +521,7 @@ class _StatCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6),
         ],
       ),
       child: Column(
@@ -565,7 +565,7 @@ class _InfoCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6),
         ],
       ),
       child: Column(children: children),

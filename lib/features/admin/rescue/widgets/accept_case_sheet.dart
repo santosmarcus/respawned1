@@ -87,7 +87,7 @@ class _AcceptCaseSheetBodyState extends State<_AcceptCaseSheetBody> {
                 const SizedBox(width: 8),
                 Switch(
                   value: _openForTransfer,
-                  activeColor: AppColors.textPrimary,
+                  activeThumbColor: AppColors.textPrimary,
                   onChanged: (v) => setState(() => _openForTransfer = v),
                 ),
               ],

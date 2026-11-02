@@ -343,7 +343,7 @@ class _TransporterNotificationsState
           .get()
           .then((doc) {
         if (!mounted) return;
-        final data = doc.data() as Map<String, dynamic>? ?? {};
+        final data = doc.data() ?? {};
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -584,7 +584,7 @@ class _TransporterNotificationTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.5),
+              color: Colors.grey.withValues(alpha: 0.5),
               blurRadius: 15,
               offset: const Offset(0.0, 0.75),
             ),

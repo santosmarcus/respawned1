@@ -175,9 +175,9 @@ class _RescueRequestState extends State<RescueRequest> {
       final caseRef =
       FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
       final snap = await caseRef.get();
-      final currentStatus = (snap.data() as Map<String, dynamic>?)?['status'];
+      final currentStatus = snap.data()?['status'];
       final wasAssignedToMe =
-          (snap.data() as Map<String, dynamic>?)?['assignedVolunteerId'] == uid;
+          snap.data()?['assignedVolunteerId'] == uid;
 
       final reasonText = reasons.join('; ');
 
@@ -536,7 +536,7 @@ class _RescueRequestState extends State<RescueRequest> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.lavenderrspwn.withOpacity(0.2),
+                          color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: AppColors.lavenderrspwn),
                         ),

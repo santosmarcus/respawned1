@@ -8,8 +8,14 @@ class AppValidators {
   static final RegExp _namePattern =
   RegExp(r"^[A-Za-zÀ-ÖØ-öø-ÿ' \-.]+$");
 
+  // Root cause of the "sample@school.edu.ph is invalid" bug: the previous
+  // pattern only allowed a single dot in the domain (one label + one TLD),
+  // so any multi-label domain (.edu.ph, .co.uk) or subdomain was rejected
+  // outright even though it's a syntactically valid address. This pattern
+  // allows the local part to include plus-addressing (name+tag@...) and
+  // the domain to have any number of dot-separated labels.
   static final RegExp _emailPattern =
-  RegExp(r'^[\w.+-]+@[\w-]+\.[A-Za-z]{2,}$');
+  RegExp(r'^[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$');
 
   // Philippine mobile number, 10 digits starting with 9
   static final RegExp _phPhoneLocalPattern = RegExp(r'^9\d{9}$');
@@ -49,7 +55,7 @@ class AppValidators {
       return required ? 'Email is required.' : null;
     }
     if (!_emailPattern.hasMatch(v)) {
-      return 'Please enter a valid email address.';
+      return 'Invalid email format.';
     }
     return null;
   }

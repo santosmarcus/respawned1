@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/utils/validators.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_id_tag_screen.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
@@ -357,10 +357,10 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                       height: 90,
                       decoration: BoxDecoration(
                         border: Border.all(
-                            color: AppColors.textPrimary.withOpacity(0.3),
+                            color: AppColors.textPrimary.withValues(alpha: 0.3),
                             style: BorderStyle.solid),
                         borderRadius: BorderRadius.circular(8),
-                        color: AppColors.tearspwn.withOpacity(0.3),
+                        color: AppColors.tearspwn.withValues(alpha: 0.3),
                       ),
                       child: _petImage != null
                           ? ClipRRect(
@@ -496,10 +496,10 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                         height: 80,
                         decoration: BoxDecoration(
                           border: Border.all(
-                              color: AppColors.textPrimary.withOpacity(0.3),
+                              color: AppColors.textPrimary.withValues(alpha: 0.3),
                               style: BorderStyle.solid),
                           borderRadius: BorderRadius.circular(8),
-                          color: AppColors.tearspwn.withOpacity(0.3),
+                          color: AppColors.tearspwn.withValues(alpha: 0.3),
                         ),
                         child: _vaccinationImage != null
                             ? ClipRRect(
@@ -651,7 +651,7 @@ Widget _field(
             ),
 
             filled: true,
-            fillColor: AppColors.background.withOpacity(0.3),
+            fillColor: AppColors.background.withValues(alpha: 0.3),
 
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 14,
@@ -725,7 +725,7 @@ Widget _datePickerField({
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: AppColors.background.withOpacity(0.3),
+              color: AppColors.background.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.slaterspwn, width: 1),
             ),
@@ -831,57 +831,6 @@ class _CheckRow extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-// Yes/No for health-related questions
-class _YesNoRow extends StatelessWidget {
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _YesNoRow({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  Widget _option(String text, bool optionValue) {
-    return GestureDetector(
-      onTap: () => onChanged(optionValue),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Radio<bool>(
-            value: optionValue,
-            groupValue: value,
-            activeColor: AppColors.textPrimary,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            onChanged: (v) => onChanged(v ?? optionValue),
-          ),
-          const SizedBox(width: 2),
-          Text(text,
-              style:
-              GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(label,
-              style:
-              GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-        ),
-        _option('Yes', true),
-        const SizedBox(width: 8),
-        _option('No', false),
-      ],
     );
   }
 }

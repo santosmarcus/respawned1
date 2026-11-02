@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/currency.dart';
 
 // Admin/org-facing queue for verifying proposed lost  found pet matches.
 class AdminMatchVerificationPage extends StatelessWidget {
@@ -260,6 +261,14 @@ class _AlertColumn extends StatelessWidget {
         Text(data!['address']?.toString() ?? '',
             maxLines: 1, overflow: TextOverflow.ellipsis,
             style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+        if (title == 'Lost report') ...[
+          const SizedBox(height: 4),
+          Text(
+            'Reward: ${formatRewardDisplay(offerReward: data!['offerReward'], rewardAmount: data!['rewardAmount'])}',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+          ),
+        ],
       ],
     );
   }

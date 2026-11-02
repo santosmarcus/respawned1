@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 // NFC disabled for now — only QR is used for collar tags.
 // import 'admin_nfc.dart';
 import 'admin_qr.dart';
@@ -103,7 +103,7 @@ class _HubCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: AppColors.tearspwn.withOpacity(0.15),
+          color: AppColors.tearspwn.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppColors.slaterspwn),
         ),
@@ -113,7 +113,7 @@ class _HubCard extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: AppColors.yellowrspwn.withOpacity(0.25),
+                color: AppColors.yellowrspwn.withValues(alpha: 0.25),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, size: 26, color: AppColors.textPrimary),

@@ -9,7 +9,7 @@ import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'animal_page.dart';
 
@@ -101,7 +101,7 @@ List<String> healthTagsOf(AnimalRecord r) => [
   if (r.vaccinated) 'Vaccinated',
   if (r.spayedNeutered) 'Spayed/Neutered',
   if (r.dewormed) 'Dewormed',
-  if (r.specialNeeds) 'Special Needs',
+  if (r.hasSpecialNeeds) 'Special Needs',
 ];
 
 String ageGroupOf(AnimalRecord r) {
@@ -135,7 +135,7 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
     age: r.age,
     description: r.description,
     healthTags: healthTags,
-    specialNeeds: r.specialNeeds,
+    specialNeeds: r.hasSpecialNeeds,
     gender: sexLower == 'female' ? AnimalGender.female : AnimalGender.male,
     sex: r.sex,
     category: speciesLower == 'cat' ? AnimalCategory.cat : AnimalCategory.dog,
@@ -161,6 +161,16 @@ const List<String> kHealthOptions = [
 ];
 
 const List<String> kSpecialNeedsOptions = ['Special Needs'];
+
+/// [kAgeGroupOptions] entries are the long display labels ("Baby (0-6
+/// months)") but [ageGroupOf] returns the short life-stage word ("Baby") —
+/// a bare `selected.contains(ageGroupOf(animal))` never matches, silently
+/// zeroing every result the moment any Age chip is picked. Each option
+/// label starts with its short word and no two options share a prefix, so
+/// `startsWith` is a safe, single fix shared by every Age filter (user
+/// Adoption and admin Animal Records) rather than patched twice.
+bool matchesAgeGroup(Set<String> selectedOptions, AnimalRecord animal) =>
+    selectedOptions.isEmpty || selectedOptions.any((o) => o.startsWith(ageGroupOf(animal)));
 
 class AdoptionFilters {
   final Set<String> breeds;
@@ -230,7 +240,7 @@ class AdoptionFilters {
     return _matchesAny(breeds, animal.breed) &&
         _matchesAny(sizes, animal.size) &&
         _matchesAny(coatLengths, animal.coatLength) &&
-        _matchesAny(ageGroups, ageGroupOf(animal)) &&
+        matchesAgeGroup(ageGroups, animal) &&
         _matchesAll(health, healthTagsOf(animal)) &&
         _matchesAll(keyCharacteristics, animal.keyCharacteristics) &&
         _matchesAll(rescueBackground, animal.rescueBackground);
@@ -574,7 +584,12 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
                       favorited: _favoriteIds.contains(stableIntIdFor(record.id)),
                       onFavorite: () => _toggleFavorite(record),
                       publicStatusLabel: _publicStatusLabel(record),
-                      extraChips: [for (final t in healthTagsOf(record)) CardChip(t)],
+                      // 'Special Needs' excluded here — AnimalRecordCard already
+                      // renders its own compact Special Needs badge unconditionally
+                      // (see specialNeedsBadge()); keeping it in healthTagsOf too
+                      // (needed for the filter sheet's Special Needs option) would
+                      // otherwise show it twice on the same card.
+                      extraChips: [for (final t in healthTagsOf(record)) if (t != 'Special Needs') CardChip(t)],
                       onTap: () {
                         final animal = animalRecordToCard(record, index)
                           ..favorited = _favoriteIds.contains(stableIntIdFor(record.id));

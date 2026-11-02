@@ -40,9 +40,13 @@ class AnimalMedicalTab extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _HealthSection(animal: animal),
+          MedicalProfileSection(animal: animal),
+          if (animal.hasMeaningfulSpecialNeedsInfo) ...[
+            const SizedBox(height: 20),
+            SpecialNeedsSection(animal: animal),
+          ],
           const SizedBox(height: 20),
-          _VaccineSection(animal: animal),
+          VaccineSection(animal: animal),
           const SizedBox(height: 20),
           _CurrentStatusSection(animal: animal),
           const SizedBox(height: 20),
@@ -56,18 +60,36 @@ class AnimalMedicalTab extends ConsumerWidget {
   }
 }
 
-// ---- Health -----------------------------------------------------------
+// ---- Medical Profile (was "Health") ------------------------------------
+// Renamed visible terminology only — the underlying AnimalHealthDetails
+// fields/Firestore keys (spayedNeutered/dewormed/allergies/
+// chronicConditions/currentMedications/lastVetCheckup/weightKg/
+// bodyCondition/microchipStatus) are unchanged. Shared by the admin
+// Medical tab (editable, [readOnly]=false) and the user-facing Medical tab
+// ([readOnly]=true, no Edit button, per spec section 8) so both stay in
+// sync with one implementation.
 
-class _HealthSection extends StatelessWidget {
+/// Read-only value formatting shared by admin and user Medical Profile
+/// display — "Not recorded" is the one consistent fallback for anything
+/// empty/unknown (spec section 8), rather than admin's own "Unknown"/"Not
+/// provided" wording.
+String medicalProfileBoolLabel(bool? v, {bool userFacing = false}) =>
+    v == null ? (userFacing ? 'Not recorded' : 'Unknown') : (v ? 'Yes' : 'No');
+String medicalProfileOrFallback(String? v, {bool userFacing = false}) =>
+    (v == null || v.isEmpty) ? (userFacing ? 'Not recorded' : _kNA) : v;
+
+class MedicalProfileSection extends StatelessWidget {
   final AnimalRecord animal;
-  const _HealthSection({required this.animal});
-
-  String _boolLabel(bool? v) => v == null ? 'Unknown' : (v ? 'Yes' : 'No');
-  String _orNA(String? v) => (v == null || v.isEmpty) ? _kNA : v;
+  /// True on the user-facing Medical tab: hides the Edit button and uses
+  /// "Not recorded" instead of admin's "Unknown"/"Not provided" fallback.
+  final bool readOnly;
+  const MedicalProfileSection({super.key, required this.animal, this.readOnly = false});
 
   @override
   Widget build(BuildContext context) {
     final h = animal.health;
+    String boolLabel(bool? v) => medicalProfileBoolLabel(v, userFacing: readOnly);
+    String orNA(String? v) => medicalProfileOrFallback(v, userFacing: readOnly);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
@@ -77,23 +99,24 @@ class _HealthSection extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Health', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-              TextButton(
-                onPressed: () => showHealthDetailsSheet(context, animal: animal),
-                child: Text('Edit', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-              ),
+              Text('Medical Profile', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+              if (!readOnly)
+                TextButton(
+                  onPressed: () => showHealthDetailsSheet(context, animal: animal),
+                  child: Text('Edit Medical Profile', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                ),
             ],
           ),
-          _HealthRow('Sterilization', _boolLabel(h.sterilized)),
-          _HealthRow('Deworming status', _boolLabel(h.dewormed)),
-          _HealthRow('Known allergies', _orNA(h.allergies)),
-          _HealthRow('Chronic conditions', _orNA(h.chronicConditions)),
-          _HealthRow('Current medications', _orNA(h.currentMedications)),
-          _HealthRow('Last vet checkup',
-              h.lastVetCheckup != null ? '${h.lastVetCheckup!.month}/${h.lastVetCheckup!.day}/${h.lastVetCheckup!.year}' : _kNA),
-          _HealthRow('Weight', h.weightKg != null ? '${h.weightKg} kg' : _kNA),
-          _HealthRow('Body condition', _orNA(h.bodyCondition)),
-          _HealthRow('Microchip / tag status', _orNA(h.microchipStatus)),
+          _HealthRow('Spay/Neuter Status', boolLabel(h.sterilized)),
+          _HealthRow('Deworming Status', boolLabel(h.dewormed)),
+          _HealthRow('Known Allergies', orNA(h.allergies)),
+          _HealthRow('Chronic Conditions', orNA(h.chronicConditions)),
+          _HealthRow('Current Medications', orNA(h.currentMedications)),
+          _HealthRow('Last Veterinary Checkup',
+              h.lastVetCheckup != null ? '${h.lastVetCheckup!.month}/${h.lastVetCheckup!.day}/${h.lastVetCheckup!.year}' : (readOnly ? 'Not recorded' : _kNA)),
+          _HealthRow('Weight', h.weightKg != null ? '${h.weightKg} kg' : (readOnly ? 'Not recorded' : _kNA)),
+          _HealthRow('Body Condition', orNA(h.bodyCondition)),
+          _HealthRow('Identification Tag Status', orNA(h.microchipStatus)),
         ],
       ),
     );
@@ -124,11 +147,57 @@ class _HealthRow extends StatelessWidget {
   }
 }
 
+// ---- Special Needs --------------------------------------------------------
+// Only rendered when animal.hasMeaningfulSpecialNeedsInfo (see the guard in
+// AnimalMedicalTab.build above) — never a bare "Special Needs / None" row.
+// Distinct from MedicalProfileSection: this is the structured disability/
+// impairment list, not sterilization/allergies/chronic conditions/etc.
+
+class SpecialNeedsSection extends StatelessWidget {
+  final AnimalRecord animal;
+  const SpecialNeedsSection({super.key, required this.animal});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Special Needs', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          if (animal.specialNeedsTypes.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final need in animal.specialNeedsTypes)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(20)),
+                    child: Text(need, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  ),
+              ],
+            ),
+          if ((animal.specialNeedsNotes ?? '').trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(animal.specialNeedsNotes!.trim(), style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 // ---- Vaccines -----------------------------------------------------------
 
-class _VaccineSection extends ConsumerWidget {
+class VaccineSection extends ConsumerWidget {
   final AnimalRecord animal;
-  const _VaccineSection({required this.animal});
+  /// True on the user-facing Medical tab: hides the "Add Vaccine Record"
+  /// action and shows a user-facing empty-state message.
+  final bool readOnly;
+  const VaccineSection({super.key, required this.animal, this.readOnly = false});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -156,17 +225,20 @@ class _VaccineSection extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Vaccines', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-              TextButton(
-                onPressed: () => showAddVaccineRecordSheet(context, animal: animal),
-                child: Text('Add Vaccine Record',
-                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-              ),
+              if (!readOnly)
+                TextButton(
+                  onPressed: () => showAddVaccineRecordSheet(context, animal: animal),
+                  child: Text('Add Vaccine Record',
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                ),
             ],
           ),
           if (latest.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text('No vaccination records yet.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              child: Text(
+                  readOnly ? 'No vaccine records available.' : 'No vaccination records yet.',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
             )
           else
             for (final r in latest) _VaccineTile(record: r, allForName: records.where((x) => x.vaccineName == r.vaccineName).toList()),

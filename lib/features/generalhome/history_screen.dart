@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
-import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 import 'package:respawnd1/features/donation/donation_summary.dart' as ds;
@@ -566,7 +565,7 @@ class _DonationHistoryCard extends ConsumerWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -595,7 +594,7 @@ class _DonationHistoryCard extends ConsumerWidget {
                     subTitle,
                     style: GoogleFonts.zain(
                       fontSize: 16,
-                      color: const Color(0xFF4A4512).withOpacity(0.8),
+                      color: const Color(0xFF4A4512).withValues(alpha: 0.8),
                     ),
                   ),
                 ],

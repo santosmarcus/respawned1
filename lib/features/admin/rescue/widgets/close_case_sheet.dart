@@ -8,17 +8,20 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 typedef CloseCaseResult = ({
 ClosureReason reason,
 String details,
-String? lastKnownLocation,
-String? clinicUnavailableDetails,
 String? serviceTypeNeeded,
 });
 
-/// Shared Close Case confirmation form (spec §2/§10) — every exception
-/// path (owner found, aggressive animal, animal moved, clinic unavailable,
-/// duplicate, ...) opens this SAME sheet with a pre-selected reason rather
-/// than building its own; the actual close write is
-/// RescueCaseRepository.closeCase, called by the caller with this
-/// sheet's result, once. Returns null if dismissed without confirming.
+/// Shared Close Case confirmation form — every allowed Close Case button
+/// (Ongoing, Treatment, Intake, plus the Ownership section's Reunited
+/// shortcut and the needsSpecializedAssistance exception buttons) opens
+/// this SAME sheet, optionally with a pre-selected reason, rather than
+/// building its own; the actual close write is
+/// RescueCaseRepository.closeCase, called by the caller with this sheet's
+/// result, once. Returns null if dismissed without confirming.
+///
+/// Reason list reduced to the 5 approved options
+/// (ClosureReason.selectable) — Requires transport / Died / Aggressive /
+/// Reunited / Rescued outside ResPAWnd. Nothing else is offered.
 Future<CloseCaseResult?> showCloseCaseSheet(
     BuildContext context, {
       required RescueCase rescueCase,
@@ -45,8 +48,6 @@ class _CloseCaseSheetBody extends StatefulWidget {
 class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
   late ClosureReason? _reason = widget.initialReason;
   final _detailsController = TextEditingController();
-  final _locationController = TextEditingController();
-  final _clinicDetailsController = TextEditingController();
   final _serviceTypeOtherController = TextEditingController();
   String? _serviceType;
 
@@ -64,16 +65,12 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
   @override
   void dispose() {
     _detailsController.dispose();
-    _locationController.dispose();
-    _clinicDetailsController.dispose();
     _serviceTypeOtherController.dispose();
     super.dispose();
   }
 
   bool get _canConfirm {
     if (_reason == null || _detailsController.text.trim().isEmpty) return false;
-    if (_reason!.needsLastKnownLocation && _locationController.text.trim().isEmpty) return false;
-    if (_reason!.needsClinicDetails && _clinicDetailsController.text.trim().isEmpty) return false;
     if (_reason!.needsServiceType) {
       if (_serviceType == null) return false;
       if (_serviceType == 'Other' && _serviceTypeOtherController.text.trim().isEmpty) return false;
@@ -96,7 +93,7 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
             Text('Close Case', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
             const SizedBox(height: 12),
 
-            // Pre-close summary (spec §10).
+            // Pre-close summary.
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -128,7 +125,7 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
             const SizedBox(height: 16),
             Text('Closure Reason', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
             const SizedBox(height: 6),
-            ...ClosureReason.values.map((reason) => RadioListTile<ClosureReason>(
+            ...ClosureReason.selectable.map((reason) => RadioListTile<ClosureReason>(
               contentPadding: EdgeInsets.zero,
               dense: true,
               value: reason,
@@ -147,29 +144,6 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
               onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(hintText: 'What happened, and why the case is being closed'),
             ),
-
-            if (_reason?.needsLastKnownLocation ?? false) ...[
-              const SizedBox(height: 12),
-              Text('Last Known Location', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _locationController,
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(hintText: 'Where the animal was last seen'),
-              ),
-            ],
-
-            if (_reason?.needsClinicDetails ?? false) ...[
-              const SizedBox(height: 12),
-              Text('Clinic Availability Issue / Attempts Made', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _clinicDetailsController,
-                maxLines: 2,
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(hintText: 'e.g. clinic closed, no answer, no alternative found because…'),
-              ),
-            ],
 
             if (_reason?.needsServiceType ?? false) ...[
               const SizedBox(height: 12),
@@ -218,10 +192,6 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
                       (
                       reason: _reason!,
                       details: _detailsController.text.trim(),
-                      lastKnownLocation:
-                      _reason!.needsLastKnownLocation ? _locationController.text.trim() : null,
-                      clinicUnavailableDetails:
-                      _reason!.needsClinicDetails ? _clinicDetailsController.text.trim() : null,
                       serviceTypeNeeded: _reason!.needsServiceType
                           ? (_serviceType == 'Other'
                           ? _serviceTypeOtherController.text.trim()

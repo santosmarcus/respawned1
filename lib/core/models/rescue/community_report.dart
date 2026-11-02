@@ -20,6 +20,16 @@ class CommunityReport {
   final String? photoUrl;
   final DateTime? timestamp;
 
+  // Community Location Approval spec §9 — only meaningful when
+  // type == 'moved'; null for every other report type (no approval
+  // concept applies to them).
+  final String? approvalStatus; // 'pending' | 'approved' | 'rejected' | null
+  final String? approvedBy;
+  final DateTime? approvedAt;
+  final String? rejectedBy;
+  final DateTime? rejectedAt;
+  final String? rejectionReason;
+
   const CommunityReport({
     required this.id,
     this.reporterId,
@@ -31,11 +41,18 @@ class CommunityReport {
     this.newLng,
     this.photoUrl,
     this.timestamp,
+    this.approvalStatus,
+    this.approvedBy,
+    this.approvedAt,
+    this.rejectedBy,
+    this.rejectedAt,
+    this.rejectionReason,
   });
 
   factory CommunityReport.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
     final ts = data['timestamp'];
+    DateTime? asDate(dynamic v) => v is Timestamp ? v.toDate() : null;
     return CommunityReport(
       id: doc.id,
       reporterId: data['reporterId'] as String?,
@@ -47,6 +64,12 @@ class CommunityReport {
       newLng: (data['newLng'] as num?)?.toDouble(),
       photoUrl: data['photoUrl'] as String?,
       timestamp: ts is Timestamp ? ts.toDate() : null,
+      approvalStatus: data['approvalStatus'] as String?,
+      approvedBy: data['approvedBy'] as String?,
+      approvedAt: asDate(data['approvedAt']),
+      rejectedBy: data['rejectedBy'] as String?,
+      rejectedAt: asDate(data['rejectedAt']),
+      rejectionReason: data['rejectionReason'] as String?,
     );
   }
 

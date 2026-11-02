@@ -68,3 +68,6 @@ ios/Runner.xcworkspace/
 *.jks
 key.properties
 ._*
+
+# Cloud Functions dependencies (reinstall with: cd functions && npm install)
+functions/node_modules/

@@ -9,7 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/rescue/rescue_page.dart'
     show QRScannerPage, RescuePage;
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'collar_id_tag_screen.dart';
 import 'collar_tag_data_model.dart';
 import 'pet_found_chat.dart';
@@ -102,7 +102,9 @@ Future<TagScanOutcome> resolveScannedTagId(
 Future<ScanLocation?> fetchBestEffortScanLocation() async {
   try {
     final pos = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.medium,
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.medium,
+      ),
     ).then<Position?>((p) => p).timeout(
       const Duration(seconds: 8),
       onTimeout: () => Geolocator.getLastKnownPosition(),

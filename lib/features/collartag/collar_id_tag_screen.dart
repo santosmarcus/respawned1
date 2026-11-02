@@ -11,7 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_tag_form_screen.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
@@ -411,7 +411,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       alignment: Alignment.center,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.tearspwn.withOpacity(0.2),
+        color: AppColors.tearspwn.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.slaterspwn),
       ),
@@ -419,7 +419,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.hourglass_top_rounded,
-              size: 32, color: AppColors.textPrimary.withOpacity(0.5)),
+              size: 32, color: AppColors.textPrimary.withValues(alpha: 0.5)),
           const SizedBox(height: 8),
           Text(
             'QR code pending\nadmin approval',
@@ -437,14 +437,14 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.tearspwn.withOpacity(0.2),
+        color: AppColors.tearspwn.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.slaterspwn),
       ),
       child: Row(
         children: [
           Icon(Icons.hourglass_top_rounded,
-              size: 22, color: AppColors.textPrimary.withOpacity(0.6)),
+              size: 22, color: AppColors.textPrimary.withValues(alpha: 0.6)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -724,7 +724,7 @@ class _ActionButton extends StatelessWidget {
           border: Border.all(
             color: onTap != null
                 ? AppColors.textPrimary
-                : AppColors.textPrimary.withOpacity(0.3),
+                : AppColors.textPrimary.withValues(alpha: 0.3),
           ),
           borderRadius: BorderRadius.circular(14),
         ),
@@ -743,14 +743,14 @@ class _ActionButton extends StatelessWidget {
                   size: 20,
                   color: onTap != null
                       ? AppColors.textPrimary
-                      : AppColors.textPrimary.withOpacity(0.4)),
+                      : AppColors.textPrimary.withValues(alpha: 0.4)),
             const SizedBox(width: 6),
             Text(label,
                 style: GoogleFonts.zain(
                     fontSize: 13,
                     color: onTap != null
                         ? AppColors.textPrimary
-                        : AppColors.textPrimary.withOpacity(0.4))),
+                        : AppColors.textPrimary.withValues(alpha: 0.4))),
           ],
         ),
       ),

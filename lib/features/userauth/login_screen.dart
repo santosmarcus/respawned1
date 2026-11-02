@@ -5,7 +5,6 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:respawnd1/features/userauth/signup_screen.dart';
 import 'package:respawnd1/features/userauth/phonelogin_screen.dart';
@@ -299,27 +298,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               const SizedBox(height: 12),
-
-// Facebook button
-              /* _SocialButton(
-                label: 'Continue with Facebook',
-                iconData: Icons.facebook,
-                onTap: () async {
-                  setState(() => _errorMessage = null);
-                  try {
-                    final result = await _authService.signInWithFacebook();
-                    if (result != null && mounted) {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      setState(() => _errorMessage = 'Facebook sign-in failed: $e');
-                    }
-                  }
-                },
-              ),
-
-              const SizedBox(height: 12),*/
 
 // Phone button
               _SocialButton(

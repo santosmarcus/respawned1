@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 
 class AdminNfc extends StatefulWidget {
   const AdminNfc({super.key});
@@ -282,8 +282,8 @@ class _TagTile extends StatelessWidget {
         const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: selected
-              ? AppColors.yellowrspwn.withOpacity(0.18)
-              : AppColors.tearspwn.withOpacity(0.12),
+              ? AppColors.yellowrspwn.withValues(alpha: 0.18)
+              : AppColors.tearspwn.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: selected
@@ -327,10 +327,10 @@ class _TagTile extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
-                  color: AppColors.greenrspwn.withOpacity(0.15),
+                  color: AppColors.greenrspwn.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                      color: AppColors.greenrspwn.withOpacity(0.4)),
+                      color: AppColors.greenrspwn.withValues(alpha: 0.4)),
                 ),
                 child: Text('Written',
                     style: GoogleFonts.zain(
@@ -379,7 +379,7 @@ class _ChipPreviewCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.tearspwn.withOpacity(0.2),
+        color: AppColors.tearspwn.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.slaterspwn),
       ),
@@ -532,7 +532,7 @@ class _FullWidthButton extends StatelessWidget {
           backgroundColor: AppColors.yellowrspwn,
           foregroundColor: AppColors.textPrimary,
           disabledBackgroundColor:
-          AppColors.yellowrspwn.withOpacity(0.4),
+          AppColors.yellowrspwn.withValues(alpha: 0.4),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(30)),
           padding: const EdgeInsets.symmetric(vertical: 14),

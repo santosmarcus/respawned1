@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
+import 'package:respawnd1/features/adoption/sponsored_animals_section.dart';
 import 'package:respawnd1/features/donation/donation_page.dart';
 import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
 import 'package:respawnd1/features/organization/organization_list_page.dart';
@@ -213,6 +214,23 @@ class HomeScreen extends StatelessWidget {
                 const SizedBox(height: 20),
 
                 const PostAdoption(),
+
+                const SizedBox(height: 24),
+
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    'Sponsored Animals',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
+                      fontWeight: FontWeight.normal,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                const SponsoredAnimalsSection(),
 
                 const SizedBox(height: 24)
               ],

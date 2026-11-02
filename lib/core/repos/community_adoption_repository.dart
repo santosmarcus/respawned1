@@ -93,10 +93,16 @@ class CommunityAdoptionRepository {
       final toCreate = adoptions.where((a) => !claimedAlready.contains(a.animalIndex)).toList();
       if (toCreate.isEmpty) return;
 
+      // Adoptions of a case's animals belong to the organization that
+      // accepted the case, when one has.
+      final caseOrgId = caseData['organizationId'] as String?;
       final newIds = <String>[];
       for (final adoption in toCreate) {
         final ref = _adoptions.doc();
-        tx.set(ref, adoption.toCreateMap());
+        tx.set(ref, {
+          ...adoption.toCreateMap(),
+          if (caseOrgId != null && caseOrgId.isNotEmpty) 'organizationId': caseOrgId,
+        });
         newIds.add(ref.id);
       }
       createdIds.addAll(newIds);

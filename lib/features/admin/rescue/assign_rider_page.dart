@@ -780,7 +780,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.lavenderrspwn.withOpacity(0.2),
+                  color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: AppColors.lavenderrspwn),
                 ),

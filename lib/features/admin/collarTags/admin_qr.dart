@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,7 +10,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:io';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 
@@ -297,7 +296,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                 )
                     : null,
                 filled: true,
-                fillColor: AppColors.tearspwn.withOpacity(0.2),
+                fillColor: AppColors.tearspwn.withValues(alpha: 0.2),
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 10),
                 border: OutlineInputBorder(
@@ -494,7 +493,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(Icons.qr_code_2,
-            size: 56, color: AppColors.textPrimary.withOpacity(0.25)),
+            size: 56, color: AppColors.textPrimary.withValues(alpha: 0.25)),
         const SizedBox(height: 12),
         Text(
           'Select a tag\nto generate its QR',
@@ -513,7 +512,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.error_outline,
-              size: 48, color: AppColors.textPrimary.withOpacity(0.4)),
+              size: 48, color: AppColors.textPrimary.withValues(alpha: 0.4)),
           const SizedBox(height: 12),
           Text(
             message,
@@ -551,8 +550,8 @@ class _TagTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           color: selected
-              ? AppColors.yellowrspwn.withOpacity(0.18)
-              : AppColors.tearspwn.withOpacity(0.12),
+              ? AppColors.yellowrspwn.withValues(alpha: 0.18)
+              : AppColors.tearspwn.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: selected ? AppColors.yellowrspwn : AppColors.slaterspwn,
@@ -598,8 +597,8 @@ class _StatusPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: enabled
-            ? AppColors.greenrspwn.withOpacity(0.2)
-            : AppColors.slaterspwn.withOpacity(0.3),
+            ? AppColors.greenrspwn.withValues(alpha: 0.2)
+            : AppColors.slaterspwn.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(

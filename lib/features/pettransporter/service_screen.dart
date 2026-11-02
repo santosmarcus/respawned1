@@ -12,9 +12,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../app_theme.dart';
-
-const String _mapsApiKey = 'AIzaSyAzqeI6uyCZW5VHQTeOyWqLdku6n-rzjTQ';
+import 'package:respawnd1/app_theme.dart';
 
 class ServiceScreen extends StatefulWidget{
   const ServiceScreen({super.key});
@@ -478,7 +476,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
       setState(() {
         _currentLocation = LatLng(pos.latitude, pos.longitude);
         _isOnline = true;
@@ -776,7 +777,6 @@ class _RequestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final urgency = data['urgency'] ?? '';
-    final isCritical = urgency == 'Critical';
     final address = data['address'] ?? '';
     final rawDropoffAddress =
     (data['dropoffAddress'] as String?)?.trim().isNotEmpty == true

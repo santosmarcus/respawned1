@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/clinic_search_result.dart';
@@ -301,20 +302,46 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
       isThreeLine: true,
       onTap: isExcluded ? null : () => _selectResult(clinic),
       trailing: SizedBox(
-        width: 48,
+        width: 88,
         height: 48,
-        child: isBookmarkPending
-            ? const Padding(padding: EdgeInsets.all(14), child: CircularProgressIndicator(strokeWidth: 2))
-            : IconButton(
-                icon: Icon(
-                  isSaved ? Icons.bookmark : Icons.bookmark_border,
-                  color: isSaved ? AppColors.yellowrspwn : AppColors.textSecondary,
-                ),
-                tooltip: isSaved ? 'Remove bookmark' : 'Save clinic',
-                onPressed: () => _toggleBookmark(clinic),
-              ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Calling never selects the clinic (spec: keep selection and
+            // calling separate) — this button has its own onPressed, never
+            // routed through _selectResult/onTap. Disabled (not hidden, so
+            // the row stays a consistent width) when Places returned no
+            // phone number for this clinic — never launches an empty tel:.
+            IconButton(
+              icon: const Icon(Icons.call_outlined),
+              color: (clinic.phone?.trim().isNotEmpty ?? false) ? AppColors.textPrimary : AppColors.slaterspwn,
+              tooltip: (clinic.phone?.trim().isNotEmpty ?? false) ? 'Call ${clinic.name}' : 'Phone number unavailable',
+              onPressed: (clinic.phone?.trim().isNotEmpty ?? false) ? () => _callClinic(context, clinic.phone!) : null,
+            ),
+            isBookmarkPending
+                ? const Padding(padding: EdgeInsets.all(14), child: CircularProgressIndicator(strokeWidth: 2))
+                : IconButton(
+                    icon: Icon(
+                      isSaved ? Icons.bookmark : Icons.bookmark_border,
+                      color: isSaved ? AppColors.yellowrspwn : AppColors.textSecondary,
+                    ),
+                    tooltip: isSaved ? 'Remove bookmark' : 'Save clinic',
+                    onPressed: () => _toggleBookmark(clinic),
+                  ),
+          ],
+        ),
       ),
     );
+  }
+
+  // Reuses the exact tel: launch pattern already established in
+  // transporter_details_card.dart's own _launchCall — not a second approach.
+  Future<void> _callClinic(BuildContext context, String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone.trim());
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not start the call.')));
+    }
   }
 
   @override

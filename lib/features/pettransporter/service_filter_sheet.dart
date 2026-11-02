@@ -1,14 +1,10 @@
 import 'dart:math' as math;
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../app_theme.dart';
+import 'package:respawnd1/app_theme.dart';
 
 
 class ServiceFilterSheet extends StatefulWidget {
@@ -75,7 +71,10 @@ class _ServiceFilterSheetState
       }
 
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
       if (mounted) {
         setState(() => _center = LatLng(pos.latitude, pos.longitude));
         // Wait a frame so the map's finished attaching before we move it.
@@ -214,7 +213,7 @@ class _ServiceFilterSheetState
                   circleId: const CircleId('service_range'),
                   center: _center!,
                   radius: _range * 1000,
-                  fillColor: AppColors.greenrspwn.withOpacity(0.15),
+                  fillColor: AppColors.greenrspwn.withValues(alpha: 0.15),
                   strokeColor: AppColors.greenrspwn,
                   strokeWidth: 2,
                 ),
@@ -231,7 +230,7 @@ class _ServiceFilterSheetState
               inactiveTrackColor: AppColors.slaterspwn,
               thumbColor: AppColors.textPrimary,
               overlayColor:
-              AppColors.textPrimary.withOpacity(0.12),
+              AppColors.textPrimary.withValues(alpha: 0.12),
               trackHeight: 3,
             ),
             child: Slider(

@@ -1,27 +1,47 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:respawnd1/features/generalhome/push_token_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 //import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/core/services/geofence_service.dart';
 import 'package:respawnd1/core/services/notification_service.dart';
 
+import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
+import 'package:respawnd1/core/repos/audit_log_repository.dart';
+
 ValueNotifier<AuthService> authService = ValueNotifier (AuthService());
 
 class AuthService {
   final FirebaseAuth firebaseAuth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final AuditLogRepository _auditLog = AuditLogRepository();
 
   User? get currentUser => firebaseAuth.currentUser;
   Stream<User?> get authStateChanges => firebaseAuth.authStateChanges();
+
+  /// Best-effort only (spec: audit writes never block/affect the real
+  /// action) — called AFTER the credential is already established, so a
+  /// failure here can never prevent or roll back a successful sign-in.
+  Future<void> _logLogin(User? user, {required String method}) async {
+    if (user == null) return;
+    await _auditLog.log(
+      category: AuditCategory.logins,
+      action: 'Successful login',
+      actorId: user.uid,
+      actorEmail: user.email,
+      actorName: user.displayName,
+      metadata: {'method': method},
+    );
+  }
 
   Future<UserCredential> signIn({
     required String email,
     required String password,
   }) async {
-    return await firebaseAuth.signInWithEmailAndPassword(
+    final credential = await firebaseAuth.signInWithEmailAndPassword(
         email: email, password: password);
+    await _logLogin(credential.user, method: 'email_password');
+    return credential;
   }
 
   Future<UserCredential> createAccount({
@@ -75,34 +95,9 @@ class AuthService {
 
     final userCredential = await firebaseAuth.signInWithCredential(credential);
     await _createUserDocIfNew(userCredential.user!);
+    await _logLogin(userCredential.user, method: 'google');
     return userCredential;
   }
-
-  /*Future<UserCredential?> signInWithFacebook() async {
-    final LoginResult result = await FacebookAuth.instance.login(
-      permissions: ['public_profile', 'email'],
-    );
-
-    switch (result.status) {
-      case LoginStatus.success:
-        final OAuthCredential credential =
-        FacebookAuthProvider.credential(result.accessToken!.tokenString);
-
-        final userCredential =
-        await firebaseAuth.signInWithCredential(credential);
-        await _createUserDocIfNew(userCredential.user!);
-        return userCredential;
-
-      case LoginStatus.cancelled:
-        return null; // user backed out — not an error, don't show a message
-
-      case LoginStatus.failed:
-      case LoginStatus.operationInProgress:
-        throw Exception(
-          result.message ?? 'Facebook sign-in failed. Please try again.',
-        );
-    }
-  }*/
 
   // Step 1: Send OTP
   Future<void> sendOtp({
@@ -151,6 +146,7 @@ class AuthService {
     );
     final userCredential = await firebaseAuth.signInWithCredential(credential);
     await _createUserDocIfNew(userCredential.user!);
+    await _logLogin(userCredential.user, method: 'phone_otp');
     return userCredential;
   }
 
@@ -224,6 +220,8 @@ class AuthService {
 
   Future<bool> isNewUser(String uid) async {
     final doc = await _firestore.collection('users').doc(uid).get();
-    return !hasCompletedOnboarding(doc.data());
+    if (!doc.exists) return true;
+    final role = doc.data()?['role'];
+    return role == null || role == '';
   }
 }

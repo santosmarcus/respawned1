@@ -93,24 +93,89 @@ class AnimalRecordRepository {
         );
   }
 
-  /// Every Management-tab action (archive, transfer, deceased, adopted)
-  /// appends here — this is what both the Management tab's own "View Logs"
-  /// action and the header overflow menu's "View Logs" read, so there's one
-  /// audit trail, not two.
+  /// Every Animal Logs / Management-tab event (created, edited, vaccine
+  /// added, archive, transfer, deceased, adopted, reserved, ...) appends
+  /// here — this is what both the Management tab's own "View Logs" action
+  /// and the header overflow menu's "View Logs" read, so there's one audit
+  /// trail, not two.
   Stream<List<Map<String, dynamic>>> streamManagementLogs(String animalId) {
     return _managementLogsOf(animalId).orderBy('timestamp', descending: true).snapshots().map(
           (snap) => snap.docs.map((d) => {'id': d.id, ...d.data()}).toList(),
         );
   }
 
+  /// Public entry point for callers outside this repository (Animal Record
+  /// creation/edit, the Medical Profile sheet, the Add Vaccine sheet) that
+  /// need to log an event without going through one of this repository's
+  /// own state-changing methods. Internal methods below call the same
+  /// underlying writer ([_addManagementLog]) so there is exactly one write
+  /// path into `managementLogs`, never two.
+  Future<void> logManagementEvent({
+    required String animalId,
+    required String eventType,
+    required String action,
+    String? description,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+    String? actorRole,
+    String? organizationId,
+    Map<String, dynamic>? previousValues,
+    Map<String, dynamic>? newValues,
+    String? sourceModule,
+    String? sourceRecordId,
+  }) =>
+      _addManagementLog(
+        animalId: animalId,
+        eventType: eventType,
+        action: action,
+        details: description,
+        actorId: actorId,
+        actorName: actorName,
+        actorEmail: actorEmail,
+        actorRole: actorRole,
+        organizationId: organizationId,
+        previousValues: previousValues,
+        newValues: newValues,
+        sourceModule: sourceModule,
+        sourceRecordId: sourceRecordId,
+      );
+
+  /// The single writer behind every Animal Log entry. `action`/`details`
+  /// are the original (pre-existing) fields the two log-list widgets
+  /// already render — kept as-is for back-compat with legacy log docs that
+  /// only ever had these two plus `timestamp`. Every field below them is
+  /// additive: a legacy doc simply has them absent/null, never malformed.
   Future<void> _addManagementLog({
     required String animalId,
     required String action,
     String? details,
+    String? eventType,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+    String? actorRole,
+    String? organizationId,
+    Map<String, dynamic>? previousValues,
+    Map<String, dynamic>? newValues,
+    String? sourceModule,
+    String? sourceRecordId,
   }) async {
     await _managementLogsOf(animalId).add({
+      'animalId': animalId,
       'action': action,
       if (details != null && details.isNotEmpty) 'details': details,
+      if (details != null && details.isNotEmpty) 'description': details,
+      if (eventType != null) 'eventType': eventType,
+      if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
+      if (actorName != null && actorName.isNotEmpty) 'actorName': actorName,
+      if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
+      if (actorRole != null && actorRole.isNotEmpty) 'actorRole': actorRole,
+      if (organizationId != null && organizationId.isNotEmpty) 'organizationId': organizationId,
+      if (previousValues != null && previousValues.isNotEmpty) 'previousValues': previousValues,
+      if (newValues != null && newValues.isNotEmpty) 'newValues': newValues,
+      if (sourceModule != null) 'sourceModule': sourceModule,
+      if (sourceRecordId != null) 'sourceRecordId': sourceRecordId,
       'timestamp': FieldValue.serverTimestamp(),
     });
   }
@@ -157,6 +222,16 @@ class AnimalRecordRepository {
     );
     await _episodesOf(animal.id).add(episode.toFirestore());
     await _animalDoc(animal.id).update({'currentCaseId': caseId, 'updatedAt': FieldValue.serverTimestamp()});
+    await _addManagementLog(
+      animalId: animal.id,
+      eventType: 'intake_admitted',
+      action: 'Animal admitted to Intake',
+      details: reason,
+      actorId: actorUid,
+      actorName: actorName,
+      sourceModule: 'medical',
+      sourceRecordId: caseId,
+    );
 
     return caseId;
   }
@@ -166,9 +241,28 @@ class AnimalRecordRepository {
   /// Saves the record, then refreshes the animal doc's derived
   /// `vaccinated`/`vaccinesGiven` summary (never the reverse — those flat
   /// fields are always computed from records here, never hand-edited).
-  Future<void> addVaccination({required String animalId, required VaccinationRecord record}) async {
+  Future<void> addVaccination({
+    required String animalId,
+    required VaccinationRecord record,
+    String? actorId,
+    String? actorEmail,
+  }) async {
     await _vaccinationsOf(animalId).add(record.toFirestore());
     await _refreshVaccineSummary(animalId);
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'vaccine_added',
+      action: 'Vaccine added',
+      details: record.vaccineName,
+      actorId: actorId,
+      actorName: record.createdBy,
+      actorEmail: actorEmail,
+      newValues: {
+        'vaccineName': record.vaccineName,
+        'dateAdministered': record.dateAdministered.toIso8601String(),
+        'nextDueDate': record.nextDueDate.toIso8601String(),
+      },
+    );
   }
 
   Future<void> _refreshVaccineSummary(String animalId) async {
@@ -226,17 +320,52 @@ class AnimalRecordRepository {
 
   // ---- Management tab ---------------------------------------------------
 
-  Future<void> setArchived({required String animalId, required bool archived}) async {
+  Future<void> setArchived({
+    required String animalId,
+    required bool archived,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
     await _animalDoc(animalId).update({'archived': archived, 'updatedAt': FieldValue.serverTimestamp()});
-    await _addManagementLog(animalId: animalId, action: archived ? 'Archived' : 'Unarchived');
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: archived ? 'archived' : 'restored',
+      action: archived ? 'Archived' : 'Restored',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+    );
   }
 
+  /// Re-reads current state before writing — never trusts the UI's own
+  /// enabled/disabled guard alone (spec: "Mark as Deceased" safety). Once an
+  /// animal has actually been adopted (adoptionStatus == 'adopted') or has a
+  /// transfer in progress (transferStatus == 'pending' — see
+  /// AnimalRecord.isTransferredOut), this rejects the transition and neither
+  /// writes the record nor creates a log entry, so a stale UI (an action
+  /// tapped just before another admin's adopt/transfer commits) can never
+  /// mark a since-rehomed animal deceased.
   Future<void> markDeceased({
     required String animalId,
     DateTime? date,
     String? cause,
     String? notes,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
   }) async {
+    final snap = await _animalDoc(animalId).get();
+    final data = snap.data();
+    if (data == null) throw StateError('Animal record not found.');
+    final adoptionStatus = data['adoptionStatus'] as String?;
+    if (adoptionStatus == 'adopted') {
+      throw StateError('Unavailable after the animal has been transferred or adopted.');
+    }
+    if ((data['transferStatus'] as String?) == 'pending') {
+      throw StateError('Unavailable after the animal has been transferred or adopted.');
+    }
+
     await _animalDoc(animalId).update({
       'adoptionStatus': 'deceased',
       'status': 'deceased',
@@ -246,7 +375,15 @@ class AnimalRecordRepository {
       'updatedAt': FieldValue.serverTimestamp(),
     });
     await _addManagementLog(
-        animalId: animalId, action: 'Marked deceased', details: cause == null || cause.isEmpty ? null : 'Cause: $cause');
+      animalId: animalId,
+      action: 'Marked deceased',
+      details: cause == null || cause.isEmpty ? null : 'Cause: $cause',
+      eventType: 'deceased',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      newValues: {'adoptionStatus': 'deceased', if (cause != null && cause.isNotEmpty) 'deceasedCause': cause},
+    );
   }
 
   /// Only ever called after the existing adoption-application workflow has
@@ -254,13 +391,26 @@ class AnimalRecordRepository {
   /// performs no such check (that belongs to the adoption module, out of
   /// scope here); the Management tab UI is what's responsible for only
   /// exposing this action when that's true.
-  Future<void> markAdopted({required String animalId}) async {
+  Future<void> markAdopted({
+    required String animalId,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
     await _animalDoc(animalId).update({
       'adoptionStatus': 'adopted',
       'status': 'adopted',
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    await _addManagementLog(animalId: animalId, action: 'Marked adopted');
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'adopted',
+      action: 'Adoption/release completed',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      newValues: const {'adoptionStatus': 'adopted'},
+    );
   }
 
   /// The "un-adopt" transition — called once an approved return has actually
@@ -275,6 +425,9 @@ class AnimalRecordRepository {
     required String animalId,
     required String returnRequestId,
     required String previousAdoptionId,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
   }) async {
     await _animalDoc(animalId).update({
       'adoptionStatus': 'not_ready',
@@ -288,7 +441,16 @@ class AnimalRecordRepository {
       'reservedAt': FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    await _addManagementLog(animalId: animalId, action: 'Returned by adopter — entered Intake for review');
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'received',
+      action: 'Animal received — returned by adopter, entered Intake for review',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      sourceModule: 'adoption',
+      sourceRecordId: returnRequestId,
+    );
   }
 
   Future<void> transferAnimal({
@@ -297,6 +459,9 @@ class AnimalRecordRepository {
     required String targetName,
     String? targetOrgId,
     String? notes,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
   }) async {
     await _animalDoc(animalId).update({
       'transferStatus': 'pending',
@@ -307,6 +472,14 @@ class AnimalRecordRepository {
       'transferredAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    await _addManagementLog(animalId: animalId, action: 'Transfer initiated to $targetName ($targetType)');
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'transferred',
+      action: 'Transferred to $targetName ($targetType)',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      newValues: {'transferTargetType': targetType, 'transferTargetName': targetName},
+    );
   }
 }
