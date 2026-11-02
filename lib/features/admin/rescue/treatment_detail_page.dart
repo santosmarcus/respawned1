@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -15,7 +16,7 @@ import 'package:respawnd1/core/utils/animal_treatment_state.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/expenses/create_fundraiser_draft_page.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_create.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
@@ -569,9 +570,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final expensesAsync = ref.watch(expensesProvider(widget.caseId));
     final expenses = expensesAsync.asData?.value ?? const [];
     final totalExpenses = expenses.fold<double>(0, (sum, e) => sum + e.amount);
-    final fundedAmount = expenses
-        .where((e) => e.isFunded)
-        .fold<double>(0, (sum, e) => sum + e.amount);
+    final fundedAmount = expenses.fold<double>(0, (sum, e) => sum + e.fundedAmount);
     final outstandingBalance = totalExpenses - fundedAmount;
 
     final dateStr = c.dateAdmitted != null
@@ -594,13 +593,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           ),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: AppColors.background,
-            ),
-            onPressed: () {},
-          ),
+          const AdminAlertsBell(),
           // The AppBar's "Animal Moved" one-tap shortcut is gone — that
           // location update now only ever comes from an approved Community
           // Report. Close Case (any reason, including animal-moved) is now
@@ -1605,9 +1598,8 @@ class _CostTrackingSection extends StatelessWidget {
                     : () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => CreateFundraiserDraftPage(
-                            rescueCase: rescueCase,
-                            outstandingBalance: outstandingBalance,
+                          builder: (_) => DonationAdminCreatePage(
+                            prefill: CampaignPrefill.forCaseTreatment(rescueCase, outstandingBalance),
                           ),
                         ),
                       ),

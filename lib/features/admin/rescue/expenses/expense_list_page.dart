@@ -166,13 +166,23 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
-                              color: e.isFunded ? AppColors.greenrspwn : AppColors.slaterspwn,
+                              color: e.isFullyFunded
+                                  ? AppColors.greenrspwn
+                                  : (e.isPartlyFunded ? AppColors.yellowrspwn : AppColors.slaterspwn),
                               borderRadius: BorderRadius.circular(20),
                             ),
-                            child: Text(e.fundingSource.label,
+                            child: Text(e.fundingLabel,
                                 style: GoogleFonts.zain(
                                     fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                           ),
+                          if (e.isPartlyFunded)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                '${formatPeso(e.fundedAmount)} funded · ${formatPeso(e.outstandingAmount)} outstanding',
+                                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                              ),
+                            ),
                           const SizedBox(height: 4),
                           Text(dateStr, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                         ],

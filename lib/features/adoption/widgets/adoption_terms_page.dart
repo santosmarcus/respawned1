@@ -4,13 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 
-// Terms and Conditions page (Adoption Day)
-class AdoptionTermsAndConditionsPage extends StatelessWidget {
-  final String animalName;
-
-  const AdoptionTermsAndConditionsPage({super.key, required this.animalName});
-
-  List<String> get _terms => [
+/// The adopter's terms, shared by this page and the signed Adoption
+/// Agreement PDF (AdoptionAgreementService) so the two never drift apart.
+List<String> adoptionTermsFor(String animalName) => [
     'I am over eighteen (18) years of age and can legally adopt.',
     '$animalName, hereinafter referred to as the pet, is being transferred '
         'to the adopting owner with the understanding that the adopter is '
@@ -50,6 +46,14 @@ class AdoptionTermsAndConditionsPage extends StatelessWidget {
         'will be reviewed and signed by both parties on the day of the '
         'adoption, and that this signed agreement will govern the adoption.',
   ];
+
+// Terms and Conditions page (Adoption Day)
+class AdoptionTermsAndConditionsPage extends StatelessWidget {
+  final String animalName;
+
+  const AdoptionTermsAndConditionsPage({super.key, required this.animalName});
+
+  List<String> get _terms => adoptionTermsFor(animalName);
 
   @override
   Widget build(BuildContext context) {

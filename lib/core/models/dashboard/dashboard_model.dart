@@ -237,7 +237,7 @@ List<MonitoringReason> monitoringReasonsFor(AnimalRecord a, {DateTime? now, int 
   if ((a.health.chronicConditions ?? '').trim().isNotEmpty) {
     reasons.add(const MonitoringReason('Chronic condition', DashSeverity.info));
   }
-  if (a.specialNeeds) {
+  if (a.hasSpecialNeeds) {
     reasons.add(const MonitoringReason('Special needs', DashSeverity.info));
   }
   if (a.createdAt != null && today.difference(a.createdAt!).inDays < recentDays) {

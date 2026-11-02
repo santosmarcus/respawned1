@@ -18,8 +18,8 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
-import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
+import 'package:respawnd1/features/userauth/verify_email_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/services/notification_service.dart';
 import 'package:respawnd1/core/services/geofence_service.dart';
@@ -184,6 +184,13 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
 
   @override
   Widget build(BuildContext context) {
+    // Unverified email/password accounts confirm their address before
+    // anything else (onboarding included).
+    final authUser = FirebaseAuth.instance.currentUser;
+    if (authUser != null && AuthService.needsEmailVerification(authUser)) {
+      return VerifyEmailScreen(onVerified: () => setState(() {}));
+    }
+
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _userDoc,
       builder: (context, userSnapshot) {
@@ -263,7 +270,7 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
               // one, so this is safe to send them back to.
               return const OrganizationAboutScreen();
             }
-            return _OrganizationRoleRouter(organizationId: organizationId);
+            return OrganizationRoleRouter(organizationId: organizationId);
           case 'general':
           default:
             return const HomeScreen();
@@ -273,9 +280,12 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
   }
 }
 
-class _OrganizationRoleRouter extends StatelessWidget {
+/// Routes an organization account by its organization's verification
+/// status. Public so OrganizationMemberPendingPage can hand off to it once a
+/// member joins.
+class OrganizationRoleRouter extends StatelessWidget {
   final String organizationId;
-  const _OrganizationRoleRouter({required this.organizationId});
+  const OrganizationRoleRouter({super.key, required this.organizationId});
 
   @override
   Widget build(BuildContext context) {

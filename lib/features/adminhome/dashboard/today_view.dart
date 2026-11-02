@@ -1092,11 +1092,14 @@ class _FundsBody extends ConsumerWidget {
                   ExpenseCategory.vaccination,
                   ExpenseCategory.confinement,
                 };
-                final unfunded = list.where((e) => e.fundingSource == FundingSource.unfunded);
-                final vet = unfunded.where((e) => vetCats.contains(e.category)).fold<double>(0, (s, e) => s + e.amount);
-                final transport = unfunded
+                // Outstanding balances, so a partly funded bill counts only
+                // for the part nobody has covered yet.
+                final vet = list
+                    .where((e) => vetCats.contains(e.category))
+                    .fold<double>(0, (s, e) => s + e.outstandingAmount);
+                final transport = list
                     .where((e) => e.category == ExpenseCategory.transport)
-                    .fold<double>(0, (s, e) => s + e.amount);
+                    .fold<double>(0, (s, e) => s + e.outstandingAmount);
                 final missing = list.where((e) => (e.receiptUrl ?? '').isEmpty).length;
                 return [
                   _KvRow(

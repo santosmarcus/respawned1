@@ -27,14 +27,9 @@ enum ExpenseCategory {
       values.firstWhere((c) => c.label == label, orElse: () => ExpenseCategory.other);
 }
 
-/// [unfunded] intentionally is NOT "fully covered" — see
-/// RescueCaseRepository.streamExpenses / the Cost Tracking totals: an
-/// expense counts toward Funded Amount only when its source is anything
-/// other than [unfunded]. This is the deliberately simplified MVP rule —
-/// no partial-funding/multi-source allocation yet.
-/// TODO(cost-tracking): support partial funding and multiple funding
-/// sources allocated to a single expense; this MVP treats every non-
-/// Unfunded expense as 100% covered by its one selected source.
+/// Where money for an expense came from. [unfunded] is never stored as an
+/// [ExpenseFunding] line — an expense with no lines is unfunded — it only
+/// survives as the legacy single-source value and as a display label.
 enum FundingSource {
   unfunded,
   donationFund,
@@ -52,6 +47,29 @@ enum FundingSource {
 
   static FundingSource fromLabel(String? label) =>
       values.firstWhere((s) => s.label == label, orElse: () => FundingSource.unfunded);
+
+  /// Sources an [ExpenseFunding] line can use.
+  static List<FundingSource> get fundable => values.where((s) => s != FundingSource.unfunded).toList();
+}
+
+/// One slice of an expense's cost covered by one source — e.g. the clinic
+/// bill paid ₱3,000 from the organization budget up front and ₱2,000 from a
+/// fundraiser later. An expense can have several; whatever they don't cover
+/// is its outstanding balance.
+class ExpenseFunding {
+  final FundingSource source;
+  final double amount;
+  const ExpenseFunding({required this.source, required this.amount});
+
+  static ExpenseFunding? fromMap(Object? raw) {
+    if (raw is! Map) return null;
+    final source = FundingSource.fromLabel(raw['source'] as String?);
+    final amount = (raw['amount'] as num?)?.toDouble() ?? 0;
+    if (source == FundingSource.unfunded || amount <= 0) return null;
+    return ExpenseFunding(source: source, amount: amount);
+  }
+
+  Map<String, dynamic> toMap() => {'source': source.label, 'amount': amount};
 }
 
 /// A single doc under `cases/{caseId}/expenses/{expenseId}` — the ledger
@@ -64,7 +82,10 @@ class Expense {
   final String title;
   final ExpenseCategory category;
   final double amount;
-  final FundingSource fundingSource;
+
+  /// How the cost is covered; empty = unfunded. Lines may add up to less
+  /// than [amount] (partly funded), never more (enforced on save).
+  final List<ExpenseFunding> fundings;
   final String? receiptUrl;
   final String? notes;
   final DateTime? incurredAt;
@@ -85,7 +106,7 @@ class Expense {
     required this.title,
     required this.category,
     required this.amount,
-    required this.fundingSource,
+    this.fundings = const [],
     this.receiptUrl,
     this.notes,
     this.incurredAt,
@@ -94,7 +115,25 @@ class Expense {
     this.animalIndexes,
   });
 
-  bool get isFunded => fundingSource != FundingSource.unfunded;
+  /// Covered so far — capped at [amount] so a bad legacy record can never
+  /// make the case totals show a negative balance.
+  double get fundedAmount {
+    final total = fundings.fold<double>(0, (sum, f) => sum + f.amount);
+    return total > amount ? amount : total;
+  }
+
+  double get outstandingAmount => amount - fundedAmount;
+
+  bool get isFullyFunded => amount > 0 && outstandingAmount <= 0;
+
+  bool get isPartlyFunded => fundedAmount > 0 && !isFullyFunded;
+
+  bool get isUnfunded => fundedAmount <= 0;
+
+  /// e.g. "Unfunded", "Donation Fund", "Organization Budget + Fundraiser".
+  String get fundingLabel => fundings.isEmpty
+      ? FundingSource.unfunded.label
+      : fundings.map((f) => f.source.label).toSet().join(' + ');
 
   bool get isSharedCaseExpense => animalIndexes == null || animalIndexes!.isEmpty;
 
@@ -107,13 +146,14 @@ class Expense {
       return v is Timestamp ? v.toDate() : null;
     }
 
+    final amount = (data['amount'] as num?)?.toDouble() ?? 0;
     return Expense(
       id: doc.id,
       caseId: caseId,
       title: data['title'] as String? ?? '-',
       category: ExpenseCategory.fromLabel(data['category'] as String?),
-      amount: (data['amount'] as num?)?.toDouble() ?? 0,
-      fundingSource: FundingSource.fromLabel(data['fundingSource'] as String?),
+      amount: amount,
+      fundings: fundingsFromFirestore(data, amount),
       receiptUrl: data['receiptUrl'] as String?,
       notes: data['notes'] as String?,
       incurredAt: ts('incurredAt'),
@@ -123,11 +163,25 @@ class Expense {
     );
   }
 
+  /// `fundings` when present; otherwise a legacy single `fundingSource`,
+  /// which covered the whole amount unless it was Unfunded.
+  static List<ExpenseFunding> fundingsFromFirestore(Map<String, dynamic> data, double amount) {
+    final raw = data['fundings'];
+    if (raw is List) return raw.map(ExpenseFunding.fromMap).whereType<ExpenseFunding>().toList();
+    final legacy = FundingSource.fromLabel(data['fundingSource'] as String?);
+    if (legacy == FundingSource.unfunded || amount <= 0) return const [];
+    return [ExpenseFunding(source: legacy, amount: amount)];
+  }
+
   Map<String, dynamic> toFirestore() => {
         'title': title,
         'category': category.label,
         'amount': amount,
-        'fundingSource': fundingSource.label,
+        'fundings': fundings.map((f) => f.toMap()).toList(),
+        // Kept for anything still reading the old single-source field.
+        'fundingSource': fundings.length == 1 && isFullyFunded
+            ? fundings.single.source.label
+            : (isUnfunded ? FundingSource.unfunded.label : 'Mixed'),
         if (receiptUrl != null && receiptUrl!.isNotEmpty) 'receiptUrl': receiptUrl,
         if (notes != null && notes!.isNotEmpty) 'notes': notes,
         'incurredAt': incurredAt != null ? Timestamp.fromDate(incurredAt!) : Timestamp.now(),

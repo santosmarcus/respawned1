@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:video_player/video_player.dart';
@@ -548,13 +549,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               transferredByName: _actorName,
             ),
           ),
-          IconButton(
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: AppColors.background,
-            ),
-            onPressed: () {},
-          ),
+          const AdminAlertsBell(),
         ],
       ),
       body: SingleChildScrollView(

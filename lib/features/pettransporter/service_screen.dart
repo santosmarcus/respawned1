@@ -56,12 +56,21 @@ class _ServiceScreenState extends State<ServiceScreen> {
     super.dispose();
   }
 
+  // Also shares the go-online GPS fix as lastLat/lastLng so the admin's
+  // Assign Transporter list can show real distances. Cleared on going
+  // offline so a stale position is never shown as current.
   Future<void> _writePresence({required bool online}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+    final location = _currentLocation;
     try {
       await FirebaseFirestore.instance.collection('users').doc(uid).set(
-        {'online': online, 'lastSeenAt': FieldValue.serverTimestamp()},
+        {
+          'online': online,
+          'lastSeenAt': FieldValue.serverTimestamp(),
+          'lastLat': online && location != null ? location.latitude : FieldValue.delete(),
+          'lastLng': online && location != null ? location.longitude : FieldValue.delete(),
+        },
         SetOptions(merge: true),
       );
     } catch (_) {

@@ -7,14 +7,26 @@ rules_version = '2';
 // that actually grants access — the catch-alls exclude every collection that
 // has its own block.
 //
-// Intentionally still open to any signed-in user (pending the security pass):
-// users/{uid} docs, organizations/{orgId} profile fields, organization
+// Security pass (P0): users/{uid} can no longer self-assign staff roles or
+// an organization; organizations can't self-approve; cases, animals and
+// adoptions are writable only by the people each flow needs (owning
+// organization's staff, reporter, assigned transporter, adopter).
+//
+// Still open to any signed-in user: reads of users, cases, animals and
+// adoptions (the public map, job board and the duplicate-application check
+// in adoption_application_service.dart query them unfiltered), organization
 // subcollections other than members/integrations, and every collection not
-// named below (cases, adoptions, animals, collarTags, rescueSessions, ...).
-// collarTags/rescueSessions have specific rules further down, but the app
-// still creates and edits tags directly, so the catch-all keeps them open.
+// named below (collarTags, rescueSessions, petAlerts, ...). collarTags/
+// rescueSessions have specific rules further down, but the app still
+// creates and edits tags directly, so the catch-all keeps them open.
+//
+// Staff roles: users/{uid}.role 'admin'/'ngo_staff' (platform staff, set in
+// the console only) or membership of an approved organization. An
+// organization with no verificationStatus (bootstrapped by platform staff,
+// or created before verification existed) counts as approved.
 //
 // Cloud Functions use the Admin SDK and bypass these rules.
+// Tests: rules-tests/ (npm test, runs against the Firestore emulator).
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -45,9 +57,25 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Same roles main.dart routes into the admin shell.
+    function myRole() {
+      return userDoc().get('role', '');
+    }
+
+    function myOrgId() {
+      return userDoc().get('organizationId', '');
+    }
+
+    // Console-assigned staff accounts main.dart routes straight into the
+    // admin shell. Clients can't set these roles (see users/{uid}).
+    function isPlatformStaff() {
+      return signedIn() && myRole() in ['admin', 'ngo_staff'];
+    }
+
+    // Staff of an approved organization, or platform staff — the pool that
+    // may pick up unowned (pending/referred) cases and read staff-only data.
     function isOrgStaff() {
-      return signedIn() && userDoc().get('role', '') in ['admin', 'ngo_staff', 'organization'];
+      return isPlatformStaff() ||
+        (signedIn() && myOrgId() != '' && isApprovedStaffOf(myOrgId()));
     }
 
     // ---- Organization membership helpers -----------------------------------
@@ -83,6 +111,44 @@ service cloud.firestore {
         (isActiveMember(orgId) && get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin');
     }
 
+    // An account acts for the organization its users/{uid}.organizationId
+    // points at (as OrgMembershipService.resolveCapabilities does), unless
+    // its members doc there is inactive. No members doc = an account linked
+    // before members docs existed; users.organizationId is only writable
+    // through a real membership now, so that link can't be forged. Checking
+    // the link first keeps this cheap for everyone else — Firestore denies a
+    // request once it has evaluated 1,000 expressions.
+    function isStaffOf(orgId) {
+      return signedIn() && orgId is string && orgId != '' && myOrgId() == orgId && (
+        !exists(memberPath(orgId, request.auth.uid)) ||
+        !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']) ||
+        isOrgOwner(orgId)
+      );
+    }
+
+    function isOrgApproved(orgId) {
+      return get(orgPath(orgId)).data.get('verificationStatus', 'approved') == 'approved';
+    }
+
+    function isApprovedStaffOf(orgId) {
+      return isStaffOf(orgId) && isOrgApproved(orgId);
+    }
+
+    // May act on a record owned by `orgId` ('' = not owned by anyone yet).
+    function canStaffRecordOf(orgId) {
+      return isPlatformStaff() ||
+        (orgId != '' && isApprovedStaffOf(orgId)) ||
+        (orgId == '' && isOrgStaff());
+    }
+
+    // A staff write may only (re)assign a record to an organization the
+    // writer belongs to.
+    function orgStampOk() {
+      return !changedAny(['organizationId']) ||
+        isPlatformStaff() ||
+        isApprovedStaffOf(request.resource.data.get('organizationId', ''));
+    }
+
     // Mirrors loadActor({finance: true}) in functions/campaigns.js.
     function isFinanceAdmin() {
       let u = userDoc();
@@ -97,14 +163,35 @@ service cloud.firestore {
 
     // ---- Organizations -----------------------------------------------------
 
-    // Profile fields stay open to signed-in users, but ownerId is fixed: it
-    // must be the creator on create and can never change afterwards, since
-    // the owner gets admin rights over the members subcollection.
+    // Anyone signed in can read profiles. Only the organization's own staff
+    // edit them, and ownerId is fixed: it must be the creator on create and
+    // can never change afterwards, since the owner gets admin rights over the
+    // members subcollection.
+    //
+    // Verification: a new organization starts as 'draft' and its staff may
+    // only submit it ('pending'). Approval/rejection happens in the console
+    // (or by platform staff); an approved organization's staff get the admin
+    // shell, so this must never be self-service. Only platform staff may
+    // create an organization with no verificationStatus (the bootstrap path
+    // in OrganizationRepository.createBootstrapOrganization).
     match /organizations/{orgId} {
+      function verificationOk() {
+        return !changedAny(['verificationStatus', 'bootstrapped']) || (
+          !changedAny(['bootstrapped']) &&
+          request.resource.data.get('verificationStatus', '') == 'pending' &&
+          resource.data.get('verificationStatus', '') in ['draft', 'rejected']
+        );
+      }
+
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.get('ownerId', '') == request.auth.uid;
-      allow update: if signedIn() &&
-        request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '');
+      allow create: if signedIn() &&
+        request.resource.data.get('ownerId', '') == request.auth.uid &&
+        (isPlatformStaff() || (
+          request.resource.data.get('verificationStatus', '') == 'draft' &&
+          !('bootstrapped' in request.resource.data)
+        ));
+      allow update: if request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '') &&
+        (isPlatformStaff() || (isStaffOf(orgId) && verificationOk()));
       allow delete: if false;
     }
 
@@ -389,10 +476,63 @@ service cloud.firestore {
 
     // ---- Users -------------------------------------------------------------
 
+    // Profiles stay readable to signed-in users (directories, reporter and
+    // transporter names). Writes are the owner's, except that an
+    // organization admin may link or unlink a member's organizationId.
+    //
+    // Fields a user can't set on themselves:
+    //   - role: only the onboarding choices (selfRoles). 'admin'/'ngo_staff'
+    //     are assigned in the console.
+    //   - organizationId: only an organization they own or hold an active
+    //     membership in (checked after the write, so the org-bootstrap and
+    //     invitation-accept transactions pass).
+    //   - isVerified / transporterVerificationStatus: a user may only submit
+    //     (false / 'pending'); approval happens in the console.
     match /users/{uid} {
-      // Still open: admins write other users' organizationId when adding or
-      // removing members. Locked down in the security pass.
-      allow read, write: if signedIn();
+      function selfRoles() {
+        return ['', 'general', 'pet_transporter', 'rescue_volunteer', 'organization', 'organization_member'];
+      }
+
+      function canLinkSelfTo(orgId) {
+        return orgId is string && orgId != '' && (
+          getAfter(orgPath(orgId)).data.get('ownerId', '') == request.auth.uid ||
+          (existsAfter(memberPath(orgId, uid)) &&
+            !(getAfter(memberPath(orgId, uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']))
+        );
+      }
+
+      function selfFieldsOk(data) {
+        return data.get('role', '') in selfRoles() &&
+          data.get('isVerified', false) == false &&
+          data.get('transporterVerificationStatus', 'pending') == 'pending' &&
+          (!('organizationId' in data) || data.organizationId == null || canLinkSelfTo(data.organizationId));
+      }
+
+      function selfUpdateOk() {
+        let data = request.resource.data;
+        return (!changedAny(['role']) || data.get('role', '') in selfRoles()) &&
+          (!changedAny(['isVerified']) || data.get('isVerified', false) == false) &&
+          (!changedAny(['transporterVerificationStatus']) || data.get('transporterVerificationStatus', '') == 'pending') &&
+          (!changedAny(['organizationId']) ||
+            !('organizationId' in data) || data.organizationId == null ||
+            canLinkSelfTo(data.organizationId));
+      }
+
+      // OrganizationInvitationRepository.removeMember (unlink) and
+      // OrgMembershipService.setMember (link a member of the admin's org).
+      function orgAdminLinkChange() {
+        let data = request.resource.data;
+        return changedOnly(['organizationId']) && (
+          (!('organizationId' in data) && isOrgAdmin(resource.data.get('organizationId', ''))) ||
+          (('organizationId' in data) && isOrgAdmin(data.organizationId) &&
+            existsAfter(memberPath(data.organizationId, uid)))
+        );
+      }
+
+      allow read: if signedIn();
+      allow create: if isSelf(uid) && selfFieldsOk(request.resource.data);
+      allow update: if (isSelf(uid) && selfUpdateOk()) || (signedIn() && orgAdminLinkChange());
+      allow delete: if false;
 
       match /{sub}/{doc=**} {
         allow read, write: if signedIn() && !(sub in ['history', 'donated', 'cards', 'certificates']);
@@ -416,6 +556,297 @@ service cloud.firestore {
         allow read: if isSelf(uid);
         allow write: if false;
       }
+    }
+
+    // ---- Rescue cases ------------------------------------------------------
+    //
+    // Read by anyone signed in (public map, transporter job board). Writers:
+    //   - staff of the owning organization (or any approved organization's
+    //     staff while the case is unowned or referred), who may only stamp
+    //     their own organizationId;
+    //   - the reporter, for their own report (never ownership/assignment
+    //     fields);
+    //   - pet transporters / rescue volunteers: the one assigned or offered
+    //     the case, an open-pool claim of a pending case, or a decline;
+    //   - any user registering interest to adopt/foster, the interested
+    //     adopter reporting arrival, and community adoption claims.
+
+    function casePath(caseId) {
+      return /databases/$(database)/documents/cases/$(caseId);
+    }
+
+    function canStaffCase(data) {
+      return canStaffRecordOf(data.get('organizationId', '')) ||
+        (data.get('status', '') == 'referred' && isOrgStaff());
+    }
+
+    function isTransporterRole() {
+      return signedIn() && myRole() in ['pet_transporter', 'rescue_volunteer'];
+    }
+
+    // Holds the case through an accepted assignment or a legacy direct claim.
+    function isAssignedTransporter(data) {
+      return data.get('riderId', '') == request.auth.uid ||
+        data.get('assignedVolunteerId', '') == request.auth.uid;
+    }
+
+    // Holds the case's current (pending) offer.
+    function isOfferedTransporter(caseId, data) {
+      return data.get('currentAssignmentId', '') is string &&
+        data.get('currentAssignmentId', '') != '' &&
+        get(/databases/$(database)/documents/cases/$(caseId)/transportAssignments/$(data.currentAssignmentId))
+          .data.get('riderId', '') == request.auth.uid;
+    }
+
+    function isCaseParticipant(caseId) {
+      let data = get(casePath(caseId)).data;
+      return canStaffCase(data) ||
+        data.get('reporterId', '') == request.auth.uid ||
+        data.get('willingAdopterId', '') == request.auth.uid ||
+        (isTransporterRole() && (isAssignedTransporter(data) || isOfferedTransporter(caseId, data)));
+    }
+
+    function canWorkCase(caseId) {
+      let data = get(casePath(caseId)).data;
+      return canStaffCase(data) ||
+        (isTransporterRole() && (isAssignedTransporter(data) || isOfferedTransporter(caseId, data)));
+    }
+
+    match /cases/{caseId} {
+      // riderId / assignedVolunteerId may only stay, become the caller, or
+      // be cleared (a decline un-assigns).
+      function riderFieldsSelfOnly() {
+        let data = request.resource.data;
+        return (!changedAny(['riderId']) || data.get('riderId', null) == request.auth.uid || data.get('riderId', null) == null) &&
+          (!changedAny(['assignedVolunteerId']) ||
+            data.get('assignedVolunteerId', null) == request.auth.uid || data.get('assignedVolunteerId', null) == null);
+      }
+
+      function transporterUpdate() {
+        return isTransporterRole() &&
+          !changedAny(['reporterId', 'organizationId']) &&
+          riderFieldsSelfOnly() &&
+          (
+            isAssignedTransporter(resource.data) ||
+            isOfferedTransporter(caseId, resource.data) ||
+            // rescue_request.dart open-pool claim.
+            (resource.data.get('status', '') == 'pending' &&
+              resource.data.get('assignedVolunteerId', null) in [null, ''] &&
+              request.resource.data.get('assignedVolunteerId', '') == request.auth.uid &&
+              changedOnly(['status', 'assignedVolunteerId', 'assignedVolunteerName', 'statusHistory'])) ||
+            // rescue_request.dart decline.
+            changedOnly(['declinedBy', 'declineReasons', 'statusHistory'])
+          );
+      }
+
+      function reporterUpdate() {
+        return resource.data.get('reporterId', '') == request.auth.uid &&
+          !changedAny(['reporterId', 'organizationId', 'riderId', 'assignedVolunteerId']) &&
+          (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data));
+      }
+
+      // track_case_page.dart: register interest, then report arrival.
+      function willingAdopterUpdate() {
+        return (
+          changedOnly(['willingAdopterId', 'willingAdopterName', 'willingAdopterType', 'statusHistory']) &&
+          request.resource.data.get('willingAdopterId', '') == request.auth.uid &&
+          resource.data.get('willingAdopterId', null) in [null, '']
+        ) || (
+          changedOnly(['adopterArrivedAtTreatment', 'statusHistory']) &&
+          resource.data.get('willingAdopterId', '') == request.auth.uid
+        );
+      }
+
+      // CommunityAdoptionRepository: claim animals, closing the case once
+      // every animal is claimed.
+      function communityClaimUpdate() {
+        return changedAny(['communityAdoptionIds']) &&
+          changedOnly(['communityAdoptionIds', 'claimedAnimalIndexes', 'status', 'statusHistory']) &&
+          (!changedAny(['status']) || request.resource.data.status == 'closed');
+      }
+
+      // TransportAssignmentRepository.reconcileStaleOffer can run from any
+      // screen showing the case; it only ever clears the offer pointer.
+      function clearOfferPointer() {
+        return 'currentAssignmentId' in resource.data &&
+          !('currentAssignmentId' in request.resource.data) &&
+          changedOnly(['currentAssignmentId']);
+      }
+
+      allow read: if signedIn();
+      allow create: if signedIn() && (
+        request.resource.data.get('reporterId', '') == request.auth.uid ||
+        canStaffRecordOf(request.resource.data.get('organizationId', ''))
+      );
+      allow update: if signedIn() && (
+        (canStaffCase(resource.data) && orgStampOk()) ||
+        reporterUpdate() ||
+        transporterUpdate() ||
+        willingAdopterUpdate() ||
+        communityClaimUpdate() ||
+        clearOfferPointer()
+      );
+      allow delete: if isPlatformStaff();
+
+      // Sightings and the activity feed: anyone signed in can add to them.
+      match /communityReports/{reportId} {
+        allow read, create: if signedIn();
+        allow update, delete: if canStaffCase(get(casePath(caseId)).data);
+      }
+      match /activityLogs/{logId} {
+        allow read, create: if signedIn();
+        allow update, delete: if canStaffCase(get(casePath(caseId)).data);
+      }
+
+      // Case chat and the transporter's location trail.
+      match /messages/{messageId} {
+        allow read, write: if isCaseParticipant(caseId);
+      }
+      match /tracking/{pointId} {
+        allow read: if isCaseParticipant(caseId);
+        allow write: if canWorkCase(caseId);
+      }
+
+      // Offers: staff create and manage them; the offered transporter
+      // answers their own (TransportAssignmentRepository).
+      match /transportAssignments/{assignmentId} {
+        allow read: if isCaseParticipant(caseId) || resource.data.get('riderId', '') == request.auth.uid;
+        allow create: if canStaffCase(get(casePath(caseId)).data);
+        allow update: if canStaffCase(get(casePath(caseId)).data) || (
+          resource.data.get('riderId', '') == request.auth.uid &&
+          changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt'])
+        ) || (
+          // reconcileStaleOffer from any participant's screen.
+          isCaseParticipant(caseId) &&
+          changedOnly(['status', 'respondedAt']) &&
+          resource.data.get('status', '') == 'pending' &&
+          request.resource.data.status == 'expired'
+        );
+        allow delete: if false;
+      }
+
+      // Treatment logs, expenses, referrals and anything else: case staff
+      // and the transporter working it.
+      match /{sub}/{docId=**} {
+        allow read: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments']) &&
+          isCaseParticipant(caseId);
+        allow write: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments']) &&
+          canWorkCase(caseId);
+      }
+    }
+
+    // ---- Animal records ----------------------------------------------------
+    //
+    // Public profiles read them, so reads stay open to signed-in users.
+    // Only the owning organization's staff create and edit records and
+    // their subcollections (vaccinations, managementLogs, ...).
+
+    function animalPath(animalId) {
+      return /databases/$(database)/documents/animals/$(animalId);
+    }
+
+    function canStaffAnimal(data) {
+      return canStaffRecordOf(data.get('organizationId', ''));
+    }
+
+    match /animals/{animalId} {
+      allow read: if signedIn();
+      allow create: if canStaffRecordOf(request.resource.data.get('organizationId', ''));
+      allow update: if canStaffAnimal(resource.data) && orgStampOk();
+      allow delete: if isPlatformStaff();
+
+      match /{sub}/{docId=**} {
+        allow read: if signedIn();
+        allow write: if canStaffAnimal(get(animalPath(animalId)).data);
+      }
+    }
+
+    // ---- Adoption applications ---------------------------------------------
+    //
+    // Reads stay open to signed-in users only because
+    // AdoptionApplicationService.hasBlockingApplication queries every
+    // application for an animal (follow-up: move that check server-side and
+    // restrict reads to the adopter and staff). The adopter creates and
+    // updates their own application (appointments, withdrawal, delivery
+    // reschedules, return requests, follow-up check-ins); the owning
+    // organization's staff manage the rest.
+
+    function adoptionPath(adoptionId) {
+      return /databases/$(database)/documents/adoptions/$(adoptionId);
+    }
+
+    function isAdopterOf(data) {
+      return data.get('personal', {}).get('adopterId', '') == request.auth.uid;
+    }
+
+    function canStaffAdoption(data) {
+      return canStaffRecordOf(data.get('organizationId', ''));
+    }
+
+    match /adoptions/{adoptionId} {
+      // The application belongs to the organization that owns the animal.
+      function orgMatchesAnimal(data) {
+        let animalId = data.get('personal', {}).get('animalRecordId', '');
+        return !('organizationId' in data) || (
+          animalId is string && animalId != '' &&
+          get(animalPath(animalId)).data.get('organizationId', '') == data.organizationId
+        );
+      }
+
+      function adopterUpdate() {
+        return isAdopterOf(resource.data) &&
+          !changedAny(['personal', 'organizationId']) &&
+          (!changedAny(['status']) || request.resource.data.status == 'withdrawn');
+      }
+
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        isAdopterOf(request.resource.data) &&
+        request.resource.data.get('status', '') == 'pending' &&
+        orgMatchesAnimal(request.resource.data);
+      allow update: if signedIn() && (
+        (canStaffAdoption(resource.data) && orgStampOk()) ||
+        adopterUpdate()
+      );
+      allow delete: if false;
+
+      match /{sub}/{docId=**} {
+        allow read, write: if signedIn() && (
+          isAdopterOf(get(adoptionPath(adoptionId)).data) ||
+          canStaffAdoption(get(adoptionPath(adoptionId)).data)
+        );
+      }
+    }
+
+    // ---- Staff dashboards (collection-group queries) -----------------------
+    //
+    // The dashboard, analytics and audit pages query these subcollections
+    // across every parent. Collection-group queries need a {path=**} match;
+    // these only add reads, writes stay with the per-parent rules above.
+
+    match /{path=**}/transportAssignments/{assignmentId} {
+      // Transporters query their own offers (where riderId == uid).
+      allow read: if isOrgStaff() || resource.data.get('riderId', '') == request.auth.uid;
+    }
+
+    match /{path=**}/vaccinations/{docId} {
+      allow read: if isOrgStaff();
+    }
+
+    match /{path=**}/expenses/{docId} {
+      allow read: if isOrgStaff();
+    }
+
+    match /{path=**}/managementLogs/{docId} {
+      allow read: if isOrgStaff();
+    }
+
+    match /{path=**}/activityLogs/{docId} {
+      allow read: if isOrgStaff();
+    }
+
+    match /{path=**}/followUps/{docId} {
+      allow read: if isOrgStaff();
     }
 
     // ---- Collar tags / rescue sessions -------------------------------------
@@ -465,7 +896,7 @@ service cloud.firestore {
         'facebookConnectRequests', 'facebookShares',
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
-        'users'
+        'users', 'cases', 'animals', 'adoptions'
       ]);
     }
   }

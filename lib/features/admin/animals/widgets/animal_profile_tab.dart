@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 
 const String _kNA = 'Not provided';
@@ -147,7 +151,16 @@ class AnimalProfileTab extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () {},
+                  onPressed: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: AppColors.background,
+                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                    builder: (_) => _AnimalDonationsSheet(
+                      animalId: animal.id,
+                      animalName: animal.name.isNotEmpty ? animal.name : animal.species,
+                    ),
+                  ),
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: AppColors.textPrimary),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
@@ -159,6 +172,81 @@ class AnimalProfileTab extends StatelessWidget {
           ),
           const SizedBox(height: 24),
         ],
+      ),
+    );
+  }
+}
+
+/// Every donation listing linked to this animal — tap one to open its
+/// admin page (balance, allocations, donors).
+class _AnimalDonationsSheet extends ConsumerWidget {
+  final String animalId;
+  final String animalName;
+  const _AnimalDonationsSheet({required this.animalId, required this.animalName});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(animalCampaignsProvider(animalId));
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Donations for $animalName', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              Flexible(
+                child: async.when(
+                  loading: () => const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
+                  ),
+                  error: (_, __) => Text('Could not load donation listings.',
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+                  data: (listings) => listings.isEmpty
+                      ? Text('No donation listings are linked to this animal yet.',
+                          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary))
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: listings.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, i) {
+                            final l = listings[i];
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(l.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.zain(
+                                      fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                              subtitle: Text(
+                                '${formatPeso(l.collected)} of ${formatPeso(l.target)} · ${l.status.replaceAll('_', ' ')}',
+                                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                              ),
+                              trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: l.id)),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

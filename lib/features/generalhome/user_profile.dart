@@ -240,10 +240,6 @@ class _UserProfileState extends State<UserProfile> {
                           .then((_) => _loadUserData());
                     },
                   ),
-                  _ProfileTile(
-                    label: 'Payment methods',
-                    onTap: () {},
-                  ),
                   const SizedBox(height: 10),
                   _SectionLabel(label: 'Privacy'),
                   _ProfileTile(

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../app_theme.dart';
 import 'models.dart';
 import 'donation_payment_service.dart';
@@ -98,7 +99,10 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.share_outlined, color: AppColors.textPrimary), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.share_outlined, color: AppColors.textPrimary),
+            onPressed: () => SharePlus.instance.share(ShareParams(text: sponsorship.shareText)),
+          ),
           IconButton(
             icon: Icon(sponsorship.favorited ? Icons.favorite : Icons.favorite_border, color: sponsorship.favorited ? const Color(0xFFE05C5C) : AppColors.textPrimary),
             onPressed: () {

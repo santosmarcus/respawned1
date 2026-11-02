@@ -1,0 +1,170 @@
+rules_version = '2';
+
+// Cloud Storage rules. Paths mirror the app's upload call sites; anything
+// not listed is denied. Staff and ownership checks read Firestore
+// (firestore.get/exists), the same documents firestore.rules uses:
+//   - staff = users/{uid}.role 'admin'/'ngo_staff', or an account linked to
+//     an organization (users.organizationId is only writable through a real
+//     membership — see firestore.rules users/{uid});
+//   - a case's reporter, assigned transporter and staff may add its media.
+//
+// Downloads in the app go through tokenized download URLs, which bypass
+// these rules; read rules here govern getDownloadURL/list from the SDK.
+// Tests: rules-tests/ (npm test, runs against the Storage emulator).
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function userData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isStaff() {
+      return signedIn() && (
+        userData().get('role', '') in ['admin', 'ngo_staff'] ||
+        userData().get('organizationId', '') != ''
+      );
+    }
+
+    // Uploads are capped at 100 MB (rescue videos are the largest). The app's
+    // putFile calls don't set a content type, so this doesn't check one.
+    // Deletes (request.resource == null) pass and fall to the ownership
+    // checks alone.
+    function mediaUpload() {
+      return request.resource == null || request.resource.size < 100 * 1024 * 1024;
+    }
+
+    // ---- Profiles ----------------------------------------------------------
+
+    // profile_edit_page.dart
+    match /users/{uid}/{file=**} {
+      allow read: if signedIn();
+      allow write: if isSelf(uid) && mediaUpload();
+    }
+
+    // transporter_verification_screen.dart — ID and vehicle documents.
+    match /transporter_verifications/{uid}/{file=**} {
+      allow read: if isSelf(uid) || isStaff();
+      allow write: if isSelf(uid) && mediaUpload();
+    }
+
+    // collar_tag_form_screen.dart — pet photo shown to whoever scans a tag.
+    match /collar_tags/{uid}/{file=**} {
+      allow read: if signedIn();
+      allow write: if isSelf(uid) && mediaUpload();
+    }
+
+    // ---- Rescue cases --------------------------------------------------------
+
+    match /cases/{caseId} {
+      function caseData() {
+        return firestore.get(/databases/(default)/documents/cases/$(caseId)).data;
+      }
+
+      function isReporter() {
+        return caseData().get('reporterId', '') == request.auth.uid;
+      }
+
+      function isAssignedTransporter() {
+        return caseData().get('riderId', '') == request.auth.uid ||
+          caseData().get('assignedVolunteerId', '') == request.auth.uid;
+      }
+
+      // rescue_report_service.dart (media_N), transit_case_service.dart
+      // (pickup/clinic/shelter verification photos).
+      match /{file} {
+        allow read: if signedIn();
+        allow write: if signedIn() && mediaUpload() &&
+          (isReporter() || isAssignedTransporter() || isStaff());
+      }
+
+      // community_report_section.dart — anyone can attach a sighting photo.
+      match /communityReports/{file} {
+        allow read: if signedIn();
+        allow write: if signedIn() && mediaUpload();
+      }
+
+      // treatment_detail_page.dart, add_edit_expense_sheet.dart
+      match /treatmentUpdates/{file=**} {
+        allow read: if signedIn();
+        allow write: if mediaUpload() && (isStaff() || isAssignedTransporter());
+      }
+      match /expenseReceipts/{file} {
+        allow read: if isStaff();
+        allow write: if isStaff() && mediaUpload();
+      }
+    }
+
+    // create_animal_record_page.dart
+    match /animalRecords/{animalId}/{file=**} {
+      allow read: if signedIn();
+      allow write: if isStaff() && mediaUpload();
+    }
+
+    // ---- Adoptions -----------------------------------------------------------
+    //
+    // adoption_application_service.dart uploads the government ID, proof of
+    // address and home photos BEFORE the application doc exists, so a new
+    // application's folder is open to its uploader until the doc is created;
+    // after that only the adopter and staff can touch it.
+    match /adoptions/{adoptionId}/{file=**} {
+      function appExists() {
+        return firestore.exists(/databases/(default)/documents/adoptions/$(adoptionId));
+      }
+
+      function isAdopter() {
+        return firestore.get(/databases/(default)/documents/adoptions/$(adoptionId))
+          .data.get('personal', {}).get('adopterId', '') == request.auth.uid;
+      }
+
+      allow read: if signedIn() && (!appExists() || isAdopter() || isStaff());
+      allow write: if signedIn() && mediaUpload() && (!appExists() || isAdopter() || isStaff());
+    }
+
+    // ---- Organizations ---------------------------------------------------------
+
+    match /organizations/{orgId} {
+      function isOrgStaff() {
+        return signedIn() && (
+          userData().get('role', '') in ['admin', 'ngo_staff'] ||
+          userData().get('organizationId', '') == orgId ||
+          firestore.get(/databases/(default)/documents/organizations/$(orgId)).data.get('ownerId', '') == request.auth.uid
+        );
+      }
+
+      // organization_profile_edit_page.dart
+      match /profile/{file=**} {
+        allow read: if signedIn();
+        allow write: if isOrgStaff() && mediaUpload();
+      }
+
+      // organization_verification_screen.dart — registration papers and
+      // permits.
+      match /verification/{file=**} {
+        allow read: if isOrgStaff();
+        allow write: if isOrgStaff() && mediaUpload();
+      }
+    }
+
+    // ---- Donations ---------------------------------------------------------------
+
+    // donation_admin_service.dart — campaign cover images and offline-payment
+    // receipts.
+    match /campaigns/{file} {
+      allow read: if signedIn();
+      allow write: if isStaff() && mediaUpload();
+    }
+    match /receipts/{file} {
+      allow read: if isStaff();
+      allow write: if isStaff() && mediaUpload();
+    }
+  }
+}

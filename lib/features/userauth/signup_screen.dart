@@ -58,12 +58,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
 
       if (mounted) {
-        // Go to user type selection after account created
+        // Back to AuthWrapper, which asks for email verification first and
+        // then routes to onboarding.
         setState(() => _isLoading = false);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
-        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'email-already-in-use') {
@@ -74,10 +72,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
           );
           if (mounted) {
             setState(() => _isLoading = false);
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const EnterDetailsScreen()),
-            );
+            Navigator.of(context).popUntil((route) => route.isFirst);
           }
           return;
         } catch (_) {

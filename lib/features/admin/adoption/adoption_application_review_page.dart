@@ -15,6 +15,7 @@ import 'package:respawnd1/features/admin/adoption/adoption_application_detail_pa
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
 String _friendlyAdoptionsError(Object err) {
@@ -616,12 +617,7 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
         title: isRootModule
             ? Text('Adoptions', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background))
             : null,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
-            onPressed: () {},
-          ),
-        ],
+        actions: const [AdminAlertsBell()],
       ),
       body: Column(
         children: [

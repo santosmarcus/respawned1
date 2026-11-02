@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/utils/currency.dart';
 
 enum CardType { visa, mastercard, other }
 
@@ -224,6 +225,14 @@ class DonationListing {
   });
 
   int get percentage => target > 0 ? ((collected / target) * 100).toInt() : 0;
+
+  /// Plain-text blurb for the detail pages' Share button. Listings have no
+  /// public web URL yet, so this points people to the app instead.
+  String get shareText {
+    final what = type == 'sponsorship' ? 'Sponsor ${animalName ?? title}' : title;
+    final progress = target > 0 ? '\n${formatPeso(collected)} raised of ${formatPeso(target)} ($percentage%).' : '';
+    return '$what — by $organizer.$progress\nSupport it on the ResPAWnd app.';
+  }
 
   int get daysRemaining {
     if (endDate == null) return 0;

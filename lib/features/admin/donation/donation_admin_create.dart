@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
 import 'package:respawnd1/core/models/donation/donation_model.dart';
@@ -12,11 +13,61 @@ import 'donation_admin_providers.dart';
 import 'donation_admin_service.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 
+/// Starting values for a new campaign opened from somewhere else in the app
+/// (e.g. a rescue case's outstanding treatment balance). Everything stays
+/// editable in the form; the backend validates it as usual.
+class CampaignPrefill {
+  final String title;
+  final String description;
+  final double targetAmount;
+  final String fundKind;
+  final Set<String> purposeTags;
+  final bool restricted;
+  final String? linkedCaseId;
+  final DateTime? deadline;
+
+  const CampaignPrefill({
+    required this.title,
+    required this.description,
+    required this.targetAmount,
+    this.fundKind = 'campaign',
+    this.purposeTags = const {},
+    this.restricted = false,
+    this.linkedCaseId,
+    this.deadline,
+  });
+
+  /// A medical fundraiser for a case's uncovered treatment costs. Restricted,
+  /// since donors give for this animal's treatment (functions/campaigns.js
+  /// then never lets the money move to another campaign). The goal is the
+  /// outstanding balance rounded up to the next ₱500.
+  factory CampaignPrefill.forCaseTreatment(RescueCase rescueCase, double outstandingBalance) {
+    final clinic = (rescueCase.vetClinicName ?? '').isNotEmpty ? rescueCase.vetClinicName! : 'the clinic';
+    final condition = rescueCase.condition?.trim() ?? '';
+    final goal = (outstandingBalance / 500).ceil() * 500.0;
+    final now = DateTime.now();
+    return CampaignPrefill(
+      title: 'Help ${rescueCase.speciesSummary} #${rescueCase.shortCaseId} recover',
+      description: [
+        if (condition.isNotEmpty) condition,
+        'Ongoing treatment at $clinic. Funds raised cover this rescue\'s veterinary bills.',
+      ].join('\n\n'),
+      targetAmount: goal,
+      fundKind: 'medical',
+      purposeTags: const {'Medicine & Treatment', 'Rescue'},
+      restricted: true,
+      linkedCaseId: rescueCase.id,
+      deadline: DateTime(now.year, now.month, now.day + 30, 23, 59),
+    );
+  }
+}
+
 /// Figma "New Campaign" / "New Sponsorship" form
 class DonationAdminCreatePage extends ConsumerStatefulWidget {
   final DonationListing? existing;
   final String initialType;
-  const DonationAdminCreatePage({super.key, this.existing, this.initialType = 'donation'});
+  final CampaignPrefill? prefill;
+  const DonationAdminCreatePage({super.key, this.existing, this.initialType = 'donation', this.prefill});
 
   @override
   ConsumerState<DonationAdminCreatePage> createState() => _DonationAdminCreatePageState();
@@ -54,6 +105,7 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
   late String _fundKind;
   final Set<String> _tags = {};
   String? _animalId;
+  String? _linkedCaseId;
   bool _speciesDog = true;
   bool _speciesCat = true;
   bool _acceptInKind = false;
@@ -84,6 +136,7 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
       _animalId = e.animalId;
       _acceptInKind = e.acceptInKind;
       _restricted = e.restricted;
+      _linkedCaseId = e.linkedCaseId;
       _deadline = e.endDate;
       _imageUrl = e.imageUrl;
       for (final it in e.inKindItems) {
@@ -95,6 +148,16 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
           instructions: it.instructions,
         ));
       }
+    } else if (widget.prefill != null) {
+      final p = widget.prefill!;
+      _title.text = p.title;
+      _description.text = p.description;
+      _amount.text = p.targetAmount > 0 ? _plain(p.targetAmount) : '';
+      _fundKind = p.fundKind;
+      _tags.addAll(p.purposeTags);
+      _restricted = p.restricted;
+      _linkedCaseId = p.linkedCaseId;
+      _deadline = p.deadline;
     }
   }
 
@@ -176,6 +239,7 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
         'fundKind': _fundKind,
         'purposeTags': _tags.toList(),
         'restricted': _restricted,
+        if (_linkedCaseId != null) 'linkedCaseId': _linkedCaseId,
         if (_deadline != null) 'deadlineMs': _deadline!.millisecondsSinceEpoch,
         if (_isSponsorship) ...{
           'monthlyAmount': amount,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../app_theme.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'donation_payment_service.dart';
 import 'donation_review.dart';
 import 'donation_review_inkind.dart';
@@ -73,7 +74,10 @@ class _DonationDetailPageState extends State<DonationDetail> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.share_outlined, color: AppColors.textPrimary), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.share_outlined, color: AppColors.textPrimary),
+            onPressed: () => SharePlus.instance.share(ShareParams(text: donation.shareText)),
+          ),
           IconButton(
             icon: Icon(donation.favorited ? Icons.favorite : Icons.favorite_border, color: donation.favorited ? const Color(0xFFE05C5C) : AppColors.textPrimary),
             onPressed: () {

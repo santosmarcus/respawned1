@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/medical_episode.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
@@ -25,6 +26,10 @@ final medicalEpisodesProvider = StreamProvider.family<List<MedicalEpisode>, Stri
 
 final vaccinationsProvider = StreamProvider.family<List<VaccinationRecord>, String>((ref, animalId) {
   return ref.watch(animalRecordRepositoryProvider).streamVaccinations(animalId);
+});
+
+final careRecordsProvider = StreamProvider.family<List<CareRecord>, String>((ref, animalId) {
+  return ref.watch(animalRecordRepositoryProvider).streamCareRecords(animalId);
 });
 
 final managementLogsProvider = StreamProvider.family<List<Map<String, dynamic>>, String>((ref, animalId) {

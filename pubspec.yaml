@@ -45,7 +45,6 @@ dependencies:
   geocoding: ^3.0.0 #geocode
   image_picker: ^1.2.1
   video_player: ^2.9.1
-  flutter_stripe: ^12.3.0  # for PayMongo integration via Stripe
   google_fonts: ^8.0.2
   http: ^1.6.0
   intl: ^0.20.2 # date/number formatting (was only available transitively)

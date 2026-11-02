@@ -3,7 +3,7 @@ import 'dart:math' as math;
 /// Straight-line (haversine) distance between two coordinates, in km.
 /// Shared so this formula isn't reimplemented at every call site — see
 /// RescueCaseRepository's own copy (kept separate to avoid an unrelated
-/// change to already-working duplicate-detection code) and the demo rider
+/// change to already-working duplicate-detection code) and the transporter
 /// distance calculations in assign_rider_page.dart / admin_track_case_page.dart.
 double haversineDistanceKm(double lat1, double lng1, double lat2, double lng2) {
   const earthRadiusKm = 6371.0;
@@ -16,20 +16,9 @@ double haversineDistanceKm(double lat1, double lng1, double lat2, double lng2) {
   return earthRadiusKm * c;
 }
 
-/// De La Salle University Manila — temporary demo coordinates for a
-/// hardcoded rider location where real GPS/tracking data isn't available
-/// yet. See assign_rider_page.dart and admin_track_case_page.dart.
-/// TODO: Replace DLSU demo coordinates with the rider's live tracking location.
-const double dlsuManilaLat = 14.5649;
-const double dlsuManilaLng = 120.9932;
-
 /// Deterministic (NOT `Random()`) offset from (centerLat, centerLng), seeded
-/// by [seed] (e.g. a rider's UID). The same seed + center always produces
-/// the same offset, so a real pet-transporter with no saved/live location
-/// gets a stable "demo" position for the lifetime of the app session/case —
-/// it never reshuffles on rebuild, and different riders land at different
-/// points so distance-sorting still means something.
-/// TODO: Replace deterministic demo coordinates with live transporter GPS.
+/// by [seed]. Used only to place the debug-build demo transporters in
+/// assign_rider_page.dart; real transporters use the location they shared.
 ({double lat, double lng}) deterministicDemoOffset(
   double centerLat,
   double centerLng,
