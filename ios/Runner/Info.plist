@@ -6,6 +6,15 @@
     <string>Respawned uses the camera so you can take photos of animals and documents.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Respawned needs access to your photos so you can attach images.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Respawned uses your location to attach it to rescue reports and show reports near you.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Respawned uses your location in the background to alert you about rescues and lost pets near you, even when the app is closed.</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>location</string>
+        <string>remote-notification</string>
+    </array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

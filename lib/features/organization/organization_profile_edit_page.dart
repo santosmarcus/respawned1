@@ -285,6 +285,9 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
           placeId: locality.placeId,
           administrativeArea: locality.administrativeArea,
           countryCode: locality.countryCode,
+          lat: locality.lat,
+          lng: locality.lng,
+          radiusKm: locality.radiusKm,
         ),
       ];
       _serviceAreaController.clear();
@@ -588,13 +591,29 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (final area in _serviceAreas)
-                      Chip(
-                        label: Text(area.name),
+                  for (final area in _serviceAreas)
+                    Chip(
+                        avatar: Icon(
+                          area.hasGeofence ? Icons.radar : Icons.warning_amber_rounded,
+                          size: 16,
+                          color: area.hasGeofence ? AppColors.textPrimary : Colors.orange,
+                         ),
+                    label: Text(area.hasGeofence
+                        ? '${area.name} · ${area.radiusKm!.toStringAsFixed(1)} km'
+                        : area.name),
                         onDeleted: () => _removeServiceArea(area),
                         backgroundColor: AppColors.lavenderrspwn,
-                      ),
-                  ],
+                        ),
+                      ],
+                    ),
+              if (_serviceAreas.any((a) => !a.hasGeofence))
+                Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                    'Areas marked with ⚠ were added before coverage geofencing. '
+                    'Remove and re-add them so new rescue reports inside them reach your organization.',
+                  style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 // Search-only — a service area can only be added by picking

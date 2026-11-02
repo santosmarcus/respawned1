@@ -3559,6 +3559,18 @@ class _RescuePageState extends State<RescuePage> {
             'videoUrls': media.videoUrls,
           });
         }
+        // The linked rescue case (finder needs pickup) is what the pet
+        // transporter reviews — give it the same photos/videos, otherwise
+        // the transporter only sees empty media boxes.
+        if (linkedCaseId != null) {
+          await FirebaseFirestore.instance
+              .collection('cases')
+              .doc(linkedCaseId)
+              .update({
+            'photoUrls': media.photoUrls,
+            'videoUrls': media.videoUrls,
+          });
+        }
       }
 
       final oppositeType = _isOwner == true ? 'found' : 'lost';

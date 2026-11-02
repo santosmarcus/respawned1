@@ -21,6 +21,8 @@ import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
 import 'package:respawnd1/features/volunteerhome/volhome_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/core/services/notification_service.dart';
+import 'package:respawnd1/core/services/geofence_service.dart';
 import 'package:respawnd1/features/generalhome/push_token_service.dart';
 
 void main() async {
@@ -30,6 +32,9 @@ void main() async {
   );
 
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  // Foreground push display + notification tap routing (geofence alerts).
+  await NotificationService.init(appNavigatorKey);
 
   /*if (kIsWeb) {
     await FacebookAuth.instance.webAndDesktopInitialize(
@@ -136,9 +141,44 @@ class _UserDocRouter extends StatefulWidget {
   State<_UserDocRouter> createState() => _UserDocRouterState();
 }
 
-class _UserDocRouterState extends State<_UserDocRouter> {
+class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObserver {
   late Stream<DocumentSnapshot<Map<String, dynamic>>> _userDoc = _subscribe();
+  bool _signedInServicesStarted = false;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Refresh the saved location + nearby case geofences whenever the app
+  // comes back to the foreground (throttled inside GeofenceService).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _signedInServicesStarted) {
+      GeofenceService.sync();
+    }
+  }
+
+  /// Runs once per sign-in, after onboarding is complete: saves this
+  /// device's push token (users/{uid}.fcmToken — every Cloud Function
+  /// notification depends on it), starts geofencing, and lets a tapped
+  /// notification open its screen.
+  void _startSignedInServices() {
+    if (_signedInServicesStarted) return;
+    _signedInServicesStarted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      PushTokenService.register();
+      GeofenceService.start(widget.uid);
+      NotificationService.markRouterReady();
+    });
+  }
   Stream<DocumentSnapshot<Map<String, dynamic>>> _subscribe() =>
       FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(includeMetadataChanges: true);
 
@@ -193,6 +233,8 @@ class _UserDocRouterState extends State<_UserDocRouter> {
           }
           return const EnterDetailsScreen();
         }
+
+        _startSignedInServices();
 
         // Existing user with role — route based on role
         switch (role) {

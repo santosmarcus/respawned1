@@ -53,6 +53,9 @@ dependencies:
   #sign in
   google_sign_in: ^6.2.1
   #flutter_facebook_auth: ^7.1.5
+  # Geofencing + notifications
+  native_geofence: ^1.5.1                # Google Geofencing API (Android) / region monitoring (iOS)
+  flutter_local_notifications: ^22.3.3   # show pushes in foreground + geofence alerts
 
   # UI
   lottie: ^3.3.2  # animated illustrations (loading, empty states)

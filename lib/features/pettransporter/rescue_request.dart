@@ -1,4 +1,7 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -471,12 +474,9 @@ class _RescueRequestState extends State<RescueRequest> {
                 ),
                 Padding(
                   padding: const EdgeInsets.only(left: 36),
-                  child: Text(
-                    '~4KM from you',
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      color: AppColors.background.withOpacity(0.8),
-                    ),
+                  child: _DistanceFromYou(
+                    lat: (d['lat'] as num?)?.toDouble(),
+                    lng: (d['lng'] as num?)?.toDouble(),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -597,54 +597,11 @@ class _RescueRequestState extends State<RescueRequest> {
                           color: AppColors.textPrimary)),
                   const SizedBox(height: 10),
 
-                  photoUrls.isEmpty
-                      ? Row(
-                    children: List.generate(
-                      2,
-                          (i) => Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: Container(
-                          width: 100,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: AppColors.textPrimary, width: 1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.image_outlined,
-                              color: AppColors.slaterspwn),
-                        ),
-                      ),
-                    ),
-                  )
-                      : Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: photoUrls.map((url) {
-                      return GestureDetector(
-                        onTap: () => _showFullImage(context, url),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            url,
-                            width: 100,
-                            height: 100,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, _, __) => Container(
-                              width: 100,
-                              height: 100,
-                              decoration: BoxDecoration(
-                                color: AppColors.slaterspwn,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(
-                                  Icons.broken_image_outlined,
-                                  color: AppColors.textSecondary),
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                  _CaseMediaGallery(
+                    caseId: widget.caseId,
+                    photoUrls: photoUrls,
+                    videoUrls: List<String>.from(d['videoUrls'] ?? const []),
+                    onOpenImage: (url) => _showFullImage(context, url),
                   ),
 
                   const SizedBox(height: 24),
@@ -787,7 +744,21 @@ class _RescueRequestState extends State<RescueRequest> {
         child: Stack(
           children: [
             InteractiveViewer(
-              child: Image.network(url, fit: BoxFit.contain),
+              child: CachedNetworkImage(
+                imageUrl: url,
+                fit: BoxFit.contain,
+                placeholder: (_, _) => const SizedBox(
+                  height: 240,
+                  child: Center(
+                      child: CircularProgressIndicator(color: Colors.white)),
+                ),
+                errorWidget: (_, _, _) => const SizedBox(
+                  height: 240,
+                  child: Center(
+                      child: Icon(Icons.broken_image_outlined,
+                          color: Colors.white70, size: 48)),
+                ),
+              ),
             ),
             Positioned(
               top: 8,
@@ -969,6 +940,219 @@ class _AnimalDetailBlock extends StatelessWidget {
           ..._fields(),
         ],
       ),
+    );
+  }
+}
+
+/// "~X km from you" in the header, from the transporter's last known
+/// location (was hard-coded to "~4KM from you").
+class _DistanceFromYou extends StatefulWidget {
+  final double? lat;
+  final double? lng;
+  const _DistanceFromYou({required this.lat, required this.lng});
+
+  @override
+  State<_DistanceFromYou> createState() => _DistanceFromYouState();
+}
+
+class _DistanceFromYouState extends State<_DistanceFromYou> {
+  // Computed once, so the case stream rebuilding the page doesn't re-run it.
+  late final Future<String?> _future = _label();
+
+  Future<String?> _label() async {
+    final lat = widget.lat;
+    final lng = widget.lng;
+    if (lat == null || lng == null) return null;
+    try {
+      final pos = await Geolocator.getLastKnownPosition() ??
+          await Geolocator.getCurrentPosition()
+              .timeout(const Duration(seconds: 8));
+      final km =
+          Geolocator.distanceBetween(pos.latitude, pos.longitude, lat, lng) / 1000;
+      return '~${km < 10 ? km.toStringAsFixed(1) : km.round()} km from you';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: _future,
+      builder: (context, snap) => Text(
+        snap.data ?? '',
+        style: GoogleFonts.zain(
+          fontSize: 12,
+          color: AppColors.background.withValues(alpha: 0.8),
+        ),
+      ),
+    );
+  }
+}
+
+/// Case photos and videos for the transporter.
+///
+/// Fixes the gray boxes:
+///  * lost/found reports that needed a rescue saved their media only on the
+///    petAlerts doc, never on the linked case — so the case had no
+///    photoUrls. Falls back to the linked petAlerts doc's media.
+///  * videos (videoUrls) were never shown.
+///  * images load through CachedNetworkImage with a loading spinner and a
+///    tap-to-retry error tile instead of a silent gray box.
+class _CaseMediaGallery extends StatefulWidget {
+  final String caseId;
+  final List<String> photoUrls;
+  final List<String> videoUrls;
+  final ValueChanged<String> onOpenImage;
+
+  const _CaseMediaGallery({
+    required this.caseId,
+    required this.photoUrls,
+    required this.videoUrls,
+    required this.onOpenImage,
+  });
+
+  @override
+  State<_CaseMediaGallery> createState() => _CaseMediaGalleryState();
+}
+
+class _CaseMediaGalleryState extends State<_CaseMediaGallery> {
+  List<String> _fallbackPhotos = const [];
+  List<String> _fallbackVideos = const [];
+  bool _loadingFallback = false;
+  int _retry = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeLoadLinkedAlertMedia();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CaseMediaGallery oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.caseId != widget.caseId) _maybeLoadLinkedAlertMedia();
+  }
+
+  Future<void> _maybeLoadLinkedAlertMedia() async {
+    if (widget.photoUrls.isNotEmpty || widget.videoUrls.isNotEmpty) return;
+    setState(() => _loadingFallback = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('petAlerts')
+          .where('linkedCaseId', isEqualTo: widget.caseId)
+          .limit(5)
+          .get();
+      final photos = <String>{};
+      final videos = <String>{};
+      for (final doc in snap.docs) {
+        photos.addAll(List<String>.from(doc.data()['photoUrls'] ?? const []));
+        videos.addAll(List<String>.from(doc.data()['videoUrls'] ?? const []));
+      }
+      if (!mounted) return;
+      setState(() {
+        _fallbackPhotos = photos.toList();
+        _fallbackVideos = videos.toList();
+      });
+    } catch (_) {
+      // No linked alert media — the empty state below is shown.
+    } finally {
+      if (mounted) setState(() => _loadingFallback = false);
+    }
+  }
+
+  Widget _tile({required Widget child, VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(width: 100, height: 100, child: child),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final photos = widget.photoUrls.isNotEmpty || widget.videoUrls.isNotEmpty
+        ? widget.photoUrls
+        : _fallbackPhotos;
+    final videos = widget.photoUrls.isNotEmpty || widget.videoUrls.isNotEmpty
+        ? widget.videoUrls
+        : _fallbackVideos;
+
+    if (photos.isEmpty && videos.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.slaterspwn),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: _loadingFallback
+              ? const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+              : Text('No photos or videos were attached to this report.',
+              style: GoogleFonts.zain(
+                  fontSize: 13, color: AppColors.textSecondary)),
+        ),
+      );
+    }
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        for (final url in photos)
+          _tile(
+            onTap: () => widget.onOpenImage(url),
+            child: CachedNetworkImage(
+              key: ValueKey('$url#$_retry'),
+              imageUrl: url,
+              fit: BoxFit.cover,
+              placeholder: (_, _) => Container(
+                color: AppColors.tearspwn.withValues(alpha: 0.4),
+                child: const Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ),
+              errorWidget: (_, _, _) => GestureDetector(
+                onTap: () => setState(() => _retry++),
+                child: Container(
+                  color: AppColors.slaterspwn,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.refresh, color: AppColors.textSecondary),
+                      Text('Tap to retry',
+                          style: GoogleFonts.zain(
+                              fontSize: 11, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        for (final url in videos)
+          _tile(
+            onTap: () => launchUrl(Uri.parse(url),
+                mode: LaunchMode.externalApplication),
+            child: Container(
+              color: Colors.black87,
+              child: const Center(
+                child: Icon(Icons.play_circle_fill,
+                    color: Colors.white, size: 40),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

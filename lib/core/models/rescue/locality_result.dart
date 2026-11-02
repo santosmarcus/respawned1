@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+import 'package:respawnd1/core/utils/geo.dart';
+
 /// A single validated city/locality result from Places API (New), used by
 /// the Organization service-area picker (see
 /// ClinicSearchRepository.searchLocalities) — never a bare free-text
@@ -8,11 +11,18 @@ class LocalityResult {
   final String? administrativeArea; // province/region, e.g. "Metro Manila"
   final String? countryCode; // ISO 3166-1 alpha-2, e.g. "PH"
 
+  final double? lat;
+  final double? lng;
+  final double? radiusKm;
+
   const LocalityResult({
     required this.placeId,
     required this.name,
     this.administrativeArea,
     this.countryCode,
+    this.lat,
+    this.lng,
+    this.radiusKm,
   });
 
   /// Parses one entry from Places API (New)'s `places[]` array, reading
@@ -40,11 +50,29 @@ class LocalityResult {
       }
     }
 
+    final location = json['location'] as Map<String, dynamic>?;
+    final lat = (location?['latitude'] as num?)?.toDouble();
+    final lng = (location?['longitude'] as num?)?.toDouble();
+    double? radiusKm;
+    final viewport = json['viewport'] as Map<String, dynamic>?;
+    final high = viewport?['high'] as Map<String, dynamic>?;
+    final low = viewport?['low'] as Map<String, dynamic>?;
+    if (lat != null && lng != null && high != null && low != null) {
+      final r1 = haversineDistanceKm(lat, lng,
+          (high['latitude'] as num).toDouble(), (high['longitude'] as num).toDouble());
+      final r2 = haversineDistanceKm(lat, lng,
+          (low['latitude'] as num).toDouble(), (low['longitude'] as num).toDouble());
+      radiusKm = double.parse(math.max(r1, r2).toStringAsFixed(2));
+    }
+
     return LocalityResult(
       placeId: json['id'] as String? ?? '',
       name: name,
       administrativeArea: findByType('administrative_area_level_1'),
       countryCode: countryCode,
+      lat: lat,
+      lng: lng,
+      radiusKm: radiusKm,
     );
   }
 }

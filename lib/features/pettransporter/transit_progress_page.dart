@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -33,10 +34,19 @@ const double _arrivalThresholdMeters = 150;
 // this, a case with no org-registered shelter would show "Shelter address
 // not available" and have no coordinates to route/verify arrival against.
 // Remove once every organization has a real shelter location configured.
-const String _fallbackShelterName = 'LGARI Shelter - Tanza';
-const String _fallbackShelterAddress = 'LGARI Shelter, Tanza, Cavite, Philippines';
-const double _fallbackShelterLat = 14.3860;
-const double _fallbackShelterLng = 120.8283;
+// Default shelter, used when the case's organization has no registered
+// shelter location (OrganizationDirectoryRepository.resolveShelterLocation
+// returns null).
+const String _fallbackShelterName = 'Loved by the Gapz Shelter - Rodriguez';
+const String _fallbackShelterAddress =
+    'Sitio Maislap, Brgy. San Isidro, Rodriguez, Rizal, Philippines';
+// APPROXIMATE coordinates for Brgy. San Isidro, Rodriguez, Rizal. The
+// shelter arrival geofence is only 150 m, so replace these with the exact
+// pin (Google Maps → long-press the shelter → copy the numbers).
+// _resolveFallbackShelterLatLng() geocodes the address first and only
+// uses these if geocoding fails.
+const double _fallbackShelterLat = 14.7350;
+const double _fallbackShelterLng = 121.1590;
 
 class DirectionsRoute {
   final List<LatLng> points;
@@ -170,6 +180,19 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   bool _isVerifyingArrival = false;
   Timestamp? _lastReadAt;
 
+  // Arrival geofences — latest case snapshot (set in build) so the GPS
+  // stream can tell which stop the rider is heading to.
+  Map<String, dynamic>? _latestCase;
+  bool _autoArriving = false;
+  String? _autoArrivedFor;
+
+  // Verification geofence — photo verification (pickup, clinic, shelter)
+  // is only allowed while the rider's live GPS is within
+  // _arrivalThresholdMeters of the stop being verified.
+  Position? _lastRiderPosition;
+  double? _distanceToStopMeters;
+  String? _proximityStatus; // status the distance above was computed for
+
   @override
   void initState() {
     super.initState();
@@ -216,7 +239,255 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       });
       _mapController
           ?.animateCamera(CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
+      _checkArrivalGeofence(pos);
+      _updateStopProximity(pos);
     });
+  }
+
+  /// The stop whose photo verification is due in [status], or null when the
+  /// current status has no photo verification step.
+  ({LatLng? target, String place})? _verificationStopFor(
+      String status, Map<String, dynamic> data) {
+    switch (status) {
+      case 'arrived':
+        return (target: _latLngFrom(data, 'lat', 'lng'), place: 'the pick up location');
+      case 'dropoff':
+        return (target: _clinicLatLngFrom(data), place: 'the clinic');
+      case 'in_transit_shelter':
+        return (target: _latLngFrom(data, 'shelterLat', 'shelterLng'), place: 'the shelter');
+      default:
+        return null;
+    }
+  }
+
+  void _updateStopProximity(Position pos) {
+    _lastRiderPosition = pos;
+    final data = _latestCase;
+    if (data == null || !mounted) return;
+    final stop = _verificationStopFor(data['status'] as String? ?? '', data);
+    final target = stop?.target;
+    final meters = target == null
+        ? null
+        : Geolocator.distanceBetween(
+        pos.latitude, pos.longitude, target.latitude, target.longitude);
+    if (meters != _distanceToStopMeters) {
+      setState(() => _distanceToStopMeters = meters);
+    }
+  }
+
+  Future<void> _refreshStopProximity() async {
+    final known = _lastRiderPosition;
+    if (known != null) {
+      _updateStopProximity(known);
+    }
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+      _updateStopProximity(pos);
+    } catch (_) {
+      // The live stream will fill it in on the next GPS update.
+    }
+  }
+
+  /// True when the rider is inside the current stop's geofence. A stop with
+  /// no saved coordinates can't be geofenced, so it isn't blocked.
+  bool _isAtVerificationStop(Map<String, dynamic> data) {
+    final stop = _verificationStopFor(data['status'] as String? ?? '', data);
+    if (stop == null || stop.target == null) return true;
+    final d = _distanceToStopMeters;
+    return d != null && d <= _arrivalThresholdMeters;
+  }
+
+  /// Fresh GPS check right before uploading verification photos, so a stale
+  /// stream reading can't let a submission through from somewhere else.
+  Future<bool> _ensureAtVerificationStop(Map<String, dynamic> data) async {
+    final stop = _verificationStopFor(data['status'] as String? ?? '', data);
+    final target = stop?.target;
+    if (stop == null || target == null) return true;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+      _updateStopProximity(pos);
+      final meters = Geolocator.distanceBetween(
+          pos.latitude, pos.longitude, target.latitude, target.longitude);
+      if (meters <= _arrivalThresholdMeters) return true;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("You're ~${meters.round()} m from ${stop.place}. "
+              'Photo verification only works at the location.'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+      return false;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not check your location: $e'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+      return false;
+    }
+  }
+
+  /// Opens the camera for a verification photo only inside the geofence.
+  Future<void> _pickVerificationImage(
+      List<File?> slot, int index, Map<String, dynamic> data) async {
+    if (!_isAtVerificationStop(data)) {
+      final stop = _verificationStopFor(data['status'] as String? ?? '', data);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Photo verification unlocks when you are at '
+            '${stop?.place ?? 'the location'} (within ${_arrivalThresholdMeters.round()} m).'),
+      ));
+      return;
+    }
+    await _pickImage(slot, index);
+  }
+
+  /// Banner on every photo-verification panel showing whether the rider is
+  /// inside the stop's geofence.
+  Widget _buildGeofenceBanner(Map<String, dynamic> data) {
+    final stop = _verificationStopFor(data['status'] as String? ?? '', data);
+    if (stop == null) return const SizedBox.shrink();
+
+    final String text;
+    final Color color;
+    final IconData icon;
+    if (stop.target == null) {
+      text = 'No saved coordinates for ${stop.place}, so your location can\'t be checked.';
+      color = AppColors.textSecondary;
+      icon = Icons.info_outline;
+    } else if (_distanceToStopMeters == null) {
+      text = 'Checking your location…';
+      color = AppColors.textSecondary;
+      icon = Icons.my_location;
+    } else if (_isAtVerificationStop(data)) {
+      text = "You're at ${stop.place} (detected by geofence). You can submit photo verification.";
+      color = Colors.green.shade700;
+      icon = Icons.verified;
+    } else {
+      text = "You're ~${_distanceToStopMeters!.round()} m from ${stop.place}. "
+          'Photo verification unlocks within ${_arrivalThresholdMeters.round()} m.';
+      color = Colors.orange.shade800;
+      icon = Icons.location_searching;
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text,
+                style: GoogleFonts.zain(
+                    fontSize: 13, fontWeight: FontWeight.w600, color: color)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Geocodes the default shelter address once per page; falls back to the
+  /// approximate constants if geocoding isn't available.
+  Future<LatLng> _resolveFallbackShelterLatLng() async {
+    try {
+      final results = await locationFromAddress(_fallbackShelterAddress)
+          .timeout(const Duration(seconds: 8));
+      if (results.isNotEmpty) {
+        return LatLng(results.first.latitude, results.first.longitude);
+      }
+    } catch (_) {
+      // fall through to the constants
+    }
+    return const LatLng(_fallbackShelterLat, _fallbackShelterLng);
+  }
+
+  // Arrival geofences: a circle of _arrivalThresholdMeters around the
+  // current stop. Entering it moves the case on automatically —
+  //   pickup  : ongoing   -> arrived  (reporter is notified by
+  //             notifyCaseGeofenceEvents in functions/index.js)
+  //   clinic  : treatment -> dropoff
+  //   shelter : in_transit_shelter -> prompt only, because completing a
+  //             shelter drop-off still needs the verification photos.
+  // The manual "Arrived" buttons keep working as before.
+  Future<void> _checkArrivalGeofence(Position pos) async {
+    final data = _latestCase;
+    if (data == null || _autoArriving || _isActing || !mounted) return;
+    final status = data['status'] as String? ?? '';
+
+    LatLng? target;
+    String? nextStatus;
+    String? statusLabel;
+    String place;
+    if (status == 'ongoing') {
+      target = _latLngFrom(data, 'lat', 'lng');
+      nextStatus = 'arrived';
+      statusLabel = 'Arrived at pick up location.';
+      place = 'the pick up location';
+    } else if (status == 'treatment') {
+      target = _clinicLatLngFrom(data);
+      nextStatus = 'dropoff';
+      statusLabel = 'Arrived at clinic for treatment.';
+      place = 'the clinic';
+    } else if (status == 'in_transit_shelter') {
+      target = _latLngFrom(data, 'shelterLat', 'shelterLng');
+      place = 'the shelter';
+    } else {
+      return;
+    }
+    if (target == null) return;
+
+    final meters = Geolocator.distanceBetween(
+      pos.latitude,
+      pos.longitude,
+      target.latitude,
+      target.longitude,
+    );
+    if (meters > _arrivalThresholdMeters) return;
+
+    final key = '$status@${target.latitude},${target.longitude}';
+    if (_autoArrivedFor == key) return;
+    _autoArrivedFor = key;
+
+    if (nextStatus == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("You're at $place. Add the drop-off photos, then tap Complete.")),
+      );
+      return;
+    }
+
+    _autoArriving = true;
+    try {
+      await _setStatus(nextStatus, '$statusLabel (detected by geofence)');
+      await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).set({
+        'arrivalGeofence': {
+          nextStatus: {
+            'at': FieldValue.serverTimestamp(),
+            'lat': pos.latitude,
+            'lng': pos.longitude,
+            'distanceMeters': meters.round(),
+          },
+        },
+      }, SetOptions(merge: true));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Arrival detected — you're at $place.")),
+        );
+      }
+    } catch (e) {
+      debugPrint('Arrival geofence update failed: $e');
+      _autoArrivedFor = null; // try again on the next GPS update
+    } finally {
+      _autoArriving = false;
+    }
   }
 
   // Status transitions
@@ -525,6 +796,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       );
       return;
     }
+    if (!await _ensureAtVerificationStop(_latestCase ?? const {})) return;
     setState(() => _isActing = true);
     try {
       final urls = await _uploadVerificationImages(
@@ -557,6 +829,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       );
       return;
     }
+    if (!await _ensureAtVerificationStop(_latestCase ?? const {})) return;
     setState(() => _isActing = true);
     try {
       final urls = await _uploadVerificationImages(_clinicImages, 'clinic');
@@ -575,6 +848,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       // coordinates at all.
       final shelter = await OrganizationDirectoryRepository()
           .resolveShelterLocation(data['organizationId'] as String?);
+      final fallback = shelter == null ? await _resolveFallbackShelterLatLng() : null;
 
       // The reporter answered "yes" to "interested to adopt" on the
       // original report form (see rescue_page.dart's `interestedToAdopt`)
@@ -599,8 +873,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         'clinicVerificationUrls': urls,
         'shelterName': shelter?.name ?? _fallbackShelterName,
         'shelterAddress': shelter?.address ?? _fallbackShelterAddress,
-        'shelterLat': shelter?.lat ?? _fallbackShelterLat,
-        'shelterLng': shelter?.lng ?? _fallbackShelterLng,
+        'shelterLat': shelter?.lat ?? fallback!.latitude,
+        'shelterLng': shelter?.lng ?? fallback!.longitude,
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': nextStatusLabel,
@@ -633,6 +907,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       );
       return;
     }
+    if (!await _ensureAtVerificationStop(_latestCase ?? const {})) return;
     final reason = await _showTreatmentRejectDialog();
     if (reason == null) return; // dismissed via X / back
 
@@ -831,10 +1106,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         .doc(widget.caseId)
         .get();
     final data = doc.data() as Map<String, dynamic>? ?? {};
-    final destination = _latLngFrom(data, 'shelterLat', 'shelterLng');
-    final arrived =
-    await _verifyArrivalViaDirections(destination, 'the shelter');
-    if (!arrived) return;
+    // Same geofence check as every other photo verification step.
+    if (!await _ensureAtVerificationStop(data)) return;
 
     setState(() => _isActing = true);
     try {
@@ -1595,6 +1868,15 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         }
 
         final status = data['status'] ?? 'accepted';
+        _latestCase = data;
+        // New stop (e.g. ongoing -> arrived): recompute the distance now —
+        // the GPS stream only emits after 15 m of movement, so a rider
+        // standing still at the stop would otherwise stay locked out.
+        if (_proximityStatus != status) {
+          _proximityStatus = status as String?;
+          _distanceToStopMeters = null;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _refreshStopProximity());
+        }
 
         if ((status == 'ongoing' ||
             status == 'arrived' ||
@@ -1733,7 +2015,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         destinationAddress:
         clinicAddress.isEmpty ? 'Clinic not yet assigned' : clinicAddress,
         images: _pickupImages,
-        onImageTap: (i) => _pickImage(_pickupImages, i),
+        onImageTap: (i) => _pickVerificationImage(_pickupImages, i, data),
         onConfirm: _submitPickupVerification,
         onEnd: _showCloseTransitDialog,
         confirmLabel: 'Animal Rescued',
@@ -1769,10 +2051,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         title: 'In transit to shelter',
         address: shelterAddress,
         images: _shelterImages,
-        onImageTap: (i) => _pickImage(_shelterImages, i),
+        onImageTap: (i) => _pickVerificationImage(_shelterImages, i, data),
         onConfirm: _completeShelterDropoff,
         confirmLabel: 'Complete',
         isActing: _isActing,
+        data: data,
       );
     }
 
@@ -1784,7 +2067,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   Widget _buildClinicDecisionPanel(Map<String, dynamic> data) {
     final address = _clinicAddressFrom(data);
     final placeId = data['dropoffPlaceId'] as String?;
-    final canDecide = !_isActing;
+    final atStop = _isAtVerificationStop(data);
+    final canDecide = !_isActing && atStop;
 
     return Container(
       decoration: const BoxDecoration(
@@ -1814,6 +2098,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               ],
             ),
             const SizedBox(height: 8),
+            _buildGeofenceBanner(data),
             _ClinicHistoryNote(
               future: _fetchClinicProfile(placeId, address.toString()),
             ),
@@ -1837,7 +2122,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                     (i) => Padding(
                   padding: EdgeInsets.only(right: i == 0 ? 12 : 0),
                   child: GestureDetector(
-                    onTap: () => _pickImage(_clinicImages, i)
+                    onTap: () => _pickVerificationImage(_clinicImages, i, data)
                         .then((_) => setState(() {})),
                     child: Container(
                       width: 100,
@@ -1855,8 +2140,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                       clipBehavior: Clip.antiAlias,
                       child: _clinicImages[i] != null
                           ? Image.file(_clinicImages[i]!, fit: BoxFit.cover)
-                          : const Center(
-                          child: Icon(Icons.add,
+                          : Center(
+                          child: Icon(atStop ? Icons.add : Icons.lock_outline,
                               size: 28, color: AppColors.textSecondary)),
                     ),
                   ),
@@ -2199,6 +2484,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     String? destinationAddress,
   }) {
     final bottomAddress = destinationAddress ?? address;
+    final atStop = data == null || _isAtVerificationStop(data);
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.background,
@@ -2227,6 +2513,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
               ],
             ),
             const SizedBox(height: 14),
+            if (data != null) _buildGeofenceBanner(data),
             Row(
               children: [
                 Text('Provide images and video to verify',
@@ -2263,8 +2550,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                       clipBehavior: Clip.antiAlias,
                       child: images[i] != null
                           ? Image.file(images[i]!, fit: BoxFit.cover)
-                          : const Center(
-                          child: Icon(Icons.add,
+                          : Center(
+                          child: Icon(atStop ? Icons.add : Icons.lock_outline,
                               size: 28, color: AppColors.textSecondary)),
                     ),
                   ),
@@ -2303,7 +2590,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
             // shouldn't be the lone plain tap button).
             _SwipeButton(
               label: confirmLabel,
-              onSwiped: isActing ? null : onConfirm,
+              onSwiped: (isActing || !atStop) ? null : onConfirm,
             ),
             const SizedBox(height: 14),
 
@@ -2320,7 +2607,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30)),
                   ),
-                  child: Text('Close',
+                  child: Text('Close Case',
                       style: GoogleFonts.tiltWarp(
                           fontSize: 14, color: AppColors.textPrimary)),
                 ),
@@ -3104,8 +3391,8 @@ class TransitResultPage extends StatelessWidget {
                 color: AppColors.textPrimary, size: 28),
             onPressed: () => Navigator.of(context).pop(),
           ),
-          title: Text(
-            'Pet Transporter Requirements',
+          title:   Text(
+        completed ? 'Transit Completed' : 'Transit Canceled',
             style: GoogleFonts.tiltWarp(
                 fontSize: 15, color: AppColors.textSecondary),
           ),
@@ -3127,7 +3414,10 @@ class TransitResultPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  completed ? 'Transit Completed' : 'Transit Canceled',
+                  completed
+                      ? 'Rescue Transit has been completed! Thank you for safely '
+                      'transporting the rescued animal to its destination.'
+                      : 'Transit Canceled',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.tiltWarp(
                       fontSize: 17,

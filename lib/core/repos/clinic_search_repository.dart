@@ -153,7 +153,8 @@ class ClinicSearchRepository {
   // Requests addressComponents (not part of the clinic field mask above,
   // and billed separately) so LocalityResult can carry the
   // province/region + country the spec's stored shape wants.
-  static const _localityFieldMask = 'places.id,places.displayName,places.addressComponents';
+  static const _localityFieldMask =
+      'places.id,places.displayName,places.addressComponents,places.location,places.viewport';
 
   Future<List<LocalityResult>> searchLocalities({required String query}) async {
     if (query.trim().isEmpty) return const [];

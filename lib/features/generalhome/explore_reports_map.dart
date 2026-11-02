@@ -20,6 +20,7 @@ as community_adoption_util;
 import 'package:respawnd1/core/utils/public_case_visibility.dart';
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
+import 'package:respawnd1/core/geofence/geofence_config.dart';
 
 import '../../app_theme.dart';
 
@@ -386,7 +387,12 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
   // AND'd against that OR group and against each other — see
   // _visibleMarkers.
   final Set<String> _selectedFilters = {};
-  LatLng _initialCamera = const LatLng(14.5416, 121.0644); // Pateros, Metro Manila fallback
+  LatLng _initialCamera = const LatLng(14.5416, 121.0644);
+
+  // Geofence overlay: the viewer's alert radius (users/{uid}.geofencePrefs)
+  // around their location, plus each report's on-device case geofence.
+  LatLng? _userPosition;
+  GeofencePrefs _geofencePrefs = const GeofencePrefs();
 
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
   // Separate subscription for "My Reports" — deliberately NOT sourced from
@@ -535,13 +541,55 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         ),
       );
       if (!mounted) return;
-      setState(() => _initialCamera = LatLng(pos.latitude, pos.longitude));
+      setState(() {
+        _initialCamera = LatLng(pos.latitude, pos.longitude);
+        _userPosition = _initialCamera;
+      });
       _mapController?.animateCamera(CameraUpdate.newLatLng(_initialCamera));
       _saveLastLocation(pos.latitude, pos.longitude);
+      _loadGeofencePrefs();
     } catch (_) {
 
     }
   }
+  Future<void> _loadGeofencePrefs() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (!mounted) return;
+      setState(() => _geofencePrefs = GeofencePrefs.fromUserData(doc.data()));
+    } catch (_) {}
+  }
+
+  Set<Circle> _geofenceCircles() {
+    final circles = <Circle>{};
+    final me = _userPosition;
+    if (me != null && _geofencePrefs.enabled) {
+      circles.add(Circle(
+        circleId: const CircleId('my_alert_radius'),
+        center: me,
+        radius: _geofencePrefs.radiusKm * 1000,
+        strokeWidth: 1,
+        strokeColor: AppColors.lavenderrspwn,
+        fillColor: AppColors.lavenderrspwn.withValues(alpha: 0.06),
+      ));
+    }
+    if (!_loadingReports) {
+      for (final r in _caseReports) {
+        circles.add(Circle(
+          circleId: CircleId('case_${r.caseId}'),
+          center: LatLng(r.lat, r.lng),
+          radius: GeofenceConfig.caseGeofenceRadiusMeters,
+          strokeWidth: 1,
+          strokeColor: Colors.redAccent.withValues(alpha: 0.6),
+          fillColor: Colors.redAccent.withValues(alpha: 0.08),
+        ));
+      }
+    }
+    return circles;
+  }
+
   void _saveLastLocation(double lat, double lng) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -702,6 +750,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                     initialCameraPosition: CameraPosition(target: _initialCamera, zoom: 13.5),
                     onMapCreated: (c) => _mapController = c,
                     markers: _loadingReports ? const {} : _visibleMarkers(),
+                    circles: _geofenceCircles(),
                     myLocationEnabled: true,
                     myLocationButtonEnabled: false,
                     zoomControlsEnabled: false,

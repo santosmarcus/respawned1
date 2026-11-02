@@ -54,13 +54,24 @@ class ServiceArea {
   final String? placeId;
   final String? administrativeArea;
   final String? countryCode;
+  // Coverage geofence (center + radius). functions/index.js tags every new
+  // case with the organizations whose geofence contains it. Null on
+  // entries saved before geofencing — re-add those to enable coverage.
+  final double? lat;
+  final double? lng;
+  final double? radiusKm;
   const ServiceArea({
     required this.name,
     required this.normalizedName,
     this.placeId,
     this.administrativeArea,
     this.countryCode,
+    this.lat,
+    this.lng,
+    this.radiusKm,
   });
+
+  bool get hasGeofence => lat != null && lng != null && radiusKm != null;
 
   factory ServiceArea.fromMap(Map<String, dynamic> map) => ServiceArea(
         name: map['name'] as String? ?? '',
@@ -68,6 +79,9 @@ class ServiceArea {
         placeId: map['placeId'] as String?,
         administrativeArea: map['administrativeArea'] as String?,
         countryCode: map['countryCode'] as String?,
+        lat: (map['lat'] as num?)?.toDouble(),
+        lng: (map['lng'] as num?)?.toDouble(),
+        radiusKm: (map['radiusKm'] as num?)?.toDouble(),
       );
 
   Map<String, dynamic> toMap() => {
@@ -76,6 +90,9 @@ class ServiceArea {
         if (placeId != null) 'placeId': placeId,
         if (administrativeArea != null) 'administrativeArea': administrativeArea,
         if (countryCode != null) 'countryCode': countryCode,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        if (radiusKm != null) 'radiusKm': radiusKm,
       };
 }
 
