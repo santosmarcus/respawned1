@@ -7,6 +7,7 @@ import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
 class TransporterProfile extends StatelessWidget {
@@ -407,6 +408,25 @@ class _StatsRow extends StatelessWidget {
     'awaiting_adopter_pickup',
   };
 
+  // Statuses a case moves on to AFTER the transporter's trip is done —
+  // admin closes it, admits the animal (intake) or starts clinical care.
+  // Previously only the literal 'completed' counted, so every finished trip
+  // whose case the admin had already moved on vanished from Completed.
+  static const _afterTransitStatuses = {
+    'completed',
+    'closed',
+    'intake',
+    'in_treatment',
+  };
+
+  static bool _isCompletedTransit(Map<String, dynamic> data, String status) {
+    if (_afterTransitStatuses.contains(status)) return true;
+    // Proof the trip itself was finished, whatever the case status is now.
+    return data['transitCompletedAt'] != null ||
+        data['adopterPickupConfirmedAt'] != null ||
+        (data['shelterVerificationUrls'] as List?)?.isNotEmpty == true;
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
@@ -423,13 +443,14 @@ class _StatsRow extends StatelessWidget {
         // first match found is the one to show.
         String? ongoingCaseId;
 
+        final completedDocs = <QueryDocumentSnapshot>[];
         if (snapshot.hasData) {
           for (final doc in snapshot.data!.docs) {
-            final status =
-                (doc.data() as Map<String, dynamic>)['status'] as String? ??
-                    '';
-            if (status == 'completed') {
+            final data = doc.data() as Map<String, dynamic>;
+            final status = data['status'] as String? ?? '';
+            if (_isCompletedTransit(data, status)) {
               completed++;
+              completedDocs.add(doc);
             } else if (_ongoingStatuses.contains(status)) {
               ongoing++;
               ongoingCaseId ??= doc.id;
@@ -441,7 +462,19 @@ class _StatsRow extends StatelessWidget {
           children: [
             Expanded(
               child: _StatCard(
-                  label: 'Completed', value: '$completed', icon: Icons.check_circle_outline),
+                label: 'Completed',
+                value: '$completed',
+                icon: Icons.check_circle_outline,
+                onTap: completedDocs.isEmpty
+                    ? null
+                    : () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        _CompletedTransitsPage(docs: completedDocs),
+                  ),
+                ),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -591,6 +624,100 @@ class _MenuRow extends StatelessWidget {
           const Icon(Icons.chevron_right,
               size: 18, color: AppColors.textSecondary),
         ],
+      ),
+    );
+  }
+}
+
+/// List of the transporter's completed transits (opened from the
+/// "Completed" stat on the profile).
+class _CompletedTransitsPage extends StatelessWidget {
+  final List<QueryDocumentSnapshot> docs;
+  const _CompletedTransitsPage({required this.docs});
+
+  DateTime? _completedAt(Map<String, dynamic> data) {
+    for (final key in ['transitCompletedAt', 'adopterPickupConfirmedAt']) {
+      final v = data[key];
+      if (v is Timestamp) return v.toDate();
+    }
+    final history = (data['statusHistory'] as List?) ?? const [];
+    if (history.isNotEmpty) {
+      final last = history.last;
+      if (last is Map && last['timestamp'] is Timestamp) {
+        return (last['timestamp'] as Timestamp).toDate();
+      }
+    }
+    return null;
+  }
+
+  String _formatDate(DateTime d) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${months[d.month - 1]} ${d.day}, ${d.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sorted = [...docs]..sort((a, b) {
+      final da = _completedAt(a.data() as Map<String, dynamic>) ?? DateTime(2000);
+      final db = _completedAt(b.data() as Map<String, dynamic>) ?? DateTime(2000);
+      return db.compareTo(da);
+    });
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text('Completed Transits',
+            style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+      ),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: sorted.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (context, i) {
+          final data = sorted[i].data() as Map<String, dynamic>;
+          final when = _completedAt(data);
+          final species = (data['animalType'] ?? 'Animal').toString();
+          final destination = (data['shelterAddress'] as String?)?.isNotEmpty == true
+              ? data['shelterAddress'] as String
+              : (data['dropoffAddress'] ?? data['vetClinicAddress'] ?? '').toString();
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.check_circle, color: AppColors.greenrspwn),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('#${shortCaseId(sorted[i].id)} · $species',
+                          style: GoogleFonts.zain(
+                              fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      Text((data['address'] ?? '').toString(),
+                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                      if (destination.isNotEmpty)
+                        Text('→ $destination',
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                      if (when != null)
+                        Text('Completed ${_formatDate(when)}',
+                            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

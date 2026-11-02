@@ -342,6 +342,15 @@ class RescueReportService {
           'videoUrls': media.videoUrls,
         });
       }
+      // The linked rescue case (finder needs pickup) is what the pet
+      // transporter reviews — give it the same photos/videos, otherwise
+      // the transporter only sees empty media boxes.
+      if (linkedCaseId != null) {
+        await _db.collection('cases').doc(linkedCaseId).update({
+          'photoUrls': media.photoUrls,
+          'videoUrls': media.videoUrls,
+        });
+      }
     }
 
     final oppositeType = form.isOwner == true ? 'found' : 'lost';

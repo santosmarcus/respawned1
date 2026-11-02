@@ -34,7 +34,7 @@ class TransitResultPage extends StatelessWidget {
             onPressed: () => Navigator.of(context).pop(),
           ),
           title: Text(
-            'Pet Transporter Requirements',
+            completed ? 'Transit Completed' : 'Transit Canceled',
             style: GoogleFonts.tiltWarp(
               fontSize: 15,
               color: AppColors.textSecondary,
@@ -58,7 +58,10 @@ class TransitResultPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  completed ? 'Transit Completed' : 'Transit Canceled',
+                  completed
+                      ? 'Rescue Transit has been completed! Thank you for safely '
+                            'transporting the rescued animal to its destination.'
+                      : 'Transit Canceled',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.tiltWarp(
                     fontSize: 17,

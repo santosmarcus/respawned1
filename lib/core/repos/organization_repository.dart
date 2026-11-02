@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geocoding/geocoding.dart';
 
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
@@ -54,13 +55,35 @@ class ServiceArea {
   final String? placeId;
   final String? administrativeArea;
   final String? countryCode;
+  // Coverage geofence (center + radius). functions/index.js tags every new
+  // case with the organizations whose geofence contains it. Null on
+  // entries saved before geofencing — re-add those to enable coverage.
+  final double? lat;
+  final double? lng;
+  final double? radiusKm;
   const ServiceArea({
     required this.name,
     required this.normalizedName,
     this.placeId,
     this.administrativeArea,
     this.countryCode,
+    this.lat,
+    this.lng,
+    this.radiusKm,
   });
+
+  bool get hasGeofence => lat != null && lng != null && radiusKm != null;
+
+  ServiceArea withGeofence({required double lat, required double lng, required double radiusKm}) => ServiceArea(
+        name: name,
+        normalizedName: normalizedName,
+        placeId: placeId,
+        administrativeArea: administrativeArea,
+        countryCode: countryCode,
+        lat: lat,
+        lng: lng,
+        radiusKm: radiusKm,
+      );
 
   factory ServiceArea.fromMap(Map<String, dynamic> map) => ServiceArea(
         name: map['name'] as String? ?? '',
@@ -68,6 +91,9 @@ class ServiceArea {
         placeId: map['placeId'] as String?,
         administrativeArea: map['administrativeArea'] as String?,
         countryCode: map['countryCode'] as String?,
+        lat: (map['lat'] as num?)?.toDouble(),
+        lng: (map['lng'] as num?)?.toDouble(),
+        radiusKm: (map['radiusKm'] as num?)?.toDouble(),
       );
 
   Map<String, dynamic> toMap() => {
@@ -76,6 +102,9 @@ class ServiceArea {
         if (placeId != null) 'placeId': placeId,
         if (administrativeArea != null) 'administrativeArea': administrativeArea,
         if (countryCode != null) 'countryCode': countryCode,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        if (radiusKm != null) 'radiusKm': radiusKm,
       };
 }
 
@@ -86,6 +115,42 @@ class ServiceArea {
 /// avatarUrl, plus the shelter*/acceptedSpecies fields already written
 /// elsewhere in this codebase) rather than a second organization
 /// collection. Every field this class adds is additive.
+/// Coverage radius given to a service-area city whose geofence is created
+/// from its geocoded center (the supported-city list has no boundaries).
+const double kDefaultServiceAreaRadiusKm = 10;
+
+/// Adds a coverage geofence (center + [kDefaultServiceAreaRadiusKm]) to every
+/// service area that doesn't have one yet, by geocoding "<city>, <region>,
+/// Philippines". functions/index.js tags each new rescue case with the
+/// organizations whose geofence contains it. Areas that can't be geocoded
+/// are saved unchanged.
+Future<List<ServiceArea>> withCoverageGeofences(List<ServiceArea> areas) async {
+  final result = <ServiceArea>[];
+  for (final area in areas) {
+    if (area.hasGeofence) {
+      result.add(area);
+      continue;
+    }
+    try {
+      final region = area.administrativeArea;
+      final query = [area.name, if (region != null && region.isNotEmpty) region, 'Philippines'].join(', ');
+      final hits = await locationFromAddress(query).timeout(const Duration(seconds: 8));
+      if (hits.isNotEmpty) {
+        result.add(area.withGeofence(
+          lat: hits.first.latitude,
+          lng: hits.first.longitude,
+          radiusKm: kDefaultServiceAreaRadiusKm,
+        ));
+        continue;
+      }
+    } catch (_) {
+      // fall through: keep the area without a geofence
+    }
+    result.add(area);
+  }
+  return result;
+}
+
 class OrganizationRepository {
   OrganizationRepository({FirebaseFirestore? firestore}) : _db = firestore ?? FirebaseFirestore.instance;
 
@@ -264,6 +329,7 @@ class OrganizationRepository {
   }) async {
     final existing = await currentOrganizationFor(uid);
     if (existing != null) return existing.id;
+    serviceAreas = await withCoverageGeofences(serviceAreas);
 
     final orgRef = _organizations.doc();
     try {
@@ -398,7 +464,10 @@ class OrganizationRepository {
     }
     if (facebookUrl != null) update['facebookUrl'] = facebookUrl;
     if (website != null) update['website'] = website;
-    if (serviceAreas != null) update['serviceAreas'] = serviceAreas.map((s) => s.toMap()).toList();
+    if (serviceAreas != null) {
+      final withGeofences = await withCoverageGeofences(serviceAreas);
+      update['serviceAreas'] = withGeofences.map((s) => s.toMap()).toList();
+    }
     if (acceptedSpecies != null) update['acceptedSpecies'] = acceptedSpecies;
 
     await _organizations.doc(organizationId).set(update, SetOptions(merge: true));

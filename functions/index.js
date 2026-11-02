@@ -76,6 +76,21 @@ exports.getOrCreateRescueSession = onCall(async (request) => {
         }
       }
 
+      try {
+        await notifyTagScan({
+          tagId,
+          tagData,
+          sessionId: existingSessionId,
+          scannerUid: request.auth.uid,
+          lat,
+          lng,
+          address,
+          isNewSession: false,
+        });
+      } catch (e) {
+        console.warn('notifyTagScan failed', e.message);
+      }
+
       return {sessionId: existingSessionId};
     }
   }
@@ -110,6 +125,21 @@ exports.getOrCreateRescueSession = onCall(async (request) => {
       .collection('collarTags')
       .doc(tagId)
       .set(tagUpdate, {merge: true});
+  }
+
+  try {
+    await notifyTagScan({
+      tagId,
+      tagData,
+      sessionId: sessionRef.id,
+      scannerUid: request.auth.uid,
+      lat,
+      lng,
+      address,
+      isNewSession: true,
+    });
+  } catch (e) {
+    console.warn('notifyTagScan failed', e.message);
   }
 
   return {sessionId: sessionRef.id};
@@ -180,9 +210,87 @@ async function notifyUser({uid, title, body, data}) {
   return true;
 }
 
-async function notifyNearbyUsers({lat, lng, excludeUid, title, body, data}) {
-  const latDeltaDeg = RADIUS_KM / 111; // ~111km per degree of latitude
-  const lngDeltaDeg = RADIUS_KM / (111 * Math.cos((lat * Math.PI) / 180));
+// ---- Geofence notifications -------------------------------------------
+//
+// A geofence here is a circle of `radiusKm` around a case/alert's lat/lng.
+// Every user whose last known location (users/{uid}.lastLat/lastLng) is
+// inside that circle gets the push. Responders (volunteers, transporters,
+// organizations) get a wider geofence than the general public so cases
+// reach the people who can act on them first.
+// Pet transporters are NOT nearby-alert recipients: they only get pushes for
+// their own assignments, rescue-location updates and clinic changes (see
+// notifyTransporterAssignment / notifyTransporterCaseChanges below).
+const TRANSPORTER_ROLE = 'pet_transporter';
+const RESPONDER_ROLES = ['rescue_volunteer', 'organization'];
+const RESPONDER_RADIUS_KM = 10;
+// Users can pick their own alert radius (location_sharing_page.dart); it
+// is clamped to this so the bounding-box query stays small.
+const MAX_USER_ALERT_RADIUS_KM = 10;
+const FCM_MULTICAST_LIMIT = 500;
+
+// Notification categories a user can mute in Location Sharing settings.
+// Keep in sync with GeofencePrefs.categories in geofence_prefs.dart.
+const NOTIFY_CATEGORY = {
+  newCase: 'new_case',
+  caseUpdate: 'case_update',
+  petAlert: 'pet_alert',
+  tagScan: 'tag_scan',
+};
+
+// Effective alert radius for one user: their own setting if they chose
+// one, otherwise the radius of the geofence being checked.
+function userAlertRadiusKm(u, defaultKm) {
+  const prefs = u.geofencePrefs || {};
+  const r = Number(prefs.radiusKm);
+  if (!Number.isFinite(r) || r <= 0) return defaultKm;
+  return Math.min(r, MAX_USER_ALERT_RADIUS_KM);
+}
+
+function userWantsCategory(u, category) {
+  const prefs = u.geofencePrefs || {};
+  if (prefs.enabled === false) return false;
+  const muted = Array.isArray(prefs.mutedCategories) ? prefs.mutedCategories : [];
+  return !category || !muted.includes(category);
+}
+
+// FCM `data` values must all be strings.
+function toFcmData(data) {
+  const out = {};
+  Object.entries(data || {}).forEach(([k, v]) => {
+    if (v !== null && v !== undefined) out[k] = String(v);
+  });
+  return out;
+}
+
+// notifyUser that never throws (a stale token shouldn't stop the
+// geofence notifications that follow it).
+async function safeNotifyUser(args) {
+  try {
+    return await notifyUser({...args, data: toFcmData(args.data)});
+  } catch (e) {
+    console.warn('notifyUser failed', args.uid, e.message);
+    return false;
+  }
+}
+
+async function notifyNearbyUsers({
+  lat,
+  lng,
+  excludeUid,
+  excludeUids = [],
+  roles = null, // only these roles (null = any role)
+  excludeRoles = null, // never these roles
+  radiusKm = RADIUS_KM,
+  category = null, // one of NOTIFY_CATEGORY; users can mute categories
+  title,
+  body,
+  data,
+}) {
+  const skip = new Set([excludeUid, ...excludeUids].filter(Boolean));
+  // Search wide enough for users who picked a bigger personal radius.
+  const searchKm = Math.max(radiusKm, MAX_USER_ALERT_RADIUS_KM);
+  const latDeltaDeg = searchKm / 111; // ~111km per degree of latitude
+  const lngDeltaDeg = searchKm / (111 * Math.cos((lat * Math.PI) / 180));
 
   const usersSnap = await db
     .collection('users')
@@ -190,26 +298,111 @@ async function notifyNearbyUsers({lat, lng, excludeUid, title, body, data}) {
     .where('lastLat', '<=', lat + latDeltaDeg)
     .get();
 
-  const tokens = [];
+  const tokens = new Set();
   usersSnap.forEach((userDoc) => {
-    if (userDoc.id === excludeUid) return;
+    if (skip.has(userDoc.id)) return;
     const u = userDoc.data();
     if (!u.fcmToken || u.lastLng == null) return;
+    const role = u.role || '';
+    if (role === TRANSPORTER_ROLE) return;
+    if (roles && !roles.includes(role)) return;
+    if (excludeRoles && excludeRoles.includes(role)) return;
+    if (!userWantsCategory(u, category)) return;
     if (Math.abs(u.lastLng - lng) > lngDeltaDeg) return;
-    if (haversineKm(lat, lng, u.lastLat, u.lastLng) <= RADIUS_KM) {
-      tokens.push(u.fcmToken);
+    if (haversineKm(lat, lng, u.lastLat, u.lastLng) <= userAlertRadiusKm(u, radiusKm)) {
+      tokens.add(u.fcmToken);
     }
   });
 
-  if (tokens.length === 0) return 0;
+  if (tokens.size === 0) return 0;
 
-  await admin.messaging().sendEachForMulticast({
-    tokens,
-    notification: {title, body},
-    data,
+  const list = [...tokens];
+  for (let i = 0; i < list.length; i += FCM_MULTICAST_LIMIT) {
+    await admin.messaging().sendEachForMulticast({
+      tokens: list.slice(i, i + FCM_MULTICAST_LIMIT),
+      notification: {title, body},
+      data: toFcmData(data),
+    });
+  }
+
+  return list.length;
+}
+
+// ---- Organization coverage geofences ------------------------------------
+//
+// Each organization's serviceAreas[] entry carries {lat, lng, radiusKm}
+// (from the Places viewport, see LocalityResult / ServiceArea). A new
+// case is tagged with every approved organization whose coverage
+// contains it, and that organization's staff are notified directly.
+// Cases outside every coverage area are flagged for admins (they can be
+// referred to the LGU from the case page).
+const ORG_STAFF_ROLES = ['organization', 'ngo_staff', 'admin'];
+
+function orgCoversPoint(org, lat, lng) {
+  const areas = Array.isArray(org.serviceAreas) ? org.serviceAreas : [];
+  return areas.some((a) =>
+    typeof a.lat === 'number' &&
+    typeof a.lng === 'number' &&
+    typeof a.radiusKm === 'number' &&
+    haversineKm(lat, lng, a.lat, a.lng) <= a.radiusKm);
+}
+
+async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
+  const orgsSnap = await db
+    .collection('organizations')
+    .where('verificationStatus', '==', 'approved')
+    .get();
+
+  const matched = orgsSnap.docs
+    .filter((d) => orgCoversPoint(d.data(), c.lat, c.lng))
+    .map((d) => d.id);
+
+  await caseRef.update({
+    areaOrgIds: matched,
+    outsideServiceArea: matched.length === 0,
   });
 
-  return tokens.length;
+  if (matched.length === 0) {
+    await db.collection('adminAlerts').add({
+      type: 'outside_service_area',
+      caseId,
+      lat: c.lat,
+      lng: c.lng,
+      address: c.address || null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      resolved: false,
+    });
+    return;
+  }
+
+  // Firestore `in` accepts at most 30 values.
+  const tokens = new Set();
+  for (let i = 0; i < matched.length; i += 30) {
+    const staffSnap = await db
+      .collection('users')
+      .where('organizationId', 'in', matched.slice(i, i + 30))
+      .get();
+    staffSnap.forEach((u) => {
+      const d = u.data();
+      if (u.id === c.reporterId) return;
+      if (!ORG_STAFF_ROLES.includes(d.role)) return;
+      if (!d.fcmToken || !userWantsCategory(d, NOTIFY_CATEGORY.newCase)) return;
+      tokens.add(d.fcmToken);
+    });
+  }
+  if (tokens.size === 0) return;
+
+  const list = [...tokens];
+  for (let i = 0; i < list.length; i += FCM_MULTICAST_LIMIT) {
+    await admin.messaging().sendEachForMulticast({
+      tokens: list.slice(i, i + FCM_MULTICAST_LIMIT),
+      notification: {
+        title: isCritical ? 'URGENT: Critical case in your service area' : 'New case in your service area',
+        body: 'A rescue report was filed inside your organization\'s coverage area. Tap to review it.',
+      },
+      data: toFcmData({type: 'new_case_service_area', caseId}),
+    });
+  }
 }
 
 // 1. Immediate alert the moment a new case is reported.
@@ -225,15 +418,41 @@ exports.notifyNewCaseReported = onDocumentCreated(
     const status = (c.status || '').toLowerCase();
     if (DISMISSED_STATUSES.includes(status)) return;
 
+    const caseId = event.params.caseId;
+    const isCritical = c.urgency === 'Critical';
+
+    // Which organizations' coverage geofences contain this case?
+    await assignCaseToServiceAreas({caseRef: snap.ref, caseId, c, isCritical});
+
+    // Responders: wider geofence + "view and accept" wording.
     await notifyNearbyUsers({
       lat: c.lat,
       lng: c.lng,
       excludeUid: c.reporterId,
+      roles: RESPONDER_ROLES,
+      radiusKm: RESPONDER_RADIUS_KM,
+      category: NOTIFY_CATEGORY.newCase,
+      title: isCritical ? 'URGENT: Critical rescue near you' : 'Rescue needed near you',
+      body: 'A new rescue report is inside your area. Tap to view and accept the case.',
+      data: {
+        type: 'new_case_nearby_responder',
+        caseId,
+      },
+    });
+
+    // General public inside the standard geofence (responders excluded
+    // so nobody gets two pushes for the same case).
+    await notifyNearbyUsers({
+      lat: c.lat,
+      lng: c.lng,
+      excludeUid: c.reporterId,
+      excludeRoles: [...RESPONDER_ROLES, TRANSPORTER_ROLE],
+      category: NOTIFY_CATEGORY.newCase,
       title: 'New rescue report near you',
       body: 'A rescue report just came in nearby — tap to see if you can help.',
       data: {
         type: 'new_case_nearby',
-        caseId: event.params.caseId,
+        caseId,
       },
     });
   },
@@ -283,6 +502,7 @@ exports.notifyUnconfirmedReports = onSchedule('every 5 minutes', async () => {
       lat: c.lat,
       lng: c.lng,
       excludeUid: c.reporterId,
+      category: NOTIFY_CATEGORY.newCase,
       title: 'A nearby report still needs a responder',
       body: 'This report is still awaiting a pet transporter — is the animal present or not? Tap to confirm.',
       data: {
@@ -357,6 +577,274 @@ exports.notifyOnEndReasonStatus = onDocumentUpdated(
   },
 );
 
+
+// ---- Case geofence events (rescue progress + rescue completed) ---------
+//
+// When a case moves to one of these statuses, the reporter is told
+// directly, and (where `nearby` is set) everyone inside the case's
+// geofence is told too — e.g. "a rescue near you was completed".
+const CASE_COMPLETED_MESSAGE = {
+  reporter: {
+    title: 'Rescue completed',
+    body: 'The rescue for the animal you reported has been completed. Thank you for reporting!',
+  },
+  nearby: {
+    title: 'A rescue near you was completed',
+    body: 'A rescue case in your area was just completed by a volunteer or organization. Tap to see the outcome.',
+  },
+};
+
+const CASE_GEOFENCE_EVENTS = {
+  // Set automatically by the transporter's pickup geofence
+  // (transit_progress_page.dart) or by the "Arrived" button.
+  arrived: {
+    reporter: {
+      title: 'The transporter has arrived',
+      body: 'The pet transporter has reached the location you reported.',
+    },
+  },
+  treatment: {
+    reporter: {
+      title: 'The animal has been picked up',
+      body: 'A transporter has rescued the animal you reported and is taking it for treatment.',
+    },
+    nearby: {
+      title: 'An animal near you was rescued',
+      body: 'A reported animal in your area has been picked up — no need to report it again.',
+    },
+  },
+  dropoff: {
+    reporter: {
+      title: 'Arrived for treatment',
+      body: 'The animal you reported has been brought to a clinic for treatment.',
+    },
+  },
+  in_transit_shelter: {
+    reporter: {
+      title: 'On the way to the shelter',
+      body: 'The animal you reported is now being transported to the shelter.',
+    },
+  },
+  completed: CASE_COMPLETED_MESSAGE,
+  closed: CASE_COMPLETED_MESSAGE,
+};
+
+// completed and closed share one key so a case that goes
+// completed -> closed only announces its completion once.
+function geofenceEventKey(status) {
+  return status === 'completed' || status === 'closed' ? 'final' : status;
+}
+
+exports.notifyCaseGeofenceEvents = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after || before.status === after.status) return;
+
+    const status = (after.status || '').toLowerCase();
+    const config = CASE_GEOFENCE_EVENTS[status];
+    if (!config) return;
+
+    const key = geofenceEventKey(status);
+    const alreadySent = after.geofenceNotified || {};
+    if (alreadySent[key]) return;
+
+    const caseId = event.params.caseId;
+
+    if (config.reporter && after.reporterId) {
+      await safeNotifyUser({
+        uid: after.reporterId,
+        title: config.reporter.title,
+        body: config.reporter.body,
+        data: {type: 'case_status_update', caseId, status},
+      });
+    }
+
+    if (config.nearby && after.lat != null && after.lng != null) {
+      await notifyNearbyUsers({
+        lat: after.lat,
+        lng: after.lng,
+        excludeUids: [after.reporterId, after.riderId, after.assignedVolunteerId],
+        category: NOTIFY_CATEGORY.caseUpdate,
+        title: config.nearby.title,
+        body: config.nearby.body,
+        data: {type: 'case_geofence_event', caseId, status},
+      });
+    }
+
+    // Status is unchanged by this write, so this trigger won't loop.
+    await event.data.after.ref.update({
+      [`geofenceNotified.${key}`]: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  },
+);
+
+// ---- Lost / found pet alerts --------------------------------------------
+//
+// New lost-pet and found-animal alerts notify everyone inside the alert's
+// geofence. A found report with several animals creates several petAlerts
+// docs; only the first one has groupId == null at creation, so the group
+// produces a single push.
+exports.notifyPetAlertNearby = onDocumentCreated(
+  'petAlerts/{alertId}',
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const a = snap.data();
+
+    if (a.lat == null || a.lng == null) return;
+    if (a.groupId) return; // not the first doc of its group
+    // A found report linked to a rescue case is already announced by
+    // notifyNewCaseReported.
+    if (a.linkedCaseId) return;
+
+    const species = (a.species || 'pet').toString().toLowerCase();
+    let title;
+    let body;
+    if (a.type === 'lost') {
+      title = 'Lost pet alert near you';
+      body = a.petName
+        ? `${a.petName} (${species}) was reported lost nearby. Keep an eye out!`
+        : `A lost ${species} was reported nearby. Keep an eye out!`;
+    } else if (a.type === 'found') {
+      title = 'Found animal near you';
+      body = `Someone found a ${species} nearby — could it be yours?`;
+    } else {
+      return;
+    }
+
+    await notifyNearbyUsers({
+      lat: a.lat,
+      lng: a.lng,
+      excludeUid: a.reporterId,
+      category: NOTIFY_CATEGORY.petAlert,
+      title,
+      body,
+      data: {
+        type: 'pet_alert_nearby',
+        alertId: event.params.alertId,
+        alertType: a.type,
+      },
+    });
+  },
+);
+
+// Collar tag scans: the owner hears about every scan of their lost pet;
+// people nearby are alerted only when a scan opens a new rescue session
+// (re-scans don't re-alert the neighbourhood).
+async function notifyTagScan({tagId, tagData, sessionId, scannerUid, lat, lng, address, isNewSession}) {
+  const petName = tagData.name || 'Your pet';
+  const ownerId = tagData.ownerId;
+
+  if (ownerId && ownerId !== scannerUid) {
+    await safeNotifyUser({
+      uid: ownerId,
+      title: `${petName} was just scanned!`,
+      body: address
+        ? `Someone scanned ${petName}'s tag near ${address}. Tap to open the chat.`
+        : `Someone scanned ${petName}'s tag. Tap to open the chat.`,
+      data: {type: 'tag_scanned', tagId, sessionId},
+    });
+  }
+
+  if (isNewSession && lat !== null && lng !== null) {
+    await notifyNearbyUsers({
+      lat,
+      lng,
+      excludeUids: [ownerId, scannerUid],
+      category: NOTIFY_CATEGORY.tagScan,
+      title: 'Lost pet spotted near you',
+      body: tagData.name
+        ? `${tagData.name}, a lost pet, was just spotted nearby. Keep an eye out!`
+        : 'A lost pet was just spotted nearby. Keep an eye out!',
+      data: {type: 'tag_scanned_nearby', tagId, sessionId},
+    });
+  }
+}
+
+// ---- Pet transporter notifications ----------------------------------------
+//
+// Transporters are notified about exactly three things:
+//   1. a new assignment offer for them
+//   2. the rescue (pickup) location of their case changing
+//   3. the clinic address of their case changing
+const TRANSPORTER_ACTIVE_STATUSES = [
+  'assigned', 'accepted', 'ongoing', 'arrived', 'treatment', 'dropoff',
+  'searching_clinic', 'in_transit_shelter', 'awaiting_adopter_pickup',
+];
+
+exports.notifyTransporterAssignment = onDocumentCreated(
+  'cases/{caseId}/transportAssignments/{assignmentId}',
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const a = snap.data();
+    if (a.status !== 'pending' || !a.riderId) return;
+
+    const caseSnap = await db.collection('cases').doc(event.params.caseId).get();
+    const c = caseSnap.data() || {};
+    await safeNotifyUser({
+      uid: a.riderId,
+      title: 'New rescue assignment',
+      body: c.address
+        ? `You've been assigned a rescue at ${c.address}. Tap to accept or decline.`
+        : 'You have a new rescue transport assignment. Tap to accept or decline.',
+      data: {
+        type: 'transporter_assignment',
+        caseId: event.params.caseId,
+        assignmentId: event.params.assignmentId,
+      },
+    });
+  },
+);
+
+function clinicAddressOf(c) {
+  return (c.dropoffAddress || c.vetClinicAddress || '').trim();
+}
+
+exports.notifyTransporterCaseChanges = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after) return;
+
+    const riderId = after.riderId || after.assignedVolunteerId;
+    if (!riderId) return;
+    if (!TRANSPORTER_ACTIVE_STATUSES.includes((after.status || '').toLowerCase())) return;
+    // The rider's own clinic reroute (transit_progress_page.dart) changes
+    // the clinic too, but they already know — don't push it back to them.
+    const reroutedByRider = (before.status || '') === 'searching_clinic';
+
+    const caseId = event.params.caseId;
+
+    const locationChanged =
+      before.lat !== after.lat || before.lng !== after.lng ||
+      (before.address || '') !== (after.address || '');
+    if (locationChanged && after.lat != null && after.lng != null) {
+      await safeNotifyUser({
+        uid: riderId,
+        title: 'Rescue location updated',
+        body: after.address
+          ? `The pick up location changed to ${after.address}.`
+          : 'The pick up location for your rescue was updated.',
+        data: {type: 'transporter_location_updated', caseId},
+      });
+    }
+
+    const beforeClinic = clinicAddressOf(before);
+    const afterClinic = clinicAddressOf(after);
+    if (afterClinic && beforeClinic !== afterClinic && !reroutedByRider) {
+      await safeNotifyUser({
+        uid: riderId,
+        title: 'Clinic address changed',
+        body: `Your drop off clinic is now ${afterClinic}.`,
+        data: {type: 'transporter_clinic_changed', caseId},
+      });
+    }
+  },
+);
 
 const REPORTER_RESPONSE_TIMEOUT_HOURS = 48;
 

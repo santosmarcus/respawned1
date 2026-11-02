@@ -29,11 +29,16 @@ const double kArrivalThresholdMeters = 150;
 // this, a case with no org-registered shelter would show "Shelter address
 // not available" and have no coordinates to route/verify arrival against.
 // Remove once every organization has a real shelter location configured.
-const String kFallbackShelterName = 'LGARI Shelter - Tanza';
+const String kFallbackShelterName = 'Loved by the Gapz Shelter - Rodriguez';
 const String kFallbackShelterAddress =
-    'LGARI Shelter, Tanza, Cavite, Philippines';
-const double kFallbackShelterLat = 14.3860;
-const double kFallbackShelterLng = 120.8283;
+    'Sitio Maislap, Brgy. San Isidro, Rodriguez, Rizal, Philippines';
+// APPROXIMATE coordinates for Brgy. San Isidro, Rodriguez, Rizal. The
+// shelter arrival geofence is only 150 m, so replace these with the exact
+// pin (Google Maps → long-press the shelter → copy the numbers).
+// TransitCaseService.acceptTreatment geocodes the address first and only
+// uses these if geocoding fails.
+const double kFallbackShelterLat = 14.7350;
+const double kFallbackShelterLng = 121.1590;
 
 /// Nearby-clinic search radii (meters), widened progressively when nearby
 /// clinics have already rejected the case.

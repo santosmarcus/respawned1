@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:respawnd1/core/constants/maps_config.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:respawnd1/features/pettransporter/transit_rules.dart';
 
 /// Result of [TransitCaseService.findAndRouteToNextClinic].
@@ -114,6 +115,8 @@ class TransitCaseService {
     // coordinates at all.
     final shelter = await OrganizationDirectoryRepository()
         .resolveShelterLocation(data['organizationId'] as String?);
+    final fallback =
+        shelter == null ? await _resolveFallbackShelterLatLng() : null;
 
     final next = statusAfterTreatmentAccepted(data);
 
@@ -122,8 +125,8 @@ class TransitCaseService {
       'clinicVerificationUrls': clinicUrls,
       'shelterName': shelter?.name ?? kFallbackShelterName,
       'shelterAddress': shelter?.address ?? kFallbackShelterAddress,
-      'shelterLat': shelter?.lat ?? kFallbackShelterLat,
-      'shelterLng': shelter?.lng ?? kFallbackShelterLng,
+      'shelterLat': shelter?.lat ?? fallback!.lat,
+      'shelterLng': shelter?.lng ?? fallback!.lng,
       ..._historyEntry(next.label),
     });
 
@@ -276,10 +279,33 @@ class TransitCaseService {
     return ClinicSearchOutcome.routedToClinic;
   }
 
+  /// Geocodes the default shelter address; falls back to the approximate
+  /// constants in transit_rules.dart when geocoding isn't available.
+  Future<({double lat, double lng})> _resolveFallbackShelterLatLng() async {
+    try {
+      final hits = await locationFromAddress(kFallbackShelterAddress)
+          .timeout(const Duration(seconds: 8));
+      if (hits.isNotEmpty) {
+        return (lat: hits.first.latitude, lng: hits.first.longitude);
+      }
+    } catch (_) {
+      // fall through to the constants
+    }
+    return (lat: kFallbackShelterLat, lng: kFallbackShelterLng);
+  }
+
+  // transitCompletedAt/By let the transporter's profile keep counting the
+  // trip as completed after admin moves the case on (intake, closed, ...).
+  Map<String, dynamic> get _transitCompletedStamp => {
+    'transitCompletedAt': Timestamp.now(),
+    'transitCompletedBy': FirebaseAuth.instance.currentUser?.uid,
+  };
+
   Future<void> completeShelterDropoff(List<String> shelterUrls) {
     return caseRef.update({
       'status': 'completed',
       'shelterVerificationUrls': shelterUrls,
+      ..._transitCompletedStamp,
       ..._historyEntry('Animal delivered to shelter. Rescue completed.'),
     });
   }
@@ -288,6 +314,7 @@ class TransitCaseService {
     return caseRef.update({
       'status': 'completed',
       'adopterPickupConfirmedAt': Timestamp.now(),
+      ..._transitCompletedStamp,
       ..._historyEntry(
         'Animal handed off directly to the interested adopter at the treatment location. Rescue completed.',
       ),

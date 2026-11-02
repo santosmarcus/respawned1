@@ -844,6 +844,17 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                   },
                   initialCameraPosition: CameraPosition(target: caseLocation, zoom: 13),
                   markers: _buildMarkers(caseLocation, visibleRiders),
+                  // Transporter search geofence — grows with the radius steps.
+                  circles: {
+                    Circle(
+                      circleId: const CircleId('search_radius'),
+                      center: caseLocation,
+                      radius: _currentRadiusKm * 1000,
+                      strokeWidth: 2,
+                      strokeColor: AppColors.greenrspwn,
+                      fillColor: AppColors.greenrspwn.withValues(alpha: 0.08),
+                    ),
+                  },
                   onMapCreated: (ctrl) {
                     _mapController = ctrl;
                     _fitCameraOnce(caseLocation, visibleRiders);

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -25,7 +26,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
   bool _isOnline = false;
 
   GoogleMapController? _mapController;
-  double _serviceRangeKm = 100;
+  // The transporter picks this themselves (filter sheet). Until they have,
+  // going online first asks them to choose a range.
+  double _serviceRangeKm = 10;
+  bool _hasChosenRange = false;
   bool _loadingLocation = false;
   LatLng? _currentLocation;
 
@@ -87,7 +91,10 @@ class _ServiceScreenState extends State<ServiceScreen> {
       await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final saved = (doc.data()?['serviceRangeKm'] as num?)?.toDouble();
       if (saved != null && mounted) {
-        setState(() => _serviceRangeKm = saved);
+        setState(() {
+          _serviceRangeKm = saved;
+          _hasChosenRange = true;
+        });
       }
     } catch (_) {
       // Keep the default range if it can't be loaded — never block the
@@ -128,7 +135,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
           actions: [
             IconButton(
               icon: const Icon(Icons.tune, color: AppColors.textPrimary),
-              onPressed: _openFilter,
+              onPressed: () => _openFilter(),
             ),
           ],
         ),
@@ -299,43 +306,83 @@ class _ServiceScreenState extends State<ServiceScreen> {
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(20),
               color: AppColors.slaterspwn,),
             clipBehavior: Clip.hardEdge,
-            child: GoogleMap(
-              onMapCreated: (ctrl) {
-                _mapController = ctrl;
-                if(_currentLocation != null){
-                  ctrl.animateCamera(CameraUpdate.newCameraPosition(
-                    CameraPosition(target: _currentLocation!, zoom: 14),));
-                }
-              },
-              initialCameraPosition:
-              CameraPosition(target: center, zoom: 14),
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
-              zoomControlsEnabled: false,
-              mapToolbarEnabled: false,
-              markers: _currentLocation == null ? {}
-                  : {
-                Marker(
-                  markerId: const MarkerId('my_location'),
-                  position: _currentLocation!,
-                  infoWindow:
-                  const InfoWindow(title: 'Your Location'),
+            child: Stack(
+              children: [
+                GoogleMap(
+                  onMapCreated: (ctrl) {
+                    _mapController = ctrl;
+                    // Wait a frame so the map has a size before fitting bounds.
+                    WidgetsBinding.instance
+                        .addPostFrameCallback((_) => _fitMapToRange());
+                  },
+                  initialCameraPosition:
+                  CameraPosition(target: center, zoom: 14),
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: true,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
+                  markers: _currentLocation == null ? {}
+                      : {
+                    Marker(
+                      markerId: const MarkerId('my_location'),
+                      position: _currentLocation!,
+                      infoWindow:
+                      const InfoWindow(title: 'Your Location'),
+                    ),
+                  },
+                  // The transporter's chosen service range — only requests
+                  // inside this circle are listed below.
+                  circles: _currentLocation == null
+                      ? {}
+                      : {
+                    Circle(
+                      circleId: const CircleId('service_range'),
+                      center: _currentLocation!,
+                      radius: _serviceRangeKm * 1000,
+                      fillColor:
+                      AppColors.greenrspwn.withValues(alpha: 0.15),
+                      strokeColor: AppColors.greenrspwn,
+                      strokeWidth: 2,
+                    ),
+                  },
                 ),
-              },
-              /*circles: _currentLocation == null
-                  ? {}
-                  : {
-                Circle(
-                  circleId: const CircleId('service_range'),
-                  center: _currentLocation!,
-                  radius: _serviceRangeKm * 1000,
-                  fillColor:
-                  AppColors.greenrspwn.withValues(alpha: 0.12),
-                  strokeColor: AppColors.greenrspwn,
-                  strokeWidth: 1,
+                // Current range + quick way to change it.
+                Positioned(
+                  left: 12,
+                  top: 12,
+                  child: Material(
+                    color: AppColors.background,
+                    elevation: 2,
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => _openFilter(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.radar,
+                                size: 16, color: AppColors.textPrimary),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Service range: ${_serviceRangeKm.toInt()} km',
+                              style: GoogleFonts.zain(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(width: 6),
+                            const Icon(Icons.edit,
+                                size: 14, color: AppColors.textPrimary),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              },
-               */
+              ],
             ),
           ),
         ),
@@ -392,7 +439,35 @@ class _ServiceScreenState extends State<ServiceScreen> {
   }
 
 
+  // Fits the online map so the whole service-range circle is visible.
+  void _fitMapToRange() {
+    final center = _currentLocation;
+    final controller = _mapController;
+    if (center == null || controller == null) return;
+    final latDelta = _serviceRangeKm / 111.0;
+    final lngDelta =
+        _serviceRangeKm / (111.0 * math.cos(center.latitude * math.pi / 180)).abs();
+    controller.animateCamera(CameraUpdate.newLatLngBounds(
+      LatLngBounds(
+        southwest: LatLng(center.latitude - latDelta, center.longitude - lngDelta),
+        northeast: LatLng(center.latitude + latDelta, center.longitude + lngDelta),
+      ),
+      40,
+    ));
+  }
+
   Future<void> _goOnline() async {
+    // The transporter chooses their own service range before going online
+    // for the first time.
+    if (!_hasChosenRange) {
+      final chosen = await _openFilter(
+        title: 'Set your service range',
+      );
+      if (!chosen) {
+        _showError('Choose a service range to go online.');
+        return;
+      }
+    }
     setState(() => _loadingLocation = true);
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -444,18 +519,28 @@ class _ServiceScreenState extends State<ServiceScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
   }
-  void _openFilter(){
-    showModalBottomSheet(context: context,
+  /// Opens the service-range picker. Returns true when a range was applied.
+  Future<bool> _openFilter({String? title}) async {
+    var applied = false;
+    await showModalBottomSheet(context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => ServiceFilterSheet(
         initialRange: _serviceRangeKm,
         currentLocation: _currentLocation,
+        title: title,
         onApply: (km) {
-          setState(() => _serviceRangeKm = km);
+          applied = true;
+          setState(() {
+            _serviceRangeKm = km;
+            _hasChosenRange = true;
+          });
           _saveServiceRange(km);
+          WidgetsBinding.instance
+              .addPostFrameCallback((_) => _fitMapToRange());
         },
       ),);
+    return applied;
   }
 
 }

@@ -23,7 +23,16 @@ class VerificationPanel extends StatelessWidget {
     this.onEnd,
     this.destinationAddress,
     this.contactRows,
+    this.geofenceBanner,
+    this.locked = false,
   });
+
+  /// Shows whether the rider is inside this stop's geofence.
+  final Widget? geofenceBanner;
+
+  /// True while the rider is outside the geofence: photo slots show a lock
+  /// and the confirm swipe is disabled.
+  final bool locked;
 
   final String title;
   final String address;
@@ -84,6 +93,7 @@ class VerificationPanel extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 14),
+            ?geofenceBanner,
             Row(
               children: [
                 Text(
@@ -126,9 +136,9 @@ class VerificationPanel extends StatelessWidget {
                       clipBehavior: Clip.antiAlias,
                       child: images[i] != null
                           ? Image.file(images[i]!, fit: BoxFit.cover)
-                          : const Center(
+                          : Center(
                               child: Icon(
-                                Icons.add,
+                                locked ? Icons.lock_outline : Icons.add,
                                 size: 28,
                                 color: AppColors.textSecondary,
                               ),
@@ -177,7 +187,7 @@ class VerificationPanel extends StatelessWidget {
             // shouldn't be the lone plain tap button).
             TransitSwipeButton(
               label: confirmLabel,
-              onSwiped: isActing ? null : onConfirm,
+              onSwiped: (isActing || locked) ? null : onConfirm,
             ),
             const SizedBox(height: 14),
 
@@ -196,7 +206,7 @@ class VerificationPanel extends StatelessWidget {
                     ),
                   ),
                   child: Text(
-                    'Close',
+                    'Close Case',
                     style: GoogleFonts.tiltWarp(
                       fontSize: 14,
                       color: AppColors.textPrimary,

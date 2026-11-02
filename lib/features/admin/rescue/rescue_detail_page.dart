@@ -8,7 +8,6 @@ import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:video_player/video_player.dart';
-
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
@@ -36,6 +35,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
+import 'package:respawnd1/core/geofence/geofence_config.dart';
 
 class RescueDetailPage extends ConsumerStatefulWidget {
   final String caseId;
@@ -768,6 +768,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             const SizedBox(height: 8),
 
             _DetailSection(label: 'Location', value: c.address ?? '-'),
+            _ServiceAreaGeofenceNote(data: d),
             Stack(
               children: [
                 // Real map when we have coordinates — this used to be a
@@ -809,6 +810,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                                 snippet: report.newAddress,
                               ),
                             ),
+                        },
+                        // On-device geofence around this case (GeofenceService).
+                        circles: {
+                          Circle(
+                            circleId: const CircleId('case_geofence'),
+                            center: LatLng(c.lat!, c.lng!),
+                            radius: GeofenceConfig.caseGeofenceRadiusMeters,
+                            strokeWidth: 2,
+                            strokeColor: Colors.redAccent,
+                            fillColor: Colors.redAccent.withValues(alpha: 0.10),
+                          ),
                         },
                         myLocationButtonEnabled: false,
                         zoomControlsEnabled: false,
@@ -2242,5 +2254,42 @@ class _AnimalCard extends StatelessWidget {
         value: (escapeRisk != null && escapeRisk.isNotEmpty) ? escapeRisk : 'Not assessed',
       ),
     ];
+  }
+}
+/// Result of the service-area geofence check done by notifyNewCaseReported
+/// (functions/index.js): which organizations' coverage contains this case,
+/// or a warning when it's outside every coverage area.
+class _ServiceAreaGeofenceNote extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ServiceAreaGeofenceNote({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final outside = data['outsideServiceArea'] == true;
+    final orgIds = ((data['areaOrgIds'] as List?) ?? const []).whereType<String>().toList();
+    if (!outside && orgIds.isEmpty) return const SizedBox.shrink();
+
+    final text = outside
+        ? 'Outside every organization service area. Consider referring this case to the LGU.'
+        : orgIds.length == 1
+        ? 'Inside 1 organization service area.'
+        : 'Inside ${orgIds.length} organization service areas.';
+    final color = outside ? Colors.orange.shade800 : AppColors.textSecondary;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(outside ? Icons.warning_amber_rounded : Icons.radar, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.zain(fontSize: 12, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

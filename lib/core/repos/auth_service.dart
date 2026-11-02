@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 //import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/services/geofence_service.dart';
+import 'package:respawnd1/core/services/notification_service.dart';
+import 'package:respawnd1/features/generalhome/push_token_service.dart';
 
 import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/repos/audit_log_repository.dart';
@@ -226,6 +229,13 @@ class AuthService {
     } catch (e) {
       debugPrint('Facebook sign-out cleanup failed (non-fatal): $e');
     }*/
+
+    // Stop geofence alerts and pushes for this account on this device
+    // before the session ends (needs the still-signed-in user).
+    NotificationService.markSignedOut();
+    await GeofenceService.stop();
+    await PushTokenService.unregister();
+
     await firebaseAuth.signOut();
   }
 

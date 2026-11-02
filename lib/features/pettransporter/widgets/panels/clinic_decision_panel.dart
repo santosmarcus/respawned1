@@ -19,7 +19,16 @@ class ClinicDecisionPanel extends StatelessWidget {
     required this.onImageTap,
     required this.onAccept,
     required this.onReject,
+    this.geofenceBanner,
+    this.locked = false,
   });
+
+  /// Shows whether the rider is inside the clinic's geofence.
+  final Widget? geofenceBanner;
+
+  /// True while the rider is outside the geofence: photo slots show a lock
+  /// and both decision swipes are disabled.
+  final bool locked;
 
   final String address;
   final List<File?> images;
@@ -31,7 +40,7 @@ class ClinicDecisionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final canDecide = !isActing;
+    final canDecide = !isActing && !locked;
 
     return Container(
       decoration: const BoxDecoration(
@@ -68,6 +77,7 @@ class ClinicDecisionPanel extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
+            ?geofenceBanner,
             ClinicHistoryNote(future: clinicProfileFuture),
             const SizedBox(height: 6),
             Row(
@@ -112,9 +122,9 @@ class ClinicDecisionPanel extends StatelessWidget {
                       clipBehavior: Clip.antiAlias,
                       child: images[i] != null
                           ? Image.file(images[i]!, fit: BoxFit.cover)
-                          : const Center(
+                          : Center(
                               child: Icon(
-                                Icons.add,
+                                locked ? Icons.lock_outline : Icons.add,
                                 size: 28,
                                 color: AppColors.textSecondary,
                               ),

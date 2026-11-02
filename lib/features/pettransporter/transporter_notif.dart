@@ -50,11 +50,18 @@ class _TransporterNotificationsState
 
   StreamSubscription<QuerySnapshot>? _casesSub;
   StreamSubscription<QuerySnapshot>? _offersSub;
+  // Per-case listeners on communityReports, for "animal moved to a new
+  // location" reports on this transporter's cases.
   final Map<String, StreamSubscription<QuerySnapshot>> _messageSubs = {};
 
   List<_NotifItem> _statusItems = [];
   List<_NotifItem> _offerItems = [];
   final Map<String, List<_NotifItem>> _messageItemsByCase = {};
+
+  // Transporter notifications are limited to three kinds:
+  static const _typeAssigned = 'New Assignment';
+  static const _typeLocation = 'Rescue Location Updated';
+  static const _typeClinic = 'Clinic Changed';
 
   DateTime? _lastSeenAt;
   Set<String> _dismissedIds = {};
@@ -129,16 +136,27 @@ class _TransporterNotificationsState
 
   String _labelFor(String docId) => '#${shortCaseId(docId)}';
 
-  String _classifyStatusType(String message) {
+  /// Maps a case statusHistory line to one of the three transporter
+  /// notification types, or null when it isn't something the transporter
+  /// should be notified about. The strings match what the app writes:
+  ///  * acceptAssignment: 'Pet transporter assigned: …'
+  ///  * updateCaseLocation: 'Rescue location updated.'
+  ///  * assignClinic / changeClinic: 'Assigned to clinic: …' /
+  ///    'Clinic changed from … to …'
+  ///  * clinic auto-reroute: 'Finding nearby clinics… routed to …'
+  String? _classifyStatusType(String message) {
     final lower = message.toLowerCase();
-    if (lower.contains('assigned')) return 'New Assignment';
-    if (lower.contains('arrived')) return 'Arrival Confirmed';
-    if (lower.contains('rejected')) return 'Treatment Rejected';
-    if (lower.contains('accepted')) return 'Treatment Accepted';
-    if (lower.contains('completed') || lower.contains('rescued')) {
-      return 'Case Completed';
+    if (lower.startsWith('pet transporter assigned')) return _typeAssigned;
+    if (lower.contains('location updated') ||
+        lower.contains('location changed')) {
+      return _typeLocation;
     }
-    return 'Status Update';
+    if (lower.startsWith('clinic changed') ||
+        lower.startsWith('assigned to clinic') ||
+        lower.contains('routed to')) {
+      return _typeClinic;
+    }
+    return null;
   }
 
   void _onCasesUpdate(QuerySnapshot snap) {
@@ -149,30 +167,74 @@ class _TransporterNotificationsState
       final label = _labelFor(doc.id);
       final history = (data['statusHistory'] as List?)?.cast<Map>() ?? [];
 
+      // Only changes made after this transporter got the case count — a
+      // clinic picked before they were assigned isn't a "clinic change".
+      DateTime? assignedAt;
+      for (final h in history) {
+        final msg = (h['status'] as String? ?? '').toLowerCase();
+        final ts = h['timestamp'];
+        if (ts is Timestamp &&
+            (msg.startsWith('pet transporter assigned') ||
+                msg.startsWith('rider accepted the rescue request'))) {
+          final t = ts.toDate();
+          if (assignedAt == null || t.isAfter(assignedAt)) assignedAt = t;
+        }
+      }
+
       for (final h in history) {
         final ts = h['timestamp'];
         if (ts is! Timestamp) continue;
         final statusMessage = h['status'] as String? ?? '';
+        final type = _classifyStatusType(statusMessage);
+        if (type == null) continue;
+        if (type != _typeAssigned &&
+            assignedAt != null &&
+            ts.toDate().isBefore(assignedAt)) {
+          continue;
+        }
+        String message = statusMessage;
+        if (type == _typeLocation) {
+          final address = (data['address'] as String?)?.trim();
+          message = address == null || address.isEmpty
+              ? 'The rescue location was updated. Check the new pick up point.'
+              : 'The rescue location was updated to $address.';
+        } else if (type == _typeClinic) {
+          final clinic = _clinicAddressOf(data);
+          message = clinic == null
+              ? statusMessage
+              : '$statusMessage New clinic address: $clinic.';
+        }
         items.add(_NotifItem(
           refLabel: label,
-          type: _classifyStatusType(statusMessage),
-          message: statusMessage,
+          type: type,
+          message: message,
           timestamp: ts.toDate(),
           caseId: doc.id,
         ));
       }
 
+      // "Animal moved" community reports carry a new location for the
+      // animal — also a rescue location update for the transporter.
       if (!_messageSubs.containsKey(doc.id)) {
         _messageSubs[doc.id] = FirebaseFirestore.instance
             .collection('cases')
             .doc(doc.id)
-            .collection('messages')
+            .collection('communityReports')
+            .where('type', isEqualTo: 'moved')
             .snapshots()
-            .listen((msgSnap) => _onMessagesUpdate(doc.id, label, msgSnap));
+            .listen((reportSnap) => _onMovedReportsUpdate(doc.id, label, reportSnap));
       }
     }
 
     if (mounted) setState(() => _statusItems = items);
+  }
+
+  String? _clinicAddressOf(Map<String, dynamic> data) {
+    for (final key in ['dropoffAddress', 'vetClinicAddress']) {
+      final v = (data[key] as String?)?.trim();
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return null;
   }
 
   void _onOffersUpdate(QuerySnapshot snap) {
@@ -198,24 +260,20 @@ class _TransporterNotificationsState
     if (mounted) setState(() => _offerItems = items);
   }
 
-  void _onMessagesUpdate(String caseId, String label, QuerySnapshot snap) {
-    final uid = _uid;
+  void _onMovedReportsUpdate(String caseId, String label, QuerySnapshot snap) {
     final items = <_NotifItem>[];
 
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      if (data['senderId'] == uid) continue;
-
       final ts = data['timestamp'];
       if (ts is! Timestamp) continue;
-
-      final senderName = data['senderName'] as String?;
+      final newAddress = (data['newAddress'] as String?)?.trim();
       items.add(_NotifItem(
         refLabel: label,
-        type: 'New Message',
-        message: (senderName != null && senderName.isNotEmpty)
-            ? '$senderName sent you a message.'
-            : 'You have a new message.',
+        type: _typeLocation,
+        message: newAddress == null || newAddress.isEmpty
+            ? 'A community member reported the animal has moved.'
+            : 'A community member reported the animal has moved to $newAddress.',
         timestamp: ts.toDate(),
         caseId: caseId,
       ));
@@ -507,12 +565,10 @@ class _TransporterNotificationTile extends StatelessWidget {
     switch (type) {
       case 'New Assignment':
         return AppColors.greenrspwn;
-      case 'New Message':
+      case 'Rescue Location Updated':
+        return Colors.orangeAccent;
+      case 'Clinic Changed':
         return AppColors.lavenderrspwn;
-      case 'Treatment Rejected':
-        return Colors.redAccent;
-      case 'Case Completed':
-        return AppColors.greenrspwn;
       default:
         return AppColors.yellowrspwn;
     }

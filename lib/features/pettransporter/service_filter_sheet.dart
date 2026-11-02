@@ -15,11 +15,16 @@ class ServiceFilterSheet extends StatefulWidget {
   // sheet resolves its own location so the map still has something real to
   // center on.
   final LatLng? currentLocation;
+  // Optional heading, e.g. "Set your service range" the first time a
+  // transporter goes online.
+  final String? title;
 
   const ServiceFilterSheet({
+    super.key,
     required this.initialRange,
     required this.onApply,
     this.currentLocation,
+    this.title,
   });
 
   @override
@@ -137,7 +142,7 @@ class _ServiceFilterSheetState
               ),
               const SizedBox(width: 4),
               Text(
-                'Filter Service Availability',
+                widget.title ?? 'Filter Service Availability',
                 style: GoogleFonts.tiltWarp(
                     fontSize: 18,
                     color: AppColors.textPrimary),

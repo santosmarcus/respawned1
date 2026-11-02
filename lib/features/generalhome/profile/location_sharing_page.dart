@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/profile/settings_widget.dart';
-
+import 'package:geolocator/geolocator.dart';
+import 'package:respawnd1/core/geofence/geofence_config.dart';
+import 'package:respawnd1/core/services/geofence_service.dart';
 
 class LocationSharingPage extends StatefulWidget {
   const LocationSharingPage({super.key});
@@ -17,6 +19,8 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
   bool _loading = true;
   bool _saving = false;
   bool _transportSharing = false;
+  GeofencePrefs _geofence = const GeofencePrefs();
+  bool _backgroundGranted = false;
 
   @override
   void initState() {
@@ -32,8 +36,11 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
       await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final prefs =
           (doc.data()?['locationSharingPrefs'] as Map<String, dynamic>?) ?? {};
+      final permission = await Geolocator.checkPermission();
       setState(() {
         _transportSharing = prefs['transport'] as bool? ?? false;
+        _geofence = GeofencePrefs.fromUserData(doc.data());
+        _backgroundGranted = permission == LocationPermission.always;
       });
     } catch (_) {
 
@@ -48,10 +55,13 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
     setState(() => _saving = true);
     try {
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'locationSharingPrefs': {
-          'transport': _transportSharing,
-        },
-      }, SetOptions(merge: true));
+    'locationSharingPrefs': {
+    'transport': _transportSharing,
+    },
+    'geofencePrefs': _geofence.toMap(),
+    }, SetOptions(merge: true));
+    // Re-register (or remove) this device's geofences with the new prefs.
+    GeofenceService.sync(force: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -74,6 +84,95 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
       if (mounted) setState(() => _saving = false);
     }
   }
+
+  Future<void> _requestBackground() async {
+    final granted = await GeofenceService.requestBackgroundPermission();
+    if (!mounted) return;
+    setState(() => _backgroundGranted = granted);
+    if (!granted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose "Allow all the time" under Location, then come back.'),
+        ),
+      );
+    }
+  }
+
+  Widget _buildGeofenceSection() {
+    final titleStyle = GoogleFonts.tiltWarp(
+        fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary);
+    final smallStyle = GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Nearby alerts (geofencing)', style: titleStyle),
+        const SizedBox(height: 4),
+        Text(
+          'Get notified about rescues, lost pets and completed rescues inside '
+              'your alert radius, even when the app is closed.',
+          style: smallStyle,
+        ),
+        const SizedBox(height: 12),
+        TogglePillRow(
+          label: 'Nearby alerts',
+          value: _geofence.enabled,
+          onChanged: (v) => setState(() => _geofence = _geofence.copyWith(enabled: v)),
+        ),
+        if (_geofence.enabled) ...[
+          const SizedBox(height: 12),
+          Text('Alert radius: ${_geofence.radiusKm.toStringAsFixed(0)} km',
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+          Slider(
+            value: _geofence.radiusKm,
+            min: 1,
+            max: GeofenceConfig.maxAlertRadiusKm,
+            divisions: (GeofenceConfig.maxAlertRadiusKm - 1).round(),
+            activeColor: AppColors.greenrspwn,
+            label: '${_geofence.radiusKm.toStringAsFixed(0)} km',
+            onChanged: (v) => setState(() => _geofence = _geofence.copyWith(radiusKm: v)),
+          ),
+          const SizedBox(height: 4),
+          for (final entry in GeofenceCategory.labels.entries) ...[
+            TogglePillRow(
+              label: entry.value,
+              value: !_geofence.mutedCategories.contains(entry.key),
+              onChanged: (on) {
+                final muted = {..._geofence.mutedCategories};
+                on ? muted.remove(entry.key) : muted.add(entry.key);
+                setState(() => _geofence = _geofence.copyWith(mutedCategories: muted));
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(
+                _backgroundGranted ? Icons.check_circle : Icons.info_outline,
+                size: 18,
+                color: _backgroundGranted ? AppColors.greenrspwn : AppColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _backgroundGranted
+                      ? 'Background location is on — alerts work while the app is closed.'
+                      : 'Background location is off — you only get alerts based on where you last opened the app.',
+                  style: smallStyle,
+                ),
+              ),
+            ],
+          ),
+          if (!_backgroundGranted)
+            TextButton(
+              onPressed: _requestBackground,
+              child: const Text('Allow background location'),
+            ),
+        ],
+      ],
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -115,6 +214,10 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
               value: _transportSharing,
               onChanged: (v) => setState(() => _transportSharing = v),
             ),
+
+            const SizedBox(height: 28),
+            _buildGeofenceSection(),
+
             const SizedBox(height: 36),
             Center(
               child: SizedBox(

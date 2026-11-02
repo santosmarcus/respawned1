@@ -381,8 +381,13 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       // delete button, never implicitly by this sheet), plus every
       // canonical option the admin just selected.
       final keptLegacy = _serviceAreas.where((s) => !_isSupportedServiceArea(s) && workingSelection.contains(s.normalizedName));
+      // Re-use an already-saved entry for the same city so its coverage
+      // geofence (lat/lng/radiusKm) isn't thrown away.
+      final existingByName = {for (final s in _serviceAreas) s.normalizedName: s};
       final newCanonical = kSupportedServiceAreas.where((o) => workingSelection.contains(normalizeForMatch(o.name))).map(
-            (o) => ServiceArea(name: o.name, normalizedName: normalizeForMatch(o.name), administrativeArea: o.region),
+            (o) =>
+                existingByName[normalizeForMatch(o.name)] ??
+                ServiceArea(name: o.name, normalizedName: normalizeForMatch(o.name), administrativeArea: o.region),
           );
       _serviceAreas = [...keptLegacy, ...newCanonical];
     });
@@ -767,6 +772,14 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   children: [
                     for (final area in _serviceAreas)
                       Chip(
+                        // Radar = this area has a coverage geofence (set when
+                        // the profile is saved); new rescue reports inside it
+                        // reach this organization.
+                        avatar: area.hasGeofence
+                            ? Icon(Icons.radar,
+                                size: 16,
+                                color: _isSupportedServiceArea(area) ? AppColors.textPrimary : Colors.white)
+                            : null,
                         label: Text(_isSupportedServiceArea(area) ? area.name : '${area.name} (Unsupported)'),
                         onDeleted: () => _removeServiceArea(area),
                         backgroundColor: _isSupportedServiceArea(area) ? AppColors.lavenderrspwn : const Color(0xFFE05353),
