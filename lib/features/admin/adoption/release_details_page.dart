@@ -8,6 +8,7 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_schedule.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
+import 'package:respawnd1/core/services/adoption_agreement_service.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
@@ -268,6 +269,21 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     }
   }
 
+  Future<void> _openAgreement(AdoptionApplication app, AnimalRecord? animal) async {
+    setState(() => _busy = true);
+    try {
+      await AdoptionAgreementService().preview(app: app, animal: animal, adoptionDate: _releaseDate);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not create the agreement: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final appAsync = ref.watch(adoptionApplicationProvider(widget.applicationId));
@@ -304,6 +320,13 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                     _row('Adopter', app.adopterName),
                     _row('Application', '#${app.id.substring(0, app.id.length > 6 ? 6 : app.id.length)}'),
                     _row('Adoption fee', app.feeStatus.label + (app.paymentAmount != null ? ' · ${formatPeso(app.paymentAmount!)}' : '')),
+                    const SizedBox(height: 4),
+                    // Printed for both parties to sign at handover.
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : () => _openAgreement(app, animal),
+                      icon: const Icon(Icons.description_outlined, size: 16),
+                      label: const Text('Adoption Agreement (PDF)'),
+                    ),
                   ],
                 ),
               ),

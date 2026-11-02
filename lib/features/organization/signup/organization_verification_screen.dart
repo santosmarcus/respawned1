@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
-import 'package:respawnd1/features/adminhome/adminhome_screen.dart';
+import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
 
 /// Step 2 of the Organization signup flow (spec §4) — reuses the same
 /// image_picker + Firebase Storage stack the pet-transporter verification

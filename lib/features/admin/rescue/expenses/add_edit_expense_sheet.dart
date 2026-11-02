@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
+import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 
@@ -63,12 +64,21 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   late final _amountController =
       TextEditingController(text: widget.existing != null ? widget.existing!.amount.toStringAsFixed(0) : '');
   late final _notesController = TextEditingController(text: widget.existing?.notes ?? '');
-  // Category/Funding Source start unselected (null) for a new expense —
-  // rather than silently defaulting to Other/Unfunded — so "must be
-  // selected" is a real, checkable requirement instead of one that's
-  // trivially satisfied by a default nobody chose.
+  // Category starts unselected (null) for a new expense — rather than
+  // silently defaulting to Other — so "must be selected" is a real,
+  // checkable requirement instead of one that's trivially satisfied by a
+  // default nobody chose.
   ExpenseCategory? _category;
-  FundingSource? _fundingSource;
+
+  // Funding lines (source + amount). None = unfunded; lines covering less
+  // than the amount leave the rest outstanding (e.g. treatment paid partly
+  // from the organization budget before a fundraiser covers the rest).
+  late final List<_FundingRow> _fundingRows = [
+    for (final f in widget.existing?.fundings ?? const <ExpenseFunding>[])
+      _FundingRow(f.source, TextEditingController(text: _plainAmount(f.amount))),
+  ];
+
+  static String _plainAmount(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
   late DateTime _incurredAt = widget.existing?.incurredAt ?? DateTime.now();
   late Set<int> _animalIndexes =
       (widget.existing?.animalIndexes?.toSet()) ?? widget.initialAnimalIndexes.toSet();
@@ -91,7 +101,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   String? _titleError;
   String? _categoryError;
   String? _amountError;
-  String? _fundingSourceError;
+  String? _fundingError;
   String? _errorMessage;
   bool _saving = false;
 
@@ -101,8 +111,44 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   void initState() {
     super.initState();
     _category = widget.existing?.category;
-    _fundingSource = widget.existing?.fundingSource;
     _receiptUrl = widget.existing?.receiptUrl;
+  }
+
+  double? get _enteredAmount => double.tryParse(_amountController.text.trim());
+
+  double get _fundedTotal =>
+      _fundingRows.fold<double>(0, (sum, r) => sum + (double.tryParse(r.amount.text.trim()) ?? 0));
+
+  /// New line pre-filled with whatever is still uncovered, so the common
+  /// "one source pays it all" case is a single tap plus picking the source.
+  void _addFundingRow() {
+    final remaining = (_enteredAmount ?? 0) - _fundedTotal;
+    setState(() {
+      _fundingRows.add(_FundingRow(null, TextEditingController(text: remaining > 0 ? _plainAmount(remaining) : '')));
+      _fundingError = null;
+    });
+  }
+
+  void _removeFundingRow(int index) {
+    setState(() {
+      _fundingRows.removeAt(index).amount.dispose();
+      _fundingError = null;
+    });
+  }
+
+  /// Null when the lines are valid against [amount].
+  String? _validateFundings(double? amount) {
+    final seen = <FundingSource>{};
+    for (final row in _fundingRows) {
+      if (row.source == null) return 'Pick a source for every funding line.';
+      if (!seen.add(row.source!)) return 'Each source can only appear once.';
+      final value = double.tryParse(row.amount.text.trim());
+      if (value == null || value <= 0) return 'Enter an amount greater than zero for every funding line.';
+    }
+    if (amount != null && _fundedTotal > amount + 0.005) {
+      return 'Funding adds up to more than the expense amount.';
+    }
+    return null;
   }
 
   Future<void> _pickReceipt() async {
@@ -142,6 +188,9 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
     _titleController.dispose();
     _amountController.dispose();
     _notesController.dispose();
+    for (final row in _fundingRows) {
+      row.amount.dispose();
+    }
     super.dispose();
   }
 
@@ -161,7 +210,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       _titleError = title.isEmpty ? 'Title is required.' : null;
       _categoryError = _category == null ? 'Select a category.' : null;
       _amountError = (amount == null || amount <= 0) ? 'Enter an amount greater than zero.' : null;
-      _fundingSourceError = _fundingSource == null ? 'Select a funding source.' : null;
+      _fundingError = _validateFundings(amount);
       _receiptError = (receiptRequired && (_receiptUrl == null || _receiptUrl!.isEmpty))
           ? 'Attach a receipt before saving.'
           : null;
@@ -170,7 +219,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
     if (_titleError != null ||
         _categoryError != null ||
         _amountError != null ||
-        _fundingSourceError != null ||
+        _fundingError != null ||
         _receiptError != null) {
       return;
     }
@@ -186,7 +235,10 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       title: title,
       category: _category!,
       amount: amount!,
-      fundingSource: _fundingSource!,
+      fundings: [
+        for (final row in _fundingRows)
+          ExpenseFunding(source: row.source!, amount: double.parse(row.amount.text.trim())),
+      ],
       receiptUrl: _receiptUrl,
       notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       incurredAt: _incurredAt,
@@ -277,9 +329,8 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
             TextField(
               controller: _amountController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              onChanged: (_) {
-                if (_amountError != null) setState(() => _amountError = null);
-              },
+              // Rebuilds the funding summary as the amount changes.
+              onChanged: (_) => setState(() => _amountError = null),
               decoration: InputDecoration(
                 prefixText: '₱ ',
                 hintText: '0',
@@ -295,18 +346,78 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
             if (_amountError != null) _FieldError(_amountError!),
             const SizedBox(height: 14),
 
-            _Label('Funding Source', required: true),
-            _EnumDropdown<FundingSource>(
-              value: _fundingSource,
-              hint: 'Select',
-              items: FundingSource.values,
-              labelOf: (s) => s.label,
-              onChanged: (v) => setState(() {
-                _fundingSource = v;
-                _fundingSourceError = null;
-              }),
+            _Label('Funding'),
+            Text(
+              'Where the money came from. Leave empty if it isn\'t funded yet — '
+              'anything not covered stays outstanding.',
+              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
             ),
-            if (_fundingSourceError != null) _FieldError(_fundingSourceError!),
+            for (var i = 0; i < _fundingRows.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: _EnumDropdown<FundingSource>(
+                        value: _fundingRows[i].source,
+                        hint: 'Source',
+                        items: FundingSource.fundable,
+                        labelOf: (s) => s.label,
+                        onChanged: (v) => setState(() {
+                          _fundingRows[i].source = v;
+                          _fundingError = null;
+                        }),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _fundingRows[i].amount,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => setState(() => _fundingError = null),
+                        decoration: const InputDecoration(
+                          prefixText: '₱ ',
+                          hintText: '0',
+                          isDense: true,
+                          contentPadding: EdgeInsets.only(bottom: 8),
+                          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
+                          focusedBorder:
+                              UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+                        ),
+                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Remove funding line',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close, size: 18, color: AppColors.textSecondary),
+                      onPressed: () => _removeFundingRow(i),
+                    ),
+                  ],
+                ),
+              ),
+            if (_fundingRows.length < FundingSource.fundable.length)
+              TextButton.icon(
+                onPressed: _addFundingRow,
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+                icon: const Icon(Icons.add, size: 16, color: AppColors.textPrimary),
+                label: Text('Add funding source',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+            Builder(builder: (context) {
+              final amount = _enteredAmount;
+              final funded = _fundedTotal;
+              final text = amount == null || amount <= 0
+                  ? (funded > 0 ? 'Funded ${formatPeso(funded)}' : 'Unfunded')
+                  : 'Funded ${formatPeso(funded)} of ${formatPeso(amount)} · '
+                      '${formatPeso((amount - funded).clamp(0, amount))} outstanding';
+              return Text(text,
+                  style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary));
+            }),
+            if (_fundingError != null) _FieldError(_fundingError!),
             const SizedBox(height: 14),
 
             _Label('Date', required: true),
@@ -417,6 +528,12 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   }
 }
 
+class _FundingRow {
+  FundingSource? source;
+  final TextEditingController amount;
+  _FundingRow(this.source, this.amount);
+}
+
 class _Label extends StatelessWidget {
   final String text;
   final bool required;
@@ -489,6 +606,9 @@ class _EnumDropdown<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropdownButtonFormField<T>(
       value: value,
+      // Long labels ("Organization Budget") ellipsize instead of
+      // overflowing the narrow funding-line column.
+      isExpanded: true,
       hint: Text(hint, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
       decoration: const InputDecoration(

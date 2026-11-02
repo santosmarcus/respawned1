@@ -76,7 +76,53 @@ class AuthService {
       // happens when this used to throw and strand a role-less account.
     }
 
+    // Best-effort: VerifyEmailScreen (shown by AuthWrapper until the address
+    // is confirmed) can always resend it.
+    try {
+      await credential.user!.sendEmailVerification();
+    } catch (e) {
+      debugPrint('sendEmailVerification failed (non-fatal): $e');
+    }
+
     return credential;
+  }
+
+  /// Email/password accounts must confirm their address before using the
+  /// app. Google accounts arrive verified; phone-only accounts have no email.
+  static bool needsEmailVerification(User user) =>
+      !user.emailVerified && user.providerData.any((p) => p.providerId == 'password');
+
+  Future<void> sendEmailVerification() async {
+    await firebaseAuth.currentUser?.sendEmailVerification();
+  }
+
+  /// Re-reads the signed-in user from Firebase Auth (emailVerified only
+  /// changes after a reload) and reports whether verification is still owed.
+  Future<bool> reloadAndCheckVerified() async {
+    final user = firebaseAuth.currentUser;
+    if (user == null) return false;
+    await user.reload();
+    final fresh = firebaseAuth.currentUser;
+    return fresh != null && !needsEmailVerification(fresh);
+  }
+
+  /// Sends a confirmation link to [newEmail]; the account's email only
+  /// changes once that link is opened. Throws FirebaseAuthException
+  /// 'requires-recent-login' when the session is too old — callers
+  /// re-authenticate with [reauthenticateWithPassword] and retry.
+  Future<void> requestEmailChange(String newEmail) async {
+    final user = firebaseAuth.currentUser;
+    if (user == null) throw StateError('Not signed in.');
+    await user.verifyBeforeUpdateEmail(newEmail);
+  }
+
+  Future<void> reauthenticateWithPassword(String password) async {
+    final user = firebaseAuth.currentUser;
+    final email = user?.email;
+    if (user == null || email == null) throw StateError('Not signed in with an email.');
+    await user.reauthenticateWithCredential(
+      EmailAuthProvider.credential(email: email, password: password),
+    );
   }
 
   Future<UserCredential?> signInWithGoogle() async {

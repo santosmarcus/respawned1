@@ -23,6 +23,17 @@ class CaseExpenseRepository {
         );
   }
 
+  /// Funding lines must each be positive and together not exceed the cost.
+  static void _checkFundings(Expense expense) {
+    if (expense.fundings.any((f) => f.amount <= 0)) {
+      throw ArgumentError('Each funding amount must be greater than zero.');
+    }
+    final total = expense.fundings.fold<double>(0, (sum, f) => sum + f.amount);
+    if (total > expense.amount + 0.005) {
+      throw ArgumentError('Funding adds up to more than the expense amount.');
+    }
+  }
+
   Future<void> addExpense({
     required String caseId,
     required Expense expense,
@@ -33,6 +44,7 @@ class CaseExpenseRepository {
     if (expense.amount <= 0) {
       throw ArgumentError('Expense amount must be greater than zero.');
     }
+    _checkFundings(expense);
     // Every NEW expense requires a receipt (spec) — enforced here too, not
     // just in the UI, so a malformed direct call can't skip it. Existing
     // (legacy) expenses are never retroactively blocked — see updateExpense,
@@ -56,6 +68,7 @@ class CaseExpenseRepository {
     if (expense.amount <= 0) {
       throw ArgumentError('Expense amount must be greater than zero.');
     }
+    _checkFundings(expense);
     await _store
         .expensesOf(caseId)
         .doc(expense.id)

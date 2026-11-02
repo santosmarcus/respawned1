@@ -280,7 +280,7 @@ class RescueReadinessCard extends ConsumerWidget {
 
     // Continuing care — long-term needs already in care.
     final ongoing = (records ?? const <AnimalRecord>[])
-        .where((a) => isInCare(a) && ((a.health.currentMedications ?? '').trim().isNotEmpty || a.specialNeeds))
+        .where((a) => isInCare(a) && ((a.health.currentMedications ?? '').trim().isNotEmpty || a.hasSpecialNeeds))
         .length;
     final continuing = ReadinessFactor(
       Icons.medical_services,
