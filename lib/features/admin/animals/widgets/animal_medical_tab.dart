@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/medical_episode.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -13,6 +14,7 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/admit_animal_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/animals/widgets/add_care_record_sheet.dart';
 import 'package:respawnd1/features/admin/animals/widgets/add_vaccine_record_sheet.dart';
 import 'package:respawnd1/features/admin/animals/widgets/health_details_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -48,6 +50,19 @@ class AnimalMedicalTab extends ConsumerWidget {
           const SizedBox(height: 20),
           VaccineSection(animal: animal),
           const SizedBox(height: 20),
+          PreventiveCareSection(animal: animal),
+          const SizedBox(height: 8),
+          // Backfill for animals whose paper health list is out of date.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => showPastHealthHistorySheet(context, animal: animal),
+              icon: const Icon(Icons.history, size: 16, color: AppColors.textPrimary),
+              label: Text('Add Past Health Records',
+                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            ),
+          ),
+          const SizedBox(height: 12),
           _CurrentStatusSection(animal: animal),
           const SizedBox(height: 20),
           Text('Treatment Episodes', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
@@ -327,6 +342,152 @@ class _VaccineTile extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
               child: Text(record.status.label, style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: fg)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---- Preventive care (deworming, flea & tick, vet checkups) ----------------
+
+/// Latest record per care type with its due status, like the vaccine list.
+/// Recorded directly on the animal — no treatment episode needed for
+/// routine care given in the shelter.
+class PreventiveCareSection extends ConsumerWidget {
+  final AnimalRecord animal;
+  const PreventiveCareSection({super.key, required this.animal});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final records = ref.watch(careRecordsProvider(animal.id)).asData?.value ?? const <CareRecord>[];
+    final latest = CareRecord.latestByType(records);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Preventive Care', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+              TextButton(
+                onPressed: () => showAddCareRecordSheet(context, animal: animal),
+                child: Text('Add Record',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          for (final type in CareType.values)
+            _CareTile(
+              type: type,
+              latest: latest[type],
+              history: records.where((r) => r.type == type).toList(),
+              onAdd: () => showAddCareRecordSheet(context, animal: animal, initialType: type),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CareTile extends StatelessWidget {
+  final CareType type;
+  final CareRecord? latest;
+  final List<CareRecord> history;
+  final VoidCallback onAdd;
+  const _CareTile({required this.type, required this.latest, required this.history, required this.onAdd});
+
+  static String _d(DateTime d) => '${d.month}/${d.day}/${d.year}';
+
+  (Color, Color) _statusColors(VaccineStatus s) => switch (s) {
+        VaccineStatus.upToDate => (AppColors.greenrspwn, AppColors.textPrimary),
+        VaccineStatus.dueSoon => (AppColors.yellowrspwn, AppColors.textPrimary),
+        VaccineStatus.overdue => (const Color(0xFFE05353), Colors.white),
+        VaccineStatus.noRecord => (AppColors.slaterspwn, AppColors.textSecondary),
+      };
+
+  void _showHistory(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: Text('${type.label} History', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+        content: SizedBox(
+          width: 320,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final r in history)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      [
+                        _d(r.dateGiven),
+                        if ((r.product ?? '').isNotEmpty) r.product!,
+                        if ((r.provider ?? '').isNotEmpty) r.provider!,
+                        if ((r.notes ?? '').isNotEmpty) r.notes!,
+                      ].join(' · '),
+                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = latest;
+    final status = r?.status ?? VaccineStatus.noRecord;
+    final (bg, fg) = _statusColors(status);
+    final dueLabel = type == CareType.vetCheckup ? 'Next visit' : 'Next due';
+    final statusLabel = r == null
+        ? 'No record'
+        : (r.nextDueDate == null ? 'Done' : (status == VaccineStatus.overdue && type == CareType.vetCheckup ? 'Visit overdue' : status.label));
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: InkWell(
+        onTap: r == null ? onAdd : () => _showHistory(context),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(type.label, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  Text(
+                    r == null
+                        ? 'Not recorded yet — tap to add'
+                        : '${type == CareType.vetCheckup ? 'Last visit' : 'Given'}: ${_d(r.dateGiven)}'
+                            '${r.nextDueDate != null ? ' · $dueLabel ${_d(r.nextDueDate!)}' : ''}',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                  if (history.length > 1)
+                    Text('View history (${history.length})',
+                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.greenrspwn, decoration: TextDecoration.underline)),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: r?.nextDueDate == null && r != null ? AppColors.greenrspwn : bg,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(statusLabel,
+                  style: GoogleFonts.zain(
+                      fontSize: 10, fontWeight: FontWeight.bold, color: r?.nextDueDate == null && r != null ? AppColors.textPrimary : fg)),
             ),
           ],
         ),

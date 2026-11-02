@@ -9,6 +9,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
+import 'package:respawnd1/core/utils/adoption_readiness.dart';
+import 'package:respawnd1/features/admin/animals/widgets/adoption_readiness_dialog.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 
@@ -151,7 +155,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   String? _selectedSex;
   String? _selectedSize;
   String? _selectedCoatLength;
-  bool _isAdoptable = true;
+  // Off for new records: listing an animal goes through the adoption
+  // readiness check (_confirmAdoptionReadiness), never by default.
+  bool _isAdoptable = false;
   bool _isLoading = false;
 
   // Preventive Care — unchecked when unknown, never inferred. Vaccinated
@@ -661,6 +667,49 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     return ref.getDownloadURL();
   }
 
+  /// Runs the adoption readiness checklist against the live record (open
+  /// treatment episode, vaccine records) plus this form's values. Returns
+  /// the confirmed checklist to store, or null if staff cancelled or the
+  /// animal can't be listed yet.
+  Future<Map<String, dynamic>?> _confirmAdoptionReadiness() async {
+    final db = FirebaseFirestore.instance;
+    var inActiveTreatment = false;
+    var vaccineCount = 0;
+    var overdue = 0;
+    final animalId = widget.existingAnimalId;
+    if (widget.isEditing && animalId != null) {
+      final currentCaseId = widget.existingData?['currentCaseId'] as String?;
+      if (currentCaseId != null && currentCaseId.isNotEmpty) {
+        final caseSnap = await db.collection('cases').doc(currentCaseId).get();
+        inActiveTreatment = caseSnap.exists &&
+            !RescueStatus.fromFirestoreValue(caseSnap.data()?['status'] as String?).isTerminal;
+      }
+      final vaccines = await db.collection('animals').doc(animalId).collection('vaccinations').get();
+      final records = vaccines.docs.map((d) => VaccinationRecord.fromFirestore(d, animalId)).toList();
+      vaccineCount = records.length;
+      overdue = records.where((r) => r.status == VaccineStatus.overdue).length;
+    }
+    final checks = assessAdoptionReadiness(ReadinessInput(
+      inActiveTreatment: inActiveTreatment,
+      temperament: [for (final e in _temperament.entries) if (e.value) e.key],
+      vaccineCount: vaccineCount,
+      overdueVaccineCount: overdue,
+      spayedNeutered: _spayedNeutered,
+      currentMedications: widget.existingData?['currentMedications'] as String?,
+      chronicConditions: widget.existingData?['chronicConditions'] as String?,
+      specialNeeds: _selectedSpecialNeedsTypes,
+    ));
+    if (!mounted) return null;
+    final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
+    final animalName = _nameController.text.trim();
+    return showAdoptionReadinessDialog(
+      context,
+      animalName: animalName.isEmpty ? 'this animal' : animalName,
+      checks: checks,
+      confirmedBy: (name != null && name.isNotEmpty) ? name : 'Admin Staff',
+    );
+  }
+
   Future<void> _createRecord() async {
     if (_isLoading) return; // guards against a duplicate Finish/Save tap
     // Image required for brand-new records only — a legacy record already
@@ -706,6 +755,19 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         });
       }
       return;
+    }
+
+    // Becoming adoptable needs the readiness checklist first; cancelling it
+    // leaves the form open with nothing saved.
+    Map<String, dynamic>? readiness;
+    if (_becameAdoptableThisSave) {
+      setState(() => _isLoading = true);
+      try {
+        readiness = await _confirmAdoptionReadiness();
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+      if (readiness == null) return;
     }
 
     setState(() {
@@ -875,6 +937,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'rescueBackground': selectedBackground,
         'tags': tags,
         'adoptionStatus': _isAdoptable ? 'adoptable' : 'not_ready',
+        if (readiness != null) 'adoptionReadiness': readiness,
       };
 
       if (widget.isEditing) {
@@ -1542,6 +1605,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               onChanged: (v) => setState(() => _isAdoptable = v),
               activeThumbColor: AppColors.greenrspwn,
             ),
+            if (_becameAdoptableThisSave)
+              Text(
+                'You\'ll confirm health, behavior, vaccines, spay/neuter and continuing care before it\'s listed.',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+              ),
             const SizedBox(height: 16),
 
             _FieldLabel('Tags'),

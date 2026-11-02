@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/medical_episode.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
@@ -28,6 +29,8 @@ class AnimalRecordRepository {
       _animalDoc(animalId).collection('vaccinations');
   CollectionReference<Map<String, dynamic>> _managementLogsOf(String animalId) =>
       _animalDoc(animalId).collection('managementLogs');
+  CollectionReference<Map<String, dynamic>> _careRecordsOf(String animalId) =>
+      _animalDoc(animalId).collection('careRecords');
 
   // ---- Reads --------------------------------------------------------
 
@@ -261,6 +264,55 @@ class AnimalRecordRepository {
         'vaccineName': record.vaccineName,
         'dateAdministered': record.dateAdministered.toIso8601String(),
         'nextDueDate': record.nextDueDate.toIso8601String(),
+      },
+    );
+  }
+
+  // ---- Preventive care (deworming, flea & tick, vet checkups) ----------
+
+  Stream<List<CareRecord>> streamCareRecords(String animalId) {
+    return _careRecordsOf(animalId).orderBy('dateGiven', descending: true).snapshots().map(
+          (snap) => snap.docs.map((d) => CareRecord.fromFirestore(d, animalId)).toList(),
+        );
+  }
+
+  /// Saves the record and keeps the Medical Profile's flat summary fields in
+  /// step: a deworming record sets `dewormed`, a checkup moves
+  /// `lastVetCheckup` forward (never back, so backfilling an old visit can't
+  /// hide a newer one).
+  Future<void> addCareRecord({
+    required String animalId,
+    required CareRecord record,
+    String? actorId,
+    String? actorEmail,
+  }) async {
+    await _careRecordsOf(animalId).add(record.toFirestore());
+    final summary = <String, dynamic>{
+      if (record.type == CareType.deworming) 'dewormed': true,
+    };
+    if (record.type == CareType.vetCheckup) {
+      final current = (await _animalDoc(animalId).get()).data()?['lastVetCheckup'];
+      final currentDate = current is Timestamp ? current.toDate() : null;
+      if (currentDate == null || record.dateGiven.isAfter(currentDate)) {
+        summary['lastVetCheckup'] = Timestamp.fromDate(record.dateGiven);
+      }
+    }
+    if (summary.isNotEmpty) {
+      await _animalDoc(animalId).update({...summary, 'updatedAt': FieldValue.serverTimestamp()});
+    }
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'care_added',
+      action: '${record.type.label} recorded',
+      details: record.product,
+      actorId: actorId,
+      actorName: record.createdBy,
+      actorEmail: actorEmail,
+      sourceModule: 'medical',
+      newValues: {
+        'type': record.type.name,
+        'dateGiven': record.dateGiven.toIso8601String(),
+        if (record.nextDueDate != null) 'nextDueDate': record.nextDueDate!.toIso8601String(),
       },
     );
   }
