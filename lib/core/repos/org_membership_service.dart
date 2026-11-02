@@ -7,9 +7,9 @@ import 'package:respawnd1/core/models/rescue/org_role.dart';
 
 /// A user's membership in a single organization.
 ///
-/// [status] mirrors the Firestore doc's own `status` field. Most existing
-/// membership docs predate this field entirely (see this file's TESTING
-/// PHASE note below) — [isActive] treats a missing/unrecognized status as
+/// [status] mirrors the Firestore doc's own `status` field. Older
+/// membership docs predate this field entirely — [isActive] treats a
+/// missing/unrecognized status as
 /// active rather than blocking legacy accounts that were never written
 /// with one, and only treats a recognized inactive value ('inactive',
 /// 'removed', 'disabled') as actually revoking organization access
@@ -34,22 +34,21 @@ class OrgMembership {
 /// "within their organization, are they an Admin or Staff member?", which
 /// is what backs the Admin-only vs Staff-allowed actions in this module.
 ///
-/// TODO(org-roles) — TESTING PHASE, READ BEFORE PRODUCTION:
-/// No `organizations/{orgId}/members/{uid}` documents exist for any real
-/// user yet, and no Firestore rule enforces this model — every rescue-module
-/// write today is only gated by the existing flat auth/role check (signed in
-/// + `users/{uid}.role` in {admin, ngo_staff}), same as before this model was
-/// introduced. `getMembership`/`streamMembership` simply return null until
-/// membership docs are backfilled; callers (see rescue_detail_page.dart's
-/// `canManageOrgActions`) are written to fail OPEN on null rather than block
-/// testing. Before shipping Admin-vs-Staff enforcement for real: backfill
-/// membership docs, flip frontend checks to fail closed, and add rules like:
-///   match /organizations/{orgId}/members/{uid} {
-///     allow read: if request.auth != null;
-///     allow write: if <caller is an existing admin member of orgId>;
-///   }
-/// and gate `cases` writes that should be Admin-only (merge, refer) on
-/// `orgRole(orgId) == 'admin'` in the deployed rules, not just this class.
+/// Enforcement lives in firestore.rules, and this class mirrors it:
+///   - Members docs: only the owner or an active admin manages them; an
+///     invited person creates only their own (rules `members/{uid}`).
+///   - `users/{uid}.organizationId` can only point at an organization the
+///     account owns or holds an active membership in, or be set by that
+///     organization's admin — so it can't be forged.
+///   - Organization-owned cases, animals and adoptions are writable by that
+///     organization's staff (owner, active member, or a legacy account
+///     linked through `organizationId` with no members doc yet).
+/// An org-linked account with no members doc therefore still works as
+/// staff (fail open, matching the rules), but gets none of the owner/admin-
+/// only capabilities ([_resolveCapabilities] passes
+/// `confirmedMembership: false`), which the rules and facebook.js also deny.
+/// Remaining gap: Admin-only case actions (merge, refer) are enforced in the
+/// app only; the rules treat every staff member of the organization alike.
 class OrgMembershipService {
   OrgMembershipService({FirebaseFirestore? firestore})
       : _db = firestore ?? FirebaseFirestore.instance;
@@ -59,14 +58,12 @@ class OrgMembershipService {
   /// Just "which organization is this account linked to" — reads
   /// `users/{uid}.organizationId` directly, with NO dependency on the
   /// `organizations/{orgId}/members/{uid}` subdoc [getMembership] requires.
-  /// Per this class's own TODO above, no member subdoc exists for real
-  /// users yet, so [getMembership] returns null for every legitimate,
-  /// already-configured organization today — which was silently routing
+  /// Legacy org-linked accounts may have no member subdoc, so
+  /// [getMembership] returns null for them — which was silently routing
   /// "open my Organization Profile" into the blank bootstrap/invitation
   /// flow instead of the account's real org. Use this for "which org
   /// profile should open" (viewing); keep using [getMembership] for
-  /// role-gated actions (editing/staff management), which SHOULD fail open
-  /// on missing membership per the TODO above, not silently succeed.
+  /// role-gated actions (editing/staff management).
   Future<String?> resolveOrganizationId(String uid) async {
     final userDoc = await _db.collection('users').doc(uid).get();
     final orgId = userDoc.data()?['organizationId'] as String?;
@@ -132,10 +129,9 @@ class OrgMembershipService {
   /// organization's own `ownerId` as a fallback so a legacy owner (no
   /// membership subdoc, or a membership doc that predates this model) is
   /// never blocked. An org-linked account with NO membership subdoc at all
-  /// (the pre-existing "TESTING PHASE" case documented below) still
-  /// resolves to full capabilities — this mirrors the fail-open behavior
-  /// every existing call site already had, just centralized, so it changes
-  /// nothing for accounts that worked before this model existed.
+  /// (a legacy link — see the class doc comment) still resolves to staff
+  /// access, minus the owner/admin-only capabilities, matching
+  /// firestore.rules.
   Stream<OrganizationCapabilities> streamCapabilities(String uid) {
     return _db.collection('users').doc(uid).snapshots().asyncExpand((userDoc) {
       final orgId = userDoc.data()?['organizationId'] as String?;
@@ -153,10 +149,10 @@ class OrgMembershipService {
     if (isOwner) return OrganizationCapabilities.forRole(ResolvedOrgRole.owner);
 
     if (!memberDoc.exists) {
-      // No membership subdoc yet for an org-linked account — fail open
-      // (see class doc comment), same as the legacy ad hoc checks this
-      // resolver replaces. Owner/admin-only actions stay off: facebook.js
-      // and firestore.rules both fail closed on a missing membership doc.
+      // No membership subdoc yet for a (legacy) org-linked account — staff
+      // access, as firestore.rules' isStaffOf allows. Owner/admin-only
+      // actions stay off: facebook.js and the rules' isOrgAdmin both fail
+      // closed on a missing membership doc.
       return OrganizationCapabilities.forRole(ResolvedOrgRole.admin, confirmedMembership: false);
     }
 
