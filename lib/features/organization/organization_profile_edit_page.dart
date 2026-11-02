@@ -265,64 +265,14 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     }
   }
 
-  Future<void> _searchServiceAreas(String query) async {
-    if (query.trim().isEmpty) {
-      setState(() => _serviceAreaResults = const []);
-      return;
-    }
-    setState(() => _searchingServiceAreas = true);
-    try {
-      final results = await _clinicSearchRepo.searchLocalities(query: query);
-      if (!mounted) return;
-      setState(() {
-        _serviceAreaResults = results;
-        _searchingServiceAreas = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _searchingServiceAreas = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not search localities: $e'), backgroundColor: Colors.redAccent),
-        );
-      }
-    }
-  }
-
-  /// Only ever called with a [LocalityResult] the admin actually picked
-  /// from search results — never raw typed text (spec §13's core
-  /// requirement). Deduplicates by placeId first (so "Manila", "City of
-  /// Manila", and "manila" — three different search queries that all
-  /// resolve to the same real place — collapse to one entry regardless of
-  /// how the admin searched) and falls back to normalizedName for legacy
-  /// entries that predate placeId being stored.
-  void _addServiceArea(LocalityResult locality) {
-    final normalized = normalizeForMatch(locality.name);
-    final alreadyAdded = _serviceAreas.any((s) =>
-        (s.placeId != null && s.placeId == locality.placeId) || s.normalizedName == normalized);
-    if (alreadyAdded) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('That service area is already added.'), backgroundColor: Colors.redAccent),
-      );
-      return;
-    }
-    setState(() {
-      _serviceAreas = [
-        ..._serviceAreas,
-        ServiceArea(
-          name: locality.name,
-          normalizedName: normalized,
-          placeId: locality.placeId,
-          administrativeArea: locality.administrativeArea,
-          countryCode: locality.countryCode,
-          lat: locality.lat,
-          lng: locality.lng,
-          radiusKm: locality.radiusKm,
-        ),
-      ];
-      _serviceAreaController.clear();
-      _serviceAreaResults = const [];
-    });
-  }
+  /// True when [area] matches one of the canonical, currently-supported
+  /// cities/LGUs (lib/core/constants/service_areas.dart) — false for a
+  /// legacy value saved before that controlled list existed (a free-text
+  /// entry, or a Places-search pick outside the three supported regions).
+  /// Legacy values are never silently dropped — they stay visible (clearly
+  /// marked) until the admin explicitly removes/replaces them and saves.
+  bool _isSupportedServiceArea(ServiceArea area) =>
+      kSupportedServiceAreas.any((o) => normalizeForMatch(o.name) == area.normalizedName);
 
   void _removeServiceArea(ServiceArea area) => setState(() => _serviceAreas = _serviceAreas.where((s) => s != area).toList());
 
@@ -431,8 +381,13 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       // delete button, never implicitly by this sheet), plus every
       // canonical option the admin just selected.
       final keptLegacy = _serviceAreas.where((s) => !_isSupportedServiceArea(s) && workingSelection.contains(s.normalizedName));
+      // Re-use an already-saved entry for the same city so its coverage
+      // geofence (lat/lng/radiusKm) isn't thrown away.
+      final existingByName = {for (final s in _serviceAreas) s.normalizedName: s};
       final newCanonical = kSupportedServiceAreas.where((o) => workingSelection.contains(normalizeForMatch(o.name))).map(
-            (o) => ServiceArea(name: o.name, normalizedName: normalizeForMatch(o.name), administrativeArea: o.region),
+            (o) =>
+                existingByName[normalizeForMatch(o.name)] ??
+                ServiceArea(name: o.name, normalizedName: normalizeForMatch(o.name), administrativeArea: o.region),
           );
       _serviceAreas = [...keptLegacy, ...newCanonical];
     });
@@ -815,29 +770,23 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                  for (final area in _serviceAreas)
-                    Chip(
-                        avatar: Icon(
-                          area.hasGeofence ? Icons.radar : Icons.warning_amber_rounded,
-                          size: 16,
-                          color: area.hasGeofence ? AppColors.textPrimary : Colors.orange,
-                         ),
-                    label: Text(area.hasGeofence
-                        ? '${area.name} · ${area.radiusKm!.toStringAsFixed(1)} km'
-                        : area.name),
+                    for (final area in _serviceAreas)
+                      Chip(
+                        // Radar = this area has a coverage geofence (set when
+                        // the profile is saved); new rescue reports inside it
+                        // reach this organization.
+                        avatar: area.hasGeofence
+                            ? Icon(Icons.radar,
+                                size: 16,
+                                color: _isSupportedServiceArea(area) ? AppColors.textPrimary : Colors.white)
+                            : null,
+                        label: Text(_isSupportedServiceArea(area) ? area.name : '${area.name} (Unsupported)'),
                         onDeleted: () => _removeServiceArea(area),
-                        backgroundColor: AppColors.lavenderrspwn,
-                        ),
-                      ],
-                    ),
-              if (_serviceAreas.any((a) => !a.hasGeofence))
-                Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                    'Areas marked with ⚠ were added before coverage geofencing. '
-                    'Remove and re-add them so new rescue reports inside them reach your organization.',
-                  style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
-                  ),
+                        backgroundColor: _isSupportedServiceArea(area) ? AppColors.lavenderrspwn : const Color(0xFFE05353),
+                        labelStyle: _isSupportedServiceArea(area) ? null : const TextStyle(color: Colors.white),
+                        deleteIconColor: _isSupportedServiceArea(area) ? null : Colors.white,
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
