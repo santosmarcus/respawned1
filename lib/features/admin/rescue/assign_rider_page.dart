@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
@@ -20,6 +21,7 @@ import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_ut
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 
 // ---- Demo transporters ---------------------------------------------------
 // Two fixed, clearly-marked (isDemo: true) test transporters so the whole
@@ -96,13 +98,15 @@ class _RiderVm {
   final String uid;
   final String name;
   final String type;
-  final LatLng position;
+  // Null (with distanceKm) when the transporter hasn't shared a location.
+  final LatLng? position;
   final String vehicle;
   final String plate;
   final String? photoUrl;
+  final String? phone;
   final bool isDemo;
   final _RiderAvailability availability;
-  final double distanceKm;
+  final double? distanceKm;
   final VehicleCategory vehicleCategory;
   final int compatibilityScore;
   final bool isPreferred;
@@ -120,6 +124,7 @@ class _RiderVm {
     required this.distanceKm,
     required this.vehicleCategory,
     required this.compatibilityScore,
+    this.phone,
     this.isPreferred = false,
   });
 
@@ -131,6 +136,7 @@ class _RiderVm {
     vehicle: vehicle,
     plate: plate,
     photoUrl: photoUrl,
+    phone: phone,
     isDemo: isDemo,
     availability: availability,
     distanceKm: distanceKm,
@@ -138,6 +144,9 @@ class _RiderVm {
     compatibilityScore: compatibilityScore,
     isPreferred: isPreferred ?? this.isPreferred,
   );
+
+  String get distanceLabel =>
+      distanceKm == null ? 'Location not shared' : '${distanceKm!.toStringAsFixed(1)} km away';
 }
 
 class AssignRiderPage extends ConsumerStatefulWidget {
@@ -361,6 +370,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// real presence data at all).
   List<_RiderVm> _buildRiderVms(
       LatLng center,
+      LatLng? caseLocation,
       List<PetTransporter> transporters,
       Map<String, TransportAssignmentStatus> activeByRider,
       AnimalTransportProfile animalProfile,
@@ -412,8 +422,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     )
         : null;
 
+    // Real transporters are placed only where they actually are (the
+    // lastLat/lastLng they shared on going online) — never at a made-up
+    // offset. Distance also needs the case's own coordinates; without
+    // either, it's shown as unknown rather than estimated.
     final realRiders = onlineTransporters.map((t) {
-      final pos = _positionFor(center, t.uid);
+      final pos = (t.lastLat != null && t.lastLng != null) ? LatLng(t.lastLat!, t.lastLng!) : null;
       final category = classifyVehicle(t.vehicleType);
       return _RiderVm(
         uid: t.uid,
@@ -423,15 +437,21 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         vehicle: t.vehicleType ?? 'Not provided',
         plate: t.licensePlate ?? 'Not provided',
         photoUrl: t.photoUrl,
+        phone: t.phone,
         isDemo: false,
         availability: _availabilityFor(t.uid, activeByRider),
-        distanceKm: distanceFor(pos),
+        distanceKm: (pos == null || caseLocation == null) ? null : distanceFor(pos),
         vehicleCategory: category,
         compatibilityScore: vehicleCompatibilityScore(category, animalProfile),
       );
     }).toList();
 
-    int byDistance(_RiderVm a, _RiderVm b) => a.distanceKm.compareTo(b.distanceKm);
+    // Unknown distances sort after every known one.
+    int byDistance(_RiderVm a, _RiderVm b) {
+      final da = a.distanceKm, db = b.distanceKm;
+      if (da == null || db == null) return da == null ? (db == null ? 0 : 1) : -1;
+      return da.compareTo(db);
+    }
     // Transporter Ranking spec — within the Available bucket, the best
     // vehicle/capacity match ranks first; distance only breaks ties within
     // the same compatibility score, never overriding it (a compatible
@@ -571,7 +591,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   void _fitCameraOnce(LatLng? center, List<_RiderVm> riders) {
     if (_hasFitCamera || _mapController == null || center == null) return;
     _hasFitCamera = true;
-    final points = [center, ...riders.map((r) => r.position)];
+    final points = [center, ...riders.map((r) => r.position).whereType<LatLng>()];
     final lats = points.map((p) => p.latitude);
     final lngs = points.map((p) => p.longitude);
     _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
@@ -593,9 +613,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           infoWindow: const InfoWindow(title: 'Rescue Case'),
         ),
       for (final rider in riders)
+        if (rider.position != null)
         Marker(
           markerId: MarkerId(rider.uid),
-          position: rider.position,
+          position: rider.position!,
           icon: BitmapDescriptor.defaultMarkerWithHue(
             rider.uid == _selectedRiderUid
                 ? BitmapDescriptor.hueGreen
@@ -607,7 +628,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           ),
           infoWindow: InfoWindow(
             title: rider.name,
-            snippet: '${rider.distanceKm.toStringAsFixed(1)} km',
+            snippet: rider.distanceLabel,
           ),
         ),
     };
@@ -650,13 +671,15 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             legacyEscapeRisk: d['escapeRisk'] as String?,
           ).isNotEmpty,
     );
-    final riders = _buildRiderVms(riderCenter, transporters, activeByRider, animalProfile);
+    final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile);
 
     // Progressive Search Radius spec — only riders within the current
     // radius are actually shown/selectable; the underlying compatibility/
     // availability ordering from _buildRiderVms is preserved by filtering
-    // rather than re-sorting.
-    final visibleRiders = riders.where((r) => r.distanceKm <= _currentRadiusKm).toList();
+    // rather than re-sorting. Riders with no known distance are always
+    // listed — the radius can't rule them in or out, and hiding them would
+    // hide every transporter who hasn't shared a location.
+    final visibleRiders = riders.where((r) => r.distanceKm == null || r.distanceKm! <= _currentRadiusKm).toList();
     final hasAvailableInRadius = visibleRiders.any((r) => r.availability == _RiderAvailability.available);
     final hasAvailableAnywhere = riders.any((r) => r.availability == _RiderAvailability.available);
     final atMaxRadius = _currentRadiusKm >= _maxRadiusKm;
@@ -715,13 +738,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         title: Text('Assign Transporter',
             style: GoogleFonts.tiltWarp(
                 fontSize: 18, color: AppColors.background)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined,
-                color: AppColors.background),
-            onPressed: () {},
-          ),
-        ],
+        actions: const [AdminAlertsBell()],
       ),
       body: Column(
         children: [
@@ -1063,6 +1080,17 @@ class _RiderCard extends StatelessWidget {
     required this.animalProfile,
   });
 
+  // Same tel: launch pattern as transporter_details_card.dart's _launchCall.
+  Future<void> _launchCall(BuildContext context) async {
+    final uri = Uri(scheme: 'tel', path: rider.phone!.trim());
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not start the call.')),
+      );
+    }
+  }
+
   (String, Color, Color) _statusChip() => switch (rider.availability) {
     _RiderAvailability.available => ('Available', AppColors.greenrspwn, AppColors.textPrimary),
     _RiderAvailability.pending => ('Pending', AppColors.yellowrspwn, AppColors.textPrimary),
@@ -1166,7 +1194,7 @@ class _RiderCard extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(height: 2),
-                  Text('${rider.distanceKm.toStringAsFixed(1)} km away',
+                  Text(rider.distanceLabel,
                       style: GoogleFonts.zain(
                           fontSize: 12, color: AppColors.textSecondary)),
                   Text(compatibilityReason(rider.vehicleCategory, animalProfile),
@@ -1192,21 +1220,19 @@ class _RiderCard extends StatelessWidget {
               children: [
                 // Message removed — redundant with the shared case-level
                 // Messages thread on Track Case (spec: only Call stays on
-                // a transporter card).
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    GestureDetector(
-                      onTap: () {},
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        child: const Icon(Icons.phone_outlined,
-                            size: 20, color: AppColors.textPrimary),
-                      ),
+                // a transporter card). Hidden when there's no number to dial
+                // (demo transporters, or accounts that never saved one).
+                if ((rider.phone ?? '').trim().isNotEmpty) ...[
+                  GestureDetector(
+                    onTap: () => _launchCall(context),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      child: const Icon(Icons.phone_outlined,
+                          size: 20, color: AppColors.textPrimary),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 4),
+                  ),
+                  const SizedBox(height: 4),
+                ],
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   decoration: BoxDecoration(
@@ -1674,7 +1700,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _infoRow('Transporter', '${widget.rider.name} (${widget.rider.type})'),
-        _infoRow('Distance', '${widget.rider.distanceKm.toStringAsFixed(1)} km'),
+        _infoRow(
+          'Distance',
+          widget.rider.distanceKm == null ? 'Location not shared' : '${widget.rider.distanceKm!.toStringAsFixed(1)} km',
+        ),
         _infoRow('Vehicle', '${widget.rider.plate}  ${widget.rider.vehicle}'),
         _infoRow(
           'Selected Clinic',

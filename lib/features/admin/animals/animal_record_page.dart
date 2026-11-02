@@ -7,6 +7,7 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart' show kAgeGroupOptions, matchesAgeGroup;
 import 'animal_record_detail_page.dart';
@@ -510,11 +511,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.background)),
             )
           else
-            IconButton(
-              icon: const Icon(Icons.notifications_outlined,
-                  color: AppColors.background),
-              onPressed: () {},
-            ),
+            const AdminAlertsBell(),
         ],
       ),
       body: Column(

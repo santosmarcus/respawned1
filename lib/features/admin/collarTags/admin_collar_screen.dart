@@ -4,6 +4,7 @@ import 'package:respawnd1/app_theme.dart';
 // NFC disabled for now — only QR is used for collar tags.
 // import 'admin_nfc.dart';
 import 'admin_qr.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
 
@@ -15,10 +16,6 @@ class AdminCollarTagScreen extends StatelessWidget {
     return Scaffold(
       drawer: const AdminDrawer(active: AdminModule.collarTags),
       appBar: AppBar(
-        //leading: IconButton(
-        //icon: const Icon(Icons.menu, color: AppColors.background),
-        //onPressed: () {},
-        //),
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu, color: AppColors.background),
@@ -31,13 +28,7 @@ class AdminCollarTagScreen extends StatelessWidget {
           style: GoogleFonts.tiltWarp(
               fontSize: 18, color: AppColors.background),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined,
-                color: AppColors.background),
-            onPressed: () {},
-          ),
-        ],
+        actions: const [AdminAlertsBell()],
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),

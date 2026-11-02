@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'volunteer_page.dart';
 import 'volunteer_signup_page.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
@@ -23,6 +25,16 @@ class VolunteerEventDetailPage extends StatefulWidget {
 
 class _VolunteerEventDetailPageState
     extends State<VolunteerEventDetailPage> {
+  Future<void> _openInMaps(BuildContext context, String address) async {
+    final uri = Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': address});
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open Google Maps.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final event = widget.event;
@@ -42,7 +54,11 @@ class _VolunteerEventDetailPageState
           IconButton(
             icon: const Icon(Icons.share_outlined,
                 color: AppColors.textPrimary, size: 22),
-            onPressed: () {},
+            onPressed: () => SharePlus.instance.share(ShareParams(
+              text: '${event.title} — ${event.date}, ${event.time}\n'
+                  '${event.addressFull}\n'
+                  'Organized by ${event.organizerName}. Join on the ResPAWnd app.',
+            )),
           ),
           StatefulBuilder(
             builder: (context, setIcon) => IconButton(
@@ -195,7 +211,7 @@ class _VolunteerEventDetailPageState
                   ),
                 ),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () => _openInMaps(context, event.addressFull),
                   child: Text(
                     'View on Google Maps',
                     style: GoogleFonts.zain(
@@ -207,18 +223,9 @@ class _VolunteerEventDetailPageState
               ],
             ),
 
-            const SizedBox(height: 12),
-
-            // Map placeholder
-            Container(
-              width: double.infinity,
-              height: 120,
-              decoration: BoxDecoration(
-                color: AppColors.slaterspwn,
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-
+            // Events store a text address only (no coordinates), so the
+            // empty map placeholder that used to sit here is gone — the
+            // link above opens the address in Google Maps instead.
             const SizedBox(height: 28),
 
             if (event.isCancelled) ...[

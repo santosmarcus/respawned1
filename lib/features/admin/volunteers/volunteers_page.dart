@@ -28,8 +28,12 @@ enum VolunteerSortOption {
       };
 }
 
+/// Also serves the drawer's Transporters entry: `pet_transporter` and
+/// `rescue_volunteer` accounts share the [PetTransporter] shape, so one
+/// directory with a [transporters] switch beats a near-identical copy.
 class VolunteersPage extends ConsumerStatefulWidget {
-  const VolunteersPage({super.key});
+  final bool transporters;
+  const VolunteersPage({super.key, this.transporters = false});
 
   @override
   ConsumerState<VolunteersPage> createState() => _VolunteersPageState();
@@ -94,7 +98,7 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
               ),
             ),
             const SizedBox(height: 16),
-            Text('Sort Volunteers', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+            Text('Sort $_title', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
             const SizedBox(height: 12),
             for (final option in VolunteerSortOption.values)
               RadioListTile<VolunteerSortOption>(
@@ -112,13 +116,16 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
     if (picked != null) setState(() => _sort = picked);
   }
 
+  String get _title => widget.transporters ? 'Transporters' : 'Volunteers';
+  String get _noun => widget.transporters ? 'transporters' : 'volunteers';
+
   @override
   Widget build(BuildContext context) {
-    final volunteersAsync = ref.watch(rescueVolunteersProvider);
+    final volunteersAsync = ref.watch(widget.transporters ? petTransportersProvider : rescueVolunteersProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      drawer: const AdminDrawer(active: AdminModule.volunteers),
+      drawer: AdminDrawer(active: widget.transporters ? AdminModule.transporters : AdminModule.volunteers),
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
         leading: Builder(
@@ -127,7 +134,7 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: Text('Volunteers', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+        title: Text(_title, style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
       ),
       body: Column(
         children: [
@@ -153,7 +160,7 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
                             controller: _searchController,
                             onChanged: (v) => setState(() => _searchText = v),
                             decoration: InputDecoration(
-                              hintText: 'Search volunteers…',
+                              hintText: 'Search $_noun…',
                               hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
                               border: InputBorder.none,
                               isDense: true,
@@ -196,7 +203,7 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
             child: volunteersAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (err, _) => Center(
-                child: Text('Could not load volunteers.',
+                child: Text('Could not load $_noun.',
                     style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
               ),
               data: (volunteers) {
@@ -204,7 +211,9 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
                 if (list.isEmpty) {
                   return Center(
                     child: Text(
-                      volunteers.isEmpty ? 'No rescue volunteers yet.' : 'No volunteers match your search.',
+                      volunteers.isEmpty
+                          ? (widget.transporters ? 'No pet transporters yet.' : 'No rescue volunteers yet.')
+                          : 'No $_noun match your search.',
                       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
                     ),
                   );

@@ -19,6 +19,7 @@ import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_case_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_filter_sheet.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
 String _friendlyCasesError(Object err) {
@@ -139,12 +140,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
         // own smaller title here instead; that's removed below so the
         // title is never shown twice.
         title: Text('Rescue Reports', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: AppColors.background),
-            onPressed: () {},
-          ),
-        ],
+        actions: const [AdminAlertsBell()],
       ),
       body: Column(
         children: [

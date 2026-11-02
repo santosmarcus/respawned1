@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -594,13 +595,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           ),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: AppColors.background,
-            ),
-            onPressed: () {},
-          ),
+          const AdminAlertsBell(),
           // The AppBar's "Animal Moved" one-tap shortcut is gone — that
           // location update now only ever comes from an approved Community
           // Report. Close Case (any reason, including animal-moved) is now

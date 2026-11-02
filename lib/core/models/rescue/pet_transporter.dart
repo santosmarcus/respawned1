@@ -26,6 +26,12 @@ class PetTransporter {
   final bool online;
   final DateTime? lastSeenAt;
 
+  /// Where the transporter was when they last went online (or the last
+  /// presence heartbeat), written by service_screen.dart and cleared when
+  /// they go offline. Null for accounts that haven't shared a location.
+  final double? lastLat;
+  final double? lastLng;
+
   const PetTransporter({
     required this.uid,
     required this.name,
@@ -36,6 +42,8 @@ class PetTransporter {
     this.isVerified = false,
     this.online = false,
     this.lastSeenAt,
+    this.lastLat,
+    this.lastLng,
   });
 
   /// True only when the transporter's own app last wrote `online: true`
@@ -70,6 +78,8 @@ class PetTransporter {
       isVerified: data['isVerified'] as bool? ?? false,
       online: data['online'] as bool? ?? false,
       lastSeenAt: lastSeen is Timestamp ? lastSeen.toDate() : null,
+      lastLat: (data['lastLat'] as num?)?.toDouble(),
+      lastLng: (data['lastLng'] as num?)?.toDouble(),
     );
   }
 }

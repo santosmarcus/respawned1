@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -1026,14 +1027,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           ),
         ),
         actions: [
-          if (!widget.isEditing)
-            IconButton(
-              icon: const Icon(
-                Icons.notifications_outlined,
-                color: AppColors.background,
-              ),
-              onPressed: () {},
-            ),
+          if (!widget.isEditing) const AdminAlertsBell(),
         ],
       ),
       body: SingleChildScrollView(

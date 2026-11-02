@@ -209,10 +209,10 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             // Menu items — order matches the project's required admin menu
             // order: Dashboard, Rescue, Adoptions, Donations, Records,
             // Events, Volunteers, Transporters, Collar Tags, Audit.
-            // Volunteers now opens VolunteersPage (role ==
-            // 'rescue_volunteer' directory), Events opens AdminEventsPage.
-            // Transporters still has no admin screen built yet, so it stays
-            // a no-op placeholder. Shelter Resources was removed entirely — it
+            // Volunteers opens VolunteersPage (role == 'rescue_volunteer'
+            // directory), Transporters opens the same page over
+            // 'pet_transporter' accounts, Events opens AdminEventsPage.
+            // Shelter Resources was removed entirely — it
             // was a permanent no-op with no destination page; shelter
             // capacity is edited from Organization Profile.
             _DrawerItem(
@@ -262,7 +262,11 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
               selected: widget.active == AdminModule.volunteers,
               onTap: () => _openModule(context, (_) => const VolunteersPage()),
             ),
-            _DrawerItem(label: 'Transporters', selected: widget.active == AdminModule.transporters, onTap: () {}),
+            _DrawerItem(
+              label: 'Transporters',
+              selected: widget.active == AdminModule.transporters,
+              onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
+            ),
             _DrawerItem(
               label: 'Collar Tags',
               selected: widget.active == AdminModule.collarTags,

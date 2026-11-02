@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -367,23 +368,15 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     return LatLng(lat, lng);
   }
 
-  /// Priority: real tracking location -> saved rider location -> DLSU demo
-  /// fallback. This schema currently only has one rider-position field
-  /// (`riderLastLat`/`riderLastLng`, written by the transporter app's own
-  /// transit flow — see transit_progress_page.dart's `_findAndRouteToNextClinic`),
-  /// so "real" and "saved" collapse to the same check here; there's no
-  /// second, distinctly-cached position to fall back to before the demo
-  /// coordinates. Never overwrites that field — this only reads it.
-  ({LatLng location, bool isDemo}) _riderLocationFrom(
-    Map<String, dynamic> data,
-  ) {
+  /// The transporter's last reported position (`riderLastLat`/`riderLastLng`,
+  /// written by the transporter app's transit flow — see
+  /// transit_case_service.dart), or null before they've reported one. The
+  /// map then shows "location not shared yet" instead of a made-up pin.
+  /// Never overwrites that field — this only reads it.
+  LatLng? _riderLocationFrom(Map<String, dynamic> data) {
     final lat = (data['riderLastLat'] as num?)?.toDouble();
     final lng = (data['riderLastLng'] as num?)?.toDouble();
-    if (lat != null && lng != null) {
-      return (location: LatLng(lat, lng), isDemo: false);
-    }
-    // TODO: Replace DLSU demo coordinates with the rider's live tracking location.
-    return (location: const LatLng(dlsuManilaLat, dlsuManilaLng), isDemo: true);
+    return (lat != null && lng != null) ? LatLng(lat, lng) : null;
   }
 
   /// Where the rider is currently heading. Before pickup, that's the
@@ -580,8 +573,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   () => EagerGestureRecognizer(),
                 ),
               },
+              // caseLocation is non-null whenever rider is null here — the
+              // both-missing case returned early above.
               initialCameraPosition: CameraPosition(
-                target: rider.location,
+                target: rider ?? caseLocation!,
                 zoom: 13,
               ),
               markers: {
@@ -594,18 +589,15 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     ),
                     infoWindow: InfoWindow(title: _originMarkerLabel),
                   ),
-                Marker(
-                  markerId: const MarkerId('rider'),
-                  position: rider.location,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                    BitmapDescriptor.hueGreen,
+                if (rider != null)
+                  Marker(
+                    markerId: const MarkerId('rider'),
+                    position: rider,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                      BitmapDescriptor.hueGreen,
+                    ),
+                    infoWindow: const InfoWindow(title: 'Transporter'),
                   ),
-                  infoWindow: InfoWindow(
-                    title: rider.isDemo
-                        ? 'Transporter (demo location)'
-                        : 'Transporter',
-                  ),
-                ),
               },
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
@@ -664,7 +656,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             caseLocation.longitude != destinationLocation.longitude);
 
     return FutureBuilder<RouteResult>(
-      future: _routeFor(rider.location, destinationLocation),
+      // No route until the transporter has reported a position.
+      future: rider == null ? null : _routeFor(rider, destinationLocation),
       builder: (context, snapshot) {
         final route = snapshot.data;
         final markers = {
@@ -685,31 +678,29 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               ),
               infoWindow: InfoWindow(title: _originMarkerLabel),
             ),
-          Marker(
-            markerId: const MarkerId('rider'),
-            position: rider.location,
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueGreen,
+          if (rider != null)
+            Marker(
+              markerId: const MarkerId('rider'),
+              position: rider,
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueGreen,
+              ),
+              infoWindow: const InfoWindow(title: 'Transporter'),
             ),
-            infoWindow: InfoWindow(
-              title: rider.isDemo
-                  ? 'Transporter (demo location)'
-                  : 'Transporter',
-            ),
-          ),
         };
 
         // Distance prefers the route's own (road) distance; only the
         // straight-line fallback falls back to haversine, and RouteResult
         // already encodes that — this is never recomputed here.
-        final distanceKm =
-            route?.distanceKm ??
-            haversineDistanceKm(
-              rider.location.latitude,
-              rider.location.longitude,
-              destinationLocation.latitude,
-              destinationLocation.longitude,
-            );
+        final distanceKm = rider == null
+            ? null
+            : route?.distanceKm ??
+                haversineDistanceKm(
+                  rider.latitude,
+                  rider.longitude,
+                  destinationLocation.latitude,
+                  destinationLocation.longitude,
+                );
         final isRoadFollowing = route?.isRoadFollowing ?? false;
 
         // Covers the ordering where the route resolves *after* the map
@@ -770,9 +761,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    '${distanceKm.toStringAsFixed(1)} km to ${destination.label}'
-                    '${!isRoadFollowing ? ' (straight-line estimate)' : ''}'
-                    '${rider.isDemo ? ' · demo transporter location' : ''}',
+                    distanceKm == null
+                        ? 'Heading to ${destination.label} · transporter location not shared yet'
+                        : '${distanceKm.toStringAsFixed(1)} km to ${destination.label}'
+                            '${!isRoadFollowing ? ' (straight-line estimate)' : ''}',
                     style: GoogleFonts.zain(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -877,13 +869,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               ),
             ),
             actions: [
-              IconButton(
-                icon: const Icon(
-                  Icons.notifications_outlined,
-                  color: AppColors.background,
-                ),
-                onPressed: () {},
-              ),
+              const AdminAlertsBell(),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, color: AppColors.background),
                 enabled: !_closing,
@@ -1242,37 +1228,6 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
           ),
         ),
 
-        /* todo for manual testing
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Demo Controls',
-                  style: GoogleFonts.zain(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                      fontStyle: FontStyle.italic)),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 8,
-                children: [
-                  _DemoButton(
-                    label: 'Transporter Accepted',
-                    caseId: caseId,
-                    status: 'Pet Transporter has been assigned, in transit to pick up location.',
-                  ),
-                  _DemoButton(
-                    label: 'Reached Animal',
-                    caseId: caseId,
-                    status: 'Pet Transporter has reached the animal.',
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        */
         const Divider(),
 
         // Collapsible Messages — collapsed by default so the status
@@ -2104,37 +2059,3 @@ class _DeclinedAssignmentBanner extends StatelessWidget {
     );
   }
 }
-
-/* TODO: demo button
-class _DemoButton extends StatelessWidget {
-  final String label;
-  final String caseId;
-  final String status;
-  const _DemoButton({required this.label, required this.caseId, required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: () async {
-        await FirebaseFirestore.instance
-            .collection('cases')
-            .doc(caseId)
-            .update({
-          'statusHistory': FieldValue.arrayUnion([
-            {'status': status, 'timestamp': Timestamp.now()}
-          ]),
-        });
-      },
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.textSecondary,
-        side: const BorderSide(color: AppColors.slaterspwn),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-      child: Text(label,
-          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-    );
-  }
-}
-*/

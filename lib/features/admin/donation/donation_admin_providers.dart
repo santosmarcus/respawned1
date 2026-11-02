@@ -29,6 +29,23 @@ final adminCampaignsProvider = StreamProvider.autoDispose<List<DonationListing>>
   });
 });
 
+/// Listings tied to one animal (sponsorships and animal/medical campaigns),
+/// newest first. Backs "View Donations" on the admin animal profile.
+final animalCampaignsProvider = StreamProvider.autoDispose.family<List<DonationListing>, String>((ref, animalId) {
+  return _db.collection('campaigns').where('animalId', isEqualTo: animalId).snapshots().map((snap) {
+    final list = <DonationListing>[];
+    for (final doc in snap.docs) {
+      try {
+        list.add(DonationListing.fromFirestore(doc));
+      } catch (_) {
+        // A malformed legacy doc must not hide every other listing.
+      }
+    }
+    list.sort((a, b) => _newestFirstKey(b).compareTo(_newestFirstKey(a)));
+    return list;
+  });
+});
+
 final campaignProvider = StreamProvider.autoDispose.family<DonationListing?, String>((ref, id) {
   return _db.collection('campaigns').doc(id).snapshots().map((d) => d.exists ? DonationListing.fromFirestore(d) : null);
 });
