@@ -133,7 +133,7 @@ OutcomeCounts computeOutcomes({
     if (p.has(c.deceasedAt) && c.raw['sourceType'] != 'animalRecordAdmission') {
       death('${c.speciesSummary} #${c.shortCaseId}', c.deceasedAt!, c.causeOfDeath);
     }
-    if (c.raw['closureReason'] == ClosureReason.reunitedWithOwner.name && p.has(tsOf(c.raw['closedAt']))) {
+    if (_reunitedReasons.contains(c.raw['closureReason']) && p.has(tsOf(c.raw['closedAt']))) {
       o.returnedToOwner += c.animalCount;
     }
     for (final a in c.animals) {
@@ -921,6 +921,13 @@ class _WaitsCard extends StatelessWidget {
 
 // ─── 5. Could animals stay home or outside? ──────────────────────────────
 
+// Stored `closureReason` values. ClosureReason was reduced to five reasons
+// (closure_reason.dart): "reunited with owner" and "owner found" became
+// `reunited`. Cases closed before that still hold the old names, so
+// analytics match them as strings rather than enum values.
+const _reunitedReasons = {'reunited', 'reunitedWithOwner'};
+const _legacyUnconfirmedReasons = {'hasOwner', 'resolvedWithoutTransport'};
+
 class _DiversionCard extends ConsumerWidget {
   final Period period;
   final List<RescueCase> cases;
@@ -931,10 +938,13 @@ class _DiversionCard extends ConsumerWidget {
     final reports = cases.where((c) => period.has(c.createdAt)).length;
     final closedHere = cases.where((c) => period.has(tsOf(c.raw['closedAt']))).toList();
     String? reason(RescueCase c) => c.raw['closureReason'] as String?;
-    final confirmed = closedHere.where((c) => reason(c) == ClosureReason.reunitedWithOwner.name).length;
-    final ownerKnown = closedHere.where((c) => reason(c) == ClosureReason.hasOwner.name).length;
-    final resolved = closedHere.where((c) => reason(c) == ClosureReason.resolvedWithoutTransport.name).length;
-    final unknown = ownerKnown + resolved;
+    final confirmed = closedHere.where((c) => _reunitedReasons.contains(reason(c))).length;
+    // Only older cases carry these; today's picker records a found owner
+    // as `reunited`.
+    final unknown = closedHere.where((c) => _legacyUnconfirmedReasons.contains(reason(c))).length;
+    // Any closure where the animal turned out to have an owner: reunited
+    // (current and legacy) plus the old "has an owner" reason.
+    final ownerKnown = confirmed + closedHere.where((c) => reason(c) == 'hasOwner').length;
     final diverted = confirmed + unknown;
     final referred = cases.where((c) => c.status == RescueStatus.referred && period.has(lastUpdateOf(c))).length;
 
