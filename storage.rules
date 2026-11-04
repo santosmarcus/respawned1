@@ -27,11 +27,26 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Platform staff, or staff of an approved organization whose membership
+    // is still active (mirrors isApprovedStaffOf in firestore.rules).
     function isStaff() {
       return signedIn() && (
         userData().get('role', '') in ['admin', 'ngo_staff'] ||
-        userData().get('organizationId', '') != ''
+        isApprovedOrgStaff()
       );
+    }
+
+    function isApprovedOrgStaff() {
+      return userData().get('organizationId', '') != '' &&
+        firestore.get(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))).data
+          .get('verificationStatus', 'approved') == 'approved' &&
+        (
+          !firestore.exists(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))/members/$(request.auth.uid)) ||
+          !(firestore.get(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))/members/$(request.auth.uid)).data
+            .get('status', 'active') in ['inactive', 'removed', 'disabled']) ||
+          firestore.get(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))).data
+            .get('ownerId', '') == request.auth.uid
+        );
     }
 
     // Uploads are capped at 100 MB (rescue videos are the largest). The app's

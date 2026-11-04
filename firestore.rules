@@ -674,8 +674,11 @@ service cloud.firestore {
       }
 
       allow read: if signedIn();
+      // Reporters file unowned reports only; an organization claims a case
+      // through its staff, never by stamping it at creation.
       allow create: if signedIn() && (
-        request.resource.data.get('reporterId', '') == request.auth.uid ||
+        (request.resource.data.get('reporterId', '') == request.auth.uid &&
+          request.resource.data.get('organizationId', '') == '') ||
         canStaffRecordOf(request.resource.data.get('organizationId', ''))
       );
       allow update: if signedIn() && (

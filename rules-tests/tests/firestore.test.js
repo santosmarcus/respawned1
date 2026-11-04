@@ -102,6 +102,12 @@ describe('cases', () => {
     await assertFails(as('reporter').collection('cases').add({ reporterId: 'stranger', status: 'pending' }));
   });
 
+  test('reporters cannot stamp a new report with an organization', async () => {
+    await assertFails(as('reporter').collection('cases').add({ reporterId: 'reporter', organizationId: 'orgA', status: 'pending' }));
+    await assertFails(as('reporter').collection('cases').add({ reporterId: 'reporter', organizationId: 'orgB', status: 'pending' }));
+    await assertSucceeds(as('reporter').collection('cases').add({ reporterId: 'reporter', organizationId: '', status: 'pending' }));
+  });
+
   test("strangers and other organizations can't touch an owned case", async () => {
     await assertFails(as('stranger').doc('cases/ownedA').update({ status: 'completed' }));
     await assertFails(as('staffB').doc('cases/ownedA').update({ status: 'completed' }));

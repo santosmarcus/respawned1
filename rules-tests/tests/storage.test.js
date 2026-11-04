@@ -47,6 +47,17 @@ describe('storage', () => {
     await assertFails(upload('stranger', 'campaigns/1.jpg'));
   });
 
+  test('staff of an unapproved organization get no staff access', async () => {
+    await assertFails(upload('draftOwner', 'receipts/1.jpg'));
+  });
+
+  test('removed members lose staff access', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('organizations/orgA/members/staffA').update({ status: 'removed' }));
+    await assertFails(upload('staffA', 'cases/ownedA/expenseReceipts/2.jpg'));
+    await assertSucceeds(upload('ownerA', 'cases/ownedA/expenseReceipts/2.jpg'));
+  });
+
   test('unlisted paths are denied', async () => {
     await assertFails(upload('admin', 'anything/else.jpg'));
   });
