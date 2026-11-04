@@ -9,6 +9,7 @@ import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'event_detail_page.dart';
+import 'volunteer_application_screen.dart';
 
 export 'package:respawnd1/core/models/volunteer/volunteer_event.dart' show VolunteerEvent;
 
@@ -179,6 +180,9 @@ class _VolunteerPageState extends State<VolunteerPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
+
+            const VolunteerApplicationBanner(),
+            const SizedBox(height: 12),
 
             // Search bar
             Row(
