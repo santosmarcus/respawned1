@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
@@ -48,6 +49,52 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
   String get _actorName {
     final n = FirebaseAuth.instance.currentUser?.displayName?.trim();
     return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
+
+  Future<void> _showQrTag() async {
+    final animal = widget.animal;
+    String? tag;
+    await _run(() async {
+      tag = await ref.read(animalRecordRepositoryProvider).ensureQrTag(
+            animalId: animal.id,
+            existing: animal.qrTagId,
+            actorId: _actorId,
+            actorName: _actorName,
+            actorEmail: _actorEmail,
+          );
+    });
+    final code = tag;
+    if (code == null || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('QR tag for ${animal.name.isEmpty ? 'this animal' : animal.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            QrImageView(data: 'RESPAWND-ANIMAL:$code', size: 220),
+            const SizedBox(height: 10),
+            SelectableText(code, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text('Print or attach this code to the animal’s kennel or collar.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Future<void> _togglePublicProfile() async {
+    final animal = widget.animal;
+    await _run(() => ref.read(animalRecordRepositoryProvider).setPublicProfileHidden(
+          animalId: animal.id,
+          hidden: !animal.publicProfileHidden,
+          actorId: _actorId,
+          actorName: _actorName,
+          actorEmail: _actorEmail,
+        ));
   }
 
   Future<void> _toggleArchive() async {
@@ -207,6 +254,18 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
             label: animal.archived ? 'Restore Record' : 'Archive',
             enabled: !_busy,
             onTap: _toggleArchive,
+          ),
+          _ActionTile(
+            icon: Icons.qr_code_2,
+            label: animal.qrTagId == null ? 'Add QR Tag' : 'Show QR Tag',
+            enabled: !_busy,
+            onTap: _showQrTag,
+          ),
+          _ActionTile(
+            icon: animal.publicProfileHidden ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            label: animal.publicProfileHidden ? 'Show on Public Profile' : 'Hide from Public Profile',
+            enabled: !_busy,
+            onTap: _togglePublicProfile,
           ),
           _ActionTile(
             icon: Icons.compare_arrows,

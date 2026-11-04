@@ -10,6 +10,7 @@ import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/rescue/rescue_page.dart'
     show QRScannerPage, RescuePage;
 import 'package:respawnd1/app_theme.dart';
+import 'animal_tag_scan.dart';
 import 'collar_id_tag_screen.dart';
 import 'collar_tag_data_model.dart';
 import 'pet_found_chat.dart';
@@ -123,6 +124,10 @@ Future<void> startTagScan(BuildContext context) async {
     MaterialPageRoute(builder: (_) => const QRScannerPage()),
   );
   if (rawResult == null || !context.mounted) return;
+
+  // Animal record QR tags (Animal Management > Add QR Tag) open the animal.
+  if (await openScannedAnimalTag(context, rawResult)) return;
+  if (!context.mounted) return;
 
   final tagId = AppLinks.tagIdFromScan(rawResult);
   if (tagId == null) {

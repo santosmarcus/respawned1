@@ -137,6 +137,11 @@ class AnimalRecord {
   final DateTime? updatedAt;
   final String? currentCaseId;
   final bool archived;
+  /// Staff hid this animal from public adoption listings (P2-12). Internal
+  /// records and medical detail are never public regardless of this flag.
+  final bool publicProfileHidden;
+  /// Printed/attached QR tag for this animal (P3-23). Null until assigned.
+  final String? qrTagId;
   final DateTime? deceasedAt;
   final String? deceasedCause;
   // Reservation/adoption — written by AdoptionApplicationRepository's
@@ -193,6 +198,8 @@ class AnimalRecord {
     required this.updatedAt,
     required this.currentCaseId,
     required this.archived,
+    this.publicProfileHidden = false,
+    this.qrTagId,
     required this.deceasedAt,
     required this.deceasedCause,
     this.reservedForUserId,
@@ -350,6 +357,8 @@ class AnimalRecord {
       updatedAt: updatedAtRaw is Timestamp ? updatedAtRaw.toDate() : null,
       currentCaseId: parseOptionalString(data['currentCaseId']),
       archived: parseBool(data['archived']),
+      publicProfileHidden: parseBool(data['publicProfileHidden']),
+      qrTagId: parseOptionalString(data['qrTagId']),
       deceasedAt: deceasedAtRaw is Timestamp ? deceasedAtRaw.toDate() : null,
       deceasedCause: parseOptionalString(data['deceasedCause']),
       reservedForUserId: parseOptionalString(data['reservedForUserId']),

@@ -413,7 +413,10 @@ class _AdoptionsTabState extends State<_AdoptionsTab> {
           return const Center(
               child: CircularProgressIndicator(color: AppColors.greenrspwn));
         }
-        final docs = snapshot.data!.docs;
+        // Staff can hide an animal from public listings (publicProfileHidden).
+        final docs = snapshot.data!.docs
+            .where((d) => d.data()['publicProfileHidden'] != true)
+            .toList();
         if (docs.isEmpty) {
           return Center(
             child: Text('No animals listed yet.',

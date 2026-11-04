@@ -417,13 +417,12 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     }
   }
 
-  // TODO(qr-nfc): generating a real per-animal QR/NFC tag, associating it
-  // with this record, and printing/displaying it are not implemented.
-  // Also TODO: NFC support, if it ends up sharing the same identifier as
-  // the QR code rather than being independent.
+  // QR tags are assigned from the animal's profile after the record is saved
+  // (Animal Management > Add QR Tag), so the tag has a saved record to attach
+  // to. TODO(nfc): NFC support is not implemented.
   void _showTagNotAvailable() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('QR assignment is not available yet.')),
+      const SnackBar(content: Text('Add the QR tag from the animal profile after saving.')),
     );
   }
 
