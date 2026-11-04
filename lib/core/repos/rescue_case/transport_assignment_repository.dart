@@ -316,8 +316,8 @@ class TransportAssignmentRepository {
         'rejectionReason': null,
         'completedAt': null,
         'isDemo': isDemo,
-        if (vehicle != null) 'vehicle': vehicle,
-        if (plate != null) 'plate': plate,
+        'vehicle': ?vehicle,
+        'plate': ?plate,
       });
       tx.update(caseRef, {'currentAssignmentId': newRef.id});
     });

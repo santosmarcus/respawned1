@@ -93,7 +93,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // Edit mode only — already-uploaded photos, individually removable;
   // newly picked images are uploaded and appended alongside whatever
   // remains of this list on Save.
-  late List<String> _existingPhotoUrls = List<String>.from(
+  late final List<String> _existingPhotoUrls = List<String>.from(
     widget.existingData?['photoUrls'] ?? const [],
   );
   bool _isUploadingImages = false;
@@ -348,8 +348,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
   String get _saveButtonLabel {
     if (widget.isEditing) return 'Save Changes';
-    if (widget.stepCurrent == null || widget.stepTotal == null)
+    if (widget.stepCurrent == null || widget.stepTotal == null) {
       return 'Create Record';
+    }
     return widget.stepCurrent! >= widget.stepTotal!
         ? 'Finish'
         : 'Save and Continue';
@@ -937,7 +938,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'rescueBackground': selectedBackground,
         'tags': tags,
         'adoptionStatus': _isAdoptable ? 'adoptable' : 'not_ready',
-        if (readiness != null) 'adoptionReadiness': readiness,
+        'adoptionReadiness': ?readiness,
       };
 
       if (widget.isEditing) {
@@ -951,7 +952,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         final organizationId = await _resolveOwningOrganizationId(uid);
         await docRef.set({
           ...sharedFields,
-          if (organizationId != null) 'organizationId': organizationId,
+          'organizationId': ?organizationId,
           'status': 'intake',
           'linkedCaseId': widget.linkedCaseId ?? '',
           if (widget.sourceAnimalIndex != null)
@@ -1813,7 +1814,8 @@ class _DropdownField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DropdownButtonFormField<String>(
-    value: value,
+    key: ValueKey(value),
+    initialValue: value,
     hint: Text(
       hint,
       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
@@ -1934,7 +1936,7 @@ class _ExistingImageThumb extends StatelessWidget {
               width: 80,
               height: 80,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+              errorBuilder: (_, _, _) => Container(
                 width: 80,
                 height: 80,
                 color: AppColors.tearspwn,

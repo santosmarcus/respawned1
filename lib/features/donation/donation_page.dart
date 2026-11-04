@@ -28,7 +28,6 @@ class _DonationPageState extends State<DonationPage> {
 
   Set<String> _donatedIds = {};
   Set<String> _favoriteIds = {};
-  Set<String> _petFavoriteIds = {};
   Map<String, HistoryItem> _activeSponsorships = {};
   bool _userDataLoading = true;
 
@@ -52,7 +51,6 @@ class _DonationPageState extends State<DonationPage> {
       final results = await Future.wait([
         FirebaseFirestore.instance.collection('users').doc(_uid).collection('donated').get(),
         FirebaseFirestore.instance.collection('users').doc(_uid).collection('donationFavorites').get(),
-        FirebaseFirestore.instance.collection('users').doc(_uid).collection('favorites').get(),
         FirebaseFirestore.instance.collection('donations')
             .where('userId', isEqualTo: _uid)
             .where('type', isEqualTo: 'sponsorship')
@@ -60,7 +58,7 @@ class _DonationPageState extends State<DonationPage> {
       ]);
 
       if (mounted) {
-        final sponsorships = results[3].docs.map((doc) => HistoryItem.fromFirestore(doc)).toList();
+        final sponsorships = results[2].docs.map((doc) => HistoryItem.fromFirestore(doc)).toList();
         final Map<String, HistoryItem> activeMap = {};
         final now = DateTime.now();
 
@@ -77,7 +75,6 @@ class _DonationPageState extends State<DonationPage> {
         setState(() {
           _donatedIds = results[0].docs.map((d) => d.id).toSet();
           _favoriteIds = results[1].docs.map((d) => d.id).toSet();
-          _petFavoriteIds = results[2].docs.map((d) => d.id).toSet();
           _activeSponsorships = activeMap;
           _userDataLoading = false;
         });
@@ -119,26 +116,6 @@ class _DonationPageState extends State<DonationPage> {
     }
   }
 
-  Future<void> _toggleSponsorFavorite(SponsorPet pet) async {
-    final isFav = _petFavoriteIds.contains(pet.id);
-    final doc = FirebaseFirestore.instance
-        .collection('users')
-        .doc(_uid)
-        .collection('favorites')
-        .doc(pet.id);
-
-    if (isFav) {
-      await doc.delete();
-      setState(() => _petFavoriteIds.remove(pet.id));
-    } else {
-      await doc.set({
-        'petId': pet.id,
-        'name': pet.name,
-        'savedAt': FieldValue.serverTimestamp(),
-      });
-      setState(() => _petFavoriteIds.add(pet.id));
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -167,9 +144,13 @@ class _DonationPageState extends State<DonationPage> {
           BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'My Profile'),
         ],
         onTap: (index) {
-          if (index == 0) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomeScreen()));
-          else if (index == 1) Navigator.push(context, MaterialPageRoute(builder: (context) => const NotificationsScreen()));
-          else if (index == 2) Navigator.push(context, MaterialPageRoute(builder: (context) => const UserProfile()));
+          if (index == 0) {
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomeScreen()));
+          } else if (index == 1) {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => const NotificationsScreen()));
+          } else if (index == 2) {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => const UserProfile()));
+          }
         },
       ),
       body: _userDataLoading
@@ -282,10 +263,10 @@ class _DonationPageState extends State<DonationPage> {
             if (donatedList.isNotEmpty) ...[
               Text('Donated', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
               const SizedBox(height: 10),
-              ...donatedList.map((d) => _DonationListItem(d, _favoriteIds.contains(d.id), () => _toggleFavorite(d), () => _openDetail(d))),
+              ...donatedList.map((d) => _donationListItem(d, _favoriteIds.contains(d.id), () => _toggleFavorite(d), () => _openDetail(d))),
             ],
             if (activeDonations.isNotEmpty)
-              ...activeDonations.map((d) => _DonationListItem(d, _favoriteIds.contains(d.id), () => _toggleFavorite(d), () => _openDetail(d))),
+              ...activeDonations.map((d) => _donationListItem(d, _favoriteIds.contains(d.id), () => _toggleFavorite(d), () => _openDetail(d))),
           ],
         );
       },
@@ -380,7 +361,7 @@ class _DonationPageState extends State<DonationPage> {
     );
   }
 
-  Widget _DonationListItem(DonationListing d, bool favorited, VoidCallback onFav, VoidCallback onTap) {
+  Widget _donationListItem(DonationListing d, bool favorited, VoidCallback onFav, VoidCallback onTap) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: _DonationCard(donation: d, favorited: favorited, onFavorite: onFav, onTap: onTap),

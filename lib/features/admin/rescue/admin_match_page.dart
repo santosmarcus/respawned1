@@ -48,7 +48,7 @@ class AdminMatchVerificationPage extends StatelessWidget {
           return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 14),
+            separatorBuilder: (_, _) => const SizedBox(height: 14),
             itemBuilder: (context, i) => _MatchReviewCard(
               matchId: docs[i].id,
               match: docs[i].data(),
@@ -246,7 +246,7 @@ class _AlertColumn extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             child: Image.network(photoUrls.first,
                 width: 70, height: 70, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
+                errorBuilder: (_, _, _) => Container(
                   width: 70, height: 70, color: AppColors.slaterspwn,
                 )),
           ),

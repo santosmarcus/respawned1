@@ -50,7 +50,7 @@ class SponsoredAnimalsSection extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 16),
           itemCount: sponsorships.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) => _SponsoredAnimalTile(sponsorship: sponsorships[i]),
         );
       },
@@ -104,7 +104,7 @@ class _SponsoredAnimalTile extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: photoUrl != null
-                      ? Image.network(photoUrl, width: 48, height: 48, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _placeholder())
+                      ? Image.network(photoUrl, width: 48, height: 48, fit: BoxFit.cover, errorBuilder: (_, _, _) => _placeholder())
                       : _placeholder(),
                 ),
                 const SizedBox(width: 12),

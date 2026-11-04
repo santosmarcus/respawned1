@@ -676,7 +676,7 @@ class _ServiceRequestList extends StatelessWidget {
                   Expanded(
                     child: ListView.separated(
                       itemCount: visible.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final doc = visible[index];
                         final data = doc.data() as Map<String, dynamic>;

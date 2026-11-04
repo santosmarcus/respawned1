@@ -118,7 +118,7 @@ class Expense {
   /// Covered so far — capped at [amount] so a bad legacy record can never
   /// make the case totals show a negative balance.
   double get fundedAmount {
-    final total = fundings.fold<double>(0, (sum, f) => sum + f.amount);
+    final total = fundings.fold<double>(0, (acc, f) => acc + f.amount);
     return total > amount ? amount : total;
   }
 

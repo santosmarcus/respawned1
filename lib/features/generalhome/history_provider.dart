@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../donation/models.dart';
 
@@ -27,7 +28,7 @@ class HistoryNotifier extends Notifier<List<HistoryItem>> {
       }
       state = merged.values.toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
     } catch (e) {
-      print('Error loading history: $e');
+      debugPrint('Error loading history: $e');
     }
   }
 
@@ -97,7 +98,7 @@ class HistoryNotifier extends Notifier<List<HistoryItem>> {
         FirebaseFirestore.instance.collection('users').doc(uid).collection('history').doc(id).update(data),
       ]);
     } catch (e) {
-      print('Error updating donation in Firestore: $e');
+      debugPrint('Error updating donation in Firestore: $e');
     }
   }
 }

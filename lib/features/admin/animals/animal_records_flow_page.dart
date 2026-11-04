@@ -235,7 +235,7 @@ class _RecordsForCaseViewState extends ConsumerState<_RecordsForCaseView> {
                 child: ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: records.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (context, i) => _RecordListTile(record: records[i]),
                 ),
               ),
@@ -271,7 +271,7 @@ class _RecordListTile extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: record.photoUrls.isNotEmpty
-                  ? Image.network(record.photoUrls.first, width: 64, height: 64, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _ph())
+                  ? Image.network(record.photoUrls.first, width: 64, height: 64, fit: BoxFit.cover, errorBuilder: (_, _, _) => _ph())
                   : _ph(),
             ),
             const SizedBox(width: 12),

@@ -303,7 +303,7 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
                           ? Image.network(
                         petImageUrl,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.pets,
+                        errorBuilder: (_, _, _) => const Icon(Icons.pets,
                             size: 44, color: AppColors.textPrimary),
                       )
                           : const Icon(Icons.pets,

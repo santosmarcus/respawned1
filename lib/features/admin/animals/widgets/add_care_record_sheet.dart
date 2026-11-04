@@ -365,7 +365,8 @@ class _PastHistoryBodyState extends ConsumerState<_PastHistoryBody> {
                     Expanded(
                       flex: 3,
                       child: DropdownButtonFormField<String>(
-                        value: _rows[i].isSet ? _rows[i].key : null,
+                        key: ValueKey(_rows[i].isSet ? _rows[i].key : null),
+                        initialValue: _rows[i].isSet ? _rows[i].key : null,
                         isExpanded: true,
                         hint: Text('What was given', style: GoogleFonts.zain(fontSize: 13)),
                         items: _options,

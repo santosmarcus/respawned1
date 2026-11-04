@@ -245,7 +245,7 @@ class _CollarTagsListScreenState extends State<CollarTagsListScreen> {
               )
                   : ListView.separated(
                 itemCount: _tags.length,
-                separatorBuilder: (_, __) => const Divider(
+                separatorBuilder: (_, _) => const Divider(
                     height: 24, color: AppColors.slaterspwn),
                 itemBuilder: (_, i) => _TagRow(
                   tag: _tags[i],
@@ -338,7 +338,7 @@ class _TagRow extends StatelessWidget {
         width: 64,
         height: 64,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder(),
+        errorBuilder: (_, _, _) => _placeholder(),
       );
     }
     return _placeholder();

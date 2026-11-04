@@ -205,7 +205,7 @@ class ActivityCard extends StatelessWidget{
                         if (progress == null) return child;
                         return _thumbFallback();
                       },
-                      errorBuilder: (_, __, ___) => _thumbFallback(),
+                      errorBuilder: (_, _, _) => _thumbFallback(),
                     )
                         : _thumbFallback(),
                   ),

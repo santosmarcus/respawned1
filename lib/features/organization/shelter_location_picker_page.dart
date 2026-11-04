@@ -235,7 +235,7 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
                     : ListView.separated(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         itemCount: _results.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
                         itemBuilder: (context, i) {
                           final r = _results[i];
                           final isSelected = selected?.placeId == r.placeId;

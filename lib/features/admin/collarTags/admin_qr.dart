@@ -227,10 +227,10 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
       final file = File('${dir.path}/qr_${_selected!.tagId}.png');
       await file.writeAsBytes(bytes);
 
-      await Share.shareXFiles(
-        [XFile(file.path)],
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(file.path)],
         text: 'Pet Collar Tag QR — ${_selected!.name}',
-      );
+      ));
 
       await _logAudit('qr_shared', _selected!);
     } catch (e) {
@@ -346,7 +346,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(12, 0, 6, 16),
                     itemCount: _filtered.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (_, _) =>
                     const SizedBox(height: 8),
                     itemBuilder: (_, i) {
                       final tag = _filtered[i];
@@ -742,7 +742,7 @@ class _QrPreviewCard extends StatelessWidget {
     if (tag.petImageUrl != null && tag.petImageUrl!.isNotEmpty) {
       return Image.network(tag.petImageUrl!,
           width: 120, height: 120, fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _placeholder());
+          errorBuilder: (_, _, _) => _placeholder());
     }
     return _placeholder();
   }

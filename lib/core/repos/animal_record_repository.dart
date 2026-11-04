@@ -169,7 +169,7 @@ class AnimalRecordRepository {
       'action': action,
       if (details != null && details.isNotEmpty) 'details': details,
       if (details != null && details.isNotEmpty) 'description': details,
-      if (eventType != null) 'eventType': eventType,
+      'eventType': ?eventType,
       if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
       if (actorName != null && actorName.isNotEmpty) 'actorName': actorName,
       if (actorEmail != null && actorEmail.isNotEmpty) 'actorEmail': actorEmail,
@@ -177,8 +177,8 @@ class AnimalRecordRepository {
       if (organizationId != null && organizationId.isNotEmpty) 'organizationId': organizationId,
       if (previousValues != null && previousValues.isNotEmpty) 'previousValues': previousValues,
       if (newValues != null && newValues.isNotEmpty) 'newValues': newValues,
-      if (sourceModule != null) 'sourceModule': sourceModule,
-      if (sourceRecordId != null) 'sourceRecordId': sourceRecordId,
+      'sourceModule': ?sourceModule,
+      'sourceRecordId': ?sourceRecordId,
       'timestamp': FieldValue.serverTimestamp(),
     });
   }
@@ -353,15 +353,15 @@ class AnimalRecordRepository {
     String? microchipStatus,
   }) async {
     await _animalDoc(animalId).update({
-      if (spayedNeutered != null) 'spayedNeutered': spayedNeutered,
-      if (dewormed != null) 'dewormed': dewormed,
-      if (allergies != null) 'allergies': allergies,
-      if (chronicConditions != null) 'chronicConditions': chronicConditions,
-      if (currentMedications != null) 'currentMedications': currentMedications,
+      'spayedNeutered': ?spayedNeutered,
+      'dewormed': ?dewormed,
+      'allergies': ?allergies,
+      'chronicConditions': ?chronicConditions,
+      'currentMedications': ?currentMedications,
       if (lastVetCheckup != null) 'lastVetCheckup': Timestamp.fromDate(lastVetCheckup),
-      if (weightKg != null) 'weightKg': weightKg,
-      if (bodyCondition != null) 'bodyCondition': bodyCondition,
-      if (microchipStatus != null) 'microchipStatus': microchipStatus,
+      'weightKg': ?weightKg,
+      'bodyCondition': ?bodyCondition,
+      'microchipStatus': ?microchipStatus,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -519,7 +519,7 @@ class AnimalRecordRepository {
       'transferStatus': 'pending',
       'transferTargetType': targetType,
       'transferTargetName': targetName,
-      if (targetOrgId != null) 'transferTargetOrgId': targetOrgId,
+      'transferTargetOrgId': ?targetOrgId,
       if (notes != null && notes.isNotEmpty) 'transferNotes': notes,
       'transferredAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),

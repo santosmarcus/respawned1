@@ -186,7 +186,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => const _InitiateReturnSheet(),
     );
-    if (result == null) return;
+    if (result == null || !mounted) return;
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Initiate Return?',
@@ -1224,11 +1224,11 @@ class _AdopterResponseViewer extends StatelessWidget {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: images.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (context, i) => ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: Image.network(images[i], width: 84, height: 84, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(width: 84, height: 84, color: AppColors.tearspwn)),
+                        errorBuilder: (_, _, _) => Container(width: 84, height: 84, color: AppColors.tearspwn)),
                   ),
                 ),
               ),

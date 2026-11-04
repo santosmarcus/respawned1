@@ -198,7 +198,7 @@ class CaseSummaryPage extends StatelessWidget {
                   width: 36,
                   height: 36,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+                  errorBuilder: (_, _, _) => Container(
                       width: 36, height: 36, color: AppColors.slaterspwn)),
             ),
           ],
@@ -232,7 +232,7 @@ class CaseSummaryPage extends StatelessWidget {
                   width: 100,
                   height: 100,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _MediaBox(),
+                  errorBuilder: (_, _, _) => _MediaBox(),
                 ),
               );
             }).toList(),
@@ -355,7 +355,7 @@ class CaseSummaryPage extends StatelessWidget {
                       width: 100,
                       height: 100,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _MediaBox(),
+                      errorBuilder: (_, _, _) => _MediaBox(),
                     ),
                   );
                 }),

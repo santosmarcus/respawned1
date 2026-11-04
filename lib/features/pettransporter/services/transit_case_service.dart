@@ -396,8 +396,8 @@ class TransitCaseService {
         tx.set(ref, {
           'name': name,
           'address': address,
-          if (lat != null) 'lat': lat,
-          if (lng != null) 'lng': lng,
+          'lat': ?lat,
+          'lng': ?lng,
           'declineReasonTally': tally,
           'totalDeclines':
               ((data['totalDeclines'] as num?)?.toInt() ?? 0) +

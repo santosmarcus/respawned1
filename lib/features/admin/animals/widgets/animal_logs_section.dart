@@ -68,7 +68,7 @@ class AnimalLogsSheet extends ConsumerWidget {
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: logs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 20),
+                  separatorBuilder: (_, _) => const Divider(height: 20),
                   itemBuilder: (context, i) => _LogEntryTile(log: logs[i]),
                 ),
               ),

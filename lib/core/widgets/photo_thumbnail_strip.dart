@@ -23,7 +23,7 @@ class PhotoThumbnailStrip extends StatelessWidget {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: photoUrls.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, i) => GestureDetector(
           onTap: () => Navigator.push(
             context,
@@ -41,7 +41,7 @@ class PhotoThumbnailStrip extends StatelessWidget {
               fit: BoxFit.cover,
               loadingBuilder: (context, child, progress) =>
                   progress == null ? child : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              errorBuilder: (_, __, ___) => Container(
+              errorBuilder: (_, _, _) => Container(
                 width: size,
                 height: size,
                 color: AppColors.tearspwn,

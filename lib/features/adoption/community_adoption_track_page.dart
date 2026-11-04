@@ -152,7 +152,7 @@ class _PhotoGallery extends StatelessWidget {
           child: Image.network(
             photoUrls[i],
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(
+            errorBuilder: (_, _, _) => Container(
               color: AppColors.tearspwn,
               child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textSecondary),
             ),

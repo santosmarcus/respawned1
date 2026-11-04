@@ -984,7 +984,7 @@ class _AnswersViewer extends StatelessWidget {
                             width: 90,
                             height: 90,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(width: 90, height: 90, color: AppColors.tearspwn)),
+                            errorBuilder: (_, _, _) => Container(width: 90, height: 90, color: AppColors.tearspwn)),
                       ),
                     ),
                 ],
@@ -2231,7 +2231,7 @@ class PostAdoption extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 16),
           itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
             final doc = docs[i];
             final data = doc.data() as Map<String, dynamic>;
@@ -2389,12 +2389,14 @@ class _RadioBlock extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  Radio<String>(
-                    value: o,
+                  RadioGroup<String>(
                     groupValue: value,
                     onChanged: onChanged,
-                    activeColor: AppColors.greenrspwn,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    child: Radio<String>(
+                      value: o,
+                      activeColor: AppColors.greenrspwn,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                   const SizedBox(width: 4),
                   Expanded(

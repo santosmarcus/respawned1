@@ -777,12 +777,14 @@ class _SingleChoiceRow extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Radio<String>(
-                    value: option,
+                  RadioGroup<String>(
                     groupValue: value,
-                    activeColor: AppColors.textPrimary,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     onChanged: (v) => onChanged(v ?? option),
+                    child: Radio<String>(
+                      value: option,
+                      activeColor: AppColors.textPrimary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
 
                   const SizedBox(width: 2),

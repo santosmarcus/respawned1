@@ -474,7 +474,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                                 borderRadius: BorderRadius.circular(8),
                                 child: Image.network(_receiptUrl!,
                                     width: 48, height: 48, fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => Container(
+                                    errorBuilder: (_, _, _) => Container(
                                         width: 48, height: 48, color: AppColors.tearspwn, child: const Icon(Icons.receipt_long_outlined))),
                               ),
                               const SizedBox(width: 10),
@@ -605,7 +605,8 @@ class _EnumDropdown<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<T>(
-      value: value,
+      key: ValueKey(value),
+      initialValue: value,
       // Long labels ("Organization Budget") ellipsize instead of
       // overflowing the narrow funding-line column.
       isExpanded: true,

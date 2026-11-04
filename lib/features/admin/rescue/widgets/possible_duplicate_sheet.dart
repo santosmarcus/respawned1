@@ -213,7 +213,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
                   return ListView.separated(
                     controller: scrollController,
                     itemCount: candidates.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, i) {
                       final candidate = candidates[i];
                       final distanceKm =
@@ -426,9 +426,9 @@ class _CompareCard extends StatelessWidget {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: c.photoUrls.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 6),
+                  separatorBuilder: (_, _) => const SizedBox(width: 6),
                   itemBuilder: (context, i) => Image.network(c.photoUrls[i], width: 140, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(width: 140, color: AppColors.tearspwn)),
+                      errorBuilder: (_, _, _) => Container(width: 140, color: AppColors.tearspwn)),
                 ),
               ),
             )

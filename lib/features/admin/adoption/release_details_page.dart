@@ -179,7 +179,6 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
     setState(() {
-      if (newIndex > oldIndex) newIndex -= 1;
       final item = _rules.removeAt(oldIndex);
       _rules.insert(newIndex, item);
       _rules = [for (var i = 0; i < _rules.length; i++) _rules[i].copyWith(order: i)];
@@ -421,7 +420,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: _rules.length,
-                          onReorder: (o, n) => _reorder(o, n),
+                          onReorderItem: (o, n) => _reorder(o, n),
                           itemBuilder: (context, i) {
                             final r = _rules[i];
                             return Container(

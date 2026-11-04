@@ -27,7 +27,6 @@ class SponsorshipDetail extends StatefulWidget {
 
 class _SponsorshipDetailState extends State<SponsorshipDetail> {
   final TextEditingController _amountController = TextEditingController();
-  String? _selectedPayment;
   HistoryItem? _activeSponsorship;
   bool _isLoading = true;
 
@@ -429,7 +428,7 @@ class _SponsorshipReviewSheetState extends State<SponsorshipReviewSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(border: Border.all(color: _selectedPayment == method ? AppColors.textPrimary : AppColors.textPrimary.withValues(alpha: 0.2)), borderRadius: BorderRadius.circular(12), color: _selectedPayment == method ? AppColors.yellowrspwn.withValues(alpha: 0.1) : Colors.transparent),
                 child: Row(children: [
-                  Radio<String>(value: method, groupValue: _selectedPayment, activeColor: AppColors.textPrimary, onChanged: (v) => setState(() => _selectedPayment = v)),
+                  RadioGroup<String>(groupValue: _selectedPayment, onChanged: (v) => setState(() => _selectedPayment = v), child: Radio<String>(value: method, activeColor: AppColors.textPrimary)),
                   Text(method, style: GoogleFonts.zain(fontSize: 16)),
                 ]),
               ),

@@ -56,7 +56,7 @@ class CreditCard {
       'cardNumberLastFour': cardNumberLastFour,
       'cardHolderName': cardHolderName,
       'expiryDate': expiryDate,
-      'backgroundColor': backgroundColor.value,
+      'backgroundColor': backgroundColor.toARGB32(),
       'token': token,
       'createdAt': FieldValue.serverTimestamp(),
     };
@@ -359,7 +359,7 @@ class DonationListing {
       'animalId': animalId,
       'animalName': animalName,
       'imageUrl': imageUrl,
-      'backgroundColor': backgroundColor.value,
+      'backgroundColor': backgroundColor.toARGB32(),
       'inKindItems': inKindItems.map((e) => e.toMap()).toList(),
       'isDog': isDog,
       'isActive': isActive,

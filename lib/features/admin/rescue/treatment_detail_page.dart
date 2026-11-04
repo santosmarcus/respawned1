@@ -1029,7 +1029,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               firstDate: DateTime(2020),
               lastDate: now,
             );
-            if (picked != null)
+            if (picked != null) {
               setState(
                 () => _treatmentDate = DateTime(
                   picked.year,
@@ -1037,6 +1037,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                   picked.day,
                 ),
               );
+            }
           },
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1810,7 +1811,8 @@ class _Dropdown<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<T>(
-      value: value,
+      key: ValueKey(value),
+      initialValue: value,
       hint: Text(
         hint,
         style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),

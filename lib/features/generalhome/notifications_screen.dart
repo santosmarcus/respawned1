@@ -583,7 +583,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       for (final list in _nearbyCommunityReportItemsByCase.values) ...list,
       for (final list in _checkinItemsByAdoption.values) ...list,
       for (final item in _dueItemsByAdoption.values)
-        if (item != null) item,
+        ?item,
     ];
     all.removeWhere((item) => _dismissedIds.contains(item.id));
     final deduped = <String, _NotifItem>{for (final item in all) item.id: item};

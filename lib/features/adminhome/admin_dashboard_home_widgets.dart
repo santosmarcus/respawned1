@@ -534,9 +534,9 @@ class TopMetricsRow extends ConsumerWidget {
     final intake = ref.watch(casesForTabProvider(RescuePipelineTab.intake));
     final activeTabs = [review, assign, ongoing, treatment, intake];
     final allLoaded = activeTabs.every((a) => a.hasValue);
-    final activeCaseCount = allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.value!.length) : null;
+    final activeCaseCount = allLoaded ? activeTabs.fold<int>(0, (acc, a) => acc + a.value!.length) : null;
     final activeAnimalCount =
-        allLoaded ? activeTabs.fold<int>(0, (sum, a) => sum + a.value!.fold<int>(0, (s, c) => s + c.animalCount)) : null;
+        allLoaded ? activeTabs.fold<int>(0, (acc, a) => acc + a.value!.fold<int>(0, (s, c) => s + c.animalCount)) : null;
 
     // Active Volunteers — no distinct active/inactive account field exists
     // for rescue_volunteer users (confirmed by inspection); the only real
@@ -605,11 +605,11 @@ class CurrentOperationsSection extends ConsumerWidget {
 
     final activeRescueCases = [review, assign, ongoing, treatment, intake]
         .map(lenOf)
-        .fold<int?>(0, (sum, v) => sum == null || v == null ? null : sum + v);
+        .fold<int?>(0, (acc, v) => acc == null || v == null ? null : acc + v);
 
     final pendingAdoptionApps = [pendingApps, interviewApps]
         .map(lenOf)
-        .fold<int?>(0, (sum, v) => sum == null || v == null ? null : sum + v);
+        .fold<int?>(0, (acc, v) => acc == null || v == null ? null : acc + v);
 
     final availableForAdoption = animalsAsync.value?.where((a) => a.adoptionStatus == 'adoptable').length;
 

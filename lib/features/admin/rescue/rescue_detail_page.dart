@@ -1787,7 +1787,7 @@ class _PhotoCarouselState extends State<_PhotoCarousel> {
                     : Image.network(
                         _items[i],
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                        errorBuilder: (_, _, _) => Container(
                           color: AppColors.tearspwn,
                           child: const Icon(
                             Icons.broken_image,
@@ -2161,11 +2161,12 @@ class _AnimalCard extends StatelessWidget {
   // choices).
   static List<String> _stringList(dynamic value) {
     if (value == null) return const [];
-    if (value is List)
+    if (value is List) {
       return value
           .whereType<String>()
           .where((s) => s.trim().isNotEmpty)
           .toList();
+    }
     if (value is String && value.trim().isNotEmpty) return [value.trim()];
     return const [];
   }

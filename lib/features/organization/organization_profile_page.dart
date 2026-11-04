@@ -433,7 +433,7 @@ class _AdoptionsTabState extends State<_AdoptionsTab> {
         return ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: animals.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final animal = animals[index];
             return _OrgAnimalCard(
@@ -730,7 +730,7 @@ class _DonationsTabState extends State<_DonationsTab> {
         return ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: donations.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 16),
+          separatorBuilder: (_, _) => const SizedBox(height: 16),
           itemBuilder: (context, index) {
             final donation = donations[index];
             return _OrgDonationCard(
@@ -965,7 +965,7 @@ class _EventsTabState extends State<_EventsTab> {
         return ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: events.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 16),
+          separatorBuilder: (_, _) => const SizedBox(height: 16),
           itemBuilder: (context, index) {
             final event = events[index];
             return GestureDetector(
@@ -1261,7 +1261,7 @@ class _ReviewsTab extends StatelessWidget {
                   : ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: reviews.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 14),
+                separatorBuilder: (_, _) => const SizedBox(height: 14),
                 itemBuilder: (context, index) {
                   final review = reviews[index];
                   return Column(

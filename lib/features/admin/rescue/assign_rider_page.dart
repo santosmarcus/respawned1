@@ -467,7 +467,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // distance-sorted Pending/Busy bucket as everyone else instead of
     // staying artificially glued to the top — that's what actually moves
     // a just-declined transporter down and out of easy re-selection.
-    final demoRiders = [if (demoA != null) demoA, if (demoB != null) demoB];
+    final demoRiders = [?demoA, ?demoB];
     final allRiders = [...demoRiders, ...realRiders];
 
     final demoAvailable = demoRiders.where((r) => r.availability == _RiderAvailability.available).toList()
@@ -1023,7 +1023,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 key: const PageStorageKey('assign_rider_list'),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: visibleRiders.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                separatorBuilder: (_, _) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
                   final rider = visibleRiders[index];
                   final isSelected = _selectedRiderUid == rider.uid;
@@ -1279,7 +1279,7 @@ class _Avatar extends StatelessWidget {
           width: 56,
           height: 56,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _placeholder(),
+          errorBuilder: (_, _, _) => _placeholder(),
         ),
       );
     }

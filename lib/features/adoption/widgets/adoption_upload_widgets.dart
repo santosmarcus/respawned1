@@ -64,7 +64,7 @@ class HomePhotosPicker extends StatelessWidget {
                 child: Image.network(
                   existingUrls[i],
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
+                  errorBuilder: (_, _, _) =>
                       const Icon(Icons.broken_image_outlined),
                 ),
                 onRemove: () => onRemoveExisting(i),

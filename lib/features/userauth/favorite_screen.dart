@@ -134,7 +134,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: _favorites.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final animal = _favorites[index];
 
@@ -187,7 +187,7 @@ class _FavoriteCard extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: animal.photoUrl != null
-                  ? Image.network(animal.photoUrl!, width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _placeholder())
+                  ? Image.network(animal.photoUrl!, width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_, _, _) => _placeholder())
                   : _placeholder(),
             ),
             const SizedBox(width: 12),

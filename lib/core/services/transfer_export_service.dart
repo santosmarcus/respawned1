@@ -303,7 +303,7 @@ class TransferExportService {
     final file = File('${dir.path}/transfer_${rescueCase.id}_${DateTime.now().millisecondsSinceEpoch}.pdf');
     await file.writeAsBytes(bytes);
     try {
-      await Share.shareXFiles([XFile(file.path)], text: 'Transfer packet — Case ${rescueCase.id}');
+      await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], text: 'Transfer packet — Case ${rescueCase.id}'));
     } finally {
       if (await file.exists()) await file.delete();
     }

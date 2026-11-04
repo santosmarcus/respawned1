@@ -34,7 +34,6 @@ class DonationDetail extends StatefulWidget {
 class _DonationDetailPageState extends State<DonationDetail> {
   bool _showFundTracking = true;
   SponsorPet? _linkedAnimal;
-  bool _animalLoading = false;
 
   @override
   void initState() {
@@ -45,18 +44,12 @@ class _DonationDetailPageState extends State<DonationDetail> {
   }
 
   Future<void> _loadLinkedAnimal() async {
-    setState(() => _animalLoading = true);
     try {
       final doc = await FirebaseFirestore.instance.collection('animals').doc(widget.donation.animalId).get();
       if (doc.exists && mounted) {
-        setState(() {
-          _linkedAnimal = SponsorPet.fromFirestore(doc);
-          _animalLoading = false;
-        });
+        setState(() => _linkedAnimal = SponsorPet.fromFirestore(doc));
       }
-    } catch (_) {
-      if (mounted) setState(() => _animalLoading = false);
-    }
+    } catch (_) {}
   }
 
   @override
@@ -583,7 +576,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
                     borderRadius: BorderRadius.circular(12), color: _selectedPayment == method ? AppColors.yellowrspwn.withValues(alpha: 0.1) : Colors.transparent,
                   ),
                   child: Row(children: [
-                    Radio<String>(value: method, groupValue: _selectedPayment, activeColor: AppColors.yellowrspwn, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, onChanged: (v) => setState(() => _selectedPayment = v)),
+                    RadioGroup<String>(groupValue: _selectedPayment, onChanged: (v) => setState(() => _selectedPayment = v), child: Radio<String>(value: method, activeColor: AppColors.yellowrspwn, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap)),
                     const SizedBox(width: 8),
                     Text(method, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                   ]),

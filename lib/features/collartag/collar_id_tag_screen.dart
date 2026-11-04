@@ -118,10 +118,10 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       final file = File('${dir.path}/collar_tag_${_tag.tagId}.png');
       await file.writeAsBytes(bytes);
 
-      await Share.shareXFiles(
-        [XFile(file.path)],
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(file.path)],
         text: 'Pet Collar ID Card — ${_tag.name}',
-      );
+      ));
     } catch (e) {
       _showSnack('Share failed: $e');
     } finally {
@@ -680,7 +680,7 @@ class _PetPhoto extends StatelessWidget {
       child = Image.network(
         imageUrl!,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) =>
+        errorBuilder: (_, _, _) =>
         const Icon(Icons.pets, size: 50, color: AppColors.textPrimary),
       );
     } else {

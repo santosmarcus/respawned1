@@ -235,7 +235,7 @@ class _PublicRescueFeedState extends State<PublicRescueFeed> {
                   key: const PageStorageKey('public_rescue_feed_list'),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: visible.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) => PublicRescueCard(
                     item: visible[i],
                     distanceKm: _distanceKmFor(visible[i]),
