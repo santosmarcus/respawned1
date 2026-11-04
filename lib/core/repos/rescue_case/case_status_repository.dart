@@ -25,15 +25,43 @@ class CaseStatusRepository {
   /// [organizationId] is the accepting organization — it becomes the case's
   /// owner (`cases/{id}.organizationId`). A referred case re-stamps it when
   /// the receiving organization accepts.
+  /// Sends a rider to confirm the reported location before acceptance.
+  /// Accept and reject remain available from the verifying state.
+  Future<void> markVerifying({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? organizationId,
+  }) async {
+    await _store.caseDoc(caseId).update({
+      'status': RescueStatus.verifying.firestoreValue,
+      // Which organization sent the rider. Not ownership: the case is still
+      // unowned until someone accepts it.
+      'verifyingOrganizationId': ?organizationId,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Rider sent to verify the location.', 'timestamp': Timestamp.now()},
+      ]),
+    });
+    await _store.addActivityLog(
+      caseId: caseId,
+      action: 'verifying',
+      actorUid: actorUid,
+      actorName: actorName,
+    );
+  }
+
   Future<void> acceptCase({
     required String caseId,
     required String actorUid,
     required String actorName,
     String? organizationId,
     bool openForTransfer = false,
+    Map<String, dynamic>? readinessSnapshot,
   }) async {
     await _store.caseDoc(caseId).update({
       if (organizationId != null && organizationId.isNotEmpty) 'organizationId': organizationId,
+      // Readiness factors and the admin's note as seen at acceptance.
+      'readinessSnapshot': ?readinessSnapshot,
       // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
       // jumping straight to awaitingAssignment — the case stays visible
       // under Rescue Review until assignClinic actually saves a clinic and

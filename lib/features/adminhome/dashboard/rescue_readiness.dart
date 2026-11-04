@@ -82,7 +82,7 @@ class RescueReadinessCard extends ConsumerWidget {
         value: occAsync,
         what: 'shelter space',
         builder: (occ) {
-          final factors = _factors(
+          final factors = RescueReadinessCard.buildFactors(
             occ: occ,
             settings: settings,
             snap: snap,
@@ -171,7 +171,9 @@ class RescueReadinessCard extends ConsumerWidget {
     );
   }
 
-  List<ReadinessFactor> _factors({
+  /// Pure: the same factors the dashboard card shows. The accept sheet calls
+  /// this too, so the snapshot saved on a case matches what the admin saw.
+  static List<ReadinessFactor> buildFactors({
     required ShelterOccupancy occ,
     required ShelterSettings settings,
     required RescueSnapshot? snap,

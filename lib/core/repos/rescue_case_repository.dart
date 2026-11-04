@@ -241,6 +241,19 @@ class RescueCaseRepository {
   double distanceKmBetween(RescueCase a, RescueCase b) =>
       duplicates.distanceKmBetween(a, b);
 
+  /// Delegates to [CaseStatusRepository.markVerifying].
+  Future<void> markVerifying({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? organizationId,
+  }) => status.markVerifying(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+    organizationId: organizationId,
+  );
+
   /// Delegates to [CaseStatusRepository.acceptCase].
   Future<void> acceptCase({
     required String caseId,
@@ -248,12 +261,14 @@ class RescueCaseRepository {
     required String actorName,
     String? organizationId,
     bool openForTransfer = false,
+    Map<String, dynamic>? readinessSnapshot,
   }) => status.acceptCase(
     caseId: caseId,
     actorUid: actorUid,
     actorName: actorName,
     organizationId: organizationId,
     openForTransfer: openForTransfer,
+    readinessSnapshot: readinessSnapshot,
   );
 
   /// Delegates to [CaseStatusRepository.rejectCase].

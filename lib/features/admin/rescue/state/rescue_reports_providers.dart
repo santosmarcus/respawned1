@@ -238,7 +238,11 @@ enum RescuePipelineTab {
   // every call for the same tab returns the exact same object — so the
   // family provider correctly resolves to one stable, reused instance.
   List<RescueStatus> get statuses => switch (this) {
-        RescuePipelineTab.review => const [RescueStatus.pendingReview, RescueStatus.accepted],
+        RescuePipelineTab.review => const [
+            RescueStatus.pendingReview,
+            RescueStatus.verifying,
+            RescueStatus.accepted,
+          ],
         RescuePipelineTab.assign => const [RescueStatus.awaitingAssignment],
         RescuePipelineTab.ongoing => const [RescueStatus.ongoing],
         RescuePipelineTab.treatment => const [RescueStatus.treatment],
