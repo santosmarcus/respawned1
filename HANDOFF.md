@@ -108,6 +108,8 @@ These commits landed before the `dev` merge and are in this branch's history. Th
 - The adoption checklist is enforced in the app only, not in Firestore rules.
 - Overdue care isn't in the dashboard's Priority actions yet, and care records don't show on the public profile.
 - `users`, `cases` and `adoptions` are still readable by any signed-in user. Admin-only case actions are enforced in the app only.
+- Reporters can only file unowned reports (no `organizationId` at creation). Storage staff access now requires an approved org and an active membership, matching Firestore.
+- The read lock on `adoptions` is still open. About 15 public read sites depend on it (animal page, activity feed, history, notifications, `hasBlockingApplication`), so it needs a server-side check first.
 - The rules in `firestore.rules` / `storage.rules` are **not deployed**. Run the tests first: `cd rules-tests && npm test` (needs Java 21; Android Studio's `jbr` works as `JAVA_HOME`).
 
 ### Remaining plan items
