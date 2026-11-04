@@ -4,11 +4,23 @@
 /// which only distinguishes account *types*, not org-level permissions.
 enum OrgRole {
   admin,
-  staff;
+  staff,
+  /// Animal care only: records doses and reads care instructions. Not staff;
+  /// firestore.rules and storage.rules keep carers out of case, record and
+  /// finance writes.
+  carer;
 
   String get label => switch (this) {
         OrgRole.admin => 'Admin',
         OrgRole.staff => 'Staff',
+        OrgRole.carer => 'Carer',
+      };
+
+  /// Title shown on member and invitation rows.
+  String get memberTitle => switch (this) {
+        OrgRole.admin => 'Organization Admin',
+        OrgRole.staff => 'Organization Member',
+        OrgRole.carer => 'Carer',
       };
 
   static OrgRole fromName(String? value) =>

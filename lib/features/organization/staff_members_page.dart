@@ -206,6 +206,12 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                     selectedColor: AppColors.yellowrspwn,
                     onSelected: (_) => setSheetState(() => role = OrgRole.staff),
                   ),
+                  ChoiceChip(
+                    label: const Text('Carer'),
+                    selected: role == OrgRole.carer,
+                    selectedColor: AppColors.yellowrspwn,
+                    onSelected: (_) => setSheetState(() => role = OrgRole.carer),
+                  ),
                 ],
               ),
               const SizedBox(height: 20),
@@ -315,7 +321,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                 for (final r in OrgRole.values)
                   RadioListTile<OrgRole>(
                     value: r,
-                    title: Text(r == OrgRole.staff ? 'Organization Member' : 'Organization Admin'),
+                    title: Text(r.memberTitle),
                   ),
               ],
             ),
@@ -605,7 +611,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                                       for (final r in OrgRole.values)
                                         RadioListTile<OrgRole>(
                                           value: r,
-                                          title: Text(r == OrgRole.staff ? 'Organization Member' : 'Organization Admin'),
+                                          title: Text(r.memberTitle),
                                         ),
                                     ],
                                   ),
@@ -794,7 +800,7 @@ class _InvitationRow extends StatelessWidget {
                   children: [
                     Text(invitation.email, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     Text(
-                        'Invited as ${invitation.role == OrgRole.staff ? 'Organization Member' : 'Organization Admin'} · Sent $sentLabel',
+                        'Invited as ${invitation.role.memberTitle} · Sent $sentLabel',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                     if (invitation.invitedByName.isNotEmpty)
                       Text('Invited by ${invitation.invitedByName}',

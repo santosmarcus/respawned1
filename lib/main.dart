@@ -17,6 +17,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
+import 'package:respawnd1/features/carer/carer_home_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
 import 'package:respawnd1/features/userauth/verify_email_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -298,7 +299,7 @@ class OrganizationRoleRouter extends StatelessWidget {
         final status = OrgVerificationStatus.fromName(data?['verificationStatus'] as String?);
         switch (status) {
           case OrgVerificationStatus.approved:
-            return const AdminHomeScreen();
+            return _ApprovedOrgHome(organizationId: organizationId);
           case OrgVerificationStatus.draft:
             return OrganizationVerificationScreen(organizationId: organizationId);
           case OrgVerificationStatus.pending:
@@ -306,6 +307,36 @@ class OrganizationRoleRouter extends StatelessWidget {
           case OrgVerificationStatus.requiresChanges:
             return OrganizationVerificationPendingPage(organizationId: organizationId);
         }
+      },
+    );
+  }
+}
+
+/// Carers (organization role `carer`) get the care-tasks screen, everyone
+/// else on an approved organization gets the admin shell.
+class _ApprovedOrgHome extends StatelessWidget {
+  final String organizationId;
+  const _ApprovedOrgHome({required this.organizationId});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const AdminHomeScreen();
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationId)
+          .collection('members')
+          .doc(uid)
+          .get(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.data?.data()?['role'] == 'carer') {
+          return CarerHomeScreen(organizationId: organizationId);
+        }
+        return const AdminHomeScreen();
       },
     );
   }
