@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -752,7 +753,15 @@ class _AdoptionAnalyticsView extends StatelessWidget {
   const _AdoptionAnalyticsView();
 
   Future<Map<String, dynamic>> _loadMetrics() async {
-    final snap = await FirebaseFirestore.instance.collection('adoptions').get();
+    // Staff may only read their own organization's applications
+    // (firestore.rules), so scope the query; platform staff with no
+    // organization read everything.
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final user = uid == null ? null : await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final orgId = user?.data()?['organizationId'] as String?;
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('adoptions');
+    if (orgId != null && orgId.isNotEmpty) query = query.where('organizationId', isEqualTo: orgId);
+    final snap = await query.get();
     final apps = snap.docs.map(AdoptionApplication.fromFirestore).toList();
 
     final total = apps.length;

@@ -104,14 +104,22 @@ class AdoptionApplicationRepository {
   /// queryValues (canonical + legacy aliases — see AdoptionStatus). Client
   /// filters (sort/animal filter) apply on top, same pattern as
   /// RescueCaseRepository.streamCasesByStatuses.
-  Stream<List<AdoptionApplication>> streamByStatuses(List<AdoptionStatus> statuses) {
+  /// Staff reads must name their organization: firestore.rules only lets
+  /// staff read their own organization's applications, so an unfiltered
+  /// query is refused. [organizationId] null = platform staff (no filter).
+  Query<Map<String, dynamic>> _scoped(String? organizationId) =>
+      organizationId == null || organizationId.isEmpty
+          ? _adoptions
+          : _adoptions.where('organizationId', isEqualTo: organizationId);
+
+  Stream<List<AdoptionApplication>> streamByStatuses(List<AdoptionStatus> statuses, {String? organizationId}) {
     final values = statuses.expand((s) => s.queryValues).toSet().toList();
     if (values.isEmpty) return Stream.value(const []);
     // Same diagnostic as RescueCaseRepository.streamCasesByStatuses — see
     // its comment for why this matters even though rules are wide open.
     debugPrint('[AdoptionApplicationRepository] projectId=${Firebase.app().options.projectId} '
         'uid=${FirebaseAuth.instance.currentUser?.uid} statuses=$values');
-    return _adoptions
+    return _scoped(organizationId)
         .where('status', whereIn: values)
         .snapshots()
         .map((snap) => snap.docs.map(AdoptionApplication.fromFirestore).toList());
@@ -120,8 +128,8 @@ class AdoptionApplicationRepository {
   /// Every application, regardless of status — used for the Adopted tab's
   /// history and for full applicant-history lookups where status shouldn't
   /// filter anything out.
-  Stream<List<AdoptionApplication>> streamAll() {
-    return _adoptions.snapshots().map((snap) => snap.docs.map(AdoptionApplication.fromFirestore).toList());
+  Stream<List<AdoptionApplication>> streamAll({String? organizationId}) {
+    return _scoped(organizationId).snapshots().map((snap) => snap.docs.map(AdoptionApplication.fromFirestore).toList());
   }
 
   /// Every application for one animal record — powers both the Animal
@@ -134,8 +142,8 @@ class AdoptionApplicationRepository {
   /// after animalRecordId started being written. Older applications for the
   /// same animal won't surface here; there is no reliable way to reverse
   /// their legacy animalId back into this animal's real id.
-  Stream<List<AdoptionApplication>> streamForAnimal(String animalRecordId) {
-    return _adoptions
+  Stream<List<AdoptionApplication>> streamForAnimal(String animalRecordId, {String? organizationId}) {
+    return _scoped(organizationId)
         .where('personal.animalRecordId', isEqualTo: animalRecordId)
         .snapshots()
         .map((snap) => snap.docs.map(AdoptionApplication.fromFirestore).toList());
@@ -143,8 +151,8 @@ class AdoptionApplicationRepository {
 
   /// Every application from one applicant — Applicant History section.
   /// Keyed by UID (Firestore field `personal.adopterId`), never by name.
-  Stream<List<AdoptionApplication>> streamForApplicant(String adopterId) {
-    return _adoptions
+  Stream<List<AdoptionApplication>> streamForApplicant(String adopterId, {String? organizationId}) {
+    return _scoped(organizationId)
         .where('personal.adopterId', isEqualTo: adopterId)
         .snapshots()
         .map((snap) => snap.docs.map(AdoptionApplication.fromFirestore).toList());

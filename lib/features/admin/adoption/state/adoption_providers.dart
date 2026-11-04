@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 
 final adoptionApplicationRepositoryProvider =
     Provider<AdoptionApplicationRepository>((ref) => AdoptionApplicationRepository());
@@ -15,7 +16,8 @@ final adoptionApplicationProvider = StreamProvider.family<AdoptionApplication?, 
 // anymore, instead of staying subscribed to Firestore forever.
 final adoptionsByStatusesProvider =
     StreamProvider.family.autoDispose<List<AdoptionApplication>, List<AdoptionStatus>>((ref, statuses) {
-  return ref.watch(adoptionApplicationRepositoryProvider).streamByStatuses(statuses);
+  final repo = ref.watch(adoptionApplicationRepositoryProvider);
+  return _withOrg(ref, (orgId) => repo.streamByStatuses(statuses, organizationId: orgId));
 });
 
 /// Stable, cached single-status lists. [adoptionsByStatusesProvider] is a
@@ -35,17 +37,30 @@ final Map<AdoptionStatus, List<AdoptionStatus>> _singleStatusLists = {
 
 List<AdoptionStatus> statusFilter(AdoptionStatus status) => _singleStatusLists[status]!;
 
-final allAdoptionsProvider = StreamProvider<List<AdoptionApplication>>((ref) {
-  return ref.watch(adoptionApplicationRepositoryProvider).streamAll();
+final allAdoptionsProvider = StreamProvider.autoDispose<List<AdoptionApplication>>((ref) {
+  final repo = ref.watch(adoptionApplicationRepositoryProvider);
+  return _withOrg(ref, (orgId) => repo.streamAll(organizationId: orgId));
 });
 
-final adoptionsForAnimalProvider = StreamProvider.family<List<AdoptionApplication>, String>((ref, animalId) {
-  return ref.watch(adoptionApplicationRepositoryProvider).streamForAnimal(animalId);
+final adoptionsForAnimalProvider =
+    StreamProvider.autoDispose.family<List<AdoptionApplication>, String>((ref, animalId) {
+  final repo = ref.watch(adoptionApplicationRepositoryProvider);
+  return _withOrg(ref, (orgId) => repo.streamForAnimal(animalId, organizationId: orgId));
 });
 
-final adoptionsForApplicantProvider = StreamProvider.family<List<AdoptionApplication>, String>((ref, adopterId) {
-  return ref.watch(adoptionApplicationRepositoryProvider).streamForApplicant(adopterId);
+final adoptionsForApplicantProvider =
+    StreamProvider.autoDispose.family<List<AdoptionApplication>, String>((ref, adopterId) {
+  final repo = ref.watch(adoptionApplicationRepositoryProvider);
+  return _withOrg(ref, (orgId) => repo.streamForApplicant(adopterId, organizationId: orgId));
 });
+
+/// Staff queries are scoped to the signed-in account's organization (see
+/// AdoptionApplicationRepository._scoped). Waits for the org id first so an
+/// unfiltered query is never sent and refused.
+Stream<T> _withOrg<T>(Ref ref, Stream<T> Function(String? orgId) build) {
+  final orgId = ref.watch(currentOrganizationIdProvider.future);
+  return Stream.fromFuture(orgId).asyncExpand(build);
+}
 
 final adoptionNotesProvider = StreamProvider.family<List<Map<String, dynamic>>, String>((ref, applicationId) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamNotes(applicationId);
