@@ -24,6 +24,7 @@ export const users = {
   ownerA: { role: 'organization', organizationId: 'orgA' },
   staffA: { role: 'organization_member', organizationId: 'orgA' },
   staffB: { role: 'organization_member', organizationId: 'orgB' },
+  carerA: { role: 'organization_member', organizationId: 'orgA' },
   draftOwner: { role: 'organization', organizationId: 'orgD' },
   reporter: { role: 'general' },
   stranger: { role: 'general' },
@@ -43,6 +44,7 @@ export async function seed(env) {
     await db.doc('organizations/orgA').set({ ownerId: 'ownerA', name: 'Org A', verificationStatus: 'approved' });
     await db.doc('organizations/orgA/members/ownerA').set({ role: 'admin', status: 'active' });
     await db.doc('organizations/orgA/members/staffA').set({ role: 'staff', status: 'active' });
+    await db.doc('organizations/orgA/members/carerA').set({ role: 'carer', status: 'active' });
     await db.doc('organizations/orgB').set({ ownerId: 'someoneElse', name: 'Org B', verificationStatus: 'approved' });
     await db.doc('organizations/orgB/members/staffB').set({ role: 'staff', status: 'active' });
     await db.doc('organizations/orgD').set({ ownerId: 'draftOwner', name: 'Org D', verificationStatus: 'draft' });

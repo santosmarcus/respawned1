@@ -123,7 +123,22 @@ service cloud.firestore {
         !exists(memberPath(orgId, request.auth.uid)) ||
         !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']) ||
         isOrgOwner(orgId)
-      );
+      ) && !isCarerMember(orgId);
+    }
+
+    // Carers (organization role 'carer') give care and record doses; they are
+    // not staff. Every staff check above excludes them, so they cannot touch
+    // cases, records, adoptions or finance.
+    function isCarerMember(orgId) {
+      return exists(memberPath(orgId, request.auth.uid)) &&
+        get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'carer' &&
+        !isOrgOwner(orgId);
+    }
+
+    function isCarerOf(orgId) {
+      return signedIn() && orgId is string && orgId != '' && myOrgId() == orgId &&
+        isCarerMember(orgId) && isOrgApproved(orgId) &&
+        !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']);
     }
 
     function isOrgApproved(orgId) {
@@ -272,8 +287,10 @@ service cloud.firestore {
     // ---- Organization invitations ------------------------------------------
 
     match /organizationInvitations/{invitationId} {
+      // Carers are members but not staff: they must not invite anyone, or
+      // they could invite an account of their own as an admin.
       function managesOrg(orgId) {
-        return isActiveMember(orgId) || isOrgOwner(orgId);
+        return (isActiveMember(orgId) && !isCarerMember(orgId)) || isOrgOwner(orgId);
       }
 
       // Staff Members is an equal-access module in this phase, so any active
@@ -752,11 +769,43 @@ service cloud.firestore {
       return canStaffRecordOf(data.get('organizationId', ''));
     }
 
+    // Adoption readiness gate: an animal only becomes adoptable with the
+    // confirmed checklist (adoptionReadiness, written by the readiness
+    // dialog). Re-saving an already adoptable animal, or releasing a
+    // reservation back to adoptable, doesn't need it again.
+    function readinessOnCreateOk() {
+      return request.resource.data.get('adoptionStatus', '') != 'adoptable' ||
+        request.resource.data.get('adoptionReadiness', null) is map;
+    }
+
+    function readinessOnUpdateOk() {
+      return request.resource.data.get('adoptionStatus', '') != 'adoptable' ||
+        resource.data.get('adoptionStatus', '') in ['adoptable', 'reserved'] ||
+        request.resource.data.get('adoptionReadiness', null) is map;
+    }
+
     match /animals/{animalId} {
       allow read: if signedIn();
-      allow create: if canStaffRecordOf(request.resource.data.get('organizationId', ''));
-      allow update: if canStaffAnimal(resource.data) && orgStampOk();
+      allow create: if canStaffRecordOf(request.resource.data.get('organizationId', '')) && readinessOnCreateOk();
+      allow update: if canStaffAnimal(resource.data) && orgStampOk() && readinessOnUpdateOk();
       allow delete: if isPlatformStaff();
+
+      // Dose records: carers of the owning org record the doses they give
+      // (givenBy must be themselves); staff can record any dose.
+      match /medicationDoses/{doseId} {
+        allow read: if signedIn();
+        allow create: if canStaffAnimal(get(animalPath(animalId)).data) || (
+          isCarerOf(get(animalPath(animalId)).data.get('organizationId', '')) &&
+          request.resource.data.get('givenBy', '') == request.auth.uid
+        );
+        // A carer may only rewrite their own record, never another carer's.
+        allow update: if canStaffAnimal(get(animalPath(animalId)).data) || (
+          isCarerOf(get(animalPath(animalId)).data.get('organizationId', '')) &&
+          resource.data.get('givenBy', '') == request.auth.uid &&
+          request.resource.data.get('givenBy', '') == request.auth.uid
+        );
+        allow delete: if false;
+      }
 
       match /{sub}/{docId=**} {
         allow read: if signedIn();
@@ -766,10 +815,11 @@ service cloud.firestore {
 
     // ---- Adoption applications ---------------------------------------------
     //
-    // Reads stay open to signed-in users only because
-    // AdoptionApplicationService.hasBlockingApplication queries every
-    // application for an animal (follow-up: move that check server-side and
-    // restrict reads to the adopter and staff). The adopter creates and
+    // Reads: the adopter, the owning organization's staff, and platform
+    // staff. The cross-applicant "is this animal taken" check runs in the
+    // hasBlockingAdoption callable (functions/adoptions.js). Staff queries
+    // must filter on organizationId so the rule can be proven for every
+    // result (AdoptionApplicationRepository._scoped). The adopter creates and
     // updates their own application (appointments, withdrawal, delivery
     // reschedules, return requests, follow-up check-ins); the owning
     // organization's staff manage the rest.
@@ -802,7 +852,16 @@ service cloud.firestore {
           (!changedAny(['status']) || request.resource.data.status == 'withdrawn');
       }
 
-      allow read: if signedIn();
+      // Direct field access (not .get) so queries on personal.adopterId can
+      // be proven against this rule.
+      // No "unowned" staff branch here: an application without an
+      // organizationId is readable only by its adopter and platform staff,
+      // so an unfiltered staff query can never be proven and is refused.
+      allow read: if signedIn() && (
+        resource.data.personal.adopterId == request.auth.uid ||
+        isPlatformStaff() ||
+        isApprovedStaffOf(resource.data.organizationId)
+      );
       allow create: if signedIn() &&
         isAdopterOf(request.resource.data) &&
         request.resource.data.get('status', '') == 'pending' &&
@@ -821,6 +880,30 @@ service cloud.firestore {
       }
     }
 
+    // ---- Volunteer applications ---------------------------------------------
+    //
+    // volunteerApplications/{uid}: the applicant writes their own, always as
+    // pending (an edit goes back for review) and never the review fields.
+    // Approved organization staff (not carers) read and review them.
+    match /volunteerApplications/{uid} {
+      function applicantWriteOk() {
+        return isSelf(uid) &&
+          request.resource.data.get('uid', '') == uid &&
+          request.resource.data.get('status', '') == 'pending' &&
+          !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
+      }
+
+      allow read: if isSelf(uid) || isOrgStaff();
+      allow create: if applicantWriteOk();
+      allow update: if applicantWriteOk() || (
+        isOrgStaff() &&
+        changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
+        request.resource.data.status in ['approved', 'rejected'] &&
+        request.resource.data.get('reviewedBy', '') == request.auth.uid
+      );
+      allow delete: if false;
+    }
+
     // ---- Staff dashboards (collection-group queries) -----------------------
     //
     // The dashboard, analytics and audit pages query these subcollections
@@ -833,6 +916,11 @@ service cloud.firestore {
     }
 
     match /{path=**}/vaccinations/{docId} {
+      allow read: if isOrgStaff();
+    }
+
+    // Dashboard: overdue deworming, flea & tick and vet checkups.
+    match /{path=**}/careRecords/{docId} {
       allow read: if isOrgStaff();
     }
 
@@ -899,7 +987,7 @@ service cloud.firestore {
         'facebookConnectRequests', 'facebookShares',
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
-        'users', 'cases', 'animals', 'adoptions'
+        'users', 'cases', 'animals', 'adoptions', 'volunteerApplications'
       ]);
     }
   }

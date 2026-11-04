@@ -58,6 +58,19 @@ describe('storage', () => {
     await assertSucceeds(upload('ownerA', 'cases/ownedA/expenseReceipts/2.jpg'));
   });
 
+  test('carers add dose media for their org only; they are not staff', async () => {
+    await assertSucceeds(upload('carerA', 'animalRecords/animalA/doseMedia/d1.mp4'));
+    await assertFails(upload('stranger', 'animalRecords/animalA/doseMedia/d1.mp4'));
+    await assertFails(upload('carerA', 'receipts/1.jpg'));
+    await assertFails(upload('carerA', 'animalRecords/animalA/notes.jpg'));
+  });
+
+  test('a removed carer cannot add dose media', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('organizations/orgA/members/carerA').update({ status: 'removed' }));
+    await assertFails(upload('carerA', 'animalRecords/animalA/doseMedia/d2.mp4'));
+  });
+
   test('unlisted paths are denied', async () => {
     await assertFails(upload('admin', 'anything/else.jpg'));
   });

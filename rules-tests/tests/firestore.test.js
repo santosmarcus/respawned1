@@ -191,6 +191,28 @@ describe('animals', () => {
   });
 });
 
+describe('adoption readiness gate', () => {
+  const readiness = { confirmedBy: 'staffA', items: ['health'] };
+
+  test('a new adoptable record needs the readiness checklist', async () => {
+    await assertFails(as('staffA').doc('animals/n1').set({ organizationId: 'orgA', adoptionStatus: 'adoptable' }));
+    await assertSucceeds(as('staffA').doc('animals/n2').set({ organizationId: 'orgA', adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
+    await assertSucceeds(as('staffA').doc('animals/n3').set({ organizationId: 'orgA', adoptionStatus: 'not_ready' }));
+  });
+
+  test('flipping not_ready to adoptable needs it; re-saves and releases do not', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('animals/nr').set({ organizationId: 'orgA', adoptionStatus: 'not_ready' });
+      await db.doc('animals/res').set({ organizationId: 'orgA', adoptionStatus: 'reserved' });
+    });
+    await assertFails(as('staffA').doc('animals/nr').update({ adoptionStatus: 'adoptable' }));
+    await assertSucceeds(as('staffA').doc('animals/nr').update({ adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
+    await assertSucceeds(as('staffA').doc('animals/animalA').update({ name: 'Mochi II' }));
+    await assertSucceeds(as('staffA').doc('animals/res').update({ adoptionStatus: 'adoptable' }));
+  });
+});
+
 describe('adoptions', () => {
   test('adopters submit pending applications for the right organization', async () => {
     const app = (data) => as('adopter').collection('adoptions').add({
@@ -212,9 +234,90 @@ describe('adoptions', () => {
     await assertSucceeds(as('staffA').doc('adoptions/appA').update({ status: 'approved' }));
   });
 
+  test('applications are readable by the adopter and the owning org only', async () => {
+    await assertSucceeds(as('adopter').doc('adoptions/appA').get());
+    await assertSucceeds(as('staffA').doc('adoptions/appA').get());
+    await assertSucceeds(as('admin').doc('adoptions/appA').get());
+    await assertFails(as('stranger').doc('adoptions/appA').get());
+    await assertFails(as('staffB').doc('adoptions/appA').get());
+    await assertFails(as('carerA').doc('adoptions/appA').get());
+  });
+
+  test('adoption queries must be scoped to the adopter or the organization', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('adoptions/appB').set({
+      organizationId: 'orgB', status: 'pending', personal: { adopterId: 'stranger', animalRecordId: 'animalB' },
+    }));
+    await assertSucceeds(as('adopter').collection('adoptions').where('personal.adopterId', '==', 'adopter').get());
+    await assertSucceeds(as('staffA').collection('adoptions').where('organizationId', '==', 'orgA').get());
+    await assertSucceeds(as('staffA').collection('adoptions')
+      .where('organizationId', '==', 'orgA').where('status', 'in', ['pending', 'approved']).get());
+    await assertSucceeds(as('admin').collection('adoptions').get());
+    await assertFails(as('staffA').collection('adoptions').get());
+    await assertFails(as('stranger').collection('adoptions').where('personal.animalRecordId', '==', 'animalA').get());
+    await assertFails(as('staffB').collection('adoptions').where('organizationId', '==', 'orgA').get());
+  });
+
   test('follow-up check-ins: adopter and staff only', async () => {
     await assertSucceeds(as('adopter').doc('adoptions/appA/checkins/c1').set({ howIsPetDoing: 'great' }));
     await assertFails(as('stranger').doc('adoptions/appA/checkins/c1').set({ howIsPetDoing: 'bad' }));
+  });
+});
+
+describe('carers', () => {
+  test('a carer records a dose they gave, not one for someone else', async () => {
+    const dose = (givenBy) => ({ planId: 'p1', animalId: 'animalA', slot: 1, day: new Date(), givenBy });
+    await assertSucceeds(as('carerA').doc('animals/animalA/medicationDoses/d1').set(dose('carerA')));
+    await assertFails(as('carerA').doc('animals/animalA/medicationDoses/d2').set(dose('ownerA')));
+  });
+
+  test('staff may record doses for the org; strangers may not', async () => {
+    await assertSucceeds(as('staffA').doc('animals/animalA/medicationDoses/d3').set({ planId: 'p1', givenBy: 'carerA' }));
+    await assertFails(as('stranger').doc('animals/animalA/medicationDoses/d4').set({ planId: 'p1', givenBy: 'stranger' }));
+  });
+
+  test('carers cannot plan medication or edit animal records', async () => {
+    await assertFails(as('carerA').doc('animals/animalA/medications/p1').set({ drug: 'X', animalId: 'animalA' }));
+    await assertFails(as('carerA').doc('animals/animalA').update({ name: 'Renamed' }));
+    await assertSucceeds(as('staffA').doc('animals/animalA/medications/p1').set({ drug: 'X', animalId: 'animalA' }));
+  });
+
+  test("a carer cannot overwrite another carer's dose record", async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/animalA/medicationDoses/taken').set({ planId: 'p1', givenBy: 'otherCarer' }));
+    await assertFails(as('carerA').doc('animals/animalA/medicationDoses/taken').set({ planId: 'p1', givenBy: 'carerA' }));
+  });
+
+  test('carers cannot invite anyone', async () => {
+    await assertFails(as('carerA').collection('organizationInvitations').add({
+      organizationId: 'orgA', normalizedEmail: 'x@example.com', email: 'x@example.com', status: 'pending', role: 'admin',
+    }));
+  });
+
+  test('carers are not staff: no case stamping or org changes', async () => {
+    await assertFails(as('carerA').doc('cases/ownedA').update({ status: 'completed' }));
+    await assertFails(as('carerA').doc('cases/pending1').update({ status: 'accepted_pending_clinic', organizationId: 'orgA' }));
+    await assertFails(as('carerA').doc('organizations/orgA').update({ shelterName: 'Hijacked' }));
+  });
+});
+
+describe('volunteer applications', () => {
+  const app = (uid, extra = {}) => ({ uid, name: 'R', phone: '0917', categories: ['event'], availability: 'weekends', status: 'pending', ...extra });
+
+  test('applicants submit their own, always pending, never self-approved', async () => {
+    await assertSucceeds(as('stranger').doc('volunteerApplications/stranger').set(app('stranger')));
+    await assertFails(as('stranger').doc('volunteerApplications/reporter').set(app('reporter')));
+    await assertFails(as('stranger').doc('volunteerApplications/stranger').set(app('stranger', { status: 'approved' })));
+    await assertFails(as('stranger').doc('volunteerApplications/stranger').set(app('stranger', { reviewedBy: 'stranger' })));
+  });
+
+  test('approved staff review; carers and strangers cannot read or review', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('volunteerApplications/stranger').set(app('stranger')));
+    await assertFails(as('reporter').doc('volunteerApplications/stranger').get());
+    await assertFails(as('carerA').doc('volunteerApplications/stranger').get());
+    await assertSucceeds(as('staffA').doc('volunteerApplications/stranger').get());
+    await assertFails(as('carerA').doc('volunteerApplications/stranger').update({ status: 'approved', reviewedBy: 'carerA' }));
+    await assertFails(as('staffA').doc('volunteerApplications/stranger').update({ status: 'approved', reviewedBy: 'someoneElse' }));
+    await assertSucceeds(as('staffA').doc('volunteerApplications/stranger').update({ status: 'approved', reviewedBy: 'staffA' }));
   });
 });
 
