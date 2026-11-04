@@ -23,6 +23,7 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.dart';
+import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
 
 const String _kNA = 'Not provided';
 
@@ -51,6 +52,8 @@ class AnimalMedicalTab extends ConsumerWidget {
           VaccineSection(animal: animal),
           const SizedBox(height: 20),
           PreventiveCareSection(animal: animal),
+          const SizedBox(height: 20),
+          MedicationSection(animal: animal),
           const SizedBox(height: 8),
           // Backfill for animals whose paper health list is out of date.
           Align(

@@ -1097,3 +1097,6 @@ Object.assign(exports, require('./paymongo'));
 
 // Admin campaign/sponsorship management, allocations & reallocation — see functions/campaigns.js.
 Object.assign(exports, require('./campaigns'));
+
+// Cross-applicant adoption checks (reads the client can't do) — see functions/adoptions.js.
+Object.assign(exports, require('./adoptions'));

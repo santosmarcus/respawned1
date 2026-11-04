@@ -71,9 +71,31 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
   String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  /// Sends a rider to confirm the location before acceptance (P1-7).
+  Future<void> _markVerifying(RescueCase c) async {
+    setState(() => _isLoading = true);
+    try {
+      final organizationId = await ref.read(currentOrganizationIdProvider.future);
+      await ref.read(rescueCaseRepositoryProvider).markVerifying(
+            caseId: c.id,
+            actorUid: _actorUid,
+            actorName: _actorName,
+            organizationId: organizationId,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update case: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _acceptCase(RescueCase c) async {
-    final openForTransfer = await showAcceptCaseSheet(context);
-    if (openForTransfer == null || !mounted) return;
+    final result = await showAcceptCaseSheet(context);
+    if (result == null || !mounted) return;
 
     setState(() => _isLoading = true);
     try {
@@ -85,7 +107,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             actorUid: _actorUid,
             actorName: _actorName,
             organizationId: organizationId,
-            openForTransfer: openForTransfer,
+            openForTransfer: result.openForTransfer,
+            readinessSnapshot: result.readinessSnapshot,
           );
     } catch (e) {
       if (mounted) {
@@ -963,7 +986,23 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
             const SizedBox(height: 24),
 
-            if (c.status == RescueStatus.pendingReview) ...[
+            if (c.status == RescueStatus.pendingReview || c.status == RescueStatus.verifying) ...[
+              if (c.status == RescueStatus.pendingReview) ...[
+                OutlinedButton.icon(
+                  onPressed: _isLoading ? null : () => _markVerifying(c),
+                  icon: const Icon(Icons.search, size: 18),
+                  label: Text(
+                    'Send rider to verify',
+                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.slaterspwn),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               Row(
                 children: [
                   Expanded(

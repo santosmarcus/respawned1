@@ -41,7 +41,11 @@ enum RescueStatus {
   unableToLocate,
   awaitingReporterResponse,
   pickupUnsuccessful,
-  needsSpecializedAssistance;
+  needsSpecializedAssistance,
+  // A rider has been sent to confirm the animal's location and condition
+  // before the case is accepted (paper: report verification). Not terminal;
+  // not auto-expired, since staff drive the next step.
+  verifying;
 
   /// The canonical string this module writes to Firestore for this status.
   ///
@@ -92,6 +96,7 @@ enum RescueStatus {
     RescueStatus.awaitingReporterResponse => 'awaiting_reporter_response',
     RescueStatus.pickupUnsuccessful => 'pickup_attempt_unsuccessful',
     RescueStatus.needsSpecializedAssistance => 'needs_specialized_assistance',
+    RescueStatus.verifying => 'verifying',
   };
 
   /// Every raw Firestore string that should be treated as this status when
@@ -138,6 +143,7 @@ enum RescueStatus {
     RescueStatus.awaitingReporterResponse: ['awaiting_reporter_response'],
     RescueStatus.pickupUnsuccessful: ['pickup_attempt_unsuccessful'],
     RescueStatus.needsSpecializedAssistance: ['needs_specialized_assistance'],
+    RescueStatus.verifying: ['verifying'],
   };
 
   static RescueStatus fromFirestoreValue(String? value) {
@@ -169,6 +175,7 @@ enum RescueStatus {
     RescueStatus.awaitingReporterResponse => 'Awaiting Reporter Response',
     RescueStatus.pickupUnsuccessful => 'Pickup Attempt Unsuccessful',
     RescueStatus.needsSpecializedAssistance => 'Needs Specialized Assistance',
+    RescueStatus.verifying => 'Verifying Location',
   };
 
   Color get color => switch (this) {
@@ -188,6 +195,7 @@ enum RescueStatus {
     RescueStatus.awaitingReporterResponse => const Color(0xFFE0A030),
     RescueStatus.pickupUnsuccessful => const Color(0xFFE0A030),
     RescueStatus.needsSpecializedAssistance => const Color(0xFFE05353),
+    RescueStatus.verifying => AppColors.tearspwn,
   };
 
   /// True once the case has left the active triage/rescue pipeline.

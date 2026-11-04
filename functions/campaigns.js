@@ -172,6 +172,11 @@ async function loadActor(request, {finance = false} = {}) {
     const m = await db.collection('organizations').doc(organizationId).collection('members').doc(uid).get();
     memberRole = m.exists ? m.data().role : null;
   }
+  // Carers give animal care only (firestore.rules isCarerMember): no listings
+  // or finance, whatever their account role says.
+  if (memberRole === 'carer') {
+    throw new HttpsError('permission-denied', 'Carers cannot manage campaigns or donations.');
+  }
   const canManageFinances = role === 'admin' || memberRole === 'admin';
   if (finance && !canManageFinances) {
     throw new HttpsError('permission-denied', 'Only financial administrators can do this.');

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
+import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/currency.dart';
@@ -95,6 +97,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   final payments = canManageFinances ? ref.watch(paymentAttemptsProvider) : null;
   final records = ref.watch(allAnimalRecordsProvider);
   final vaccinations = ref.watch(vaccinationsByAnimalProvider);
+  final careRecords = ref.watch(careRecordsByAnimalProvider);
 
   final alerts = <DashAlert>[];
   final failed = <String>[];
@@ -113,6 +116,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   track(approvedApps, 'approved adoptions');
   track(adoptedBucket, 'adoption returns');
   track(overdueFollowUps, 'post-adoption follow-ups');
+  track(careRecords, 'preventive care records');
   if (needsDecision != null) track(needsDecision, 'campaign decisions');
 
   String caseSubject(RescueCase c) => [
@@ -439,6 +443,41 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
           action: 'Schedule the vaccine and record it',
           area: AlertArea.care,
           open: (context, _) => overdueVax.length == 1 ? openAnimalRecord(context, a) : openAnimalRecords(context),
+        ),
+      );
+    }
+  }
+
+  // ── Care: overdue deworming / flea & tick / vet checkups ──────────────
+  final care = careRecords.asData?.value;
+  if (care != null) {
+    final overdueCare = <({AnimalRecord animal, CareRecord record})>[];
+    for (final a in inCare) {
+      for (final r in CareRecord.latestByType(care[a.id] ?? const <CareRecord>[]).values) {
+        if (r.status == VaccineStatus.overdue) overdueCare.add((animal: a, record: r));
+      }
+    }
+    if (overdueCare.isNotEmpty) {
+      final first = overdueCare.first;
+      final animals = overdueCare.map((e) => e.animal.id).toSet();
+      alerts.add(
+        DashAlert(
+          severity: DashSeverity.warning,
+          icon: Icons.healing_outlined,
+          title: overdueCare.length == 1
+              ? '${first.record.type.label} overdue'
+              : '${overdueCare.length} overdue care items across ${plural(animals.length, 'animal')}',
+          status: 'Past the recorded next-due date',
+          subject: overdueCare.length == 1
+              ? (first.animal.name.isEmpty ? first.animal.species : first.animal.name)
+              : null,
+          timing: overdueCare.length == 1 && first.record.nextDueDate != null
+              ? 'Overdue since ${shortDate(first.record.nextDueDate!)}'
+              : null,
+          action: 'Give the care and record it on the Medical tab',
+          area: AlertArea.care,
+          open: (context, _) =>
+              animals.length == 1 ? openAnimalRecord(context, first.animal) : openAnimalRecords(context),
         ),
       );
     }

@@ -6,6 +6,7 @@
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
@@ -55,37 +56,19 @@ class AdoptionApplicationService {
       _adoptions.doc(id).snapshots();
 
   /// True when [animal] already has an application that isn't rejected or
-  /// withdrawn. Checked by both keys: personal.animalId (legacy — matches
-  /// older applications written before animalRecordId existed) and
-  /// personal.animalRecordId (the real animal doc id, reliable for every
-  /// application submitted after that fix). Neither alone is guaranteed to
-  /// see every prior application for this exact animal.
+  /// withdrawn, by either key (legacy personal.animalId, or
+  /// personal.animalRecordId). Other people's applications aren't readable
+  /// from the client (firestore.rules), so the hasBlockingAdoption callable
+  /// (functions/adoptions.js) checks and returns only a yes/no.
   Future<bool> hasBlockingApplication(Animal animal) async {
-    final legacyExisting = _adoptions
-        .where('personal.animalId', isEqualTo: '${animal.id}')
-        .get();
-    final byRecordIdExisting = animal.animalRecordId.isEmpty
-        ? Future.value(null)
-        : _adoptions
-              .where(
-                'personal.animalRecordId',
-                isEqualTo: animal.animalRecordId,
-              )
-              .get();
-    final existingResults = await Future.wait([
-      legacyExisting,
-      byRecordIdExisting,
-    ]);
-
-    bool blocks(QuerySnapshot<Map<String, dynamic>>? snap) {
-      if (snap == null) return false;
-      return snap.docs.any((doc) {
-        final status = doc.data()['status'] as String? ?? '';
-        return status != 'rejected' && status != 'withdrawn';
-      });
-    }
-
-    return blocks(existingResults[0]) || blocks(existingResults[1]);
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('hasBlockingAdoption')
+        .call<Object?>({
+      'animalId': '${animal.id}',
+      'animalRecordId': animal.animalRecordId,
+    });
+    final data = result.data;
+    return data is Map && data['blocked'] == true;
   }
 
   //upload helper

@@ -95,7 +95,8 @@ String _publicStatusLabel(AnimalRecord r) {
   return 'Not Available';
 }
 
-bool isPubliclyVisible(AnimalRecord a) => !a.archived && !a.isDeceased && (a.isAdoptable || a.isReserved);
+bool isPubliclyVisible(AnimalRecord a) =>
+    !a.archived && !a.publicProfileHidden && !a.isDeceased && (a.isAdoptable || a.isReserved);
 
 List<String> healthTagsOf(AnimalRecord r) => [
   if (r.vaccinated) 'Vaccinated',

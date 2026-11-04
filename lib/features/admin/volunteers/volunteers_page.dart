@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/volunteers/volunteer_applications_page.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
 /// Sort options for the Volunteers directory. Default is [availability]
@@ -141,6 +142,17 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
           ),
         ),
         title: Text(_title, style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+        actions: [
+          if (!widget.transporters)
+            IconButton(
+              tooltip: 'Volunteer applications',
+              icon: const Icon(Icons.assignment_ind_outlined, color: AppColors.background),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const VolunteerApplicationsPage()),
+              ),
+            ),
+        ],
       ),
       body: Column(
         children: [

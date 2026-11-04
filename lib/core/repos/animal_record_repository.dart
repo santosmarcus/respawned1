@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -371,6 +373,50 @@ class AnimalRecordRepository {
   }
 
   // ---- Management tab ---------------------------------------------------
+
+  /// Assigns a QR tag id to the animal if it has none, and returns it
+  /// (P3-23). Ids are random, so they can't be guessed from the animal id.
+  Future<String> ensureQrTag({
+    required String animalId,
+    required String? existing,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
+    if (existing != null && existing.isNotEmpty) return existing;
+    final rng = math.Random.secure();
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final tag = List.generate(8, (_) => alphabet[rng.nextInt(alphabet.length)]).join();
+    await _animalDoc(animalId).update({'qrTagId': tag, 'updatedAt': FieldValue.serverTimestamp()});
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'qrAssigned',
+      action: 'QR tag assigned',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+    );
+    return tag;
+  }
+
+  /// Hides or shows the animal on public adoption listings (P2-12).
+  Future<void> setPublicProfileHidden({
+    required String animalId,
+    required bool hidden,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
+    await _animalDoc(animalId).update({'publicProfileHidden': hidden, 'updatedAt': FieldValue.serverTimestamp()});
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: hidden ? 'publicHidden' : 'publicShown',
+      action: hidden ? 'Hidden from public profile' : 'Shown on public profile',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+    );
+  }
 
   Future<void> setArchived({
     required String animalId,
