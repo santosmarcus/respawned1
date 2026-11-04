@@ -253,7 +253,7 @@ class _OrganizationsListPageState extends State<OrganizationsListPage> {
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   itemCount: orgs.length,
-                  separatorBuilder: (_, __) =>
+                  separatorBuilder: (_, _) =>
                   const SizedBox(height: 16),
                   itemBuilder: (context, index) {
                     final org = orgs[index];

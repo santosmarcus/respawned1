@@ -75,7 +75,8 @@ class SurrenderFields extends StatelessWidget {
         RescueFieldLabel('Why are you surrendering this pet?', required: true),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-          value: form.surrenderReason,
+          key: ValueKey(form.surrenderReason),
+          initialValue: form.surrenderReason,
           isDense: true,
           isExpanded: true,
           decoration: InputDecoration(
@@ -151,7 +152,8 @@ class SurrenderFields extends StatelessWidget {
         RescueFieldLabel('Where did you acquire this pet?', required: true),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
-          value: form.petAcquisitionSource,
+          key: ValueKey(form.petAcquisitionSource),
+          initialValue: form.petAcquisitionSource,
           isDense: true,
           isExpanded: true,
           decoration: InputDecoration(

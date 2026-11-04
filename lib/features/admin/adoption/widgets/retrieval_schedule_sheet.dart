@@ -76,10 +76,12 @@ class _RetrievalScheduleSheetState extends State<_RetrievalScheduleSheet> {
       initialDate: _date,
       initialTime: _time,
     );
-    if (result != null) setState(() {
+    if (result != null) {
+      setState(() {
       _date = result.date;
       _time = result.time;
     });
+    }
   }
 
   DateTime? get _combinedDateTime {

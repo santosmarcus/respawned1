@@ -306,17 +306,24 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
         backgroundColor: AppColors.background,
         title: Text('Edit Role', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
         children: [
-          for (final r in OrgRole.values)
-            RadioListTile<OrgRole>(
-              value: r,
-              groupValue: current,
-              title: Text(r == OrgRole.staff ? 'Organization Member' : 'Organization Admin'),
-              onChanged: (v) => Navigator.pop(ctx, v),
+          RadioGroup<OrgRole>(
+            groupValue: current,
+            onChanged: (v) => Navigator.pop(ctx, v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final r in OrgRole.values)
+                  RadioListTile<OrgRole>(
+                    value: r,
+                    title: Text(r == OrgRole.staff ? 'Organization Member' : 'Organization Admin'),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );
-    if (role == null || role == current) return;
+    if (role == null || role == current || !mounted) return;
     // Demoting the organization's only Admin away from Admin would leave it
     // with none — same protection _removeMember already has for outright
     // removal, applied here too since a role change can cause the exact
@@ -363,6 +370,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
       _snack('This is the only Admin on this organization and cannot be removed.', error: true);
       return;
     }
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -588,13 +596,20 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                               backgroundColor: AppColors.background,
                               title: const Text('Change Role'),
                               children: [
-                                for (final r in OrgRole.values)
-                                  RadioListTile<OrgRole>(
-                                    value: r,
-                                    groupValue: invite.role,
-                                    title: Text(r == OrgRole.staff ? 'Organization Member' : 'Organization Admin'),
-                                    onChanged: (v) => Navigator.pop(ctx, v),
+                                RadioGroup<OrgRole>(
+                                  groupValue: invite.role,
+                                  onChanged: (v) => Navigator.pop(ctx, v),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      for (final r in OrgRole.values)
+                                        RadioListTile<OrgRole>(
+                                          value: r,
+                                          title: Text(r == OrgRole.staff ? 'Organization Member' : 'Organization Admin'),
+                                        ),
+                                    ],
                                   ),
+                                ),
                               ],
                             ),
                           );

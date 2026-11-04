@@ -212,7 +212,7 @@ class _VolunteerPageState extends State<VolunteerPage> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                Container(
+                SizedBox(
                   width: 44,
                   height: 44,
                   child: const Icon(Icons.tune,

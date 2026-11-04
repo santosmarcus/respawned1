@@ -85,7 +85,7 @@ class CaseStatusRepository {
       actorName: actorName,
       details: {
         'reason': reason.name,
-        if (otherText != null) 'otherText': otherText,
+        'otherText': ?otherText,
       },
     );
   }
@@ -115,11 +115,10 @@ class CaseStatusRepository {
   }) async {
     await _store.caseDoc(caseId).update({
       'ownershipStatus': ownershipStatus,
-      if (ownedAnimalCategory != null)
-        'ownedAnimalCategory': ownedAnimalCategory,
-      if (ownerName != null) 'ownerName': ownerName,
-      if (ownerContact != null) 'ownerContact': ownerContact,
-      if (ownershipNotes != null) 'ownershipNotes': ownershipNotes,
+      'ownedAnimalCategory': ?ownedAnimalCategory,
+      'ownerName': ?ownerName,
+      'ownerContact': ?ownerContact,
+      'ownershipNotes': ?ownershipNotes,
       if (ownershipStatus == 'Owner identified')
         'ownerConfirmedAt': Timestamp.now(),
       'statusHistory': FieldValue.arrayUnion([
@@ -170,12 +169,14 @@ class CaseStatusRepository {
       if (!caseSnap.exists) throw StateError('This case no longer exists.');
       final data = reportSnap.data()!;
       final caseData = caseSnap.data()!;
-      if (data['type'] != 'moved')
+      if (data['type'] != 'moved') {
         throw StateError(
           'Only an "Animal moved" report can update the case location.',
         );
-      if (data['approvalStatus'] != 'pending')
+      }
+      if (data['approvalStatus'] != 'pending') {
         throw StateError('This location update has already been reviewed.');
+      }
 
       final newAddress = data['newAddress'] as String?;
       final newLat = (data['newLat'] as num?)?.toDouble();
@@ -263,7 +264,7 @@ class CaseStatusRepository {
       action: 'community_location_rejected',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'reportId': reportId, if (reason != null) 'reason': reason},
+      details: {'reportId': reportId, 'reason': ?reason},
     );
   }
 
@@ -301,7 +302,7 @@ class CaseStatusRepository {
       tx.update(caseRef, {
         'lat': lat,
         'lng': lng,
-        if (address != null) 'address': address,
+        'address': ?address,
         'previousLocations': previous,
         'statusHistory': FieldValue.arrayUnion([
           {'status': 'Rescue location updated.', 'timestamp': Timestamp.now()},
@@ -356,8 +357,8 @@ class CaseStatusRepository {
         'deceasedAt': Timestamp.now(),
         'deceasedReason': reason,
         'deceasedConfirmedBy': confirmedBy,
-        if (notes != null) 'deceasedNotes': notes,
-        if (photoUrl != null) 'deceasedPhotoUrl': photoUrl,
+        'deceasedNotes': ?notes,
+        'deceasedPhotoUrl': ?photoUrl,
       };
       final animalLabel =
           (animals[animalIndex]['species'] as String?) ?? 'Animal';
@@ -568,22 +569,19 @@ class CaseStatusRepository {
         'closedByName': actorName,
         'closedFromStatus': closedFromStatus,
         ...closureMeta,
-        if (lastKnownLocation != null)
-          'closureLastKnownLocation': lastKnownLocation,
-        if (clinicUnavailableDetails != null)
-          'closureClinicDetails': clinicUnavailableDetails,
+        'closureLastKnownLocation': ?lastKnownLocation,
+        'closureClinicDetails': ?clinicUnavailableDetails,
         // Read by assign_rider_page.dart / rescue_detail_page.dart so the
         // requested service type actually shows up wherever the case is
         // presented as a service request afterward, instead of only living
         // inside the free-text closureDetails.
-        if (serviceTypeNeeded != null) 'closureServiceType': serviceTypeNeeded,
+        'closureServiceType': ?serviceTypeNeeded,
         // Informational/audit only for a non-death reason applied to a
         // subset of animals — this codebase has no per-animal field for
         // "this specific animal's duplicate-report/owner-reclaimed/etc.
         // story ended" the way it does for death, so the case itself still
         // closes as a whole for every reason other than isDeathReason.
-        if (animalIndexes != null)
-          'closureAppliesToAnimalIndexes': animalIndexes,
+        'closureAppliesToAnimalIndexes': ?animalIndexes,
         'statusHistory': FieldValue.arrayUnion([
           {
             'status': 'Case closed: ${reason.label}.',
@@ -602,7 +600,7 @@ class CaseStatusRepository {
       details: {
         'reason': reason.name,
         'closedFromStatus': closedFromStatus,
-        if (animalIndexes != null) 'animalIndexes': animalIndexes,
+        'animalIndexes': ?animalIndexes,
       },
     );
     return wholeCaseClosed;

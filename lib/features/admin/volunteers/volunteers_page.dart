@@ -100,15 +100,21 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
             const SizedBox(height: 16),
             Text('Sort $_title', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
             const SizedBox(height: 12),
-            for (final option in VolunteerSortOption.values)
-              RadioListTile<VolunteerSortOption>(
-                contentPadding: EdgeInsets.zero,
-                value: option,
-                groupValue: _sort,
-                activeColor: AppColors.textPrimary,
-                title: Text(option.label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-                onChanged: (v) => Navigator.pop(context, v),
+            RadioGroup<VolunteerSortOption>(
+              groupValue: _sort,
+              onChanged: (v) => Navigator.pop(context, v),
+              child: Column(
+                children: [
+                  for (final option in VolunteerSortOption.values)
+                    RadioListTile<VolunteerSortOption>(
+                      contentPadding: EdgeInsets.zero,
+                      value: option,
+                      activeColor: AppColors.textPrimary,
+                      title: Text(option.label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),
@@ -221,7 +227,7 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   itemCount: list.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) => _VolunteerCard(volunteer: list[i]),
                 );
               },

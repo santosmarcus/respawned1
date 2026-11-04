@@ -64,8 +64,10 @@ class _UserProfileState extends State<UserProfile> {
         _phone = _user?.phoneNumber ?? _user?.email ?? '';
       });
     } finally{
-      if(mounted) setState(() =>
+      if(mounted) {
+        setState(() =>
       _loading = false);
+      }
     }
   }
 
@@ -165,7 +167,7 @@ class _UserProfileState extends State<UserProfile> {
                     clipBehavior: Clip.antiAlias,
                     child: _photoUrl != null
                         ? Image.network(_photoUrl!, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(
+                        errorBuilder: (_, _, _) => const Icon(
                             Icons.person,
                             size: 44,
                             color: AppColors.textSecondary))

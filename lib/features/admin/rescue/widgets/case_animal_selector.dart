@@ -80,7 +80,7 @@ class CaseAnimalSelectorBar extends StatelessWidget {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: options.length + 1,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
           if (i == 0) {
             return _chip(label: 'All Animals', selected: selected == null, onTap: () => onChanged(null));

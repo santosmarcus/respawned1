@@ -165,7 +165,7 @@ class AdoptionApplicationService {
     }
 
     await docRef.set({
-      if (organizationId != null) 'organizationId': organizationId,
+      'organizationId': ?organizationId,
       'personal': {
         'adopterId': uid,
         // Legacy join key — a stringified stableIntIdFor hash, kept only

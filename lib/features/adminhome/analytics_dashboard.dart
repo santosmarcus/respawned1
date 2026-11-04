@@ -324,7 +324,7 @@ class _DeclineReasonBarChart extends StatelessWidget {
           ? const ClampingScrollPhysics()
           : const NeverScrollableScrollPhysics(),
       itemCount: entries.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, i) {
         final entry = entries[i];
         final fraction = maxValue == 0 ? 0.0 : entry.value / maxValue;
@@ -393,7 +393,7 @@ class _SimplePieChart extends StatelessWidget {
     if (filtered.isEmpty) {
       return const _NotTrackedChart(note: 'No data yet.');
     }
-    final total = filtered.fold<num>(0, (sum, e) => sum + e.value);
+    final total = filtered.fold<num>(0, (acc, e) => acc + e.value);
 
     return Row(
       children: [
@@ -617,13 +617,13 @@ class _RescueAnalyticsViewState extends State<_RescueAnalyticsView> {
     // the case's own single canonical workflow status.
     final byAnimalStage = <String, num>{};
     for (final c in cases) {
-      c.animalStageCounts.forEach((stage, count) {
+      c.animalStageCounts.forEach((stage, n) {
         final label = switch (stage) {
           'intake' => 'Intake',
           'in_treatment' => 'In Treatment',
           _ => stage,
         };
-        byAnimalStage[label] = (byAnimalStage[label] ?? 0) + count;
+        byAnimalStage[label] = (byAnimalStage[label] ?? 0) + n;
       });
     }
 

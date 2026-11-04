@@ -142,7 +142,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   /// dropped with a message rather than silently accepted.
   Future<void> _addHomePhotos() async {
     final picked = await pickImagesWithSource(context, _picker);
-    if (picked.isEmpty) return;
+    if (picked.isEmpty || !mounted) return;
 
     final currentTotal =
         _form.existingHomePhotoUrls.length + _form.homePhotosFiles.length;

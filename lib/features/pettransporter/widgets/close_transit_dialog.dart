@@ -96,21 +96,27 @@ Future<EndReasonSelection?> showCloseTransitDialog(BuildContext context) async {
                   ],
                 ),
                 const SizedBox(height: 16),
-                ...kEndReasons.map(
-                  (r) => RadioListTile<String>(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    value: r,
-                    groupValue: selectedReason,
-                    activeColor: AppColors.textPrimary,
-                    title: Text(
-                      r,
-                      style: GoogleFonts.zain(
-                        fontSize: 14,
-                        color: AppColors.textPrimary,
+                RadioGroup<String>(
+                  groupValue: selectedReason,
+                  onChanged: (v) => setDlg(() => selectedReason = v),
+                  child: Column(
+                    children: [
+                      ...kEndReasons.map(
+                        (r) => RadioListTile<String>(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          value: r,
+                          activeColor: AppColors.textPrimary,
+                          title: Text(
+                            r,
+                            style: GoogleFonts.zain(
+                              fontSize: 14,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                    onChanged: (v) => setDlg(() => selectedReason = v),
+                    ],
                   ),
                 ),
                 if (needsOtherText) ...[
@@ -200,21 +206,27 @@ Future<EndReasonSelection?> showCloseTransitDialog(BuildContext context) async {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  ...kSpecializedServiceTypes.map(
-                    (option) => RadioListTile<String>(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      value: option,
-                      groupValue: serviceType,
-                      activeColor: AppColors.textPrimary,
-                      title: Text(
-                        option,
-                        style: GoogleFonts.zain(
-                          fontSize: 13,
-                          color: AppColors.textPrimary,
+                  RadioGroup<String>(
+                    groupValue: serviceType,
+                    onChanged: (v) => setDlg(() => serviceType = v),
+                    child: Column(
+                      children: [
+                        ...kSpecializedServiceTypes.map(
+                          (option) => RadioListTile<String>(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            value: option,
+                            activeColor: AppColors.textPrimary,
+                            title: Text(
+                              option,
+                              style: GoogleFonts.zain(
+                                fontSize: 13,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                      onChanged: (v) => setDlg(() => serviceType = v),
+                      ],
                     ),
                   ),
                   if (serviceType == 'Other') ...[

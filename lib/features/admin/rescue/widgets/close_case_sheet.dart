@@ -125,15 +125,21 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
             const SizedBox(height: 16),
             Text('Closure Reason', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
             const SizedBox(height: 6),
-            ...ClosureReason.selectable.map((reason) => RadioListTile<ClosureReason>(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              value: reason,
+            RadioGroup<ClosureReason>(
               groupValue: _reason,
-              activeColor: AppColors.textPrimary,
-              title: Text(reason.label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
               onChanged: (v) => setState(() => _reason = v),
-            )),
+              child: Column(
+                children: [
+                  ...ClosureReason.selectable.map((reason) => RadioListTile<ClosureReason>(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: reason,
+                    activeColor: AppColors.textPrimary,
+                    title: Text(reason.label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                  )),
+                ],
+              ),
+            ),
 
             const SizedBox(height: 8),
             Text('Detailed Explanation', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
@@ -155,15 +161,21 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
                 style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 6),
-              ..._serviceTypeOptions.map((option) => RadioListTile<String>(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                value: option,
+              RadioGroup<String>(
                 groupValue: _serviceType,
-                activeColor: AppColors.textPrimary,
-                title: Text(option, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
                 onChanged: (v) => setState(() => _serviceType = v),
-              )),
+                child: Column(
+                  children: [
+                    ..._serviceTypeOptions.map((option) => RadioListTile<String>(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      value: option,
+                      activeColor: AppColors.textPrimary,
+                      title: Text(option, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                    )),
+                  ],
+                ),
+              ),
               if (_serviceType == 'Other') ...[
                 const SizedBox(height: 6),
                 TextField(

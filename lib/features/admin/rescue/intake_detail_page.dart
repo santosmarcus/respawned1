@@ -175,8 +175,9 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final destination = _resolvedDestination;
     if (destination == null ||
         destination.lat == null ||
-        destination.lng == null)
+        destination.lng == null) {
       return;
+    }
     if (transporterUid == null) return;
 
     final confirmed = await showDialog<bool>(
@@ -1007,7 +1008,7 @@ class _ConfirmIntakeSection extends StatelessWidget {
   }
 }
 
-/// "Intake Destination / <name> / [Change Location]" or, with nothing
+/// "Intake Destination / `<name>` / [Change Location]" or, with nothing
 /// configured yet, "No shelter location configured. / [Set Shelter
 /// Location]" — deliberately card-sized, not a permanent map; the map only
 /// exists inside ShelterLocationPickerPage.
@@ -1139,8 +1140,9 @@ class _QuarantineSection extends StatelessWidget {
       );
     }
     if (c.hasQuarantineDecision) {
-      if (c.quarantineStatus == 'skipped')
+      if (c.quarantineStatus == 'skipped') {
         return (title: 'Quarantine', subtitle: 'Skipped');
+      }
       final end = c.quarantineEndedAt;
       return (
         title: 'Quarantine',

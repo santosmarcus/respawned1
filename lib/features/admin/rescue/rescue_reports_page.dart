@@ -157,7 +157,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
               // ListView's own viewport edge.
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
               itemCount: RescuePipelineTab.values.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              separatorBuilder: (_, _) => const SizedBox(width: 16),
               itemBuilder: (context, index) {
                 final tab = RescuePipelineTab.values[index];
                 final isSelected = selectedTab == tab && filters.statusOverride == null;
@@ -375,7 +375,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   key: PageStorageKey('rescue_reports_list_${filters.statusOverride?.name ?? selectedTab.name}'),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: cases.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final c = cases[index];
                     // accepted (no clinic saved yet) can never have a

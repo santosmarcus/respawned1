@@ -135,7 +135,8 @@ class AdoptionDropdownField<T> extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         DropdownButtonFormField<T>(
-          value: value,
+          key: ValueKey(value),
+          initialValue: value,
           items: items
               .map((e) => DropdownMenuItem(value: e, child: Text(e.toString())))
               .toList(),
@@ -197,12 +198,14 @@ class AdoptionRadioGroup<T> extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  Radio<T>(
-                    value: o,
+                  RadioGroup<T>(
                     groupValue: value,
                     onChanged: onChanged,
-                    activeColor: AppColors.greenrspwn,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    child: Radio<T>(
+                      value: o,
+                      activeColor: AppColors.greenrspwn,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                   const SizedBox(width: 4),
                   Expanded(

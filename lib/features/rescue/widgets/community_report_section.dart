@@ -806,7 +806,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                 width: double.infinity,
                 height: 120,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
+                errorBuilder: (_, _, _) => Container(
                   width: double.infinity,
                   height: 120,
                   color: AppColors.slaterspwn,
@@ -837,7 +837,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                 ],
               ),
             ),
-          if (approvalBadge != null) approvalBadge,
+          ?approvalBadge,
         ],
       ),
     );

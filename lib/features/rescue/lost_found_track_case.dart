@@ -414,7 +414,7 @@ class _PhotoHeaderState extends State<_PhotoHeader> {
                     ),
                   );
                 },
-                errorBuilder: (context, _, __) => Container(
+                errorBuilder: (context, _, _) => Container(
                   color: AppColors.slaterspwn,
                   child: const Center(
                     child: Icon(Icons.broken_image_outlined,

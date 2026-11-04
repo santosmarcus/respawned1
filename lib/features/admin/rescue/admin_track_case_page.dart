@@ -726,8 +726,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 ),
                 onMapCreated: (ctrl) {
                   _mapController = ctrl;
-                  if (route != null)
+                  if (route != null) {
                     _fitTrackingCameraToRoute(route.polylinePoints);
+                  }
                 },
                 markers: markers,
                 polylines: {
@@ -1715,7 +1716,7 @@ class _CompactTransporterRow extends ConsumerWidget {
                       width: 32,
                       height: 32,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      errorBuilder: (_, _, _) => Container(
                         width: 32,
                         height: 32,
                         color: AppColors.tearspwn,

@@ -33,7 +33,7 @@ class AnimalRecordHeaderImage extends StatelessWidget {
           height: height,
           width: double.infinity,
           fit: BoxFit.cover,
-          errorBuilder: (context, _, __) => _placeholder(),
+          errorBuilder: (context, _, _) => _placeholder(),
           loadingBuilder: (context, child, progress) => progress == null
               ? child
               : Container(

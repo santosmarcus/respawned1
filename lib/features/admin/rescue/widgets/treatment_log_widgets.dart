@@ -33,7 +33,7 @@ void showFullTreatmentImage(BuildContext context, String url) {
             url,
             loadingBuilder: (_, child, progress) =>
                 progress == null ? child : const Center(child: CircularProgressIndicator(color: Colors.white)),
-            errorBuilder: (_, __, ___) =>
+            errorBuilder: (_, _, _) =>
                 const Icon(Icons.broken_image_outlined, color: Colors.white, size: 48),
           ),
         ),
@@ -105,7 +105,7 @@ class TreatmentLogCard extends StatelessWidget {
                               loadingBuilder: (_, child, progress) => progress == null
                                   ? child
                                   : const Center(child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
-                              errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported_outlined, size: 18)),
+                              errorBuilder: (_, _, _) => const Icon(Icons.image_not_supported_outlined, size: 18)),
                         )
                       : const Icon(Icons.description_outlined, size: 18, color: AppColors.textSecondary),
                 ),
@@ -253,7 +253,7 @@ class TreatmentLogDetailSheet extends StatelessWidget {
                                     color: AppColors.tearspwn,
                                     child: const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
                                   ),
-                            errorBuilder: (_, __, ___) => Container(
+                            errorBuilder: (_, _, _) => Container(
                               width: 84,
                               height: 84,
                               color: AppColors.tearspwn,

@@ -213,7 +213,7 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: rows.length,
-            separatorBuilder: (_, __) => const Divider(height: 20),
+            separatorBuilder: (_, _) => const Divider(height: 20),
             itemBuilder: (context, i) => _AuditRowTile(row: rows[i]),
           ),
         ),

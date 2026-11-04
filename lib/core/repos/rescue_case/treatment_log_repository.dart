@@ -76,10 +76,12 @@ class TreatmentLogRepository {
     final type = TreatmentUpdateType.fromLabel(entry.type);
     switch (type) {
       case TreatmentUpdateType.vaccination:
-        if ((entry.vaccineName ?? '').trim().isEmpty)
+        if ((entry.vaccineName ?? '').trim().isEmpty) {
           throw ArgumentError('Vaccine is required.');
-        if ((entry.vaccineDose ?? '').trim().isEmpty)
+        }
+        if ((entry.vaccineDose ?? '').trim().isEmpty) {
           throw ArgumentError('Vaccine dose is required.');
+        }
         break;
       case TreatmentUpdateType.procedure:
         if ((entry.procedurePerformed ?? '').trim().isEmpty) {
@@ -87,26 +89,32 @@ class TreatmentLogRepository {
         }
         break;
       case TreatmentUpdateType.medication:
-        if ((entry.medicationName ?? '').trim().isEmpty)
+        if ((entry.medicationName ?? '').trim().isEmpty) {
           throw ArgumentError('Medication name is required.');
-        if ((entry.medicationDose ?? '').trim().isEmpty)
+        }
+        if ((entry.medicationDose ?? '').trim().isEmpty) {
           throw ArgumentError('Medication dose is required.');
+        }
         break;
       case TreatmentUpdateType.discharge:
-        if ((entry.finalCondition ?? '').trim().isEmpty)
+        if ((entry.finalCondition ?? '').trim().isEmpty) {
           throw ArgumentError('Final condition is required.');
+        }
         break;
       case TreatmentUpdateType.deathReport:
-        if ((entry.causeOfDeath ?? '').trim().isEmpty)
+        if ((entry.causeOfDeath ?? '').trim().isEmpty) {
           throw ArgumentError('Cause of death is required.');
+        }
         break;
       case TreatmentUpdateType.assessment:
       case TreatmentUpdateType.followUpCheck:
       case null:
-        if ((entry.condition ?? '').trim().isEmpty)
+        if ((entry.condition ?? '').trim().isEmpty) {
           throw ArgumentError('Overall condition is required.');
-        if (entry.notes.trim().isEmpty)
+        }
+        if (entry.notes.trim().isEmpty) {
           throw ArgumentError('Notes are required for this update type.');
+        }
         break;
     }
   }

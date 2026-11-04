@@ -66,7 +66,7 @@ class CaseCompletedPage extends StatelessWidget {
                               : 'assets/icon/animalshelter.png',
                           color: AppColors.textPrimary,
                           fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Icon(
+                          errorBuilder: (_, _, _) => const Icon(
                               Icons.pets,
                               size: 48,
                               color: AppColors.textPrimary),

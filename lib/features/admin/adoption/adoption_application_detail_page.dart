@@ -353,7 +353,7 @@ class _AnimalHeaderCard extends ConsumerWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: photoUrl != null
-                ? Image.network(photoUrl, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _ph())
+                ? Image.network(photoUrl, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) => _ph())
                 : _ph(),
           ),
           const SizedBox(width: 12),
@@ -788,7 +788,7 @@ class _DocumentRow extends StatelessWidget {
                         url,
                         fit: BoxFit.contain,
                         loadingBuilder: (_, child, progress) => progress == null ? child : const Center(child: CircularProgressIndicator()),
-                        errorBuilder: (_, __, ___) => const Center(
+                        errorBuilder: (_, _, _) => const Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [Icon(Icons.broken_image_outlined, size: 40), Text('Could not load this file.')],

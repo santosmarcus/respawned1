@@ -27,7 +27,7 @@ class _AddVaccineRecordSheetBody extends ConsumerStatefulWidget {
 }
 
 class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordSheetBody> {
-  late List<VaccineTemplate> _templates = VaccineTemplate.forSpecies(widget.animal.species);
+  late final List<VaccineTemplate> _templates = VaccineTemplate.forSpecies(widget.animal.species);
   VaccineTemplate? _selectedTemplate;
   final _customNameController = TextEditingController();
   final _validityController = TextEditingController(text: '365');

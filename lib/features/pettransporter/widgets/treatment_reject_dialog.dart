@@ -57,21 +57,27 @@ Future<String?> showTreatmentRejectDialog(BuildContext context) async {
                 ],
               ),
               const SizedBox(height: 16),
-              ...reasons.map(
-                (r) => RadioListTile<String>(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  value: r,
-                  groupValue: selectedReason,
-                  activeColor: AppColors.textPrimary,
-                  title: Text(
-                    r,
-                    style: GoogleFonts.zain(
-                      fontSize: 14,
-                      color: AppColors.textPrimary,
+              RadioGroup<String>(
+                groupValue: selectedReason,
+                onChanged: (v) => setDlg(() => selectedReason = v),
+                child: Column(
+                  children: [
+                    ...reasons.map(
+                      (r) => RadioListTile<String>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: r,
+                        activeColor: AppColors.textPrimary,
+                        title: Text(
+                          r,
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  onChanged: (v) => setDlg(() => selectedReason = v),
+                  ],
                 ),
               ),
               if (selectedReason == 'Other') ...[

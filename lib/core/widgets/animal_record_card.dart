@@ -166,7 +166,7 @@ class AnimalRecordCard extends StatelessWidget {
                       width: 80,
                       height: 80,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _photoPlaceholder(),
+                      errorBuilder: (_, _, _) => _photoPlaceholder(),
                     )
                   : _photoPlaceholder(),
             ),
@@ -349,7 +349,7 @@ class AnimalRecordGridTile extends StatelessWidget {
                             ? Image.network(
                                 animal.photoUrls.first,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => _gridPlaceholder(),
+                                errorBuilder: (_, _, _) => _gridPlaceholder(),
                               )
                             : _gridPlaceholder(),
                       ),

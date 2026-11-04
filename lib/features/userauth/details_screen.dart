@@ -22,7 +22,7 @@ class _EnterDetailsScreenState extends State<EnterDetailsScreen> {
   // String? _selectedGender;
   // ─────────────────────────────────────────────────────────────
 
-  bool _isLoading = false;
+  final bool _isLoading = false;
   String? _errorMessage;
 
   @override

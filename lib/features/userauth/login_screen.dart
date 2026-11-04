@@ -286,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   setState(() => _errorMessage = null);
                   try {
                     final result = await _authService.signInWithGoogle();
-                    if (result != null && mounted) {
+                    if (result != null && context.mounted) {
                       Navigator.of(context).popUntil((route) => route.isFirst);
                     }
                   } catch (e) {

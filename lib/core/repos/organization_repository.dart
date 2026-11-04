@@ -120,7 +120,7 @@ class ServiceArea {
 const double kDefaultServiceAreaRadiusKm = 10;
 
 /// Adds a coverage geofence (center + [kDefaultServiceAreaRadiusKm]) to every
-/// service area that doesn't have one yet, by geocoding "<city>, <region>,
+/// service area that doesn't have one yet, by geocoding "`<city>, <region>`,
 /// Philippines". functions/index.js tags each new rescue case with the
 /// organizations whose geofence contains it. Areas that can't be geocoded
 /// are saved unchanged.

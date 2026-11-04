@@ -55,7 +55,7 @@ class CaseIntakeRepository {
     final organizationId = await _organizationIdOfAnimal(sourceAnimalRecordId);
     await ref.set({
       'status': RescueStatus.awaitingAssignment.firestoreValue,
-      if (organizationId != null) 'organizationId': organizationId,
+      'organizationId': ?organizationId,
       'sourceType': 'animalRecordAdmission',
       'sourceAnimalRecordId': sourceAnimalRecordId,
       'admissionReason': admissionReason,
@@ -122,7 +122,7 @@ class CaseIntakeRepository {
     final organizationId = await _organizationIdOfAnimal(sourceAnimalRecordId);
     await ref.set({
       'status': RescueStatus.intake.firestoreValue,
-      if (organizationId != null) 'organizationId': organizationId,
+      'organizationId': ?organizationId,
       'sourceType': 'adoptionReturn',
       'sourceAnimalRecordId': sourceAnimalRecordId,
       'returnRequestId': returnRequestId,
@@ -303,12 +303,10 @@ class CaseIntakeRepository {
         'targetContact': targetContact,
       if (targetAddress != null && targetAddress.isNotEmpty)
         'targetAddress': targetAddress,
-      if (targetOrganizationId != null)
-        'targetOrganizationId': targetOrganizationId,
-      if (targetClinicPlaceId != null)
-        'targetClinicPlaceId': targetClinicPlaceId,
-      if (targetLat != null) 'targetLat': targetLat,
-      if (targetLng != null) 'targetLng': targetLng,
+      'targetOrganizationId': ?targetOrganizationId,
+      'targetClinicPlaceId': ?targetClinicPlaceId,
+      'targetLat': ?targetLat,
+      'targetLng': ?targetLng,
       'transferReason': reason,
       'transferDate': transferDate != null
           ? Timestamp.fromDate(transferDate)
@@ -336,8 +334,7 @@ class CaseIntakeRepository {
       details: {
         'targetType': targetType,
         'targetName': targetName,
-        if (targetOrganizationId != null)
-          'targetOrganizationId': targetOrganizationId,
+        'targetOrganizationId': ?targetOrganizationId,
       },
     );
   }
@@ -482,8 +479,9 @@ class CaseIntakeRepository {
       for (final i in animalIndexes) {
         if (i < 0 || i >= animals.length) continue;
         if (animals[i]['postTreatmentAction'] != 'intake' ||
-            animals[i]['intakeCompletedAt'] != null)
+            animals[i]['intakeCompletedAt'] != null) {
           continue;
+        }
         animals[i] = {...animals[i], 'intakeCompletedAt': now};
         changed = true;
       }
@@ -576,7 +574,7 @@ class CaseIntakeRepository {
           },
         ]),
         if (transporterUid != null) 'currentAssignmentId': assignmentRef.id,
-        if (transporterUid != null) 'assignedVolunteerId': transporterUid,
+        'assignedVolunteerId': ?transporterUid,
         if (transporterUid != null) 'assignedVolunteerName': transporterName,
         if (transporterUid != null) 'assignedVehicle': transporterVehicle,
         if (transporterUid != null) 'assignedPlate': transporterPlate,
@@ -746,8 +744,9 @@ class CaseIntakeRepository {
       if (!snap.exists) return;
       final data = snap.data()!;
       if (RescueStatus.fromFirestoreValue(data['status'] as String?) ==
-          RescueStatus.completed)
+          RescueStatus.completed) {
         return;
+      }
       if (data['intakeReceivedAt'] == null) return;
 
       final now = Timestamp.now();

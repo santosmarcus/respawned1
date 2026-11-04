@@ -416,7 +416,8 @@ class _VehicleTypeDropdown extends StatelessWidget {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButtonFormField<String>(
-          value: value,
+          key: ValueKey(value),
+          initialValue: value,
           isExpanded: true,
           decoration: const InputDecoration(
             border: InputBorder.none,

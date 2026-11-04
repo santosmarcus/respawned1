@@ -51,7 +51,7 @@ Future<String?> showRescueTypePickerSheet(
               child: ListView.separated(
                 controller: scrollController,
                 itemCount: kRescueTypeOptions.length,
-                separatorBuilder: (_, __) => Divider(
+                separatorBuilder: (_, _) => Divider(
                   height: 1,
                   color: AppColors.slaterspwn.withValues(alpha: 0.4),
                 ),

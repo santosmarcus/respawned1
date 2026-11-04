@@ -86,7 +86,7 @@ class DonationPaymentService {
   }
 
   /// Opens PayMongo's hosted checkout in the browser (https PayMongo URLs
-  /// only). No canLaunchUrl(), so Android 11+ needs no <queries> entry.
+  /// only). No canLaunchUrl(), so Android 11+ needs no `<queries>` entry.
   static Future<bool> openCheckoutPage(String url) async {
     final uri = Uri.tryParse(url);
     if (uri == null || uri.scheme != 'https' || !uri.host.endsWith('paymongo.com')) return false;

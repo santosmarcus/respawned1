@@ -260,7 +260,8 @@ class OwnerFields extends StatelessWidget {
                   RescueFieldLabel('Sex', required: false),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
-                    value: form.lostSex,
+                    key: ValueKey(form.lostSex),
+                    initialValue: form.lostSex,
                     isDense: true,
                     decoration: const InputDecoration(
                       isDense: true,

@@ -212,7 +212,7 @@ class _AnimalDonationsSheet extends ConsumerWidget {
                     padding: EdgeInsets.all(24),
                     child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
                   ),
-                  error: (_, __) => Text('Could not load donation listings.',
+                  error: (_, _) => Text('Could not load donation listings.',
                       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
                   data: (listings) => listings.isEmpty
                       ? Text('No donation listings are linked to this animal yet.',
@@ -220,7 +220,7 @@ class _AnimalDonationsSheet extends ConsumerWidget {
                       : ListView.separated(
                           shrinkWrap: true,
                           itemCount: listings.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (context, i) {
                             final l = listings[i];
                             return ListTile(

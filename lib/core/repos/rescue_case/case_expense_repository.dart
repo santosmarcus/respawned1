@@ -28,7 +28,7 @@ class CaseExpenseRepository {
     if (expense.fundings.any((f) => f.amount <= 0)) {
       throw ArgumentError('Each funding amount must be greater than zero.');
     }
-    final total = expense.fundings.fold<double>(0, (sum, f) => sum + f.amount);
+    final total = expense.fundings.fold<double>(0, (acc, f) => acc + f.amount);
     if (total > expense.amount + 0.005) {
       throw ArgumentError('Funding adds up to more than the expense amount.');
     }

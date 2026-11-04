@@ -144,7 +144,7 @@ class _InterviewRescheduleSheetState extends State<_InterviewRescheduleSheet> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: slots.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (context, i) {
                     final slot = slots[i];
                     final selected = _time == slot;

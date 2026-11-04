@@ -1204,8 +1204,8 @@ class AdoptionApplicationRepository {
       'returnRequest.retrievalScheduledAt': now,
       'returnRequest.retrievalDateTime': Timestamp.fromDate(dateTime),
       if (address != null && address.isNotEmpty) 'returnRequest.retrievalAddress': address,
-      if (lat != null) 'returnRequest.retrievalLat': lat,
-      if (lng != null) 'returnRequest.retrievalLng': lng,
+      'returnRequest.retrievalLat': ?lat,
+      'returnRequest.retrievalLng': ?lng,
       if (notes != null && notes.isNotEmpty) 'returnRequest.retrievalNotes': notes,
       'returnRequest.scheduledBy': actorName,
       // A (re)schedule always resets the adopter's own acknowledgement —

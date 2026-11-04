@@ -692,7 +692,9 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
 
     final image = await recorder.endRecording().toImage(size.toInt(), size.toInt());
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+    // bitmapScaling.none keeps fromBytes' behavior: the canvas is already
+    // sized in device pixels, so don't let the plugin rescale it.
+    return BitmapDescriptor.bytes(bytes!.buffer.asUint8List(), bitmapScaling: MapBitmapScaling.none);
   }
 
   // Renders a Material icon glyph directly onto the marker canvas, white on
@@ -976,7 +978,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                     width: 60,
                     height: 60,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _thumbFallback(category),
+                    errorBuilder: (_, _, _) => _thumbFallback(category),
                   )
                       : _thumbFallback(category),
                 ),

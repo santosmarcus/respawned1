@@ -134,7 +134,7 @@ class OrganizationPickerListState extends State<OrganizationPickerList> {
     return ListView.separated(
       controller: widget.scrollController,
       itemCount: _results.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, i) {
         final org = _results[i];
         return _OrgCard(

@@ -279,19 +279,26 @@ class _RescueRequestState extends State<RescueRequest> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    for (final reason in _declineReasonOptions)
-                      RadioListTile<String>(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        value: reason,
-                        groupValue: selectedReason,
-                        activeColor: AppColors.textPrimary,
-                        title: Text(reason,
-                            style: GoogleFonts.zain(
-                                fontSize: 14, color: AppColors.textPrimary)),
-                        onChanged: (v) =>
-                            setModalState(() => selectedReason = v),
+                    RadioGroup<String>(
+                      groupValue: selectedReason,
+                      onChanged: (v) =>
+                          setModalState(() => selectedReason = v),
+                      child: Column(
+                        children: [
+                          for (final reason in _declineReasonOptions)
+                            RadioListTile<String>(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              value: reason,
+                              activeColor: AppColors.textPrimary,
+                              title: Text(reason,
+                                  style: GoogleFonts.zain(
+                                      fontSize: 14,
+                                      color: AppColors.textPrimary)),
+                            ),
+                        ],
                       ),
+                    ),
                     if (selectedReason == 'Other')
                       Padding(
                         padding: const EdgeInsets.only(left: 8, top: 4),

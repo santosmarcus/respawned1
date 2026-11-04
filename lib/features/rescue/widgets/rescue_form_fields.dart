@@ -62,7 +62,8 @@ class SpeciesDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<String>(
-      value: value,
+      key: ValueKey(value),
+      initialValue: value,
       isDense: true,
       decoration: InputDecoration(
         isDense: true,
@@ -111,7 +112,8 @@ class BreedDropdown extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         DropdownButtonFormField<String>(
-          value: validValue,
+          key: ValueKey(validValue),
+          initialValue: validValue,
           isDense: true,
           decoration: InputDecoration(
             isDense: true,
@@ -311,7 +313,8 @@ class AssessmentDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<String>(
-      value: value,
+      key: ValueKey(value),
+      initialValue: value,
       isDense: true,
       isExpanded: true,
       decoration: InputDecoration(
@@ -419,7 +422,8 @@ class RiskDropdown extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         DropdownButtonFormField<String>(
-          value: value,
+          key: ValueKey(value),
+          initialValue: value,
           isDense: true,
           isExpanded:
               true, // lets the selected-value Text shrink to fit instead of overflowing

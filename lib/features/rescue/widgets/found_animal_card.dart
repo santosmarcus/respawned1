@@ -161,7 +161,8 @@ class FoundAnimalCard extends StatelessWidget {
             children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
-                  value: entry.sex,
+                  key: ValueKey(entry.sex),
+                  initialValue: entry.sex,
                   isDense: true,
                   decoration: const InputDecoration(
                     isDense: true,
@@ -181,7 +182,8 @@ class FoundAnimalCard extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: DropdownButtonFormField<String>(
-                  value: entry.size,
+                  key: ValueKey(entry.size),
+                  initialValue: entry.size,
                   isDense: true,
                   decoration: const InputDecoration(
                     isDense: true,

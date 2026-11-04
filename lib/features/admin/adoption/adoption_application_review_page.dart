@@ -635,7 +635,7 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
               // being sliced off by the ListView's own viewport edge.
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
               itemCount: _PageTab.values.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              separatorBuilder: (_, _) => const SizedBox(width: 16),
               itemBuilder: (context, index) {
                 final t = _PageTab.values[index];
                 final selected = _tab == t;
@@ -843,7 +843,7 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                   key: PageStorageKey('adoption_review_list_${_tab.name}'),
                   padding: const EdgeInsets.all(16),
                   itemCount: sorted.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (context, i) => switch (_tab) {
                     _PageTab.returns_ => _ReturnCard(application: sorted[i]),
                     // Navigation spec (§5/§6) — Adopted/Complete cards route
@@ -903,7 +903,7 @@ class _ReturnCard extends ConsumerWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: photoUrl != null
-                  ? Image.network(photoUrl, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _returnPlaceholder())
+                  ? Image.network(photoUrl, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) => _returnPlaceholder())
                   : _returnPlaceholder(),
             ),
             const SizedBox(width: 12),
@@ -995,7 +995,7 @@ class _ApplicationCard extends ConsumerWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: photoUrl != null
-                  ? Image.network(photoUrl, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _placeholder())
+                  ? Image.network(photoUrl, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) => _placeholder())
                   : _placeholder(),
             ),
             const SizedBox(width: 12),
@@ -1148,7 +1148,7 @@ class _AdoptedCard extends ConsumerWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: display.photoUrl != null
-                  ? Image.network(display.photoUrl!, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _monitoringCardPlaceholder())
+                  ? Image.network(display.photoUrl!, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) => _monitoringCardPlaceholder())
                   : _monitoringCardPlaceholder(),
             ),
             const SizedBox(width: 12),
@@ -1235,7 +1235,7 @@ class _CompleteCard extends ConsumerWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: display.photoUrl != null
-                  ? Image.network(display.photoUrl!, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _monitoringCardPlaceholder())
+                  ? Image.network(display.photoUrl!, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) => _monitoringCardPlaceholder())
                   : _monitoringCardPlaceholder(),
             ),
             const SizedBox(width: 12),

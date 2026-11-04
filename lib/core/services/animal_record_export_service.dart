@@ -225,7 +225,7 @@ class AnimalRecordExportService {
     final file = File('${dir.path}/animal_record_${animal.id}_${DateTime.now().millisecondsSinceEpoch}.pdf');
     await file.writeAsBytes(bytes);
     try {
-      await Share.shareXFiles([XFile(file.path)], text: 'Animal Record — ${animal.name.isNotEmpty ? animal.name : animal.species}');
+      await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], text: 'Animal Record — ${animal.name.isNotEmpty ? animal.name : animal.species}'));
     } finally {
       if (await file.exists()) await file.delete();
     }

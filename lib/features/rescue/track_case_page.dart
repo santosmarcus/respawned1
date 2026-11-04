@@ -415,7 +415,7 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
             };
 
             final routePoints = <LatLng>[
-              if (pickup != null) pickup,
+              ?pickup,
               ...trail,
               if (trail.isEmpty && dropoff != null) dropoff,
             ];
@@ -505,8 +505,9 @@ class _EtaCardState extends State<_EtaCard> {
           final d = snapshot.data!.docs.last.data() as Map<String, dynamic>;
           final lat = d['lat'];
           final lng = d['lng'];
-          if (lat is num && lng is num)
+          if (lat is num && lng is num) {
             riderPos = LatLng(lat.toDouble(), lng.toDouble());
+          }
         }
 
         if (riderPos == null || destination == null) {
@@ -720,7 +721,7 @@ class _TrackingTabState extends State<_TrackingTab> {
                                 ),
                               );
                             },
-                            errorBuilder: (context, _, __) => Container(
+                            errorBuilder: (context, _, _) => Container(
                               width: 80,
                               height: 80,
                               decoration: BoxDecoration(
@@ -1322,7 +1323,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                               ),
                             );
                           },
-                          errorBuilder: (context, _, __) => Container(
+                          errorBuilder: (context, _, _) => Container(
                             width: 100,
                             height: 100,
                             decoration: BoxDecoration(
@@ -1730,8 +1731,9 @@ class _RejectionDetailsSection extends StatelessWidget {
               final docs = snapshot.data?.docs;
               if (docs == null || docs.isEmpty) return const SizedBox.shrink();
               final reviewer = docs.first.data()['actorName'] as String?;
-              if (reviewer == null || reviewer.isEmpty)
+              if (reviewer == null || reviewer.isEmpty) {
                 return const SizedBox.shrink();
+              }
               return _DetailRow('Reviewed By', reviewer);
             },
           ),

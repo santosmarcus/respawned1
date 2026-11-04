@@ -161,7 +161,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
           children: [
             const SizedBox(height: 32),
 
-            _FieldLabel('Full Name'),
+            _fieldLabel('Full Name'),
             const SizedBox(height: 6),
             _buildTextField(
                 controller: _nameController,
@@ -169,7 +169,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
 
             const SizedBox(height: 20),
 
-            _FieldLabel('Email'),
+            _fieldLabel('Email'),
             const SizedBox(height: 6),
             _buildTextField(
                 controller: _emailController,
@@ -177,7 +177,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
 
             const SizedBox(height: 20),
 
-            _FieldLabel('Mobile Number'),
+            _fieldLabel('Mobile Number'),
             const SizedBox(height: 6),
             _buildTextField(
                 controller: _mobileController,
@@ -217,7 +217,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
     );
   }
 
-  Widget _FieldLabel(String text) => Text(text,
+  Widget _fieldLabel(String text) => Text(text,
       style: GoogleFonts.zain(
           fontSize: 15,
           fontWeight: FontWeight.w600,

@@ -802,8 +802,9 @@ class _RescuePageState extends State<RescuePage> {
     // animal's own card, name it in the error, and never clear anything
     // already entered.
     for (final entry in _form.foundAnimals) {
-      if (entry.hasAssessmentError)
+      if (entry.hasAssessmentError) {
         setState(() => entry.hasAssessmentError = false);
+      }
     }
     for (var i = 0; i < validAnimals.length; i++) {
       final entry = validAnimals[i];

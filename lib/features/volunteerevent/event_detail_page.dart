@@ -291,7 +291,7 @@ class _VolunteerEventDetailPageState
   Future<void> _openETicket(BuildContext context) async {
     final data = await VolunteerEventRepository().getMyRegistration(widget.event.id);
 
-    if (!mounted) return;
+    if (!context.mounted) return;
 
     if (data == null) {
       ScaffoldMessenger.of(context).showSnackBar(

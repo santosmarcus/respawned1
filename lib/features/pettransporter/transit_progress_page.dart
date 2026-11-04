@@ -557,6 +557,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   Future<void> _rejectTreatment() async {
     if (!_hasVerificationImage(_clinicImages)) return;
     if (!await _ensureAtVerificationStop(_latestCase ?? const {})) return;
+    if (!mounted) return;
     final reason = await showTreatmentRejectDialog(context);
     if (reason == null) return; // dismissed via X / back
 

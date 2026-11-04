@@ -184,7 +184,7 @@ class _TransferAnimalRecordSheetBodyState extends ConsumerState<_TransferAnimalR
                         : ListView.separated(
                             controller: scrollController,
                             itemCount: _results.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 10),
+                            separatorBuilder: (_, _) => const SizedBox(height: 10),
                             itemBuilder: (context, i) {
                               final org = _results[i];
                               final isSelected = _selected?.id == org.id;

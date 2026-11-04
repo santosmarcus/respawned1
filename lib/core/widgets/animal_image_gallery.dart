@@ -89,7 +89,7 @@ class _AnimalImageGalleryState extends State<AnimalImageGallery> {
                       child: const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
                     );
                   },
-                  errorBuilder: (_, __, ___) => _placeholder(),
+                  errorBuilder: (_, _, _) => _placeholder(),
                 ),
               ),
             ),
@@ -145,7 +145,7 @@ class FullscreenImageGalleryState extends State<FullscreenImageGallery> {
                   child: Image.network(
                     widget.photoUrls[i],
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Icon(Icons.pets, size: 80, color: Colors.white54),
+                    errorBuilder: (_, _, _) => const Icon(Icons.pets, size: 80, color: Colors.white54),
                   ),
                 ),
               ),
