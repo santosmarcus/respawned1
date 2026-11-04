@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -186,6 +187,24 @@ final shelterOccupancyProvider = Provider.autoDispose<AsyncValue<ShelterOccupanc
 
 /// Every vaccination record, grouped by animal id. One collection-group
 /// listener instead of one listener per animal.
+/// Every preventive-care record (deworming, flea & tick, vet checkup),
+/// grouped by animal id — feeds the dashboard's overdue-care alert.
+final careRecordsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<CareRecord>>>((ref) {
+  return FirebaseFirestore.instance.collectionGroup('careRecords').snapshots().map((snap) {
+    final out = <String, List<CareRecord>>{};
+    for (final d in snap.docs) {
+      final animalId = d.reference.parent.parent?.id;
+      if (animalId == null) continue;
+      try {
+        out.putIfAbsent(animalId, () => []).add(CareRecord.fromFirestore(d, animalId));
+      } catch (e) {
+        debugPrint('[Dashboard] skipping unparseable care record ${d.id}: $e');
+      }
+    }
+    return out;
+  });
+});
+
 final vaccinationsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<VaccinationRecord>>>((ref) {
   return FirebaseFirestore.instance.collectionGroup('vaccinations').snapshots().map((snap) {
     final out = <String, List<VaccinationRecord>>{};

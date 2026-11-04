@@ -105,19 +105,21 @@ These commits landed before the `dev` merge and are in this branch's history. Th
 **Checklist for these:** add a single care record and a batch of past records, then check the badges and history. Mark an animal in active treatment as adoptable (should be blocked), then one that's discharged (should ask for confirmations).
 
 ### Known gaps
-- The adoption checklist is enforced in the app only, not in Firestore rules.
-- Overdue care isn't in the dashboard's Priority actions yet, and care records don't show on the public profile.
-- `users`, `cases` and `adoptions` are still readable by any signed-in user. Admin-only case actions are enforced in the app only.
-- Reporters can only file unowned reports (no `organizationId` at creation). Storage staff access now requires an approved org and an active membership, matching Firestore.
-- The read lock on `adoptions` is still open. About 15 public read sites depend on it (animal page, activity feed, history, notifications, `hasBlockingApplication`), so it needs a server-side check first.
-- The rules in `firestore.rules` / `storage.rules` are **not deployed**. Run the tests first: `cd rules-tests && npm test` (needs Java 21; Android Studio's `jbr` works as `JAVA_HOME`).
+- **Rules not deployed yet (needs a coordinated release):** the adoptions read lock and readiness gate in `firestore.rules`. The `hasBlockingAdoption` callable (`functions/adoptions.js`) is deployed. App builds from before this change query adoptions without an organization filter and check availability client-side, so they break once the lock is live. Next: ship the new app build, then `firebase deploy --only firestore:rules`.
+- Adoption applications with no `organizationId` (from animals that had none) are readable only by their adopter and platform staff after the lock.
+- `users` and `cases` are still readable by any signed-in user (public case map, profiles). Admin-only case actions are enforced in the app only.
+- Public animal profiles: the hide flag filters the adoption list and the organization page, but the animal document itself is still readable by any signed-in user.
+- Missed medication doses show on the animal's Medical tab, not in the dashboard alerts (would need a collection-group index on dose dates).
+- NFC tags for animals are not implemented. QR tags are.
+- Volunteer referral is a stub ("coming soon"), kept as is.
+- Rules tests: `cd rules-tests && npm test` (60 passing; needs Java 21, Android Studio's `jbr` works as `JAVA_HOME`).
+- Function deploys need `functions/.env` with `PAYMENT_RETURN_BASE_URL=https://respawnd1-45021.web.app` (gitignored) and the `FB_APP_ID`/`FB_APP_SECRET` secrets (set).
 
-### Remaining plan items
-- **P1 6:** show Rescue Readiness (capacity) in the accept-case sheet and save a snapshot on the case.
-- **P1 7:** `awaitingInfo` and `verifying` rescue statuses before acceptance.
-- **P1 8–9:** medication schedule with a carer task list, and a `carer` org role enforced in rules.
-- **P2 15, 19:** general volunteer application, and volunteer referral. Both were deliberately skipped.
-- **P3 23:** QR/NFC tag on animal creation.
+### Done since the interview plan
+- **P0:** reporters file unowned reports only; storage staff checks match Firestore; adoption reads locked to adopter, owning org and platform staff (not deployed yet).
+- **P1:** readiness snapshot on accept; `verifying` status (records the verifying org); medication orders with carer dose logging (photo optional, confirm step); `carer` org role in rules, invite sheet and a carer-only care-tasks home screen; readiness gate enforced in rules.
+- **P2:** volunteer applications (form on the Volunteer page, review from the admin Volunteers page); public-profile hide flag; restricted donations were already enforced in the backend.
+- **P3:** QR tags assigned on the animal profile and opened by the app's scanner; overdue preventive care in the dashboard alerts; demo coordinates are debug-only; the home "Coming soon" tile is an intentional feature flag.
 
 ## Other notes
 
