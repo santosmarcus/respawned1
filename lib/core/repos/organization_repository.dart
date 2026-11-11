@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geocoding/geocoding.dart';
 
 import 'package:respawnd1/core/repos/org_membership_service.dart';
@@ -401,11 +402,34 @@ class OrganizationRepository {
 
     final memberRef = _organizations.doc(organizationId).collection('members').doc(ownerId);
     final memberSnap = await memberRef.get();
-    if (memberSnap.exists) return;
 
     final ownerUserSnap = await _users.doc(ownerId).get();
-    final email = ownerUserSnap.data()?['email'] as String?;
+    var email = ownerUserSnap.data()?['email'] as String?;
+    // users/{uid}.email can be empty (e.g. accounts created before it was
+    // stored); when the owner is the one signed in, their auth email is
+    // authoritative.
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if ((email == null || email.trim().isEmpty) && currentUser?.uid == ownerId) {
+      email = currentUser?.email;
+    }
     final displayName = ownerUserSnap.data()?['name'] as String?;
+
+    if (memberSnap.exists) {
+      // Memberships created before email was recorded show "Email
+      // unavailable" on Staff Members — backfill it once, never overwrite.
+      final existingEmail = memberSnap.data()?['email'] as String?;
+      if ((existingEmail == null || existingEmail.trim().isEmpty) && email != null && email.trim().isNotEmpty) {
+        try {
+          await memberRef.set({
+            'email': email,
+            'normalizedEmail': email.trim().toLowerCase(),
+          }, SetOptions(merge: true));
+        } catch (e) {
+          debugPrint('[OrganizationRepository] owner email backfill skipped: $e');
+        }
+      }
+      return;
+    }
 
     // Written directly (not via OrgMembershipService.setMember) so
     // `joinedAt` is set exactly once, on creation — setMember's own

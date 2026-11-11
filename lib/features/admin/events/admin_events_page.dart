@@ -87,6 +87,7 @@ class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
                       ChoiceChip(
                         label: Text(f.label, style: GoogleFonts.zain(fontSize: 13)),
                         selected: _filter == f,
+                        showCheckmark: false,
                         selectedColor: AppColors.yellowrspwn,
                         onSelected: (_) => setState(() => _filter = f),
                       ),

@@ -6,6 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/volunteers/transporter_applications_page.dart';
+import 'package:respawnd1/features/admin/volunteers/transporter_detail_page.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteer_applications_page.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
@@ -143,7 +145,16 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
         ),
         title: Text(_title, style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
-          if (!widget.transporters)
+          if (widget.transporters)
+            IconButton(
+              tooltip: 'Transporter applications',
+              icon: const Icon(Icons.assignment_ind_outlined, color: AppColors.background),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const TransporterApplicationsPage()),
+              ),
+            )
+          else
             IconButton(
               tooltip: 'Volunteer applications',
               icon: const Icon(Icons.assignment_ind_outlined, color: AppColors.background),
@@ -240,7 +251,16 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   itemCount: list.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, i) => _VolunteerCard(volunteer: list[i]),
+                  itemBuilder: (context, i) => _VolunteerCard(
+                    volunteer: list[i],
+                    showVerification: widget.transporters,
+                    onTap: widget.transporters
+                        ? () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => TransporterDetailPage(uid: list[i].uid)),
+                            )
+                        : null,
+                  ),
                 );
               },
             ),
@@ -253,7 +273,9 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
 
 class _VolunteerCard extends StatelessWidget {
   final PetTransporter volunteer;
-  const _VolunteerCard({required this.volunteer});
+  final bool showVerification;
+  final VoidCallback? onTap;
+  const _VolunteerCard({required this.volunteer, this.showVerification = false, this.onTap});
 
   Future<void> _call() async {
     final phone = volunteer.phone;
@@ -266,7 +288,7 @@ class _VolunteerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasPhone = (volunteer.phone ?? '').isNotEmpty;
     final hasVehicle = (volunteer.vehicleType ?? '').isNotEmpty || (volunteer.licensePlate ?? '').isNotEmpty;
-    return Container(
+    final card = Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -299,16 +321,14 @@ class _VolunteerCard extends StatelessWidget {
                   Text('${volunteer.vehicleType ?? ''} ${volunteer.licensePlate ?? ''}'.trim(),
                       style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                 const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: volunteer.isOnline ? AppColors.greenrspwn : AppColors.slaterspwn,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    volunteer.isOnline ? 'Online' : 'Offline',
-                    style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
-                  ),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    _pill(volunteer.isOnline ? 'Online' : 'Offline',
+                        volunteer.isOnline ? AppColors.greenrspwn : AppColors.slaterspwn),
+                    if (showVerification) transporterVerificationPill(volunteer),
+                  ],
                 ),
               ],
             ),
@@ -318,8 +338,28 @@ class _VolunteerCard extends StatelessWidget {
               icon: const Icon(Icons.call_outlined, color: AppColors.textPrimary),
               onPressed: _call,
             ),
+          if (onTap != null) const Icon(Icons.chevron_right, color: AppColors.textSecondary),
         ],
       ),
     );
+    if (onTap == null) return card;
+    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(14), child: card);
   }
+}
+
+Widget _pill(String text, Color color) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+      child: Text(text, style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
+    );
+
+/// Verified / Under review / Not approved / Not submitted, from the
+/// transporter's users doc.
+Widget transporterVerificationPill(PetTransporter t) {
+  if (t.isVerified || t.verificationStatus == 'approved') return _pill('Verified', AppColors.greenrspwn);
+  return switch (t.verificationStatus) {
+    'pending' => _pill('Under review', const Color(0xFFE0A800)),
+    'rejected' => _pill('Not approved', Colors.redAccent),
+    _ => _pill('Not submitted', AppColors.slaterspwn),
+  };
 }

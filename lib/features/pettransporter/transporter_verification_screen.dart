@@ -143,8 +143,20 @@ class _TransporterVerificationScreenState
         'submittedAt': FieldValue.serverTimestamp(),
       };
 
+      // users/{uid} is readable by every signed-in account (directories,
+      // transporter names), so only the public-facing parts go there. The
+      // license and anti-rabies document URLs live only in
+      // transporterApplications/{uid}, which only the applicant and
+      // organization staff can read.
+      const privateKeys = {'licenseFrontUrl', 'licenseBackUrl', 'antiRabiesUrl'};
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'transporterVerification': verificationData,
+        'transporterVerification': {
+          for (final e in verificationData.entries)
+            if (!privateKeys.contains(e.key)) e.key: e.value,
+          // merge: true deep-merges maps, so explicitly clear any copies an
+          // earlier version of this screen left on the public profile.
+          for (final k in privateKeys) k: FieldValue.delete(),
+        },
         'transporterVerificationStatus': 'pending',
       }, SetOptions(merge: true));
 

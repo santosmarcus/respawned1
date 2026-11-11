@@ -23,6 +23,10 @@ class PetTransporter {
   final String? vehicleType;
   final String? licensePlate;
   final bool isVerified;
+
+  /// `users/{uid}.transporterVerificationStatus`: '' (never applied),
+  /// 'pending', 'approved' or 'rejected'.
+  final String verificationStatus;
   final bool online;
   final DateTime? lastSeenAt;
 
@@ -40,6 +44,7 @@ class PetTransporter {
     this.vehicleType,
     this.licensePlate,
     this.isVerified = false,
+    this.verificationStatus = '',
     this.online = false,
     this.lastSeenAt,
     this.lastLat,
@@ -76,6 +81,7 @@ class PetTransporter {
       vehicleType: verification?['vehicleType'] as String?,
       licensePlate: verification?['licensePlate'] as String?,
       isVerified: data['isVerified'] as bool? ?? false,
+      verificationStatus: data['transporterVerificationStatus'] as String? ?? '',
       online: data['online'] as bool? ?? false,
       lastSeenAt: lastSeen is Timestamp ? lastSeen.toDate() : null,
       lastLat: (data['lastLat'] as num?)?.toDouble(),

@@ -321,6 +321,69 @@ describe('volunteer applications', () => {
   });
 });
 
+describe('transporter applications', () => {
+  const app = (uid, extra = {}) => ({
+    uid, name: 'R', mobileNumber: '0917', vehicleType: 'Motorcycle', licensePlate: 'ABC123',
+    licenseFrontUrl: 'https://x/front', licenseBackUrl: 'https://x/back', portraitUrl: 'https://x/p',
+    status: 'pending', ...extra,
+  });
+  const seedApp = (uid) => env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc(`transporterApplications/${uid}`).set(app(uid)));
+
+  test('applicants submit their own, always pending, never self-approved', async () => {
+    await assertSucceeds(as('rider').doc('transporterApplications/rider').set(app('rider')));
+    await assertFails(as('rider').doc('transporterApplications/rider2').set(app('rider2')));
+    await assertFails(as('rider').doc('transporterApplications/rider').set(app('rider', { status: 'approved' })));
+    await assertFails(as('rider').doc('transporterApplications/rider').set(app('rider', { reviewedBy: 'rider' })));
+  });
+
+  test('a rejected applicant can resubmit, which goes back to pending', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('transporterApplications/rider')
+      .set(app('rider', { status: 'rejected', reviewedBy: 'staffA', reviewNote: 'blurry' })));
+    await assertSucceeds(as('rider').doc('transporterApplications/rider').set(app('rider')));
+  });
+
+  test('ID documents are private: only the applicant and approved staff read them', async () => {
+    await seedApp('rider');
+    await assertSucceeds(as('rider').doc('transporterApplications/rider').get());
+    await assertSucceeds(as('staffA').doc('transporterApplications/rider').get());
+    await assertFails(as('rider2').doc('transporterApplications/rider').get());
+    await assertFails(as('stranger').doc('transporterApplications/rider').get());
+    await assertFails(as('carerA').doc('transporterApplications/rider').get());
+    await assertFails(as('draftOwner').doc('transporterApplications/rider').get());
+    await assertFails(as('stranger').doc('transporterApplications/rider').set(app('rider', { name: 'Hijacked' })));
+  });
+
+  test('approved staff review the application; carers and others cannot', async () => {
+    await seedApp('rider');
+    await assertFails(as('carerA').doc('transporterApplications/rider').update({ status: 'approved', reviewedBy: 'carerA' }));
+    await assertFails(as('staffA').doc('transporterApplications/rider').update({ status: 'approved', reviewedBy: 'someoneElse' }));
+    await assertFails(as('staffA').doc('transporterApplications/rider').update({ status: 'approved', reviewedBy: 'staffA', name: 'X' }));
+    await assertSucceeds(as('staffA').doc('transporterApplications/rider').update({ status: 'approved', reviewedBy: 'staffA' }));
+  });
+
+  test('staff can verify an applicant transporter, and nothing else on the profile', async () => {
+    await seedApp('rider');
+    await assertSucceeds(as('staffA').doc('users/rider').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+    await assertSucceeds(as('staffA').doc('users/rider').update({ isVerified: false, transporterVerificationStatus: 'rejected' }));
+    // Mismatched pairs and extra fields are refused.
+    await assertFails(as('staffA').doc('users/rider').update({ isVerified: true, transporterVerificationStatus: 'rejected' }));
+    await assertFails(as('staffA').doc('users/rider').update({ isVerified: true, transporterVerificationStatus: 'approved', role: 'admin' }));
+  });
+
+  test('cannot verify someone who never applied, or who is not a transporter', async () => {
+    await assertFails(as('staffA').doc('users/rider2').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+    await seedApp('stranger');
+    await assertFails(as('staffA').doc('users/stranger').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+  });
+
+  test('carers, draft-org staff and transporters cannot verify', async () => {
+    await seedApp('rider');
+    await assertFails(as('carerA').doc('users/rider').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+    await assertFails(as('draftOwner').doc('users/rider').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+    await assertFails(as('rider2').doc('users/rider').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+  });
+});
+
 describe('collection-group queries', () => {
   test('transporters list their own offers', async () => {
     await assertSucceeds(as('rider').collectionGroup('transportAssignments')

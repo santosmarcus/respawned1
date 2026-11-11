@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -79,6 +80,27 @@ final currentOrganizationIdProvider = FutureProvider.autoDispose<String?>((ref) 
   final uid = FirebaseAuth.instance.currentUser?.uid;
   if (uid == null) return null;
   return ref.watch(orgMembershipServiceProvider).resolveOrganizationId(uid);
+});
+
+/// Display name and avatar of the signed-in account's organization, live
+/// from `organizations/{id}` so the admin drawer reflects edits made in
+/// Organization Profile. Null while signed out or not linked to an org.
+final currentOrganizationHeaderProvider =
+    StreamProvider.autoDispose<({String name, String? avatarUrl})?>((ref) async* {
+  final orgId = await ref.watch(currentOrganizationIdProvider.future);
+  if (orgId == null) {
+    yield null;
+    return;
+  }
+  yield* FirebaseFirestore.instance.collection('organizations').doc(orgId).snapshots().map((snap) {
+    final data = snap.data();
+    final name = (data?['name'] as String?)?.trim();
+    final avatar = (data?['avatarUrl'] as String?)?.trim();
+    return (
+      name: (name == null || name.isEmpty) ? 'Organization' : name,
+      avatarUrl: (avatar == null || avatar.isEmpty) ? null : avatar,
+    );
+  });
 });
 
 /// Facebook Page Sharing spec — safe connection metadata for one

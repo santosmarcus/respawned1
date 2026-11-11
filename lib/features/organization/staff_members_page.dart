@@ -532,6 +532,11 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                         } else {
                           _resolveEmailIfNeeded(uid, invitationId: data['invitationId'] as String?);
                         }
+                        // Your own row never needs a lookup — the signed-in
+                        // account's email is always known locally.
+                        if ((email == null || email.trim().isEmpty) && uid == currentUid) {
+                          email = FirebaseAuth.instance.currentUser?.email;
+                        }
                         return _MemberRow(
                           displayName: data['displayName'] as String?,
                           email: email,

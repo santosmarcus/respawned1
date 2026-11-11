@@ -504,7 +504,8 @@ service cloud.firestore {
     //     membership in (checked after the write, so the org-bootstrap and
     //     invitation-accept transactions pass).
     //   - isVerified / transporterVerificationStatus: a user may only submit
-    //     (false / 'pending'); approval happens in the console.
+    //     (false / 'pending'); organization staff approve or reject through
+    //     staffTransporterReview below (or the console).
     match /users/{uid} {
       function selfRoles() {
         return ['', 'general', 'pet_transporter', 'rescue_volunteer', 'organization', 'organization_member'];
@@ -546,9 +547,26 @@ service cloud.firestore {
         );
       }
 
+      // TransporterApplicationRepository.review — approved organization
+      // staff (not carers) decide a pet transporter's verification, only for
+      // an account that actually applied, and only those two fields.
+      function staffTransporterReview() {
+        let data = request.resource.data;
+        return isOrgStaff() &&
+          resource.data.get('role', '') == 'pet_transporter' &&
+          exists(/databases/$(database)/documents/transporterApplications/$(uid)) &&
+          changedOnly(['isVerified', 'transporterVerificationStatus']) &&
+          (
+            (data.get('transporterVerificationStatus', '') == 'approved' && data.get('isVerified', false) == true) ||
+            (data.get('transporterVerificationStatus', '') == 'rejected' && data.get('isVerified', false) == false)
+          );
+      }
+
       allow read: if signedIn();
       allow create: if isSelf(uid) && selfFieldsOk(request.resource.data);
-      allow update: if (isSelf(uid) && selfUpdateOk()) || (signedIn() && orgAdminLinkChange());
+      allow update: if (isSelf(uid) && selfUpdateOk()) ||
+        (signedIn() && orgAdminLinkChange()) ||
+        staffTransporterReview();
       allow delete: if false;
 
       match /{sub}/{doc=**} {
@@ -904,6 +922,34 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---- Transporter applications -------------------------------------------
+    //
+    // transporterApplications/{uid}: identity documents (license, portrait,
+    // anti-rabies record) a pet transporter submits for verification. Same
+    // shape of rules as volunteerApplications: the applicant writes their own,
+    // always as pending (a resubmission goes back for review) and never the
+    // review fields; approved organization staff (not carers) read and review.
+    // Previously unmatched here, so it fell through to the catch-all below
+    // and any signed-in account could read or overwrite it.
+    match /transporterApplications/{uid} {
+      function applicantWriteOk() {
+        return isSelf(uid) &&
+          request.resource.data.get('uid', '') == uid &&
+          request.resource.data.get('status', '') == 'pending' &&
+          !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
+      }
+
+      allow read: if isSelf(uid) || isOrgStaff();
+      allow create: if applicantWriteOk();
+      allow update: if applicantWriteOk() || (
+        isOrgStaff() &&
+        changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
+        request.resource.data.status in ['approved', 'rejected'] &&
+        request.resource.data.get('reviewedBy', '') == request.auth.uid
+      );
+      allow delete: if false;
+    }
+
     // ---- Staff dashboards (collection-group queries) -----------------------
     //
     // The dashboard, analytics and audit pages query these subcollections
@@ -987,7 +1033,8 @@ service cloud.firestore {
         'facebookConnectRequests', 'facebookShares',
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
-        'users', 'cases', 'animals', 'adoptions', 'volunteerApplications'
+        'users', 'cases', 'animals', 'adoptions', 'volunteerApplications',
+        'transporterApplications'
       ]);
     }
   }

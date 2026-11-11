@@ -206,7 +206,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
       if (mounted) {
         _showSnack(enabled
             ? 'QR code enabled — the owner can now see and share it.'
-            : 'QR code disabled for this tag.');
+            : 'QR code revoked — the owner can no longer see it.');
       }
     } catch (e) {
       _showSnack('Failed to update approval: $e');
@@ -376,6 +376,28 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                         ),
                         const SizedBox(height: 16),
 
+                        // Current state, shown separately from the action
+                        // so the button label can just be the verb.
+                        Row(
+                          children: [
+                            Icon(
+                              _selected!.qrEnabled ? Icons.check_circle : Icons.lock_outline,
+                              size: 16,
+                              color: _selected!.qrEnabled ? AppColors.greenrspwn : AppColors.textSecondary,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                _selected!.qrEnabled
+                                    ? 'QR enabled — the owner can view and share it'
+                                    : 'QR not enabled — the owner cannot see it yet',
+                                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+
                         // Approval toggle — this is what actually unlocks
                         // the QR for the owner.
                         SizedBox(
@@ -395,24 +417,27 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                             )
                                 : Icon(
                               _selected!.qrEnabled
-                                  ? Icons.check_circle
-                                  : Icons.lock_outline,
+                                  ? Icons.block
+                                  : Icons.lock_open,
                               size: 18,
+                              color: _selected!.qrEnabled
+                                  ? Colors.redAccent
+                                  : AppColors.textPrimary,
                             ),
                             label: Text(
-                              _selected!.qrEnabled
-                                  ? 'Enabled for owner — tap to revoke'
-                                  : 'Enable QR for owner',
+                              _selected!.qrEnabled ? 'Revoke' : 'Enable',
                               style: GoogleFonts.tiltWarp(
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
-                                  color: AppColors.textPrimary),
+                                  color: _selected!.qrEnabled
+                                      ? Colors.redAccent
+                                      : AppColors.textPrimary),
                             ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.textPrimary,
                               side: BorderSide(
                                 color: _selected!.qrEnabled
-                                    ? AppColors.greenrspwn
+                                    ? Colors.redAccent
                                     : AppColors.textPrimary,
                                 width: 1.5,
                               ),

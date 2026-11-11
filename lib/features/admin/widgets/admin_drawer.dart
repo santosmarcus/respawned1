@@ -148,6 +148,12 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     // own BuildContext is deactivated once the drawer closes mid-flow.
     final rootNavigator = Navigator.of(context, rootNavigator: true);
     final messenger = ScaffoldMessenger.of(context);
+    // Closing the drawer disposes this State (and its `ref`) once the close
+    // animation ends — usually before signOut() returns. Using `ref` after
+    // that threw "Cannot use ref after the widget was disposed", which the
+    // catch below reported as "Log out failed" even though sign-out had
+    // succeeded. The ProviderContainer outlives the drawer, so use it.
+    final container = ProviderScope.containerOf(context, listen: false);
     Navigator.pop(context); // close the drawer, same pattern every other item uses
 
     try {
@@ -159,8 +165,8 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
       // pages watching them are removed below. currentOrgMembershipProvider
       // and currentOrganizationCapabilitiesProvider are global (not tied to
       // a specific page) so they're cleared explicitly.
-      ref.invalidate(currentOrgMembershipProvider);
-      ref.invalidate(currentOrganizationCapabilitiesProvider);
+      container.invalidate(currentOrgMembershipProvider);
+      container.invalidate(currentOrganizationCapabilitiesProvider);
 
       // Remove every pushed admin route so the stale authenticated screen
       // can't linger on top of AuthWrapper's now-signed-out content —
@@ -176,6 +182,9 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
 
   @override
   Widget build(BuildContext context) {
+    final header = ref.watch(currentOrganizationHeaderProvider).asData?.value;
+    final orgName = header?.name ?? 'Organization';
+    final avatarUrl = header?.avatarUrl;
     return Drawer(
       backgroundColor: AppColors.textPrimary,
       child: SafeArea(
@@ -190,15 +199,24 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                   CircleAvatar(
                     radius: 24,
                     backgroundColor: AppColors.yellowrspwn,
-                    child: Text('G', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
+                    backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                    child: avatarUrl != null
+                        ? null
+                        : Text(orgName.characters.first.toUpperCase(),
+                            style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
                   ),
                   const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Loved by the Gapz', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.background)),
-                      Text('Admin Staff', style: GoogleFonts.zain(fontSize: 12, color: AppColors.background.withValues(alpha: 0.7))),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(orgName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.background)),
+                        Text('Admin Staff', style: GoogleFonts.zain(fontSize: 12, color: AppColors.background.withValues(alpha: 0.7))),
+                      ],
+                    ),
                   ),
                 ],
               ),

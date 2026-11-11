@@ -85,6 +85,11 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   List<ServiceArea> _serviceAreas = [];
   final Set<String> _acceptedSpecies = {};
 
+  /// An existing organization opens as a read-only profile; the Edit
+  /// action switches to the form. The bootstrap (create) flow is always a
+  /// form — there's nothing to display yet.
+  bool _editing = false;
+
   bool get _isBootstrapping => _organizationId == null;
 
   @override
@@ -94,6 +99,8 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     if (_organizationId != null) {
       _load();
     } else {
+      // Whoever creates the organization becomes its owner.
+      _emailController.text = FirebaseAuth.instance.currentUser?.email ?? '';
       _checkInvitations();
     }
   }
@@ -179,6 +186,11 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     _descriptionController.text = data['description'] as String? ?? '';
     _locationController.text = data['location'] as String? ?? '';
     _emailController.text = data['email'] as String? ?? '';
+    if (_emailController.text.trim().isEmpty) {
+      // No contact email saved yet — default to the owner's account email
+      // so the field isn't blank. Only persisted if the admin saves.
+      _emailController.text = await _ownerEmail(data['ownerId'] as String?) ?? '';
+    }
     _phoneController.text = (data['contactNumber'] as String?) ?? (data['phone'] as String?) ?? '';
     _facebookController.text = data['facebookUrl'] as String? ?? '';
     _websiteController.text = data['website'] as String? ?? '';
@@ -213,6 +225,35 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     _capacityController.text = maxCapacity?.toString() ?? '';
 
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// The organization owner's account email: their `users` doc first, then
+  /// the signed-in account's auth email when the signed-in user is the owner.
+  Future<String?> _ownerEmail(String? ownerId) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (ownerId != null && ownerId.isNotEmpty) {
+      try {
+        final ownerDoc = await FirebaseFirestore.instance.collection('users').doc(ownerId).get();
+        final email = (ownerDoc.data()?['email'] as String?)?.trim();
+        if (email != null && email.isNotEmpty) return email;
+      } catch (e) {
+        debugPrint('[OrganizationProfile] owner email lookup failed: $e');
+      }
+      if (currentUser?.uid != ownerId) return null;
+    }
+    return currentUser?.email;
+  }
+
+  /// Leaves edit mode without saving: reloads the stored profile so any
+  /// unsaved edits are discarded.
+  Future<void> _cancelEditing() async {
+    setState(() {
+      _editing = false;
+      _loading = true;
+      _pendingAvatar = null;
+      _acceptedSpecies.clear();
+    });
+    await _load();
   }
 
   @override
@@ -582,6 +623,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
           _avatarUrl = avatarUrl;
           _pendingAvatar = null;
           _saving = false;
+          _editing = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Organization profile saved.')));
       }
@@ -602,6 +644,17 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.background), onPressed: () => Navigator.pop(context)),
         title: Text('Organization Profile', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
         actions: [
+          if (!_isBootstrapping && !_loading)
+            _editing
+                ? TextButton(
+                    onPressed: _saving ? null : _cancelEditing,
+                    child: Text('Cancel', style: GoogleFonts.zain(fontSize: 15, color: AppColors.background)),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.edit_outlined, color: AppColors.background),
+                    tooltip: 'Edit profile',
+                    onPressed: () => setState(() => _editing = true),
+                  ),
           // Organization Invitations spec §8 — always reachable, even
           // before an organization exists: an invited account with no
           // membership yet still needs somewhere to see and act on "My
@@ -663,8 +716,79 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     if (_isBootstrapping && _invitations.isNotEmpty) {
       return _buildInvitationsList();
     }
+    if (!_isBootstrapping && !_editing) return _buildView();
     return _buildForm();
   }
+
+  /// Read-only profile — the default for an existing organization.
+  Widget _buildView() {
+    String orDash(String v) => v.trim().isEmpty ? 'Not set' : v.trim();
+    final capacity = _capacityController.text.trim();
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Center(
+          child: CircleAvatar(
+            radius: 44,
+            backgroundColor: AppColors.slaterspwn,
+            backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
+            child: _avatarUrl == null
+                ? const Icon(Icons.business_outlined, size: 36, color: AppColors.textSecondary)
+                : null,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: Text(orDash(_nameController.text),
+              textAlign: TextAlign.center,
+              style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+        ),
+        if (_descriptionController.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(_descriptionController.text.trim(),
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+        ],
+        const SizedBox(height: 24),
+        _sectionTitle('Organization Details'),
+        _viewRow('Location', orDash(_locationController.text)),
+        _viewRow(
+          'Service Areas',
+          _serviceAreas.isEmpty
+              ? 'Not set'
+              : _serviceAreas
+                  .map((a) => _isSupportedServiceArea(a) ? a.name : '${a.name} (Unsupported)')
+                  .join(', '),
+        ),
+        _viewRow(
+          'Accepted Species',
+          _acceptedSpecies.isEmpty
+              ? 'Not set'
+              : _speciesOptions.where(_acceptedSpecies.contains).map((s) => s == 'Dog' ? 'Dogs' : 'Cats').join(', '),
+        ),
+        _viewRow('Shelter Capacity', capacity.isEmpty ? 'Not configured' : capacity),
+        const SizedBox(height: 8),
+        if (_organizationId != null)
+          FacebookIntegrationSection(organizationId: _organizationId!, canManage: _canManageFacebook),
+        _sectionTitle('Contact Details'),
+        _viewRow('Email Address', orDash(_emailController.text)),
+        _viewRow('Mobile Number', orDash(_phoneController.text)),
+        _viewRow('Facebook', orDash(_facebookController.text)),
+        _viewRow('Website', orDash(_websiteController.text)),
+      ],
+    );
+  }
+
+  Widget _viewRow(String label, String value) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _label(label),
+            Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+          ],
+        ),
+      );
 
   Widget _buildInvitationsList() {
     return ListView(

@@ -66,23 +66,33 @@ class _VolunteerApplicationsPageState extends State<VolunteerApplicationsPage> {
         backgroundColor: AppColors.textPrimary,
         iconTheme: const IconThemeData(color: AppColors.background),
         title: Text('Volunteer applications',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
       ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                for (final s in VolunteerApplicationStatus.values)
-                  ChoiceChip(
-                    label: Text(s.label),
-                    selected: _tab == s,
-                    selectedColor: AppColors.yellowrspwn,
-                    onSelected: (_) => setState(() => _tab = s),
-                  ),
-              ],
+            // One non-wrapping row: scrolls sideways on narrow screens
+            // instead of dropping a chip onto a second line.
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final s in VolunteerApplicationStatus.values)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(s.label, maxLines: 1, softWrap: false),
+                        selected: _tab == s,
+                        showCheckmark: false,
+                        selectedColor: AppColors.yellowrspwn,
+                        onSelected: (_) => setState(() => _tab = s),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           Expanded(

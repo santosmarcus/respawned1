@@ -21,9 +21,12 @@ class CarerHomeScreen extends ConsumerWidget {
 
   Future<void> _signOut(BuildContext context, WidgetRef ref) async {
     final navigator = Navigator.of(context, rootNavigator: true);
+    // AuthWrapper swaps this screen out as soon as auth state changes, which
+    // disposes `ref`; the container outlives it.
+    final container = ProviderScope.containerOf(context, listen: false);
     await authService.value.signOut();
-    ref.invalidate(currentOrgMembershipProvider);
-    ref.invalidate(currentOrganizationCapabilitiesProvider);
+    container.invalidate(currentOrgMembershipProvider);
+    container.invalidate(currentOrganizationCapabilitiesProvider);
     navigator.popUntil((route) => route.isFirst);
   }
 

@@ -8,6 +8,7 @@ import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/core/utils/transporter_trip_stats.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 
 class TransporterProfile extends StatelessWidget {
@@ -396,37 +397,6 @@ class _StatsRow extends StatelessWidget {
   final String uid;
   const _StatsRow({required this.uid});
 
-  static const _ongoingStatuses = {
-    'assigned',
-    'accepted',
-    'ongoing',
-    'arrived',
-    'treatment',
-    'dropoff',
-    'searching_clinic',
-    'in_transit_shelter',
-    'awaiting_adopter_pickup',
-  };
-
-  // Statuses a case moves on to AFTER the transporter's trip is done —
-  // admin closes it, admits the animal (intake) or starts clinical care.
-  // Previously only the literal 'completed' counted, so every finished trip
-  // whose case the admin had already moved on vanished from Completed.
-  static const _afterTransitStatuses = {
-    'completed',
-    'closed',
-    'intake',
-    'in_treatment',
-  };
-
-  static bool _isCompletedTransit(Map<String, dynamic> data, String status) {
-    if (_afterTransitStatuses.contains(status)) return true;
-    // Proof the trip itself was finished, whatever the case status is now.
-    return data['transitCompletedAt'] != null ||
-        data['adopterPickupConfirmedAt'] != null ||
-        (data['shelterVerificationUrls'] as List?)?.isNotEmpty == true;
-  }
-
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
@@ -447,11 +417,10 @@ class _StatsRow extends StatelessWidget {
         if (snapshot.hasData) {
           for (final doc in snapshot.data!.docs) {
             final data = doc.data() as Map<String, dynamic>;
-            final status = data['status'] as String? ?? '';
-            if (_isCompletedTransit(data, status)) {
+            if (isCompletedTransit(data)) {
               completed++;
               completedDocs.add(doc);
-            } else if (_ongoingStatuses.contains(status)) {
+            } else if (isOngoingTransit(data)) {
               ongoing++;
               ongoingCaseId ??= doc.id;
             }
