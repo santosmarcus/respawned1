@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'volunteer_page.dart';
@@ -25,8 +27,15 @@ class VolunteerEventDetailPage extends StatefulWidget {
 
 class _VolunteerEventDetailPageState
     extends State<VolunteerEventDetailPage> {
-  Future<void> _openInMaps(BuildContext context, String address) async {
-    final uri = Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': address});
+  /// Opens the event in Google Maps: the picked pin (and place) when the
+  /// event has one, else a search for its text address (older events).
+  Future<void> _openInMaps(BuildContext context, VolunteerEvent event) async {
+    final query = event.hasPin ? '${event.lat},${event.lng}' : event.addressFull;
+    final uri = Uri.https('www.google.com', '/maps/search/', {
+      'api': '1',
+      'query': query,
+      if (event.hasPin && (event.placeId ?? '').isNotEmpty) 'query_place_id': event.placeId!,
+    });
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -84,15 +93,8 @@ class _VolunteerEventDetailPageState
           children: [
             const SizedBox(height: 8),
 
-            // Image placeholder
-            Container(
-              width: double.infinity,
-              height: 180,
-              decoration: BoxDecoration(
-                color: AppColors.slaterspwn,
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
+            // Cover photo (plain block for events without one)
+            EventCoverImage(imageUrl: event.imageUrl, height: 180),
 
             const SizedBox(height: 20),
 
@@ -211,7 +213,7 @@ class _VolunteerEventDetailPageState
                   ),
                 ),
                 TextButton(
-                  onPressed: () => _openInMaps(context, event.addressFull),
+                  onPressed: () => _openInMaps(context, event),
                   child: Text(
                     'View on Google Maps',
                     style: GoogleFonts.zain(
@@ -223,9 +225,34 @@ class _VolunteerEventDetailPageState
               ],
             ),
 
-            // Events store a text address only (no coordinates), so the
-            // empty map placeholder that used to sit here is gone — the
-            // link above opens the address in Google Maps instead.
+            // Map preview of the pin picked in the admin event form. Older
+            // events have a text address only and skip it; the link above
+            // still opens that address in Google Maps.
+            if (event.hasPin) ...[
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  height: 150,
+                  child: GoogleMap(
+                    initialCameraPosition:
+                        CameraPosition(target: LatLng(event.lat!, event.lng!), zoom: 15),
+                    markers: {
+                      Marker(
+                          markerId: const MarkerId('event'),
+                          position: LatLng(event.lat!, event.lng!)),
+                    },
+                    liteModeEnabled: true,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    mapToolbarEnabled: false,
+                    scrollGesturesEnabled: false,
+                    zoomGesturesEnabled: false,
+                    onTap: (_) => _openInMaps(context, event),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 28),
 
             if (event.isCancelled) ...[

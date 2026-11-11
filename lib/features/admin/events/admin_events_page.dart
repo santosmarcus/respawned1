@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
+import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:respawnd1/features/admin/events/admin_event_detail_page.dart';
 import 'package:respawnd1/features/admin/events/event_form_page.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
@@ -158,6 +159,10 @@ class _AdminEventCard extends StatelessWidget {
         ),
         child: Row(
           children: [
+            if (event.hasImage) ...[
+              EventCoverImage(imageUrl: event.imageUrl, width: 56, height: 56, borderRadius: 10),
+              const SizedBox(width: 12),
+            ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

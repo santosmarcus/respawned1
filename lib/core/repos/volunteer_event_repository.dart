@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 
@@ -16,12 +19,15 @@ class EventRegistrationException implements Exception {
 /// `users/{uid}/volunteerRegistrations/{eventId}` so the user's own e-ticket
 /// and joined list read from their own document tree.
 class VolunteerEventRepository {
-  VolunteerEventRepository({FirebaseFirestore? firestore, FirebaseAuth? auth})
+  VolunteerEventRepository({FirebaseFirestore? firestore, FirebaseAuth? auth, FirebaseStorage? storage})
       : _db = firestore ?? FirebaseFirestore.instance,
-        _auth = auth ?? FirebaseAuth.instance;
+        _auth = auth ?? FirebaseAuth.instance,
+        _storageOverride = storage;
 
   final FirebaseFirestore _db;
   final FirebaseAuth _auth;
+  final FirebaseStorage? _storageOverride;
+  FirebaseStorage get _storage => _storageOverride ?? FirebaseStorage.instance;
 
   CollectionReference<Map<String, dynamic>> get _events => _db.collection('events');
   DocumentReference<Map<String, dynamic>> _eventDoc(String id) => _events.doc(id);
@@ -91,6 +97,16 @@ class VolunteerEventRepository {
       'updatedAt': FieldValue.serverTimestamp(),
     });
     return ref.id;
+  }
+
+  /// Uploads an event cover photo to `events/{organizationId}/…` (see
+  /// storage.rules) and returns its download URL for [VolunteerEvent.imageUrl].
+  /// Keyed by organization, not event, so a new event's cover can be
+  /// uploaded before the event document exists.
+  Future<String> uploadCoverImage({required String organizationId, required String filePath}) async {
+    final ref = _storage.ref('events/$organizationId/cover_${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await ref.putFile(File(filePath), SettableMetadata(contentType: 'image/jpeg'));
+    return ref.getDownloadURL();
   }
 
   Future<void> updateEvent({required String eventId, required VolunteerEvent draft}) {
