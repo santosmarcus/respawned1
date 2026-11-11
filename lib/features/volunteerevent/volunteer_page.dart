@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
+import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -315,12 +316,10 @@ class _EventCard extends StatelessWidget {
         children: [
           Stack(
             children: [
-              Container(
+              EventCoverImage(
+                imageUrl: event.imageUrl,
                 height: 120,
-                decoration: BoxDecoration(
-                  color: AppColors.tearspwn,
-                  borderRadius: BorderRadius.circular(16),
-                ),
+                placeholderColor: AppColors.tearspwn,
               ),
               Positioned(
                 top: 10,

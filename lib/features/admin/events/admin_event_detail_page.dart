@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
+import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:respawnd1/features/admin/events/admin_events_page.dart';
 import 'package:respawnd1/features/admin/events/event_form_page.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
@@ -105,6 +106,10 @@ class AdminEventDetailPage extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (event.hasImage) ...[
+                EventCoverImage(imageUrl: event.imageUrl, height: 180),
+                const SizedBox(height: 14),
+              ],
               Row(
                 children: [
                   Expanded(
@@ -117,7 +122,12 @@ class AdminEventDetailPage extends ConsumerWidget {
               const SizedBox(height: 10),
               _info(Icons.calendar_today_outlined, event.date),
               _info(Icons.access_time_outlined, event.time),
-              _info(Icons.location_on_outlined, '${event.location}\n${event.addressFull}'),
+              _info(
+                Icons.location_on_outlined,
+                event.addressFull.isEmpty || event.addressFull == event.location
+                    ? event.location
+                    : '${event.location}\n${event.addressFull}',
+              ),
               _info(
                 Icons.people_outline,
                 event.capacity == null

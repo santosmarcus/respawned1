@@ -196,6 +196,20 @@ service firebase.storage {
       }
     }
 
+    // ---- Volunteer events ------------------------------------------------------
+
+    // event_form_page.dart (VolunteerEventRepository.uploadCoverImage) —
+    // event cover photos, keyed by the owning organization so a new event's
+    // cover can be uploaded before its Firestore doc exists. Staff (not
+    // carers) of that organization, or platform staff.
+    match /events/{orgId}/{file} {
+      allow read: if signedIn();
+      allow write: if isStaff() && mediaUpload() && (
+        userData().get('role', '') in ['admin', 'ngo_staff'] ||
+        userData().get('organizationId', '') == orgId
+      );
+    }
+
     // ---- Donations ---------------------------------------------------------------
 
     // donation_admin_service.dart — campaign cover images and offline-payment

@@ -47,6 +47,16 @@ describe('storage', () => {
     await assertFails(upload('stranger', 'campaigns/1.jpg'));
   });
 
+  test('event cover images: staff of that organization only', async () => {
+    await assertSucceeds(upload('staffA', 'events/orgA/cover_1.jpg'));
+    await assertSucceeds(upload('ownerA', 'events/orgA/cover_2.jpg'));
+    await assertSucceeds(upload('admin', 'events/orgA/cover_3.jpg'));
+    await assertFails(upload('staffB', 'events/orgA/cover_1.jpg'));
+    await assertFails(upload('carerA', 'events/orgA/cover_1.jpg'));
+    await assertFails(upload('stranger', 'events/orgA/cover_1.jpg'));
+    await assertFails(upload('draftOwner', 'events/orgD/cover_1.jpg'));
+  });
+
   test('staff of an unapproved organization get no staff access', async () => {
     await assertFails(upload('draftOwner', 'receipts/1.jpg'));
   });

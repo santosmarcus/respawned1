@@ -16,7 +16,12 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 ///
 /// Returns `true` via Navigator.pop if a location was actually saved.
 ///
-/// Exactly one of [organizationId] / [userId] should be provided:
+/// [ShelterLocationPickerPage.pick] is a "return result" mode for other
+/// forms (e.g. the admin event form): it writes nothing to Firestore and
+/// pops the chosen [ClinicSearchResult] (name/address/placeId/lat/lng), or
+/// null if the user backs out.
+///
+/// Otherwise, exactly one of [organizationId] / [userId] should be provided:
 /// [organizationId] saves onto that organization's shared shelter location
 /// (`organizations/{orgId}.shelter*`); [userId] is the
 /// no-organization-linked fallback (see IntakeDetailPage's TODO on why this
@@ -36,6 +41,14 @@ class ShelterLocationPickerPage extends ConsumerStatefulWidget {
   final String? initialPlaceId;
   final double? initialLat;
   final double? initialLng;
+
+  /// True for [ShelterLocationPickerPage.pick]: pop the selection instead
+  /// of saving it.
+  final bool returnsSelection;
+  final String title;
+  final String saveLabel;
+  final String emptyHint;
+
   const ShelterLocationPickerPage({
     super.key,
     this.organizationId,
@@ -45,8 +58,27 @@ class ShelterLocationPickerPage extends ConsumerStatefulWidget {
     this.initialPlaceId,
     this.initialLat,
     this.initialLng,
-  }) : assert(organizationId != null || userId != null,
+  })  : returnsSelection = false,
+        title = 'Set Shelter Location',
+        saveLabel = 'Save Shelter Location',
+        emptyHint = "Search for your shelter's address.",
+        assert(organizationId != null || userId != null,
             'ShelterLocationPickerPage needs either an organizationId or a userId to save to.');
+
+  /// Picks a place without saving it; pops a [ClinicSearchResult] or null.
+  const ShelterLocationPickerPage.pick({
+    super.key,
+    this.initialName,
+    this.initialAddress,
+    this.initialPlaceId,
+    this.initialLat,
+    this.initialLng,
+    this.title = 'Set Location',
+    this.saveLabel = 'Use This Location',
+    this.emptyHint = 'Search for an address or place.',
+  })  : organizationId = null,
+        userId = null,
+        returnsSelection = true;
 
   @override
   ConsumerState<ShelterLocationPickerPage> createState() => _ShelterLocationPickerPageState();
@@ -116,6 +148,10 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
   Future<void> _save() async {
     final selected = _selected;
     if (selected == null || _saving) return;
+    if (widget.returnsSelection) {
+      Navigator.pop(context, selected);
+      return;
+    }
     setState(() => _saving = true);
     try {
       final repo = ref.read(organizationDirectoryRepositoryProvider);
@@ -158,9 +194,9 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
         backgroundColor: AppColors.textPrimary,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.background),
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () => Navigator.pop(context, widget.returnsSelection ? null : false),
         ),
-        title: Text('Set Shelter Location', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
+        title: Text(widget.title, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
       ),
       body: Column(
         children: [
@@ -226,9 +262,7 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
                 : _results.isEmpty
                     ? Center(
                         child: Text(
-                          _searchController.text.trim().isEmpty
-                              ? 'Search for your shelter\'s address.'
-                              : 'No results found.',
+                          _searchController.text.trim().isEmpty ? widget.emptyHint : 'No results found.',
                           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
                         ),
                       )
@@ -293,7 +327,7 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                    : Text('Save Shelter Location',
+                    : Text(widget.saveLabel,
                         style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
             ),
