@@ -9,7 +9,10 @@ import 'package:respawnd1/features/admin/events/admin_event_detail_page.dart';
 import 'package:respawnd1/features/admin/events/event_form_page.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 
 enum _EventFilter {
   upcoming('Upcoming'),
@@ -36,6 +39,19 @@ class AdminEventsPage extends ConsumerStatefulWidget {
 
 class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
   _EventFilter _filter = _EventFilter.upcoming;
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  bool _matchesQuery(VolunteerEvent e) =>
+      _query.isEmpty || e.title.toLowerCase().contains(_query) || e.location.toLowerCase().contains(_query);
+
+  void _selectFilter(int index) => setState(() => _filter = _EventFilter.values[index]);
 
   void _openForm(String organizationId) {
     Navigator.push(
@@ -49,18 +65,27 @@ class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
     final orgIdAsync = ref.watch(currentOrganizationIdProvider);
     final organizationId = orgIdAsync.asData?.value;
 
+    final events = organizationId == null
+        ? null
+        : ref.watch(organizationEventsProvider(organizationId)).asData?.value;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: const AdminDrawer(active: AdminModule.events),
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu, color: AppColors.background),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
+      appBar: AdminAppBar(
+        title: 'Events',
+        bottom: AdminTabBar(
+          tabs: [
+            for (final f in _EventFilter.values)
+              AdminTab(
+                f.label,
+                // Only upcoming events are waiting on anything.
+                count: f == _EventFilter.upcoming ? events?.where(f.matches).length : null,
+              ),
+          ],
+          selectedIndex: _filter.index,
+          onSelected: _selectFilter,
         ),
-        title: Text('Events', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
       ),
       floatingActionButton: organizationId == null
           ? null
@@ -73,54 +98,51 @@ class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
             ),
       body: orgIdAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => _message('Could not load your organization.'),
+        error: (_, _) => const AdminListMessage('Could not load your organization.'),
         data: (orgId) {
-          if (orgId == null) return _message('Link your account to an organization to manage events.');
+          if (orgId == null) return const AdminListMessage('Link your account to an organization to manage events.');
           final eventsAsync = ref.watch(organizationEventsProvider(orgId));
           return Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final f in _EventFilter.values)
-                      ChoiceChip(
-                        label: Text(f.label, style: GoogleFonts.zain(fontSize: 13)),
-                        selected: _filter == f,
-                        showCheckmark: false,
-                        selectedColor: AppColors.yellowrspwn,
-                        onSelected: (_) => setState(() => _filter = f),
-                      ),
-                  ],
-                ),
+              AdminSearchBar(
+                controller: _searchController,
+                hintText: 'Search event name or location…',
+                onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
               ),
+              const SizedBox(height: 4),
               Expanded(
-                child: eventsAsync.when(
-                  loading: () => const Center(child: CircularProgressIndicator()),
-                  error: (_, _) => _message('Could not load events.'),
-                  data: (events) {
-                    var list = events.where(_filter.matches).toList();
-                    // Most recent first for history; soonest first for upcoming.
-                    if (_filter != _EventFilter.upcoming) list = list.reversed.toList();
-                    if (list.isEmpty) {
-                      return _message(_filter == _EventFilter.upcoming
-                          ? 'No upcoming events. Tap New Event to create one.'
-                          : 'No ${_filter.label.toLowerCase()} events.');
-                    }
-                    return ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                      itemCount: list.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) => _AdminEventCard(
-                        event: list[i],
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => AdminEventDetailPage(eventId: list[i].id)),
+                child: AdminTabSwipe(
+                  index: _filter.index,
+                  count: _EventFilter.values.length,
+                  onSelected: _selectFilter,
+                  child: eventsAsync.when(
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (_, _) => const AdminListMessage('Could not load events.'),
+                    data: (events) {
+                      var list = events.where(_filter.matches).where(_matchesQuery).toList();
+                      // Most recent first for history; soonest first for upcoming.
+                      if (_filter != _EventFilter.upcoming) list = list.reversed.toList();
+                      if (list.isEmpty) {
+                        return AdminListMessage(_query.isNotEmpty
+                            ? 'No events match your search.'
+                            : _filter == _EventFilter.upcoming
+                                ? 'No upcoming events. Tap New Event to create one.'
+                                : 'No ${_filter.label.toLowerCase()} events.');
+                      }
+                      return ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                        itemCount: list.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, i) => _AdminEventCard(
+                          event: list[i],
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => AdminEventDetailPage(eventId: list[i].id)),
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               ),
             ],
@@ -129,15 +151,6 @@ class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
       ),
     );
   }
-
-  Widget _message(String text) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(text,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-        ),
-      );
 }
 
 class _AdminEventCard extends StatelessWidget {
@@ -201,7 +214,7 @@ class EventStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = event.isCancelled
-        ? ('Cancelled', Colors.redAccent)
+        ? ('Cancelled', AppColors.error)
         : event.isPast
             ? ('Ended', AppColors.textSecondary)
             : event.isFull

@@ -8,6 +8,8 @@ import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Every expense entry for one case — editing or deleting here always
 /// updates the calculated Total/Funded/Outstanding totals automatically,
@@ -51,7 +53,7 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not delete expense: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not delete expense: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -128,7 +130,7 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
             itemBuilder: (context, i) {
               final e = expenses[i];
               final dateStr = e.incurredAt != null
-                  ? '${e.incurredAt!.month}/${e.incurredAt!.day}/${e.incurredAt!.year}'
+                  ? formatDate(e.incurredAt!)
                   : '-';
               final animalLabel = _animalLabelFor(e);
               return Container(
@@ -209,7 +211,7 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
                             const SizedBox(width: 10),
                             GestureDetector(
                               onTap: () => _delete(context, ref, e),
-                              child: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFE05353)),
+                              child: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
                             ),
                           ],
                         ),

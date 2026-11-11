@@ -8,8 +8,9 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
-String _fmt(DateTime d) => '${d.month}/${d.day}/${d.year}';
+String _fmt(DateTime d) => formatDate(d);
 
 String _actorName() {
   final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
@@ -192,7 +193,7 @@ class _AddCareRecordBodyState extends ConsumerState<_AddCareRecordBody> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),
-              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
             ],
             const SizedBox(height: 18),
             _SaveButton(label: 'Save ${_type.label}', saving: _saving, onPressed: _save),
@@ -401,7 +402,7 @@ class _PastHistoryBodyState extends ConsumerState<_PastHistoryBody> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 6),
-              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
             ],
             const SizedBox(height: 14),
             _SaveButton(
@@ -477,13 +478,7 @@ class _SaveButton extends StatelessWidget {
       width: double.infinity,
       child: ElevatedButton(
         onPressed: saving ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.yellowrspwn,
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-        ),
+        style: AppButtons.primary,
         child: saving
             ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
             : Text(label, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),

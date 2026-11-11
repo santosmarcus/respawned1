@@ -15,6 +15,7 @@ import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// The full set of admin root modules the drawer can open, in the required
 /// order — the single source of truth for labels/ordering/highlighting so
@@ -126,10 +127,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
       debugPrint('[AdminDrawer] Could not resolve organization membership: $e\n$st');
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(
-            content: const Text('Could not load the organization profile.'),
-            action: SnackBarAction(label: 'Retry', onPressed: _handleOpenOrganizationProfile),
-          ),
+          appSnackBar('Could not load the organization profile.', action: SnackBarAction(label: 'Retry', onPressed: _handleOpenOrganizationProfile)),
         );
       }
     } finally {
@@ -174,7 +172,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
       // LoginScreen on its own once authStateChanges() emits null.
       rootNavigator.popUntil((route) => route.isFirst);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Log out failed: $e')));
+      messenger.showSnackBar(appSnackBar('Log out failed: $e'));
     } finally {
       if (mounted) setState(() => _signingOut = false);
     }
@@ -315,14 +313,14 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                     Text('Log out',
                         style: GoogleFonts.zain(
                             fontSize: 14,
-                            color: _signingOut ? Colors.redAccent.withValues(alpha: 0.5) : Colors.redAccent,
+                            color: _signingOut ? AppColors.error.withValues(alpha: 0.5) : AppColors.error,
                             fontWeight: FontWeight.w600)),
                     if (_signingOut) ...[
                       const SizedBox(width: 10),
                       const SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.redAccent),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
                       ),
                     ],
                   ],

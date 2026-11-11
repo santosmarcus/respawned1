@@ -24,6 +24,7 @@ import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.dart';
 import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 const String _kNA = 'Not provided';
 
@@ -131,7 +132,7 @@ class MedicalProfileSection extends StatelessWidget {
           _HealthRow('Chronic Conditions', orNA(h.chronicConditions)),
           _HealthRow('Current Medications', orNA(h.currentMedications)),
           _HealthRow('Last Veterinary Checkup',
-              h.lastVetCheckup != null ? '${h.lastVetCheckup!.month}/${h.lastVetCheckup!.day}/${h.lastVetCheckup!.year}' : (readOnly ? 'Not recorded' : _kNA)),
+              h.lastVetCheckup != null ? formatDate(h.lastVetCheckup!) : (readOnly ? 'Not recorded' : _kNA)),
           _HealthRow('Weight', h.weightKg != null ? '${h.weightKg} kg' : (readOnly ? 'Not recorded' : _kNA)),
           _HealthRow('Body Condition', orNA(h.bodyCondition)),
           _HealthRow('Identification Tag Status', orNA(h.microchipStatus)),
@@ -274,7 +275,7 @@ class _VaccineTile extends StatelessWidget {
   (Color, Color) _statusColors(VaccineStatus s) => switch (s) {
         VaccineStatus.upToDate => (AppColors.greenrspwn, AppColors.textPrimary),
         VaccineStatus.dueSoon => (AppColors.yellowrspwn, AppColors.textPrimary),
-        VaccineStatus.overdue => (const Color(0xFFE05353), Colors.white),
+        VaccineStatus.overdue => (AppColors.error, Colors.white),
         VaccineStatus.noRecord => (AppColors.slaterspwn, AppColors.textSecondary),
       };
 
@@ -296,9 +297,9 @@ class _VaccineTile extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Given: ${r.dateAdministered.month}/${r.dateAdministered.day}/${r.dateAdministered.year}',
+                      Text('Given: ${formatDate(r.dateAdministered)}',
                           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-                      Text('Valid for ${r.validityDurationDays} days · Next due ${r.nextDueDate.month}/${r.nextDueDate.day}/${r.nextDueDate.year}',
+                      Text('Valid for ${r.validityDurationDays} days · Next due ${formatDate(r.nextDueDate)}',
                           style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                       if ((r.clinicOrProvider ?? '').isNotEmpty)
                         Text(r.clinicOrProvider!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
@@ -331,8 +332,8 @@ class _VaccineTile extends StatelessWidget {
                 children: [
                   Text(record.vaccineName, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                   Text(
-                    'Given: ${record.dateAdministered.month}/${record.dateAdministered.day}/${record.dateAdministered.year} · '
-                    'Valid ${record.validityDurationDays}d · Next due ${record.nextDueDate.month}/${record.nextDueDate.day}/${record.nextDueDate.year}',
+                    'Given: ${formatDate(record.dateAdministered)} · '
+                    'Valid ${record.validityDurationDays}d · Next due ${formatDate(record.nextDueDate)}',
                     style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                   ),
                   if (allForName.length > 1)
@@ -404,12 +405,12 @@ class _CareTile extends StatelessWidget {
   final VoidCallback onAdd;
   const _CareTile({required this.type, required this.latest, required this.history, required this.onAdd});
 
-  static String _d(DateTime d) => '${d.month}/${d.day}/${d.year}';
+  static String _d(DateTime d) => formatDate(d);
 
   (Color, Color) _statusColors(VaccineStatus s) => switch (s) {
         VaccineStatus.upToDate => (AppColors.greenrspwn, AppColors.textPrimary),
         VaccineStatus.dueSoon => (AppColors.yellowrspwn, AppColors.textPrimary),
-        VaccineStatus.overdue => (const Color(0xFFE05353), Colors.white),
+        VaccineStatus.overdue => (AppColors.error, Colors.white),
         VaccineStatus.noRecord => (AppColors.slaterspwn, AppColors.textSecondary),
       };
 
@@ -604,13 +605,7 @@ class _NotInTreatmentCard extends StatelessWidget {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdmitAnimalPage(animal: animal))),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
+              style: AppButtons.primary,
               child: Text('Admit Animal', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
             ),
           ),
@@ -689,7 +684,7 @@ class _InTreatmentCard extends ConsumerWidget {
                 child: _MiniInfo(
                     'Admitted',
                     rescueCase.dateAdmitted != null
-                        ? '${rescueCase.dateAdmitted!.month}/${rescueCase.dateAdmitted!.day}/${rescueCase.dateAdmitted!.year}'
+                        ? formatDate(rescueCase.dateAdmitted!)
                         : _kNA),
               ),
             ],
@@ -704,10 +699,7 @@ class _InTreatmentCard extends ConsumerWidget {
             child: OutlinedButton(
               onPressed: () => Navigator.push(
                   context, MaterialPageRoute(builder: (_) => TreatmentDetailPage(caseId: rescueCase.id, data: rescueCase.raw))),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.textPrimary),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              ),
+              style: AppButtons.outline,
               child: Text('Open Active Treatment', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
             ),
           ),
@@ -789,7 +781,7 @@ class _EpisodeCardState extends ConsumerState<_EpisodeCard> {
   Widget build(BuildContext context) {
     final c = ref.watch(caseDetailProvider(widget.entry.sourceCaseId)).asData?.value;
     final isActive = c != null && !c.status.isTerminal;
-    final dateStr = c?.dateAdmitted != null ? '${c!.dateAdmitted!.month}/${c.dateAdmitted!.day}/${c.dateAdmitted!.year}' : '';
+    final dateStr = c?.dateAdmitted != null ? formatDate(c!.dateAdmitted!) : '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),

@@ -33,7 +33,7 @@ class DonationAdminInfoPage extends ConsumerWidget {
           Expanded(
             child: async.when(
               loading: () => const Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
-              error: (e, _) => Center(child: Text('Could not load listing: $e', style: GoogleFonts.zain(color: Colors.redAccent))),
+              error: (e, _) => Center(child: Text('Could not load listing: $e', style: GoogleFonts.zain(color: AppColors.error))),
               data: (c) => c == null
                   ? Center(child: Text('This listing no longer exists.', style: GoogleFonts.zain(color: AppColors.textSecondary)))
                   : _InfoBody(campaign: c),
@@ -160,7 +160,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
         ),
         allocations.when(
           loading: () => const LinearProgressIndicator(color: AppColors.textPrimary),
-          error: (e, _) => Text('Could not load allocations: $e', style: GoogleFonts.zain(color: Colors.redAccent)),
+          error: (e, _) => Text('Could not load allocations: $e', style: GoogleFonts.zain(color: AppColors.error)),
           data: (list) => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -226,7 +226,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           ),
         donations.when(
           loading: () => const LinearProgressIndicator(color: AppColors.textPrimary),
-          error: (e, _) => Text('Could not load donations: $e', style: GoogleFonts.zain(color: Colors.redAccent)),
+          error: (e, _) => Text('Could not load donations: $e', style: GoogleFonts.zain(color: AppColors.error)),
           data: (list) {
             final filtered = list.where((d) {
               if (_donationFilter == 1) return !d.isInKind;
@@ -547,7 +547,7 @@ class _HistoryList extends ConsumerWidget {
     return ref.watch(campaignHistoryProvider(campaignId)).when(
       loading: () => const LinearProgressIndicator(color: AppColors.textPrimary),
       error: (e, _) => Text('History is not readable with the current Firestore rules ($e).',
-          style: GoogleFonts.zain(color: Colors.redAccent)),
+          style: GoogleFonts.zain(color: AppColors.error)),
       data: (list) => list.isEmpty
           ? Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),

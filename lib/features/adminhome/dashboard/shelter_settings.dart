@@ -9,6 +9,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 /// Admin-entered shelter numbers the dashboard needs: safe capacity,
 /// isolation spots, monthly care budget, daily food use and how many riders
@@ -255,7 +256,7 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    'Last updated ${current!.updatedAt!.day}/${current.updatedAt!.month}/${current.updatedAt!.year}'
+                    'Last updated ${formatDate(current!.updatedAt!)}'
                         '${current.updatedByName == null ? '' : ' by ${current.updatedByName}'}'
                         '${current.monthlyBudget == null ? '' : ' · budget ${formatPeso(current.monthlyBudget!)}'}',
                     textAlign: TextAlign.center,
@@ -265,7 +266,7 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!, style: dashBody(color: Colors.red)),
+                  child: Text(_error!, style: dashBody(color: AppColors.error)),
                 ),
               if (!canManage)
                 const Padding(

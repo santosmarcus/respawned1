@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class DonationAdminHeader extends StatelessWidget {
   final String title;
@@ -77,7 +78,7 @@ class FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) => Text.rich(
     TextSpan(children: [
       TextSpan(text: text),
-      if (required) const TextSpan(text: ' *', style: TextStyle(color: Colors.redAccent)),
+      if (required) const TextSpan(text: ' *', style: TextStyle(color: AppColors.error)),
     ]),
     style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
   );
@@ -233,7 +234,7 @@ class StatusChip extends StatelessWidget {
       'draft' => AppColors.textSecondary,
       'paused' => const Color(0xFF9C6B10),
       'archived' => AppColors.textSecondary,
-      _ => Colors.redAccent,
+      _ => AppColors.error,
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -562,7 +563,7 @@ Future<bool> confirmAction(
           onPressed: () => Navigator.pop(ctx, true),
           child: Text(confirmLabel,
               style: GoogleFonts.zain(
-                  fontSize: 16, fontWeight: FontWeight.w800, color: destructive ? Colors.redAccent : AppColors.textPrimary)),
+                  fontSize: 16, fontWeight: FontWeight.w800, color: destructive ? AppColors.error : AppColors.textPrimary)),
         ),
       ],
     ),
@@ -571,10 +572,7 @@ Future<bool> confirmAction(
 }
 
 void showAdminSnack(BuildContext context, String message, {bool error = false}) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(message),
-    backgroundColor: error ? Colors.redAccent : AppColors.textPrimary,
-  ));
+  showAppMessage(context, message, kind: error ? AppMessageKind.error : AppMessageKind.info);
 }
 
 /// Parses "1,250.50" style input; null when not a positive amount with ≤2 decimals.

@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -27,6 +26,8 @@ import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.da
 import 'package:respawnd1/features/admin/rescue/widgets/release_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transfer_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 const List<String> _conditions = [
   'Critical',
@@ -96,13 +97,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       );
       if (outcome.acted && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              outcome.wholeCaseClosed
+          appSnackBar(outcome.wholeCaseClosed
                   ? 'Case closed.'
-                  : 'Animal marked deceased.',
-            ),
-          ),
+                  : 'Animal marked deceased.'),
         );
         // A per-animal death that leaves other animals still in Treatment
         // must NOT navigate away — the case is still active here (spec
@@ -112,10 +109,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not close case: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not close case: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -374,10 +368,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       if (mounted) {
         setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not save update: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not save update: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -435,10 +426,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Could not start intake: $e'),
-                    backgroundColor: Colors.redAccent,
-                  ),
+                  appSnackBar('Could not start intake: $e', kind: AppMessageKind.error),
                 );
               }
               return;
@@ -483,7 +471,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   ) async {
     final dateOfDeath = c.deceasedAt;
     final dateStr = dateOfDeath != null
-        ? '${dateOfDeath.month}/${dateOfDeath.day}/${dateOfDeath.year}'
+        ? formatDate(dateOfDeath)
         : '-';
     final confirmed = await showConfirmActionDialog(
       context,
@@ -506,10 +494,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not close case: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not close case: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -574,7 +559,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
     final outstandingBalance = totalExpenses - fundedAmount;
 
     final dateStr = c.dateAdmitted != null
-        ? '${_monthName(c.dateAdmitted!.month)} ${c.dateAdmitted!.day}, ${c.dateAdmitted!.year}'
+        ? formatDate(c.dateAdmitted!)
         : '-';
 
     return Scaffold(
@@ -593,7 +578,6 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           ),
         ),
         actions: [
-          const AdminAlertsBell(),
           // The AppBar's "Animal Moved" one-tap shortcut is gone — that
           // location update now only ever comes from an approved Community
           // Report. Close Case (any reason, including animal-moved) is now
@@ -813,13 +797,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                             : {};
                       }
                     }),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.outline,
                     child: Text(
                       _showUpdateForm ? 'Hide Form' : 'Add Update',
                       style: GoogleFonts.tiltWarp(
@@ -855,14 +833,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () => _closeDeceasedCase(c, outstandingBalance),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.primary,
                   child: Text(
                     'Close Case',
                     style: GoogleFonts.tiltWarp(
@@ -1050,7 +1021,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                 Text(
                   _treatmentDate == null
                       ? 'mm/dd/yyyy'
-                      : '${_treatmentDate!.month}/${_treatmentDate!.day}/${_treatmentDate!.year}',
+                      : formatDate(_treatmentDate!),
                   style: GoogleFonts.zain(
                     fontSize: 14,
                     color: _treatmentDate == null
@@ -1168,7 +1139,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                   Text(
                     _nextVaccineSchedule == null
                         ? 'mm/dd/yyyy'
-                        : '${_nextVaccineSchedule!.month}/${_nextVaccineSchedule!.day}/${_nextVaccineSchedule!.year}',
+                        : formatDate(_nextVaccineSchedule!),
                     style: GoogleFonts.zain(
                       fontSize: 14,
                       color: AppColors.textSecondary,
@@ -1326,7 +1297,7 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           const SizedBox(height: 10),
           Text(
             _mediaError!,
-            style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent),
+            style: GoogleFonts.zain(fontSize: 12, color: AppColors.error),
           ),
         ],
 
@@ -1366,20 +1337,6 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
   }
 }
 
-String _monthName(int month) => const [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-][month - 1];
 
 /// Replaces the "Add Update" button once `readyForDischarge == true` —
 /// disabled rather than hidden, so it's clear the option existed and is now
@@ -1395,14 +1352,7 @@ class _DischargedNotice extends StatelessWidget {
       children: [
         OutlinedButton(
           onPressed: null,
-          style: OutlinedButton.styleFrom(
-            disabledForegroundColor: AppColors.textSecondary,
-            side: const BorderSide(color: AppColors.slaterspwn),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(30),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-          ),
+          style: AppButtons.outline,
           child: Text(
             'Treatment Discharged',
             style: GoogleFonts.tiltWarp(
@@ -1546,13 +1496,7 @@ class _CostTrackingSection extends StatelessWidget {
                     ),
                   ),
                 ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                ),
+                style: AppButtons.outline,
                 child: Text(
                   'View Expenses',
                   style: GoogleFonts.zain(
@@ -1604,13 +1548,7 @@ class _CostTrackingSection extends StatelessWidget {
                           ),
                         ),
                       ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                ),
+                style: AppButtons.outline,
                 child: Text(
                   'Create Fundraiser',
                   style: GoogleFonts.zain(
@@ -1714,7 +1652,7 @@ class _FieldLabel extends StatelessWidget {
           ),
         ),
         if (required)
-          const Text(' *', style: TextStyle(color: Colors.red, fontSize: 14)),
+          const Text(' *', style: TextStyle(color: AppColors.error, fontSize: 14)),
       ],
     );
   }
@@ -1780,7 +1718,7 @@ class _PickedImageThumb extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(2),
                   decoration: const BoxDecoration(
-                    color: Color(0xFFE05353),
+                    color: AppColors.error,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.close, size: 14, color: Colors.white),

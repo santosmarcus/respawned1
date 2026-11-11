@@ -16,6 +16,59 @@ class AppColors {
   static const Color textSecondary = Color(0xFF7E7D76);
   static const Color bgres = Color(0xFFE2E5FF);
   static const Color surface = Color(0xFFFFFFFF);
+
+  // Meaning colours. Use these instead of a hard-coded red, amber or green.
+  static const Color error = Color(0xFFE05353);
+  static const Color warning = Color(0xFFE0A030);
+  static const Color success = Color(0xFF4CAF6D);
+}
+
+/// The app's button looks. Pass one as `style:` instead of writing a new
+/// `styleFrom(...)` on each button.
+class AppButtons {
+  const AppButtons._();
+
+  static final RoundedRectangleBorder _pill = RoundedRectangleBorder(borderRadius: BorderRadius.circular(30));
+
+  /// The main action on a screen or sheet (yellow pill).
+  static final ButtonStyle primary = ElevatedButton.styleFrom(
+    backgroundColor: AppColors.yellowrspwn,
+    foregroundColor: AppColors.textPrimary,
+    disabledBackgroundColor: AppColors.slaterspwn,
+    elevation: 0,
+    shape: _pill,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+    textStyle: GoogleFonts.tiltWarp(fontSize: 15),
+  );
+
+  /// A secondary action beside or below the main one (outlined pill).
+  static final ButtonStyle outline = OutlinedButton.styleFrom(
+    foregroundColor: AppColors.textPrimary,
+    side: const BorderSide(color: AppColors.textPrimary),
+    shape: _pill,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    textStyle: GoogleFonts.tiltWarp(fontSize: 14),
+  );
+
+  /// A destructive secondary action (outlined pill in the error colour).
+  static final ButtonStyle dangerOutline = OutlinedButton.styleFrom(
+    foregroundColor: AppColors.error,
+    side: const BorderSide(color: AppColors.error),
+    shape: _pill,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    textStyle: GoogleFonts.tiltWarp(fontSize: 14),
+  );
+
+  /// A destructive main action (reject, delete, cancel an event).
+  static final ButtonStyle danger = ElevatedButton.styleFrom(
+    backgroundColor: AppColors.error,
+    foregroundColor: Colors.white,
+    disabledBackgroundColor: AppColors.slaterspwn,
+    elevation: 0,
+    shape: _pill,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+    textStyle: GoogleFonts.tiltWarp(fontSize: 15),
+  );
 }
 
 class AppTheme {

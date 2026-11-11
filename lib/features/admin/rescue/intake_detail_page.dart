@@ -16,6 +16,8 @@ import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 typedef ShelterDestination = ({
   String name,
@@ -108,10 +110,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (orgId == null && (uid == null || uid.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Sign in to set a shelter location.'),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('Sign in to set a shelter location.', kind: AppMessageKind.error),
       );
       return;
     }
@@ -207,7 +206,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
             _ConfirmRow(
               'Discharge Date',
               c.dischargedAt != null
-                  ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'
+                  ? formatDate(c.dischargedAt!)
                   : 'Not on file',
             ),
           ],
@@ -225,14 +224,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
+            style: AppButtons.primary,
             child: Text(
               'Confirm',
               style: GoogleFonts.zain(fontWeight: FontWeight.w700),
@@ -264,10 +256,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       if (mounted) {
         setState(() => _isConfirmingIntake = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not confirm intake: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not confirm intake: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -309,10 +298,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not confirm receipt: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not confirm receipt: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -327,23 +313,16 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       final outcome = await performCloseCase(context, ref, c);
       if (outcome.acted && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              outcome.wholeCaseClosed
+          appSnackBar(outcome.wholeCaseClosed
                   ? 'Case closed.'
-                  : 'Animal marked deceased.',
-            ),
-          ),
+                  : 'Animal marked deceased.'),
         );
         if (outcome.wholeCaseClosed) Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not close case: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not close case: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -355,10 +334,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final days = int.tryParse(_quarantineDaysController.text.trim());
     if (days == null || days <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a quarantine duration in days.'),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('Enter a quarantine duration in days.', kind: AppMessageKind.error),
       );
       return;
     }
@@ -370,10 +346,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not start quarantine: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not start quarantine: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -401,10 +374,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not end quarantine: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not end quarantine: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -421,10 +391,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not skip quarantine: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not skip quarantine: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -519,7 +486,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
 
     final dischargeDateStr = c.dischargedAt != null
-        ? '${_monthName(c.dischargedAt!.month)} ${c.dischargedAt!.day}, ${c.dischargedAt!.year}'
+        ? formatDate(c.dischargedAt!)
         : '-';
 
     return Scaffold(
@@ -738,8 +705,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                             Text(
                               c.intakeReceivedAt == null
                                   ? 'Receipt confirmed'
-                                  : 'Received ${_monthName(c.intakeReceivedAt!.month)} '
-                                        '${c.intakeReceivedAt!.day}, ${c.intakeReceivedAt!.year}',
+                                  : 'Received ${formatDate(c.intakeReceivedAt!)}',
                               style: GoogleFonts.zain(
                                 fontSize: 12,
                                 color: AppColors.textSecondary,
@@ -811,17 +777,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                     onPressed: _isConfirmingReceived
                         ? null
                         : () => _confirmAnimalReceived(c),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      disabledBackgroundColor: AppColors.slaterspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      disabledForegroundColor: AppColors.textSecondary,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.primary,
                     child: _isConfirmingReceived
                         ? const SizedBox(
                             height: 20,
@@ -856,15 +812,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 width: double.infinity,
                 child: OutlinedButton(
                   onPressed: _isClosingCase ? null : () => _closeCase(c),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFE05353),
-                    side: const BorderSide(color: Color(0xFFE05353)),
-                    disabledForegroundColor: AppColors.textSecondary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                  ),
+                  style: AppButtons.dangerOutline,
                   child: _isClosingCase
                       ? const SizedBox(
                           height: 20,
@@ -941,13 +889,7 @@ class _ConfirmIntakeSection extends StatelessWidget {
         const SizedBox(height: 8),
         OutlinedButton(
           onPressed: onReassign,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.textPrimary,
-            side: const BorderSide(color: AppColors.textPrimary),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-          ),
+          style: AppButtons.outline,
           child: Text(
             'Reassign Transporter',
             style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600),
@@ -974,15 +916,7 @@ class _ConfirmIntakeSection extends StatelessWidget {
                 : (!_hasUsableDestination
                       ? onChangeShelter
                       : (canConfirm ? onConfirm : null)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              disabledBackgroundColor: AppColors.slaterspwn,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
+            style: AppButtons.primary,
             child: isConfirming
                 ? const SizedBox(
                     height: 20,
@@ -1075,7 +1009,7 @@ class _DestinationCard extends StatelessWidget {
                     'No coordinates on file — set an exact location.',
                     style: GoogleFonts.zain(
                       fontSize: 11,
-                      color: Colors.redAccent,
+                      color: AppColors.error,
                     ),
                   ),
               ],
@@ -1229,13 +1163,7 @@ class _QuarantineSection extends StatelessWidget {
             width: double.infinity,
             child: OutlinedButton(
               onPressed: isEnding ? null : onEnd,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFE05353),
-                side: const BorderSide(color: Color(0xFFE05353)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-              ),
+              style: AppButtons.dangerOutline,
               child: isEnding
                   ? const SizedBox(
                       height: 18,
@@ -1266,13 +1194,7 @@ class _QuarantineSection extends StatelessWidget {
         children: [
           OutlinedButton(
             onPressed: null,
-            style: OutlinedButton.styleFrom(
-              disabledForegroundColor: AppColors.textSecondary,
-              side: const BorderSide(color: AppColors.slaterspwn),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
-            ),
+            style: AppButtons.outline,
             child: Text(
               isSkipped ? 'Quarantine Skipped' : 'Quarantine Completed',
               style: GoogleFonts.zain(
@@ -1405,7 +1327,7 @@ class _QuarantineSection extends StatelessWidget {
     );
   }
 
-  String _fmtDate(DateTime d) => '${_monthName(d.month)} ${d.day}, ${d.year}';
+  String _fmtDate(DateTime d) => formatDate(d);
 }
 
 /// Disabled — with a real, always-visible reason, not just a greyed-out
@@ -1469,15 +1391,7 @@ class _AnimalRecordsSection extends StatelessWidget {
                   ),
                 ),
               ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+              style: AppButtons.primary,
               child: Text(
                 'View Animal Record',
                 style: GoogleFonts.tiltWarp(fontSize: 15),
@@ -1520,17 +1434,7 @@ class _AnimalRecordsSection extends StatelessWidget {
                       ),
                     ),
                   ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              disabledBackgroundColor: AppColors.slaterspwn,
-              foregroundColor: AppColors.textPrimary,
-              disabledForegroundColor: AppColors.textSecondary,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
+            style: AppButtons.primary,
             child: Text(
               received ? buttonLabel : 'Create Animal Records',
               style: GoogleFonts.tiltWarp(fontSize: 15),
@@ -1621,17 +1525,3 @@ class _ConfirmRow extends StatelessWidget {
   }
 }
 
-String _monthName(int month) => const [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-][month - 1];

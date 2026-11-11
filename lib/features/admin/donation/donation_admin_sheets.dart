@@ -390,7 +390,7 @@ class _ResolveDeadlineSheetState extends State<ResolveDeadlineSheet> {
               Expanded(
                 child: TextButton(
                   onPressed: _busy ? null : () => _run('close'),
-                  child: Text('Keep closed', style: GoogleFonts.zain(fontSize: 15, color: Colors.redAccent)),
+                  child: Text('Keep closed', style: GoogleFonts.zain(fontSize: 15, color: AppColors.error)),
                 ),
               ),
             ],
@@ -498,7 +498,7 @@ class _ReallocateExcessSheetState extends ConsumerState<ReallocateExcessSheet> {
         _sheetLabel('Destination (same organization, shares a tag: ${s.purposeTags.join(', ')})'),
         if (options.isEmpty)
           Text('No active campaign with a matching purpose. Create one first.',
-              style: GoogleFonts.zain(fontSize: 15, color: Colors.redAccent))
+              style: GoogleFonts.zain(fontSize: 15, color: AppColors.error))
         else
           DropdownButtonFormField<String>(
             initialValue: _destinationId,

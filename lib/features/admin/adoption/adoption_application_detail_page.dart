@@ -20,10 +20,13 @@ import 'package:respawnd1/features/admin/adoption/release_details_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 
-String _fmtDate(DateTime? d) => d == null ? kNotProvided : '${d.month}/${d.day}/${d.year}';
+String _fmtDate(DateTime? d) => d == null ? kNotProvided : formatDate(d);
 String _fmtDateTime(DateTime? d) =>
-    d == null ? kNotProvided : '${d.month}/${d.day}/${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    d == null ? kNotProvided : formatDateTime(d);
 
 class AdoptionApplicationDetailPage extends ConsumerStatefulWidget {
   final String applicationId;
@@ -59,7 +62,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
       await action();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Action failed: $e', kind: AppMessageKind.error));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -122,22 +125,14 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     } on FirebaseFunctionsException catch (e) {
       if (!mounted) return;
       final unavailable = e.code == 'failed-precondition';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(unavailable
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar(unavailable
             ? 'Online meeting setup is unavailable for this organization.'
-            : 'Could not set up the Zoom meeting.'),
-        backgroundColor: Colors.redAccent,
-        action: unavailable
+            : 'Could not set up the Zoom meeting.', kind: AppMessageKind.error, action: unavailable
             ? null
-            : SnackBarAction(label: 'Retry', onPressed: () => _setupZoomMeeting(applicationId, date, time)),
-      ));
+            : SnackBarAction(label: 'Retry', onPressed: () => _setupZoomMeeting(applicationId, date, time))));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Could not set up the Zoom meeting.'),
-        backgroundColor: Colors.redAccent,
-        action: SnackBarAction(label: 'Retry', onPressed: () => _setupZoomMeeting(applicationId, date, time)),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not set up the Zoom meeting.', kind: AppMessageKind.error, action: SnackBarAction(label: 'Retry', onPressed: () => _setupZoomMeeting(applicationId, date, time))));
     }
   }
 
@@ -147,7 +142,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not cancel the Zoom meeting: $e'), backgroundColor: Colors.redAccent));
+            .showSnackBar(appSnackBar('Could not cancel the Zoom meeting: $e', kind: AppMessageKind.error));
       }
     }
   }
@@ -197,9 +192,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
   Future<void> _reserve(AdoptionApplication app) async {
     final animalRecordId = app.animalRecordId;
     if (animalRecordId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("This application predates linked animal records and can't be reserved automatically."),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar("This application predates linked animal records and can't be reserved automatically.", kind: AppMessageKind.error));
       return;
     }
     final confirmed = await showConfirmActionDialog(context,
@@ -219,9 +212,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
   Future<void> _unreserve(AdoptionApplication app) async {
     final animalRecordId = app.animalRecordId;
     if (animalRecordId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("This application predates linked animal records and can't be unreserved automatically."),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar("This application predates linked animal records and can't be unreserved automatically.", kind: AppMessageKind.error));
       return;
     }
     final confirmed = await showConfirmActionDialog(context,
@@ -262,7 +253,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                   _AnimalHeaderCard(app: app),
                   const SizedBox(height: 16),
 
-                  _SectionCard(title: 'Details', child: Column(
+                  SectionCard(title: 'Details', child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(children: [
@@ -375,29 +366,6 @@ class _AnimalHeaderCard extends ConsumerWidget {
       width: 56, height: 56, decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.pets));
 }
 
-class _SectionCard extends StatelessWidget {
-  final String title;
-  final Widget child;
-  const _SectionCard({required this.title, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
 class _InfoItem extends StatelessWidget {
   final String label;
   final String value;
@@ -426,8 +394,8 @@ class _FitAssessmentCard extends ConsumerWidget {
   Color _bandColor(FitAssessmentBand band) => switch (band) {
         FitAssessmentBand.strong => AppColors.greenrspwn,
         FitAssessmentBand.moderate => AppColors.yellowrspwn,
-        FitAssessmentBand.needsReview => const Color(0xFFE0A353),
-        FitAssessmentBand.significantConcerns => const Color(0xFFE05353),
+        FitAssessmentBand.needsReview => AppColors.warning,
+        FitAssessmentBand.significantConcerns => AppColors.error,
       };
 
   @override
@@ -437,7 +405,7 @@ class _FitAssessmentCard extends ConsumerWidget {
     final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
     final assessment = animal == null ? null : calculateFitAssessment(application: app, animal: animal);
 
-    return _SectionCard(
+    return SectionCard(
       title: 'Fit Assessment',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -536,7 +504,7 @@ class _AssessmentSummary extends StatelessWidget {
           ],
           if (assessment.concerns.isNotEmpty) ...[
             const SizedBox(height: 10),
-            Text('Concerns to discuss', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFFE05353))),
+            Text('Concerns to discuss', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.error)),
             for (final c in assessment.concerns)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
@@ -738,7 +706,7 @@ class _DocumentsSection extends StatelessWidget {
     // Record's own images.
     final homePhotos = _urlsFor(uploads['homePhotos']);
 
-    return _SectionCard(
+    return SectionCard(
       title: 'Required Documents',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -867,7 +835,7 @@ class _AppointmentSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasAppointment = app.appointmentDate != null;
 
-    return _SectionCard(
+    return SectionCard(
       title: 'Appointment Details',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -948,7 +916,7 @@ class _AdoptionFeeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasPaymentRecord = app.raw['payment'] != null;
-    return _SectionCard(
+    return SectionCard(
       title: 'Adoption Fee',
       child: !hasPaymentRecord
           ? Text('Payment tracking is not configured yet.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
@@ -983,7 +951,7 @@ class _NotesSection extends ConsumerWidget {
     // is over.
     final canEditNotes = app.status != AdoptionStatus.adopted;
 
-    return _SectionCard(
+    return SectionCard(
       title: 'Interview Notes',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1007,7 +975,7 @@ class _NotesSection extends ConsumerWidget {
               alignment: Alignment.centerRight,
               child: ElevatedButton(
                 onPressed: busy ? null : onSave,
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                style: AppButtons.primary,
                 child: const Text('Save Note'),
               ),
             ),
@@ -1074,12 +1042,7 @@ class _ActionsSection extends ConsumerWidget {
           width: double.infinity,
           child: ElevatedButton(
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PostAdoptionDetailsPage(applicationId: app.id))),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-            ),
+            style: AppButtons.primary,
             child: Text('View Post-Adoption', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
           ),
         );
@@ -1095,11 +1058,7 @@ class _ActionsSection extends ConsumerWidget {
               width: double.infinity,
               child: OutlinedButton(
                 onPressed: busy ? null : (isReservedForThis ? onUnreserve : onReserve),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
+                style: AppButtons.outline,
                 child: Text(isReservedForThis ? 'Unreserve Animal' : 'Reserve Animal',
                     style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
@@ -1109,12 +1068,7 @@ class _ActionsSection extends ConsumerWidget {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: busy ? null : onRelease,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
+                style: AppButtons.primary,
                 child: Text('Release Animal', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
             ),
@@ -1137,12 +1091,7 @@ class _ActionsSection extends ConsumerWidget {
                 Expanded(
                   child: OutlinedButton(
                     onPressed: busy ? null : onReject,
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFFE05353)),
-                      foregroundColor: const Color(0xFFE05353),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
+                    style: AppButtons.dangerOutline,
                     child: const Text('Reject'),
                   ),
                 ),
@@ -1150,13 +1099,7 @@ class _ActionsSection extends ConsumerWidget {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: (busy || !canAccept) ? null : onAccept,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      disabledBackgroundColor: AppColors.slaterspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
+                    style: AppButtons.primary,
                     child: const Text('Accept'),
                   ),
                 ),

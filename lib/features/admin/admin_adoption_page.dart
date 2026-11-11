@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 
 /// Donations/Sponsorship landing page. Adoptions itself no longer routes
@@ -35,7 +34,6 @@ class AdminAdoptionPage extends StatelessWidget {
           style: GoogleFonts.tiltWarp(
               fontSize: 18, color: AppColors.background),
         ),
-        actions: const [AdminAlertsBell()],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),

@@ -11,6 +11,7 @@ import 'package:respawnd1/core/models/rescue/saved_clinic.dart';
 import 'package:respawnd1/core/repos/clinic_search_repository.dart';
 import 'package:respawnd1/core/repos/saved_clinics_repository.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Shared clinic picker — map, text search, Saved/Nearby sectioned results,
 /// bookmark toggling, and the closed-clinic availability warning. Extracted
@@ -147,7 +148,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
           }
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not update bookmark: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not update bookmark: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -292,7 +293,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
                   style: GoogleFonts.zain(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: clinic.openNow! ? AppColors.greenrspwn : const Color(0xFFE05353),
+                    color: clinic.openNow! ? AppColors.greenrspwn : AppColors.error,
                   ),
                 ),
             ],
@@ -340,7 +341,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
     final uri = Uri(scheme: 'tel', path: phone.trim());
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not start the call.')));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not start the call.'));
     }
   }
 
@@ -458,7 +459,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
               onPressed: () => Navigator.pop(ctx, 'choose_another'), child: const Text('Choose Another Clinic')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, 'proceed'),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE0A353), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.warning, foregroundColor: Colors.white),
             child: const Text('Proceed Anyway'),
           ),
         ],
@@ -633,7 +634,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.error_outline, color: Color(0xFFE05353), size: 28),
+                          const Icon(Icons.error_outline, color: AppColors.error, size: 28),
                           const SizedBox(height: 8),
                           Text(_loadError!,
                               textAlign: TextAlign.center,
@@ -701,12 +702,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
           width: double.infinity,
           child: ElevatedButton(
             onPressed: _saving ? null : _confirm,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
+            style: AppButtons.primary,
             child: _saving
                 ? const SizedBox(
                     height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))

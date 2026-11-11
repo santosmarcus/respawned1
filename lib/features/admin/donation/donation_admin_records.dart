@@ -53,7 +53,7 @@ class _DonationRecordsPageState extends ConsumerState<DonationRecordsPage> {
     final async = ref.watch(allDonationsProvider);
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
-      error: (e, _) => Center(child: Text('Could not load donations: $e', style: GoogleFonts.zain(color: Colors.redAccent))),
+      error: (e, _) => Center(child: Text('Could not load donations: $e', style: GoogleFonts.zain(color: AppColors.error))),
       data: (all) {
         final items = all.where((d) {
           final matchesTab = switch (_tab) {
@@ -368,7 +368,7 @@ class _DonationRecordSheetState extends ConsumerState<DonationRecordSheet> {
                     ),
                     TextButton(
                       onPressed: _busy ? null : () => _run('cancel'),
-                      child: Text('Cancel pledge', style: GoogleFonts.zain(fontSize: 15, color: Colors.redAccent)),
+                      child: Text('Cancel pledge', style: GoogleFonts.zain(fontSize: 15, color: AppColors.error)),
                     ),
                   ],
                 ),
@@ -392,7 +392,7 @@ class _PaymentAttemptsList extends ConsumerWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text('Payment attempts are not readable with the current Firestore rules ($e).',
-              textAlign: TextAlign.center, style: GoogleFonts.zain(color: Colors.redAccent)),
+              textAlign: TextAlign.center, style: GoogleFonts.zain(color: AppColors.error)),
         ),
       ),
       data: (items) => items.isEmpty

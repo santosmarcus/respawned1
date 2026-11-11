@@ -7,7 +7,11 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/features/admin/audit/state/audit_providers.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 
 /// Read-only audit trail across six categories. Temporary Organization
 /// Admin/Member Access Model spec — access is resolved via the centralized
@@ -26,6 +30,14 @@ class _AuditPageState extends ConsumerState<AuditPage> {
   bool _loading = true;
   bool _allowed = true;
   String? _organizationId;
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -60,58 +72,39 @@ class _AuditPageState extends ConsumerState<AuditPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      drawer: const AdminDrawer(active: AdminModule.audit),
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu, color: AppColors.background),
-            tooltip: 'Menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
+    final showTabs = !_loading && _allowed;
+    return DefaultTabController(
+      length: AuditCategory.values.length,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        drawer: const AdminDrawer(active: AdminModule.audit),
+        appBar: AdminAppBar(
+          title: 'Audit',
+          bottom: showTabs ? AdminTabBar(tabs: [for (final c in AuditCategory.values) AdminTab(c.label)]) : null,
         ),
-        title: Text('Audit', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
-          : !_allowed
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'You do not have permission to view Audit. Only organization admins can access this page.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-                    ),
-                  ),
-                )
-              : DefaultTabController(
-                  length: AuditCategory.values.length,
-                  child: Column(
+        body: _loading
+            ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
+            : !_allowed
+                ? const AdminListMessage(
+                    'You do not have permission to view Audit. Only organization admins can access this page.')
+                : Column(
                     children: [
-                      Material(
-                        color: AppColors.textPrimary,
-                        child: TabBar(
-                          isScrollable: true,
-                          labelColor: AppColors.background,
-                          unselectedLabelColor: AppColors.background.withValues(alpha: 0.6),
-                          indicatorColor: AppColors.yellowrspwn,
-                          labelStyle: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700),
-                          tabs: [for (final c in AuditCategory.values) Tab(text: c.label)],
-                        ),
+                      AdminSearchBar(
+                        controller: _searchController,
+                        hintText: 'Search action, person or record…',
+                        onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
                       ),
                       Expanded(
                         child: TabBarView(
                           children: [
-                            for (final c in AuditCategory.values) _AuditCategoryTab(category: c, organizationId: _organizationId),
+                            for (final c in AuditCategory.values)
+                              _AuditCategoryTab(category: c, organizationId: _organizationId, query: _query),
                           ],
                         ),
                       ),
                     ],
                   ),
-                ),
+      ),
     );
   }
 }
@@ -119,13 +112,23 @@ class _AuditPageState extends ConsumerState<AuditPage> {
 class _AuditCategoryTab extends ConsumerStatefulWidget {
   final AuditCategory category;
   final String? organizationId;
-  const _AuditCategoryTab({required this.category, required this.organizationId});
+
+  /// Lower-cased search text; empty shows every row.
+  final String query;
+  const _AuditCategoryTab({required this.category, required this.organizationId, this.query = ''});
 
   @override
   ConsumerState<_AuditCategoryTab> createState() => _AuditCategoryTabState();
 }
 
 class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
+  bool _matches(AuditDisplayRow r) {
+    final q = widget.query;
+    if (q.isEmpty) return true;
+    return [r.action, r.description, r.actorName, r.actorEmail, r.targetLabel]
+        .any((v) => v != null && v.toLowerCase().contains(q));
+  }
+
   @override
   Widget build(BuildContext context) {
     // Donations has no real write path anywhere in this codebase (no
@@ -134,8 +137,8 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
     // than fabricated entries, same convention admin_adoption_page.dart
     // already uses for the same reason.
     if (widget.category == AuditCategory.donations) {
-      return _EmptyState(
-        message: 'No donation events recorded yet. Donations does not have a data-writing workflow in this build.',
+      return const AdminListMessage(
+        'No donation events recorded yet. Donations does not have a data-writing workflow in this build.',
       );
     }
     if (widget.category == AuditCategory.animalRecords) {
@@ -179,12 +182,16 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
   }) {
     if (rows == null) {
       if (hasError) {
-        return _ErrorState(message: 'Could not load audit records.', onRetry: onRetry);
+        return AdminListMessage('Could not load audit records.', onRetry: onRetry);
       }
       return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
     }
     if (rows.isEmpty) {
-      return const _EmptyState(message: 'No audit records yet.');
+      return const AdminListMessage('No audit records yet.');
+    }
+    final visible = rows.where(_matches).toList();
+    if (visible.isEmpty) {
+      return AdminListMessage('None of the ${rows.length} most recent records match your search.');
     }
     return Column(
       children: [
@@ -194,12 +201,12 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
             margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.12),
+              color: AppColors.warning.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               children: [
-                const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange),
+                const Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.warning),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text('Could not refresh.',
@@ -212,9 +219,9 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
-            itemCount: rows.length,
+            itemCount: visible.length,
             separatorBuilder: (_, _) => const Divider(height: 20),
-            itemBuilder: (context, i) => _AuditRowTile(row: rows[i]),
+            itemBuilder: (context, i) => _AuditRowTile(row: visible[i]),
           ),
         ),
       ],
@@ -232,19 +239,6 @@ class _AuditRowTile extends StatefulWidget {
 
 class _AuditRowTileState extends State<_AuditRowTile> {
   bool _expanded = false;
-
-  static const _months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-  ];
-
-  String _fmt(DateTime? d) {
-    if (d == null) return 'Undated';
-    final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    final ampm = d.hour >= 12 ? 'PM' : 'AM';
-    final minute = d.minute.toString().padLeft(2, '0');
-    return '${_months[d.month - 1]} ${d.day}, ${d.year}, $hour12:$minute $ampm';
-  }
 
   String? get _actorLine {
     final r = widget.row;
@@ -283,7 +277,7 @@ class _AuditRowTileState extends State<_AuditRowTile> {
               ),
             ),
             const SizedBox(width: 8),
-            Text(_fmt(r.createdAt), style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+            Text(formatDateTimeOr(r.createdAt, 'Undated'), style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
           ],
         ),
         if (hasValues)
@@ -313,38 +307,4 @@ class _AuditRowTileState extends State<_AuditRowTile> {
       ],
     );
   }
-}
-
-class _EmptyState extends StatelessWidget {
-  final String message;
-  const _EmptyState({required this.message});
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(message, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-        ),
-      );
-}
-
-class _ErrorState extends StatelessWidget {
-  final String message;
-  final VoidCallback onRetry;
-  const _ErrorState({required this.message, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(message, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 12),
-              OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
-            ],
-          ),
-        ),
-      );
 }

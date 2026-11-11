@@ -181,12 +181,7 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: loading ? null : () => _confirm(factors, unavailable: failed),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: Text(loading ? 'Loading readiness…' : 'Accept Case',
                     style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
@@ -209,7 +204,7 @@ class _ReadinessList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (failed) {
       return Text('Readiness couldn’t load. You can still accept; the case will note it.',
-          style: GoogleFonts.zain(fontSize: 12, color: const Color(0xFFE05353)));
+          style: GoogleFonts.zain(fontSize: 12, color: AppColors.error));
     }
     if (occ == null) {
       return Text('Loading readiness…',

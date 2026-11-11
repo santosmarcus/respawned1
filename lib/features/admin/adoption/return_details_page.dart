@@ -15,10 +15,12 @@ import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
-String _fmtDate(DateTime? d) => d == null ? 'Not set' : '${d.month}/${d.day}/${d.year}';
+String _fmtDate(DateTime? d) => d == null ? 'Not set' : formatDate(d);
 String _fmtDateTime(DateTime? d) =>
-    d == null ? 'Not set' : '${d.month}/${d.day}/${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    d == null ? 'Not set' : formatDateTime(d);
 
 /// Admin Return Details screen (spec §15-21) — every field shown comes
 /// straight from the existing adopter-side AdoptionReturnForm's
@@ -50,7 +52,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
     try {
       await action();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e'), backgroundColor: Colors.redAccent));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Action failed: $e', kind: AppMessageKind.error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -92,9 +94,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
   Future<void> _confirmRetrieved(AdoptionApplication app) async {
     final animalRecordId = app.animalRecordId;
     if (animalRecordId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("This application predates linked animal records and can't be updated automatically."),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar("This application predates linked animal records and can't be updated automatically.", kind: AppMessageKind.error));
       return;
     }
     final confirmed = await showConfirmActionDialog(context,
@@ -108,9 +108,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
   Future<void> _proceedToIntake(AdoptionApplication app) async {
     final animalRecordId = app.animalRecordId;
     if (animalRecordId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("This application predates linked animal records and can't be updated automatically."),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar("This application predates linked animal records and can't be updated automatically.", kind: AppMessageKind.error));
       return;
     }
     final confirmed = await showConfirmActionDialog(context,
@@ -165,7 +163,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
               if (required && text.isEmpty) return;
               Navigator.pop(ctx, text);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            style: AppButtons.primary,
             child: const Text('Continue'),
           ),
         ],
@@ -252,7 +250,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
                       Expanded(
                         child: OutlinedButton(
                           onPressed: _busy ? null : _decline,
-                          style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFE05353)), foregroundColor: const Color(0xFFE05353)),
+                          style: AppButtons.dangerOutline,
                           child: const Text('Decline'),
                         ),
                       ),
@@ -260,7 +258,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
                       Expanded(
                         child: ElevatedButton(
                           onPressed: _busy ? null : _approve,
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                          style: AppButtons.primary,
                           child: const Text('Approve Return'),
                         ),
                       ),
@@ -270,7 +268,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: _busy ? null : () => _setSchedule(r),
-                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary, padding: const EdgeInsets.symmetric(vertical: 14)),
+                        style: AppButtons.primary,
                         child: const Text('Set Retrieval Schedule'),
                       ),
                     ),
@@ -293,7 +291,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
                       Expanded(
                         child: ElevatedButton(
                           onPressed: _busy ? null : () => _confirmRetrieved(app),
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                          style: AppButtons.primary,
                           child: const Text('Confirm Animal Retrieved'),
                         ),
                       ),
@@ -304,7 +302,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: _busy ? null : () => _proceedToIntake(app),
-                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary, padding: const EdgeInsets.symmetric(vertical: 14)),
+                        style: AppButtons.primary,
                         child: const Text('Proceed to Intake'),
                       ),
                     ),

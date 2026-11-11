@@ -31,7 +31,7 @@ Future<bool> showConfirmActionDialog(
         ElevatedButton(
           onPressed: () => Navigator.pop(ctx, true),
           style: ElevatedButton.styleFrom(
-            backgroundColor: destructive ? const Color(0xFFE05353) : AppColors.yellowrspwn,
+            backgroundColor: destructive ? AppColors.error : AppColors.yellowrspwn,
             foregroundColor: destructive ? Colors.white : AppColors.textPrimary,
             elevation: 0,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

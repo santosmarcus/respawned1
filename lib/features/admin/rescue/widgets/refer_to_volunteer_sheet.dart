@@ -44,12 +44,7 @@ Future<void> showReferToVolunteerSheet(BuildContext context) {
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.textPrimary,
-                side: const BorderSide(color: AppColors.textPrimary),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+              style: AppButtons.outline,
               child: Text('Close', style: GoogleFonts.tiltWarp(fontSize: 15)),
             ),
           ),

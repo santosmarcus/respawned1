@@ -3,7 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
 import 'donation_admin_create.dart';
@@ -40,9 +43,20 @@ class DonationAdminHomeScreen extends ConsumerStatefulWidget {
 class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScreen> {
   static const _helpText = 'Create a campaign or sponsorship with the button at the bottom, then open a listing to '
       'track funds, record offline donations, confirm in-kind items and review its history. Each tab shows up to '
-      'three listings per section; "View All" lists every current and completed one of that type.';
+      'three listings per section; "View All" lists every current and completed one of that type. Searching looks '
+      'through every current and completed listing in the tab.';
 
   _ListingTab _tab = _ListingTab.donations;
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _selectTab(int index) => setState(() => _tab = _ListingTab.values[index]);
 
   void _openListing(DonationListing l) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: l.id)));
@@ -96,22 +110,16 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: const AdminDrawer(active: AdminModule.donations),
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu, color: AppColors.background),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
-        title: Text('Donations & Sponsorships', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
-        actions: [
-          IconButton(
-            tooltip: 'Help',
-            icon: const Icon(Icons.lightbulb_outline, color: AppColors.background),
-            onPressed: _showHelp,
-          ),
+      appBar: AdminAppBar(
+        title: 'Donations & Sponsorships',
+        menuActions: [
+          AdminMenuAction(label: 'Help', icon: Icons.lightbulb_outline, onTap: _showHelp),
         ],
+        bottom: AdminTabBar(
+          tabs: [for (final t in _ListingTab.values) AdminTab(t.label)],
+          selectedIndex: _tab.index,
+          onSelected: _selectTab,
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.yellowrspwn,
@@ -122,27 +130,18 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Wrap(
-                spacing: 8,
-                children: [
-                  for (final t in _ListingTab.values)
-                    ChoiceChip(
-                      label: Text(t.label, style: GoogleFonts.zain(fontSize: 13)),
-                      selected: _tab == t,
-                      showCheckmark: false,
-                      selectedColor: AppColors.yellowrspwn,
-                      onSelected: (_) => setState(() => _tab = t),
-                    ),
-                ],
-              ),
-            ),
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: isDonations ? 'Search campaigns…' : 'Search sponsorships…',
+            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
           ),
+          const SizedBox(height: 4),
           Expanded(
-            child: ListView(
+            child: AdminTabSwipe(
+              index: _tab.index,
+              count: _ListingTab.values.length,
+              onSelected: _selectTab,
+              child: _query.isNotEmpty ? _searchResults(campaigns) : ListView(
               // Bottom padding keeps the last card clear of the FAB.
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
               children: [
@@ -196,16 +195,36 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
                     child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
                   ),
                   error: (e, _) =>
-                      Text('Could not load donations: $e', style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
+                      Text('Could not load donations: $e', style: GoogleFonts.zain(fontSize: 14, color: AppColors.error)),
                   data: (items) => items.isEmpty
                       ? Text('No donations yet.', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary))
                       : Column(children: [for (final d in items) DonationRecordCard(record: d)]),
                 ),
               ],
             ),
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  /// Every current and completed listing of the active tab that matches the
+  /// search text, in place of the sectioned home view.
+  Widget _searchResults(AsyncValue<List<DonationListing>> campaigns) {
+    return campaigns.when(
+      loading: () => const Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
+      error: (e, _) => const AdminListMessage('Could not load listings.'),
+      data: (all) {
+        final items = all
+            .where((l) => matchesListingSearch(l, type: _tab.type, statuses: defaultSearchStatuses, query: _query))
+            .toList();
+        if (items.isEmpty) return const AdminListMessage('No listings match your search.');
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+          children: [for (final l in items) CampaignCard(listing: l, onTap: () => _openListing(l))],
+        );
+      },
     );
   }
 
@@ -219,7 +238,7 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
         padding: EdgeInsets.all(16),
         child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
       ),
-      error: (e, _) => Text('Could not load listings: $e', style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
+      error: (e, _) => Text('Could not load listings: $e', style: GoogleFonts.zain(fontSize: 14, color: AppColors.error)),
       data: (all) {
         final items = select(all);
         if (items.isEmpty) {

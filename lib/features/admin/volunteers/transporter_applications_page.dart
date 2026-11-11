@@ -1,12 +1,16 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/transporter_application.dart';
 import 'package:respawnd1/core/repos/transporter_application_repository.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Staff review of pet transporter verification applications — same layout
 /// and flow as VolunteerApplicationsPage. Approving or rejecting also sets
@@ -55,13 +59,13 @@ class _TransporterApplicationsPageState extends State<TransporterApplicationsPag
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(approve ? 'Transporter approved.' : 'Application not approved.')),
+          appSnackBar(approve ? 'Transporter approved.' : 'Application not approved.'),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save the review: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not save the review: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -69,55 +73,38 @@ class _TransporterApplicationsPageState extends State<TransporterApplicationsPag
 
   @override
   Widget build(BuildContext context) {
+    void selectTab(int index) => setState(() => _tab = TransporterApplicationStatus.values[index]);
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        iconTheme: const IconThemeData(color: AppColors.background),
-        title: Text('Transporter applications',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+      appBar: AdminAppBar(
+        title: 'Transporter Applications',
+        showDrawerButton: false,
+        bottom: AdminTabBar(
+          tabs: [for (final s in TransporterApplicationStatus.values) AdminTab(s.label)],
+          selectedIndex: _tab.index,
+          onSelected: selectTab,
+        ),
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final s in TransporterApplicationStatus.values)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(s.label, maxLines: 1, softWrap: false),
-                        selected: _tab == s,
-                        showCheckmark: false,
-                        selectedColor: AppColors.yellowrspwn,
-                        onSelected: (_) => setState(() => _tab = s),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
           Expanded(
-            child: StreamBuilder<List<TransporterApplication>>(
+            child: AdminTabSwipe(
+              index: _tab.index,
+              count: TransporterApplicationStatus.values.length,
+              onSelected: selectTab,
+              child: StreamBuilder<List<TransporterApplication>>(
               stream: _repo.watchByStatus(_tab),
               builder: (context, snap) {
                 if (snap.hasError) {
-                  return Center(child: Text('Could not load applications.', style: GoogleFonts.zain()));
+                  return const AdminListMessage('Could not load applications.');
                 }
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
                 }
                 final apps = snap.data!;
                 if (apps.isEmpty) {
-                  return Center(
-                    child: Text('No applications here.',
-                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-                  );
+                  return const AdminListMessage('No applications here.');
                 }
                 return ListView.separated(
                   padding: const EdgeInsets.all(16),
@@ -134,6 +121,7 @@ class _TransporterApplicationsPageState extends State<TransporterApplicationsPag
                   ),
                 );
               },
+            ),
             ),
           ),
         ],
@@ -161,7 +149,6 @@ class TransporterApplicationCard extends StatelessWidget {
             child: Text('$label: $value', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
           );
     final vehicle = [app.vehicleType, app.licensePlate].whereType<String>().join(' · ');
-    final dateFmt = DateFormat('MMM d, y');
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -185,9 +172,9 @@ class TransporterApplicationCard extends StatelessWidget {
           ),
           line('Mobile', app.mobileNumber),
           line('Vehicle', vehicle),
-          line('Submitted', app.submittedAt == null ? null : dateFmt.format(app.submittedAt!)),
+          line('Submitted', app.submittedAt == null ? null : formatDate(app.submittedAt!)),
           if (app.status != TransporterApplicationStatus.pending)
-            line('Reviewed', app.reviewedAt == null ? null : dateFmt.format(app.reviewedAt!)),
+            line('Reviewed', app.reviewedAt == null ? null : formatDate(app.reviewedAt!)),
           line('Review note', app.reviewNote),
           if (app.documents.isNotEmpty) ...[
             const SizedBox(height: 10),

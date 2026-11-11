@@ -9,7 +9,9 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/volunteers/transporter_applications_page.dart';
 import 'package:respawnd1/features/admin/volunteers/transporter_detail_page.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteer_applications_page.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 
 /// Sort options for the Volunteers directory. Default is [availability]
 /// (available/online volunteers first) — per explicit product direction,
@@ -135,89 +137,31 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: AdminDrawer(active: widget.transporters ? AdminModule.transporters : AdminModule.volunteers),
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu, color: AppColors.background),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
-        title: Text(_title, style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
-        actions: [
-          if (widget.transporters)
-            IconButton(
-              tooltip: 'Transporter applications',
-              icon: const Icon(Icons.assignment_ind_outlined, color: AppColors.background),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const TransporterApplicationsPage()),
-              ),
-            )
-          else
-            IconButton(
-              tooltip: 'Volunteer applications',
-              icon: const Icon(Icons.assignment_ind_outlined, color: AppColors.background),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const VolunteerApplicationsPage()),
+      appBar: AdminAppBar(
+        title: _title,
+        menuActions: [
+          AdminMenuAction(
+            label: 'Applications',
+            icon: Icons.assignment_ind_outlined,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    widget.transporters ? const TransporterApplicationsPage() : const VolunteerApplicationsPage(),
               ),
             ),
+          ),
         ],
       ),
       body: Column(
         children: [
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: AppColors.slaterspwn),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.search, size: 18, color: AppColors.textSecondary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (v) => setState(() => _searchText = v),
-                            decoration: InputDecoration(
-                              hintText: 'Search $_noun…',
-                              hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: _openSortSheet,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.slaterspwn),
-                    ),
-                    child: const Icon(Icons.sort, size: 20, color: AppColors.textPrimary),
-                  ),
-                ),
-              ],
-            ),
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: 'Search $_noun…',
+            onChanged: (v) => setState(() => _searchText = v),
+            filterIcon: Icons.sort,
+            filterTooltip: 'Sort',
+            onFilter: _openSortSheet,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -359,7 +303,7 @@ Widget transporterVerificationPill(PetTransporter t) {
   if (t.isVerified || t.verificationStatus == 'approved') return _pill('Verified', AppColors.greenrspwn);
   return switch (t.verificationStatus) {
     'pending' => _pill('Under review', const Color(0xFFE0A800)),
-    'rejected' => _pill('Not approved', Colors.redAccent),
+    'rejected' => _pill('Not approved', AppColors.error),
     _ => _pill('Not submitted', AppColors.slaterspwn),
   };
 }

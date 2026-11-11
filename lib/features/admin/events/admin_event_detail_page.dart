@@ -10,6 +10,7 @@ import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:respawnd1/features/admin/events/admin_events_page.dart';
 import 'package:respawnd1/features/admin/events/event_form_page.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// One event's details, Edit/Cancel actions, and its sign-up list.
 class AdminEventDetailPage extends ConsumerWidget {
@@ -43,7 +44,7 @@ class AdminEventDetailPage extends ConsumerWidget {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Event')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            style: AppButtons.danger,
             child: const Text('Cancel Event'),
           ),
         ],
@@ -58,7 +59,7 @@ class AdminEventDetailPage extends ConsumerWidget {
       debugPrint('[AdminEventDetailPage] cancel failed: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not cancel the event.'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not cancel the event.', kind: AppMessageKind.error),
         );
       }
     }

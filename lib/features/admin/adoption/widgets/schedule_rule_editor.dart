@@ -273,7 +273,7 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
                   const SizedBox(height: 6),
                   if (preview.isEmpty)
                     Text('No dates generated — check the interval and duration.',
-                        style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent))
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.error))
                   else
                     Wrap(
                       spacing: 8,
@@ -299,7 +299,7 @@ class _ScheduleRuleEditorSheetState extends State<_ScheduleRuleEditorSheet> {
                     onPressed: preview.isEmpty && _startMode != StartMode.afterPreviousRule
                         ? null
                         : () => Navigator.pop(context, _draft),
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                    style: AppButtons.primary,
                     child: const Text('Save Schedule'),
                   ),
                 ),

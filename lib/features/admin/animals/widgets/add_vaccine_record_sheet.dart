@@ -7,6 +7,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 Future<void> showAddVaccineRecordSheet(BuildContext context, {required AnimalRecord animal}) {
   return showModalBottomSheet(
@@ -82,7 +83,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
     final existing = ref.read(vaccinationsProvider(widget.animal.id)).asData?.value ?? const <VaccinationRecord>[];
     if (_isDuplicateEvent(existing)) {
       setState(() => _error =
-          'A "$_vaccineName" record for ${_dateAdministered.month}/${_dateAdministered.day}/${_dateAdministered.year} already exists. '
+          'A "$_vaccineName" record for ${formatDate(_dateAdministered)} already exists. '
           'Pick a different date if this is a booster or separate dose.');
       return;
     }
@@ -141,11 +142,11 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
             children: [
               for (final r in matches) ...[
                 Text(
-                  'Last administered: ${r.dateAdministered.month}/${r.dateAdministered.day}/${r.dateAdministered.year}',
+                  'Last administered: ${formatDate(r.dateAdministered)}',
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
                 ),
                 Text('Validity: ${r.validityDurationDays} days', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                Text('Next due: ${r.nextDueDate.month}/${r.nextDueDate.day}/${r.nextDueDate.year}',
+                Text('Next due: ${formatDate(r.nextDueDate)}',
                     style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                 const SizedBox(height: 10),
               ],
@@ -169,7 +170,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
                 if (_selectedTemplate == null) _customNameController.text = vaccineName;
               });
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            style: AppButtons.primary,
             child: const Text('Add Another Dose'),
           ),
         ],
@@ -298,7 +299,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
 
             if (_error != null) ...[
               const SizedBox(height: 10),
-              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
             ],
 
             const SizedBox(height: 18),
@@ -306,13 +307,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _saving ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _saving
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                     : Text('Save Vaccine Record', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
@@ -411,7 +406,7 @@ class _DateField extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('${date.month}/${date.day}/${date.year}', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                Text(formatDate(date), style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
                 const Icon(Icons.calendar_today_outlined, size: 14),
               ],
             ),

@@ -323,7 +323,7 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                 FieldLabel('Name of Animal', required: _isSponsorship),
                 animals.when(
                   loading: () => const LinearProgressIndicator(color: AppColors.textPrimary),
-                  error: (e, _) => Text('Could not load animals: $e', style: GoogleFonts.zain(color: Colors.redAccent)),
+                  error: (e, _) => Text('Could not load animals: $e', style: GoogleFonts.zain(color: AppColors.error)),
                   data: (list) => _animalDropdown(list),
                 ),
                 const SizedBox(height: 18),

@@ -124,20 +124,14 @@ class _AdoptionRejectionSheetBodyState extends State<_AdoptionRejectionSheetBody
               ],
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+                Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
               ],
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _confirm,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFE05353),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.danger,
                   child: Text('Confirm Rejection', style: GoogleFonts.tiltWarp(fontSize: 15, color: Colors.white)),
                 ),
               ),

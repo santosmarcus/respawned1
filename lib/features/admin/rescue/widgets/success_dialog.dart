@@ -32,12 +32,7 @@ Future<void> showSuccessDialog(
       actions: [
         ElevatedButton(
           onPressed: () => Navigator.pop(ctx),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.yellowrspwn,
-            foregroundColor: AppColors.textPrimary,
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          ),
+          style: AppButtons.primary,
           child: Text(buttonLabel, style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
         ),
       ],

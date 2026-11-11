@@ -146,7 +146,7 @@ class _RetrievalScheduleSheetState extends State<_RetrievalScheduleSheet> {
                           contact: _contactCtrl.text.trim(),
                           notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
                         )),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                style: AppButtons.primary,
                 child: const Text('Save Schedule'),
               ),
             ),

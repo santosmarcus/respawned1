@@ -238,7 +238,7 @@ const _chartPalette = [
   AppColors.greenrspwn,
   AppColors.lavenderrspwn,
   AppColors.tearspwn,
-  Color(0xFFE05C5C),
+  AppColors.error,
 ];
 
 class _SimpleBarChart extends StatelessWidget {

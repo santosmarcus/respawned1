@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/adoption/interview_scheduling.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 typedef RescheduledInterview = ({DateTime date, String time, String type});
 
@@ -178,7 +179,7 @@ class _InterviewRescheduleSheetState extends State<_InterviewRescheduleSheet> {
                     const Icon(Icons.event_available, color: AppColors.greenrspwn, size: 18),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text('$_type  ·  ${_date!.month}/${_date!.day}/${_date!.year}  ·  $_time',
+                      child: Text('$_type  ·  ${formatDate(_date!)}  ·  $_time',
                           style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     ),
                   ],
@@ -192,13 +193,7 @@ class _InterviewRescheduleSheetState extends State<_InterviewRescheduleSheet> {
                 onPressed: (_date == null || _time == null)
                     ? null
                     : () => Navigator.pop(context, (date: _date!, time: _time!, type: _type)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
+                style: AppButtons.primary,
                 child: Text('Save Reschedule', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
             ),

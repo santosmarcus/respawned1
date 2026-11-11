@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 /// Shared treatment-log rendering — the same compact card + expandable
 /// detail sheet used by both treatment_detail_page.dart's Treatment Logs
@@ -11,13 +12,9 @@ import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 /// one renderer, just made public so it isn't reimplemented per screen.
 const String kNotProvided = 'Not provided';
 
-String _monthName(int month) => const [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
-    ][month - 1];
 
 String _fmtDateTime(DateTime d) =>
-    '${_monthName(d.month)} ${d.day}, ${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    formatDateTime(d);
 
 void showFullTreatmentImage(BuildContext context, String url) {
   showDialog(
@@ -59,7 +56,7 @@ class TreatmentLogCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final d = log.displayDate;
-    final dateStr = d != null ? '${_monthName(d.month)} ${d.day}, ${d.year}' : '';
+    final dateStr = d != null ? formatDate(d) : '';
 
     final subLines = <String>[
       if (log.medicationName != null && log.medicationName!.isNotEmpty)
@@ -182,7 +179,7 @@ class TreatmentLogDetailSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final displayDate = log.displayDate;
     final dateStr = displayDate != null
-        ? '${_monthName(displayDate.month)} ${displayDate.day}, ${displayDate.year}'
+        ? formatDate(displayDate)
         : kNotProvided;
 
     String orNotProvided(String? v) => (v == null || v.isEmpty) ? kNotProvided : v;

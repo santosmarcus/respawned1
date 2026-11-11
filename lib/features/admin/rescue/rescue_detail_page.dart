@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:video_player/video_player.dart';
@@ -36,6 +35,8 @@ import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
 import 'package:respawnd1/core/geofence/geofence_config.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class RescueDetailPage extends ConsumerStatefulWidget {
   final String caseId;
@@ -85,7 +86,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not update case: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not update case: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -113,10 +114,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not accept case: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not accept case: $e', kind: AppMessageKind.error),
         );
       }
       if (mounted) setState(() => _isLoading = false);
@@ -148,22 +146,15 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       );
       if (outcome.acted && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              outcome.wholeCaseClosed
+          appSnackBar(outcome.wholeCaseClosed
                   ? 'Case closed.'
-                  : 'Animal marked deceased.',
-            ),
-          ),
+                  : 'Animal marked deceased.'),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not close case: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not close case: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -198,10 +189,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not save ownership info: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not save ownership info: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -258,10 +246,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-            ),
+            style: AppButtons.primary,
             child: const Text('I Acknowledge'),
           ),
         ],
@@ -289,10 +274,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not resume assignment: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not resume assignment: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -324,10 +306,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-            ),
+            style: AppButtons.primary,
             child: const Text('Save'),
           ),
         ],
@@ -346,10 +325,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not save instructions: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not save instructions: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -435,10 +411,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not reject case: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not reject case: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -486,13 +459,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     );
   }
 
-  String _formatDateTime(DateTime? d) {
-    if (d == null) return '';
-    final h = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
-    final m = d.minute.toString().padLeft(2, '0');
-    final ampm = d.hour >= 12 ? 'PM' : 'AM';
-    return '$h:$m $ampm, ${d.month}/${d.day}/${d.year}';
-  }
+  String _formatDateTime(DateTime? d) => formatDateTimeOr(d, '');
 
   @override
   Widget build(BuildContext context) {
@@ -572,7 +539,6 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               transferredByName: _actorName,
             ),
           ),
-          const AdminAlertsBell(),
         ],
       ),
       body: SingleChildScrollView(
@@ -841,8 +807,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                             center: LatLng(c.lat!, c.lng!),
                             radius: GeofenceConfig.caseGeofenceRadiusMeters,
                             strokeWidth: 2,
-                            strokeColor: Colors.redAccent,
-                            fillColor: Colors.redAccent.withValues(alpha: 0.10),
+                            strokeColor: AppColors.error,
+                            fillColor: AppColors.error.withValues(alpha: 0.10),
                           ),
                         },
                         myLocationButtonEnabled: false,
@@ -889,11 +855,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     runSpacing: 4,
                     children: [
                       _MapLegendItem(
-                        color: Colors.red,
+                        color: AppColors.error,
                         label: 'Current location',
                       ),
                       _MapLegendItem(
-                        color: Colors.orange,
+                        color: AppColors.warning,
                         label: 'Proposed location — awaiting approval',
                       ),
                     ],
@@ -995,11 +961,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     'Send rider to verify',
                     style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
                   ),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.slaterspwn),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
+                  style: AppButtons.outline,
                 ),
                 const SizedBox(height: 12),
               ],
@@ -1008,18 +970,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: _isLoading ? null : () => _rejectCase(c),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.red),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                      style: AppButtons.dangerOutline,
                       child: Text(
                         'Reject',
                         style: GoogleFonts.tiltWarp(
                           fontSize: 15,
-                          color: Colors.red,
+                          color: AppColors.error,
                         ),
                       ),
                     ),
@@ -1028,14 +984,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : () => _acceptCase(c),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                      style: AppButtons.primary,
                       child: _isLoading
                           ? const SizedBox(
                               height: 20,
@@ -1063,14 +1012,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   onPressed: (_isLoading || !canManageOrgActions)
                       ? null
                       : () => _referCase(c),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.outline,
                   child: Text(
                     canManageOrgActions ? 'Refer' : 'Refer (Admin only)',
                     style: GoogleFonts.tiltWarp(
@@ -1111,14 +1053,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : () => _mergeDuplicate(c),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.primary,
                   child: Text(
                     'Review Possible Duplicate',
                     style: GoogleFonts.tiltWarp(
@@ -1147,14 +1082,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     onPressed: _isLoading
                         ? null
                         : () => _openClinicSheet(c, offerAssignRider: true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.primary,
                     child: Text(
                       'Select Clinic',
                       style: GoogleFonts.tiltWarp(
@@ -1180,14 +1108,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                             AdminTrackCasePage(caseId: c.id, data: c.raw),
                       ),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.primary,
                     child: Text(
                       'View Assignment Status',
                       style: GoogleFonts.tiltWarp(
@@ -1210,14 +1131,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                                   AssignRiderPage(caseId: c.id, data: c.raw),
                             ),
                           ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.primary,
                     child: Text(
                       'Assign Transporter',
                       style: GoogleFonts.tiltWarp(
@@ -1242,14 +1156,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                           AdminTrackCasePage(caseId: c.id, data: c.raw),
                     ),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.primary,
                   child: Text(
                     'Track Case',
                     style: GoogleFonts.tiltWarp(
@@ -1266,14 +1173,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   onPressed: _isLoading
                       ? null
                       : () => _openClinicSheet(c, offerAssignRider: false),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.outline,
                   child: Text(
                     c.vetClinicName == null
                         ? 'Assign Clinic'
@@ -1290,14 +1190,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 width: double.infinity,
                 child: OutlinedButton(
                   onPressed: _isLoading ? null : () => _closeCase(c),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFE05353),
-                    side: const BorderSide(color: Color(0xFFE05353)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.dangerOutline,
                   child: Text(
                     'Close Case',
                     style: GoogleFonts.tiltWarp(fontSize: 15),
@@ -1311,14 +1204,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   onPressed: _isLoading
                       ? null
                       : () => _openClinicSheet(c, offerAssignRider: false),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.outline,
                   child: Text(
                     c.vetClinicName == null
                         ? 'Assign Clinic'
@@ -1350,7 +1236,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE05353).withValues(alpha: 0.12),
+                      color: AppColors.error.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(
@@ -1362,7 +1248,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                               : 'Safety warning',
                           style: GoogleFonts.tiltWarp(
                             fontSize: 14,
-                            color: const Color(0xFFE05353),
+                            color: AppColors.error,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -1410,14 +1296,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   onPressed: _isLoading
                       ? null
                       : () => _retryWithDifferentTransporter(c),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.primary,
                   child: Text(
                     'Retry with a Different Transporter',
                     style: GoogleFonts.tiltWarp(
@@ -1434,14 +1313,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   onPressed: _isLoading
                       ? null
                       : () => _keepTransporterWithInstructions(c),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.outline,
                   child: Text(
                     'Keep Current Transporter + Instructions',
                     style: GoogleFonts.tiltWarp(
@@ -1487,14 +1359,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                               ? ClosureReason.requiresTransport
                               : ClosureReason.aggressive,
                         ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFE05353),
-                    side: const BorderSide(color: Color(0xFFE05353)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.dangerOutline,
                   child: Text(
                     (c.raw['endReason'] as String?) ==
                             'Animal requires specialized transport that I cannot provide'
@@ -1601,7 +1466,7 @@ class _RejectionDetailsCard extends ConsumerWidget {
 
     final rejectedDate = rejectionLog?.timestamp;
     final dateStr = rejectedDate != null
-        ? '${rejectedDate.month}/${rejectedDate.day}/${rejectedDate.year}'
+        ? formatDate(rejectedDate)
         : 'Unknown';
 
     final eligible = isCommunityAdoptionEligible(
@@ -1774,10 +1639,7 @@ class _OwnershipSection extends StatelessWidget {
                 ),
                 OutlinedButton(
                   onPressed: busy ? null : onCloseHasOwner,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFE05353),
-                    side: const BorderSide(color: Color(0xFFE05353)),
-                  ),
+                  style: AppButtons.dangerOutline,
                   child: const Text('Close Case'),
                 ),
               ],

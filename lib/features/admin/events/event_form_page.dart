@@ -245,7 +245,7 @@ class _EventFormPageState extends ConsumerState<EventFormPage> {
           Center(
             child: Text.rich(
               const TextSpan(children: [
-                TextSpan(text: '* ', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                TextSpan(text: '* ', style: TextStyle(color: AppColors.error, fontWeight: FontWeight.bold)),
                 TextSpan(text: 'Required fields'),
               ]),
               style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
@@ -438,8 +438,8 @@ class _EventFormPageState extends ConsumerState<EventFormPage> {
               ),
               TextButton.icon(
                 onPressed: _saving ? null : _removeImage,
-                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                label: Text('Remove', style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
+                icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                label: Text('Remove', style: GoogleFonts.zain(fontSize: 14, color: AppColors.error)),
               ),
             ],
           ),
@@ -493,7 +493,7 @@ class _EventFormPageState extends ConsumerState<EventFormPage> {
                             Text(_addressFull, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
                             if (!_hasPin)
                               Text('No map pin yet — pick it on the map.',
-                                  style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+                                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
                           ],
                         )
                       : Text('No location selected',

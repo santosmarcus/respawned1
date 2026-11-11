@@ -15,8 +15,11 @@ import 'package:respawnd1/features/admin/adoption/adoption_application_detail_pa
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 String _friendlyAdoptionsError(Object err) {
   if (err is FirebaseException && err.code == 'permission-denied') {
@@ -65,17 +68,6 @@ enum _PageTab {
         _PageTab.returns_ => 'Returns',
         _PageTab.rejected => 'Rejected',
         _PageTab.withdrawn => 'Withdrawn',
-      };
-
-  IconData get icon => switch (this) {
-        _PageTab.pending => Icons.pending_actions_outlined,
-        _PageTab.interview => Icons.calendar_month_outlined,
-        _PageTab.approved => Icons.check_circle_outline,
-        _PageTab.adopted => Icons.home_outlined,
-        _PageTab.complete => Icons.task_alt_outlined,
-        _PageTab.returns_ => Icons.assignment_return_outlined,
-        _PageTab.rejected => Icons.cancel_outlined,
-        _PageTab.withdrawn => Icons.logout_outlined,
       };
 
   String get emptyMessage => switch (this) {
@@ -462,12 +454,7 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                         });
                         Navigator.pop(sheetContext);
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      ),
+                      style: AppButtons.primary,
                       child: Text('Apply', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                     ),
                   ),
@@ -591,201 +578,56 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
     // from, same as every other detail/child screen.
     final isRootModule = widget.animalId == null;
 
+    // Same per-tab membership the list below uses, so a tab's count always
+    // matches what it shows.
+    int tabCount(_PageTab t) {
+      final tabApps =
+          ref.watch(adoptionsByStatusesProvider(statusFilter(t.queryStatus))).asData?.value ?? const <AdoptionApplication>[];
+      return switch (t) {
+        _PageTab.returns_ => tabApps.where((a) => isReturnActive(a.returnRequest)).length,
+        _PageTab.adopted =>
+          tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted).length,
+        _PageTab.complete =>
+          tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete).length,
+        _ => tabApps.length,
+      };
+    }
+
+    void selectTab(int index) => setState(() => _tab = _PageTab.values[index]);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: isRootModule ? const AdminDrawer(active: AdminModule.adoptions) : null,
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        leading: isRootModule
-            ? Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu, color: AppColors.background),
-                  tooltip: 'Menu',
-                  onPressed: () => Scaffold.of(context).openDrawer(),
-                ),
-              )
-            : IconButton(
-                icon: const Icon(Icons.arrow_back, color: AppColors.background),
-                onPressed: () => Navigator.pop(context),
-              ),
-        // Page title restored to the top header (spec) — same typography/
-        // placement as Volunteers/Collar Tags. Only shown at the root
-        // module entry (matches the drill-down back-arrow condition above
-        // — a pushed-in Adoptions view opened from an Animal Record keeps
-        // its own context, not a repeated "Adoptions" banner). The body's
-        // own smaller title is removed below so it's never shown twice.
-        title: isRootModule
-            ? Text('Adoptions', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background))
-            : null,
-        actions: const [AdminAlertsBell()],
+      appBar: AdminAppBar(
+        // Only the root module shows the "Adoptions" title; the drill-down
+        // from an Animal Record keeps its own context and a back arrow.
+        title: isRootModule ? 'Adoptions' : null,
+        showDrawerButton: isRootModule,
+        bottom: AdminTabBar(
+          tabs: [for (final t in _PageTab.values) AdminTab(t.label, count: tabCount(t))],
+          selectedIndex: _tab.index,
+          onSelected: selectTab,
+        ),
       ),
       body: Column(
         children: [
-          const SizedBox(height: 16),
-
-          // Workflow tabs — icon + count badge + label, matching Rescue
-          // Reports' pipeline-tab visual pattern rather than text-only pills.
-          SizedBox(
-            height: 86,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              // Extra top padding — not just horizontal — so the badge's
-              // negative top offset below has room to render instead of
-              // being sliced off by the ListView's own viewport edge.
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-              itemCount: _PageTab.values.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 16),
-              itemBuilder: (context, index) {
-                final t = _PageTab.values[index];
-                final selected = _tab == t;
-                final tabAppsAsync = ref.watch(adoptionsByStatusesProvider(statusFilter(t.queryStatus)));
-                final tabApps = tabAppsAsync.asData?.value ?? const <AdoptionApplication>[];
-                final badgeCount = switch (t) {
-                  _PageTab.returns_ => tabApps.where((a) => isReturnActive(a.returnRequest)).length,
-                  _PageTab.adopted =>
-                    tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted).length,
-                  _PageTab.complete =>
-                    tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete).length,
-                  _ => tabApps.length,
-                };
-                return GestureDetector(
-                  onTap: () => setState(() => _tab = t),
-                  child: Column(
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: selected ? AppColors.textPrimary : AppColors.slaterspwn,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(t.icon, color: selected ? AppColors.background : AppColors.textSecondary, size: 22),
-                          ),
-                          if (badgeCount > 0)
-                            Positioned(
-                              top: -6,
-                              right: -6,
-                              // Grows horizontally for 2-/3-digit counts
-                              // instead of a fixed 18x18 box that would
-                              // squeeze "100" unreadable.
-                              child: Container(
-                                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                decoration: const BoxDecoration(color: Colors.orange, shape: BoxShape.circle),
-                                child: Center(
-                                  child: Text('$badgeCount',
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        t.label,
-                        style: GoogleFonts.zain(
-                          fontSize: 11,
-                          color: selected ? AppColors.textPrimary : AppColors.textSecondary,
-                          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Search + sort/filter, same row layout and tune-button pattern
-          // as Rescue Reports (search box + tune icon beside it, opening a
-          // bottom sheet) — never a separate AppBar sort menu.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: AppColors.slaterspwn),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.search, size: 18, color: AppColors.textSecondary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: _onSearchChanged,
-                            decoration: InputDecoration(
-                              hintText: 'Search animal or applicant name…',
-                              hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-                          ),
-                        ),
-                        if (_searchController.text.isNotEmpty)
-                          GestureDetector(
-                            onTap: _clearSearch,
-                            child: const Icon(Icons.clear, size: 18, color: AppColors.textSecondary),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: () => _showSortFilterSheet(context),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: _filters.activeCount > 0 ? AppColors.yellowrspwn : Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.slaterspwn),
-                        ),
-                        child: const Icon(Icons.tune, size: 20, color: AppColors.textPrimary),
-                      ),
-                      if (_filters.activeCount > 0)
-                        Positioned(
-                          top: -4,
-                          right: -4,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(color: Color(0xFFE05C5C), shape: BoxShape.circle),
-                            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                            child: Text(
-                              '${_filters.activeCount}',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: 'Search animal or applicant name…',
+            onChanged: _onSearchChanged,
+            onClear: _clearSearch,
+            filterTooltip: 'Sort and filter',
+            activeFilterCount: _filters.activeCount,
+            onFilter: () => _showSortFilterSheet(context),
           ),
 
           const SizedBox(height: 12),
 
           Expanded(
+            child: AdminTabSwipe(
+              index: _tab.index,
+              count: _PageTab.values.length,
+              onSelected: selectTab,
             // Pull to Refresh spec §13 — same manual re-subscribe the
             // existing "Retry" button already performs on error, now also
             // reachable via a pull gesture; never a second/duplicate
@@ -857,6 +699,7 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
               },
               ),
             ),
+            ),
           ),
         ],
       ),
@@ -877,7 +720,7 @@ class _ReturnCard extends ConsumerWidget {
         ReturnRequestStatus.approved || ReturnRequestStatus.retrievalUnscheduled => AppColors.yellowrspwn,
         ReturnRequestStatus.retrievalScheduled => AppColors.lavenderrspwn,
         ReturnRequestStatus.retrieved || ReturnRequestStatus.intake => AppColors.greenrspwn,
-        ReturnRequestStatus.declined || ReturnRequestStatus.cancelled => const Color(0xFFE05353),
+        ReturnRequestStatus.declined || ReturnRequestStatus.cancelled => AppColors.error,
       };
 
   @override
@@ -916,7 +759,7 @@ class _ReturnCard extends ConsumerWidget {
                   Text('Adopter: ${application.adopterName}',
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
                   if (r.requestedAt != null)
-                    Text('Requested ${r.requestedAt!.month}/${r.requestedAt!.day}/${r.requestedAt!.year}',
+                    Text('Requested ${formatDate(r.requestedAt!)}',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                   Text('Reason: ${r.reason.isEmpty ? 'Not provided' : r.reason}',
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -955,7 +798,7 @@ class _ApplicationCard extends ConsumerWidget {
         AdoptionStatus.interview => AppColors.yellowrspwn,
         AdoptionStatus.approved => AppColors.greenrspwn,
         AdoptionStatus.adopted => AppColors.lavenderrspwn,
-        AdoptionStatus.rejected => const Color(0xFFE05353),
+        AdoptionStatus.rejected => AppColors.error,
         AdoptionStatus.withdrawn => AppColors.tearspwn,
       };
 
@@ -968,7 +811,7 @@ class _ApplicationCard extends ConsumerWidget {
     final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
     final photoUrl = animal?.photoUrls.isNotEmpty == true ? animal!.photoUrls.first : null;
     final dateStr = application.createdAt != null
-        ? '${application.createdAt!.month}/${application.createdAt!.day}/${application.createdAt!.year}'
+        ? formatDate(application.createdAt!)
         : '-';
     // Compact, neutral-styled chip from the computed Fit Assessment —
     // separate from the manual admin-decision chip below (application.
@@ -1021,7 +864,7 @@ class _ApplicationCard extends ConsumerWidget {
                     Text(application.adopterCity!, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                   if (application.appointmentDate != null)
                     Text(
-                        'Interview: ${application.appointmentDate!.month}/${application.appointmentDate!.day}/${application.appointmentDate!.year}'
+                        'Interview: ${formatDate(application.appointmentDate!)}'
                         '${application.appointmentTime != null ? ' · ${application.appointmentTime}' : ''}',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
@@ -1075,7 +918,7 @@ class _ApplicationCard extends ConsumerWidget {
       );
 }
 
-String _dateLabel(DateTime? d) => d == null ? '-' : '${d.month}/${d.day}/${d.year}';
+String _dateLabel(DateTime? d) => d == null ? '-' : formatDate(d);
 
 /// Shared animal-photo lookup used by [_AdoptedCard]/[_CompleteCard] — same
 /// Animal Record image [_ApplicationCard]/[_ReturnCard] already use, never
@@ -1168,14 +1011,14 @@ class _AdoptedCard extends ConsumerWidget {
                   if (next != null)
                     Text('Next follow-up: ${_dateLabel(next.scheduledDate)}${overdue ? ' · Overdue' : ''}',
                         style: GoogleFonts.zain(
-                            fontSize: 11, fontWeight: overdue ? FontWeight.w700 : FontWeight.normal, color: overdue ? const Color(0xFFE05353) : AppColors.textSecondary)),
+                            fontSize: 11, fontWeight: overdue ? FontWeight.w700 : FontWeight.normal, color: overdue ? AppColors.error : AppColors.textSecondary)),
                   if (returnActive) ...[
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: const Color(0xFFE05353).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+                      decoration: BoxDecoration(color: AppColors.error.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
                       child: Text('Return in progress',
-                          style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: const Color(0xFFE05353))),
+                          style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.error)),
                     ),
                   ],
                   const SizedBox(height: 6),

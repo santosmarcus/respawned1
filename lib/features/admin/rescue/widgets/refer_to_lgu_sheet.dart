@@ -6,6 +6,7 @@ import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Refer to LGU/Barangay modal. Suggests a barangay from the report's
 /// address (best-effort text heuristic — there's no barangay-boundary
@@ -109,7 +110,7 @@ class _ReferToLguSheetBodyState extends State<_ReferToLguSheetBody> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send referral: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not send referral: $e', kind: AppMessageKind.error),
         );
         setState(() => _sending = false);
       }
@@ -238,12 +239,7 @@ class _ReferToLguSheetBodyState extends State<_ReferToLguSheetBody> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: (_canSend && !_sending) ? _send : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _sending
                     ? const SizedBox(
                         height: 20,

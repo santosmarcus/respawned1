@@ -16,14 +16,11 @@ import 'package:respawnd1/features/admin/adoption/widgets/schedule_rule_editor.d
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
-String _fmtDate(DateTime d) => '${d.month}/${d.day}/${d.year}';
-String _fmtTime(DateTime d) {
-  final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
-  final minute = d.minute.toString().padLeft(2, '0');
-  final period = d.hour < 12 ? 'AM' : 'PM';
-  return '$hour12:$minute $period';
-}
+String _fmtDate(DateTime d) => formatDate(d);
+String _fmtTime(DateTime d) => formatTime(d);
 
 /// Release Details screen (spec §1/§2/§6) — the admin sets the official
 /// release/adoption date and configures the post-adoption follow-up
@@ -125,7 +122,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not record attempt: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not record attempt: $e', kind: AppMessageKind.error));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -219,9 +216,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     // defense in depth, not the primary guard.
     final animalRecordId = app.animalRecordId;
     if (animalRecordId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("This application predates linked animal records and can't be released automatically."),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar("This application predates linked animal records and can't be released automatically.", kind: AppMessageKind.error));
       return;
     }
 
@@ -255,13 +250,11 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
       }
     } on PostAdoptionScheduleRequiredException {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Set at least one Post-Adoption follow-up before completing the release.'),
-            backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Set at least one Post-Adoption follow-up before completing the release.', kind: AppMessageKind.error));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not release: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not release: $e', kind: AppMessageKind.error));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -275,7 +268,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not create the agreement: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not create the agreement: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -359,7 +352,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                             style: GoogleFonts.zain(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
-                              color: app.deliveryAttemptsExhausted ? Colors.redAccent : AppColors.textPrimary,
+                              color: app.deliveryAttemptsExhausted ? AppColors.error : AppColors.textPrimary,
                             ),
                           ),
                         ),
@@ -398,19 +391,19 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.redAccent.withValues(alpha: 0.08),
+                          color: AppColors.error.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+                          border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('Post-Adoption Schedule Required',
-                                style: GoogleFonts.zain(fontSize: 13, color: Colors.redAccent, fontWeight: FontWeight.w700)),
+                                style: GoogleFonts.zain(fontSize: 13, color: AppColors.error, fontWeight: FontWeight.w700)),
                             const SizedBox(height: 4),
                             Text(
                               'Set at least one follow-up schedule before completing the release.',
-                              style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w600),
+                              style: GoogleFonts.zain(fontSize: 12, color: AppColors.error, fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),
@@ -480,7 +473,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
               if (!guard.canRelease)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: Text(guard.reason ?? '', style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+                  child: Text(guard.reason ?? '', style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
                 ),
               Row(
                 children: [
@@ -495,12 +488,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: (_busy || !guard.canRelease) ? null : () => _markReleased(app),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        disabledBackgroundColor: AppColors.slaterspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                      style: AppButtons.primary,
                       child: Text('Mark as Released', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
                     ),
                   ),

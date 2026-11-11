@@ -21,7 +21,8 @@ import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_ut
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 // ---- Demo transporters ---------------------------------------------------
 // Two fixed, clearly-marked (isDemo: true) test transporters so the whole
@@ -236,12 +237,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFE05353),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            ),
+            style: AppButtons.danger,
             child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
           ),
         ],
@@ -258,7 +254,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not cancel this offer: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not cancel this offer: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -299,12 +295,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 children: [
                   OutlinedButton(
                     onPressed: _cancellingOffer ? null : () => _cancelExistingOffer(assignment),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFE05353),
-                      side: const BorderSide(color: Color(0xFFE05353)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
+                    style: AppButtons.dangerOutline,
                     child: _cancellingOffer
                         ? const SizedBox(
                         width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -315,13 +306,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     onPressed: () => Navigator.push(context, MaterialPageRoute(
                         builder: (_) => AdminTrackCasePage(
                             caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode))),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
+                    style: AppButtons.primary,
                     child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
                   ),
                 ],
@@ -514,10 +499,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       setState(() => _selectedRiderUid = null);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This transporter is no longer available. Please select another.'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('This transporter is no longer available. Please select another.', kind: AppMessageKind.error),
         );
       }
       return;
@@ -738,7 +720,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         title: Text('Assign Transporter',
             style: GoogleFonts.tiltWarp(
                 fontSize: 18, color: AppColors.background)),
-        actions: const [AdminAlertsBell()],
       ),
       body: Column(
         children: [
@@ -767,7 +748,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                       horizontal: 14, vertical: 5),
                   decoration: BoxDecoration(
                     color: urgency == 'Critical'
-                        ? Colors.red
+                        ? AppColors.error
                         : AppColors.yellowrspwn,
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -897,12 +878,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                         onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(
                             builder: (_) => AdminTrackCasePage(
                                 caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode))),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.yellowrspwn,
-                          foregroundColor: AppColors.textPrimary,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        ),
+                        style: AppButtons.primary,
                         child: Text('Continue to Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
                       ),
                     ),
@@ -1050,13 +1026,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(visibleRiders),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    disabledBackgroundColor: AppColors.slaterspwn,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.primary,
                   child: _isAssigning
                       ? const SizedBox(
                       height: 20,
@@ -1097,7 +1067,7 @@ class _RiderCard extends StatelessWidget {
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not start the call.')),
+        appSnackBar('Could not start the call.'),
       );
     }
   }
@@ -1549,12 +1519,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFE05353),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            ),
+            style: AppButtons.danger,
             child: Text('Stop and Cancel', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
           ),
         ],
@@ -1697,7 +1662,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   }
 
   String _formatDialogTimestamp(DateTime dt) =>
-      '${dt.month}/${dt.day}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      formatDateTime(dt);
 
   Widget _confirmationContent() {
     // Live case data, not a stale snapshot — a clinic saved moments ago
@@ -1768,9 +1733,9 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: const Color(0xFFE0A353).withValues(alpha: 0.15),
+            color: AppColors.warning.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE0A353)),
+            border: Border.all(color: AppColors.warning),
           ),
           child: Text(
             'The transporter has not responded yet.\n'
@@ -1821,7 +1786,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
 
   Widget _errorContent() => Text(
     _errorMessage ?? 'Could not check transporter response.',
-    style: GoogleFonts.zain(fontSize: 13, color: Colors.redAccent),
+    style: GoogleFonts.zain(fontSize: 13, color: AppColors.error),
   );
 
   Widget _infoRow(String label, String value) => Padding(
@@ -1846,12 +1811,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       ),
       ElevatedButton(
         onPressed: _confirm,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.yellowrspwn,
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.primary,
         child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
@@ -1873,80 +1833,45 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       ),
       ElevatedButton(
         onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.yellowrspwn,
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.primary,
         child: Text('View Transport Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
     _ModalPhase.cancelled => [
       ElevatedButton(
         onPressed: () => Navigator.of(context).pop(_DialogOutcome.offerCancelled),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.yellowrspwn,
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.primary,
         child: Text('OK', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
     _ModalPhase.pending => [
       OutlinedButton(
         onPressed: _back,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.textPrimary,
-          side: const BorderSide(color: AppColors.textPrimary),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.outline,
         child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
       ElevatedButton(
         onPressed: _isRetrying ? null : _retry,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.yellowrspwn,
-          disabledBackgroundColor: AppColors.slaterspwn,
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.primary,
         child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
     _ModalPhase.declined => [
       ElevatedButton(
         onPressed: () => Navigator.of(context).pop(_DialogOutcome.declined),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.yellowrspwn,
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.primary,
         child: Text('Choose Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
     _ModalPhase.error => [
       OutlinedButton(
         onPressed: _back,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.textPrimary,
-          side: const BorderSide(color: AppColors.textPrimary),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.outline,
         child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
       ElevatedButton(
         onPressed: _isRetrying ? null : _retry,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.yellowrspwn,
-          disabledBackgroundColor: AppColors.slaterspwn,
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
+        style: AppButtons.primary,
         child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
@@ -1963,32 +1888,18 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       if (_conflict!.status == TransportAssignmentStatus.pending)
         ElevatedButton(
           onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.yellowrspwn,
-            foregroundColor: AppColors.textPrimary,
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          ),
+          style: AppButtons.primary,
           child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
         )
       else ...[
         OutlinedButton(
           onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.textPrimary,
-            side: const BorderSide(color: AppColors.textPrimary),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          ),
+          style: AppButtons.outline,
           child: Text('Track Case', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
         ),
         ElevatedButton(
           onPressed: _reassign,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.yellowrspwn,
-            foregroundColor: AppColors.textPrimary,
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          ),
+          style: AppButtons.primary,
           child: Text('Reassign Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
         ),
       ],

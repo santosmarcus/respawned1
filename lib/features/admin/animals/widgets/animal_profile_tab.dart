@@ -12,6 +12,7 @@ import 'package:respawnd1/features/admin/adoption/adoption_application_review_pa
 import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 const String _kNA = 'Not provided';
 
@@ -91,7 +92,7 @@ class AnimalProfileTab extends StatelessWidget {
             _InfoItem(
               animal.isAdopted ? 'Adopted' : 'Reserved',
               animal.isAdopted
-                  ? (animal.adoptedAt != null ? '${animal.adoptedAt!.month}/${animal.adoptedAt!.day}/${animal.adoptedAt!.year}' : 'Yes')
+                  ? (animal.adoptedAt != null ? formatDate(animal.adoptedAt!) : 'Yes')
                   : 'Reserved · application #${animal.reservedApplicationId?.substring(0, 6) ?? ''}',
             ),
 
@@ -141,10 +142,7 @@ class AnimalProfileTab extends StatelessWidget {
                       ),
                     ),
                   ),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.outline,
                   child: Text('View Applications', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
                 ),
               ),
@@ -161,10 +159,7 @@ class AnimalProfileTab extends StatelessWidget {
                       animalName: animal.name.isNotEmpty ? animal.name : animal.species,
                     ),
                   ),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.outline,
                   child: Text('View Donations', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
                 ),
               ),

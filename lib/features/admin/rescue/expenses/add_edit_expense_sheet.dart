@@ -11,6 +11,7 @@ import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 /// Add or edit a single expense record. Returns true if a write actually
 /// happened (caller can rely on the live `expensesProvider` stream to
@@ -437,7 +438,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('${_incurredAt.month}/${_incurredAt.day}/${_incurredAt.year}',
+                    Text(formatDate(_incurredAt),
                         style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                     const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.textPrimary),
                   ],
@@ -459,7 +460,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  border: Border.all(color: _receiptError != null ? Colors.redAccent : AppColors.slaterspwn),
+                  border: Border.all(color: _receiptError != null ? AppColors.error : AppColors.slaterspwn),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: _uploadingReceipt
@@ -498,7 +499,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
 
             if (_errorMessage != null) ...[
               const SizedBox(height: 10),
-              Text(_errorMessage!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+              Text(_errorMessage!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
             ],
 
             const SizedBox(height: 20),
@@ -506,12 +507,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _saving ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _saving
                     ? const SizedBox(
                         height: 20,
@@ -545,7 +541,7 @@ class _Label extends StatelessWidget {
           children: [
             Text(text,
                 style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-            if (required) const Text(' *', style: TextStyle(color: Colors.red, fontSize: 12)),
+            if (required) const Text(' *', style: TextStyle(color: AppColors.error, fontSize: 12)),
           ],
         ),
       );
@@ -559,7 +555,7 @@ class _FieldError extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: Text(message, style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent)),
+        child: Text(message, style: GoogleFonts.zain(fontSize: 11, color: AppColors.error)),
       );
 }
 

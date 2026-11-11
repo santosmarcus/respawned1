@@ -182,19 +182,19 @@ enum RescueStatus {
     RescueStatus.pendingReview => AppColors.slaterspwn,
     RescueStatus.accepted => AppColors.yellowrspwn,
     RescueStatus.awaitingAssignment => AppColors.yellowrspwn,
-    RescueStatus.rejected => const Color(0xFFE05353),
+    RescueStatus.rejected => AppColors.error,
     RescueStatus.referred => AppColors.lavenderrspwn,
-    RescueStatus.possibleDuplicate => const Color(0xFFE0A030),
+    RescueStatus.possibleDuplicate => AppColors.warning,
     RescueStatus.merged => AppColors.tearspwn,
     RescueStatus.ongoing => AppColors.greenrspwn,
     RescueStatus.treatment => const Color(0xFF4E8FE0),
     RescueStatus.intake => const Color(0xFF9C7A4C),
-    RescueStatus.completed => const Color(0xFF4CAF6D),
+    RescueStatus.completed => AppColors.success,
     RescueStatus.cancelled => AppColors.textSecondary,
-    RescueStatus.unableToLocate => const Color(0xFFE0A030),
-    RescueStatus.awaitingReporterResponse => const Color(0xFFE0A030),
-    RescueStatus.pickupUnsuccessful => const Color(0xFFE0A030),
-    RescueStatus.needsSpecializedAssistance => const Color(0xFFE05353),
+    RescueStatus.unableToLocate => AppColors.warning,
+    RescueStatus.awaitingReporterResponse => AppColors.warning,
+    RescueStatus.pickupUnsuccessful => AppColors.warning,
+    RescueStatus.needsSpecializedAssistance => AppColors.error,
     RescueStatus.verifying => AppColors.tearspwn,
   };
 
@@ -238,7 +238,7 @@ enum UrgencyLevel {
   };
 
   Color get color => switch (this) {
-    UrgencyLevel.critical => const Color(0xFFE05353),
+    UrgencyLevel.critical => AppColors.error,
     UrgencyLevel.medium => AppColors.yellowrspwn,
     UrgencyLevel.low => AppColors.greenrspwn,
   };

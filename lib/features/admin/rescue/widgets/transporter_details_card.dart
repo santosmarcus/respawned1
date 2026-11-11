@@ -6,6 +6,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Shared transporter-details card shown on Track Case, in both ongoing
 /// rescue tracking and intake clinic-to-shelter tracking, directly below
@@ -38,7 +39,7 @@ class TransporterDetailsCard extends ConsumerWidget {
     final number = phone?.trim();
     if (number == null || number.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No phone number available.')),
+        appSnackBar('No phone number available.'),
       );
       return;
     }
@@ -46,7 +47,7 @@ class TransporterDetailsCard extends ConsumerWidget {
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not start the call.')),
+        appSnackBar('Could not start the call.'),
       );
     }
   }

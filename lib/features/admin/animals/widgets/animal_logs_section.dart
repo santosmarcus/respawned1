@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 /// One shared "Animal Logs" list, reading `animals/{id}/managementLogs` (the
 /// single existing audit-log source of truth — see
@@ -60,7 +61,7 @@ class AnimalLogsSheet extends ConsumerWidget {
                 child: Center(child: CircularProgressIndicator(color: AppColors.greenrspwn)),
               )
             else if (logs.isEmpty && logsAsync.hasError)
-              Text('Could not load logs: ${logsAsync.error}', style: GoogleFonts.zain(fontSize: 13, color: Colors.redAccent))
+              Text('Could not load logs: ${logsAsync.error}', style: GoogleFonts.zain(fontSize: 13, color: AppColors.error))
             else if (logs.isEmpty)
               Text('No actions recorded yet.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
             else
@@ -90,19 +91,7 @@ class _LogEntryTile extends StatefulWidget {
 class _LogEntryTileState extends State<_LogEntryTile> {
   bool _expanded = false;
 
-  static const _months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-  ];
-
-  String _fmtTimestamp(dynamic ts) {
-    if (ts is! Timestamp) return '';
-    final d = ts.toDate();
-    final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    final ampm = d.hour >= 12 ? 'PM' : 'AM';
-    final minute = d.minute.toString().padLeft(2, '0');
-    return '${_months[d.month - 1]} ${d.day}, ${d.year}, $hour12:$minute $ampm';
-  }
+  String _fmtTimestamp(dynamic ts) => ts is Timestamp ? formatDateTime(ts.toDate()) : '';
 
   /// "Admin Maria · maria@example.com" — falls back to whichever half is
   /// actually on file rather than showing a raw UID or nothing at all.

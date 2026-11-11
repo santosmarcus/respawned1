@@ -15,6 +15,8 @@ import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 const List<String> kPostAdoptionWarningCategories = [
   'Missed follow-up',
@@ -25,9 +27,9 @@ const List<String> kPostAdoptionWarningCategories = [
   'Other',
 ];
 
-String _fmtDate(DateTime? d) => d == null ? 'Not set' : '${d.month}/${d.day}/${d.year}';
+String _fmtDate(DateTime? d) => d == null ? 'Not set' : formatDate(d);
 String _fmtDateTime(DateTime? d) =>
-    d == null ? 'Not set' : '${d.month}/${d.day}/${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    d == null ? 'Not set' : formatDateTime(d);
 
 /// Admin-facing Post-Adoption Details (spec §7-14) — the screen the admin
 /// adoption-detail page's "View Post-Adoption" button now opens, replacing
@@ -57,7 +59,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     try {
       await action();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e'), backgroundColor: Colors.redAccent));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Action failed: $e', kind: AppMessageKind.error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -81,7 +83,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
                 if (required && text.isEmpty) return;
                 Navigator.pop(ctx, text);
               },
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+              style: AppButtons.primary,
               child: const Text('Continue'),
             ),
           ],
@@ -431,7 +433,7 @@ class _OrgActionsSection extends StatelessWidget {
               if (activeMonitoring) ...[
                 OutlinedButton(
                   onPressed: busy ? null : onAddNote,
-                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.textPrimary, side: const BorderSide(color: AppColors.textPrimary)),
+                  style: AppButtons.outline,
                   // Post-Adoption Notes spec §5 — explicitly scoped as the
                   // adoption-wide note, distinct from each follow-up's own
                   // admin note below (_FollowUpCard's "Admin Note" field).
@@ -439,13 +441,13 @@ class _OrgActionsSection extends StatelessWidget {
                 ),
                 OutlinedButton(
                   onPressed: busy ? null : onSendWarning,
-                  style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF9C6B10), side: const BorderSide(color: Color(0xFFE0A353))),
+                  style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF9C6B10), side: const BorderSide(color: AppColors.warning)),
                   child: const Text('Send Warning'),
                 ),
               ],
               ElevatedButton(
                 onPressed: busy ? null : onInitiateReturn,
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE05353), foregroundColor: Colors.white),
+                style: AppButtons.danger,
                 child: const Text('Initiate Return'),
               ),
             ],
@@ -505,7 +507,7 @@ class _WarningRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: resolved ? AppColors.tearspwn.withValues(alpha: 0.3) : const Color(0xFFE0A353).withValues(alpha: 0.15),
+        color: resolved ? AppColors.tearspwn.withValues(alpha: 0.3) : AppColors.warning.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -704,7 +706,7 @@ class _SendWarningSheetState extends State<_SendWarningSheet> {
                           requiredAction: _actionController.text.trim().isEmpty ? null : _actionController.text.trim(),
                           responseDeadline: _deadline,
                         )),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                style: AppButtons.primary,
                 child: const Text('Send Warning'),
               ),
             ),
@@ -826,11 +828,7 @@ class _InitiateReturnSheetState extends State<_InitiateReturnSheet> {
                           proposedRetrievalDateTime: _proposedDate,
                           internalNotes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
                         )),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE05353),
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                ),
+                style: AppButtons.danger,
                 child: const Text('Continue'),
               ),
             ),
@@ -880,12 +878,7 @@ class _CompleteMonitoringButton extends StatelessWidget {
           width: double.infinity,
           child: ElevatedButton(
             onPressed: (busy || !allDone) ? null : onTap,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              disabledBackgroundColor: AppColors.slaterspwn,
-              foregroundColor: AppColors.textPrimary,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
+            style: AppButtons.primary,
             child: Text('Mark Post-Adoption Complete', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
           ),
         ),
@@ -974,7 +967,7 @@ class _FollowUpAdminNoteFieldState extends State<_FollowUpAdminNoteField> {
               else if (_saveState == _NoteSaveState.saved)
                 Text('Saved', style: GoogleFonts.zain(fontSize: 11, color: AppColors.greenrspwn))
               else if (_saveState == _NoteSaveState.error)
-                Text('Could not save', style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent)),
+                Text('Could not save', style: GoogleFonts.zain(fontSize: 11, color: AppColors.error)),
             ],
           ),
           const SizedBox(height: 6),
@@ -1046,7 +1039,7 @@ class _FollowUpCard extends StatelessWidget {
   });
 
   Color _statusColor(String label) => switch (label) {
-        'Overdue' => Colors.redAccent,
+        'Overdue' => AppColors.error,
         'Completed' => AppColors.greenrspwn,
         'Confirmed' => AppColors.greenrspwn,
         'Cancelled' => AppColors.slaterspwn,
@@ -1131,7 +1124,7 @@ class _FollowUpCard extends StatelessWidget {
                               ElevatedButton(
                                 onPressed: busy ? null : onSendReminder,
                                 style:
-                                    ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                                    AppButtons.primary,
                                 child: const Text('Send Reminder'),
                               ),
                             // No separate Confirm Receipt step — Mark as
@@ -1142,7 +1135,7 @@ class _FollowUpCard extends StatelessWidget {
                                 followUp.status == FollowUpStatus.confirmed)
                               ElevatedButton(
                                 onPressed: busy ? null : onComplete,
-                                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                                style: AppButtons.primary,
                                 child: const Text('Mark as Complete'),
                               ),
                           ],

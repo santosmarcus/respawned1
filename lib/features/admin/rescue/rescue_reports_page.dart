@@ -19,8 +19,10 @@ import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_case_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_filter_sheet.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 
 String _friendlyCasesError(Object err) {
   if (err is FirebaseException && err.code == 'permission-denied') {
@@ -45,16 +47,6 @@ class RescueReportsPage extends ConsumerStatefulWidget {
 
 class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
   final _searchController = TextEditingController();
-
-  static const _tabIcons = {
-    RescuePipelineTab.review: Icons.rate_review_outlined,
-    RescuePipelineTab.assign: Icons.assignment_ind_outlined,
-    RescuePipelineTab.ongoing: Icons.local_shipping_outlined,
-    RescuePipelineTab.treatment: Icons.medical_services_outlined,
-    RescuePipelineTab.intake: Icons.pets_outlined,
-    RescuePipelineTab.rejected: Icons.block_outlined,
-    RescuePipelineTab.closed: Icons.folder_off_outlined,
-  };
 
   @override
   void dispose() {
@@ -122,174 +114,41 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     final filters = ref.watch(rescueFilterProvider);
     final casesAsync = ref.watch(filteredCasesProvider);
 
+    // Picking a tab (or re-tapping the current one) also drops a status
+    // override set from the filter sheet, so the tab shows its own cases.
+    void selectTab(int index) {
+      ref.read(rescuePipelineTabProvider.notifier).select(RescuePipelineTab.values[index]);
+      ref.read(rescueFilterProvider.notifier).setStatusOverride(null);
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: const AdminDrawer(active: AdminModule.rescue),
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu, color: AppColors.background),
-            tooltip: 'Menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
+      appBar: AdminAppBar(
+        title: 'Rescue Reports',
+        bottom: AdminTabBar(
+          tabs: [
+            for (final tab in RescuePipelineTab.values)
+              AdminTab(tab.label, count: ref.watch(casesForTabProvider(tab)).asData?.value.length ?? 0),
+          ],
+          selectedIndex: selectedTab.index,
+          onSelected: selectTab,
         ),
-        // Page title restored to the top header (spec) — same typography/
-        // placement as Volunteers/Collar Tags (GoogleFonts.tiltWarp,
-        // fontSize 18, background color). The body previously carried its
-        // own smaller title here instead; that's removed below so the
-        // title is never shown twice.
-        title: Text('Rescue Reports', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
-        actions: const [AdminAlertsBell()],
       ),
       body: Column(
         children: [
-          const SizedBox(height: 16),
-
-          // Filter tabs
-          SizedBox(
-            height: 86,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              // Extra top padding so the badge's negative top offset below
-              // has room to render instead of being sliced off by the
-              // ListView's own viewport edge.
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-              itemCount: RescuePipelineTab.values.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 16),
-              itemBuilder: (context, index) {
-                final tab = RescuePipelineTab.values[index];
-                final isSelected = selectedTab == tab && filters.statusOverride == null;
-                final badgeAsync = ref.watch(casesForTabProvider(tab));
-                final badgeCount = badgeAsync.asData?.value.length ?? 0;
-
-                return GestureDetector(
-                  onTap: () {
-                    ref.read(rescuePipelineTabProvider.notifier).select(tab);
-                    ref.read(rescueFilterProvider.notifier).setStatusOverride(null);
-                  },
-                  child: Column(
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: isSelected ? AppColors.textPrimary : AppColors.slaterspwn,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              _tabIcons[tab],
-                              color: isSelected ? AppColors.background : AppColors.textSecondary,
-                              size: 22,
-                            ),
-                          ),
-                          if (badgeCount > 0)
-                            Positioned(
-                              top: -6,
-                              right: -6,
-                              // Grows horizontally for 2-/3-digit counts
-                              // instead of a fixed 18x18 box that would
-                              // squeeze "100" unreadable.
-                              child: Container(
-                                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                decoration: const BoxDecoration(
-                                  color: Colors.orange,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '$badgeCount',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                        fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        tab.label,
-                        style: GoogleFonts.zain(
-                          fontSize: 11,
-                          color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: 'Search species, reporter, case ID…',
+            onChanged: (v) => ref.read(rescueFilterProvider.notifier).setSearchText(v),
+            filterActive: !filters.isEmpty,
+            onFilter: () => showRescueFilterSheet(
+              context,
+              current: filters,
+              onApply: (next) {
+                ref.read(rescueFilterProvider.notifier).replaceAll(next);
+                _searchController.text = next.searchText;
               },
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Search + filter
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: AppColors.slaterspwn),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.search, size: 18, color: AppColors.textSecondary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (v) =>
-                                ref.read(rescueFilterProvider.notifier).setSearchText(v),
-                            decoration: InputDecoration(
-                              hintText: 'Search species, reporter, case ID…',
-                              hintStyle: GoogleFonts.zain(
-                                  fontSize: 13, color: AppColors.textSecondary),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: () => showRescueFilterSheet(
-                    context,
-                    current: filters,
-                    onApply: (next) {
-                      ref.read(rescueFilterProvider.notifier).replaceAll(next);
-                      _searchController.text = next.searchText;
-                    },
-                  ),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: filters.isEmpty ? Colors.white : AppColors.yellowrspwn,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.slaterspwn),
-                    ),
-                    child: const Icon(Icons.tune, size: 20, color: AppColors.textPrimary),
-                  ),
-                ),
-              ],
             ),
           ),
 
@@ -316,7 +175,11 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
           // (the same manual invalidation the existing "Retry" button
           // already does on error) — never a second/duplicate listener.
           Expanded(
-            child: RefreshIndicator(
+            child: AdminTabSwipe(
+              index: selectedTab.index,
+              count: RescuePipelineTab.values.length,
+              onSelected: selectTab,
+              child: RefreshIndicator(
               onRefresh: () async => ref.invalidate(casesByStatusesProvider(ref.read(effectiveStatusesProvider))),
               child: casesAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -499,6 +362,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                   },
                 );
               },
+              ),
               ),
             ),
           ),

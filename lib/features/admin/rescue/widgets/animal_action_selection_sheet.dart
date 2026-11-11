@@ -126,12 +126,7 @@ class _AnimalActionSelectionSheetBodyState extends State<_AnimalActionSelectionS
               Expanded(
                 child: OutlinedButton(
                   onPressed: () => Navigator.pop(context, null),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.outline,
                   child: Text('Cancel', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                 ),
               ),
@@ -139,13 +134,7 @@ class _AnimalActionSelectionSheetBodyState extends State<_AnimalActionSelectionS
               Expanded(
                 child: ElevatedButton(
                   onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    disabledBackgroundColor: AppColors.slaterspwn,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.primary,
                   child: Text('Continue', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                 ),
               ),

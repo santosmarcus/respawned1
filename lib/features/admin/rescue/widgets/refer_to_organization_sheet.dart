@@ -8,6 +8,7 @@ import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/organization_picker_list.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Refer to Another Organization modal: search organizations by name, see
 /// distance/accepted species/service area/intake availability, add a note,
@@ -93,7 +94,7 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send referral: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not send referral: $e', kind: AppMessageKind.error),
         );
         setState(() => _sending = false);
       }
@@ -166,12 +167,7 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: (_selected == null || _sending) ? null : _send,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _sending
                     ? const SizedBox(
                         height: 20,

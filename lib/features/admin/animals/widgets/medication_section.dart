@@ -15,6 +15,8 @@ import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/animal_medication_repository.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 // ---- Providers ---------------------------------------------------------------
 
@@ -94,7 +96,7 @@ class MedicationSection extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text('$missed missed dose${missed == 1 ? '' : 's'} in the past 7 days',
-                  style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFFE05353))),
+                  style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.error)),
             ),
           if (plans.isLoading)
             const Padding(
@@ -272,7 +274,7 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not record dose: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not record dose: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -289,9 +291,9 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
   Widget build(BuildContext context) {
     final status = widget.status;
     final color = switch (status) {
-      DoseStatus.given => const Color(0xFF4CAF6D),
-      DoseStatus.missed => const Color(0xFFE05353),
-      DoseStatus.due => const Color(0xFFE0A030),
+      DoseStatus.given => AppColors.success,
+      DoseStatus.missed => AppColors.error,
+      DoseStatus.due => AppColors.warning,
       DoseStatus.upcoming => AppColors.textSecondary,
     };
     final dose = widget.dose;
@@ -418,11 +420,7 @@ Future<void> _showAddPlanSheet(BuildContext context, WidgetRef ref, AnimalRecord
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
+                style: AppButtons.primary,
                 onPressed: saving
                     ? null
                     : () async {
@@ -454,8 +452,4 @@ Future<void> _showAddPlanSheet(BuildContext context, WidgetRef ref, AnimalRecord
   doseCtrl.dispose();
 }
 
-String _fmt(DateTime d) {
-  final mm = d.month.toString().padLeft(2, '0');
-  final dd = d.day.toString().padLeft(2, '0');
-  return '$dd/$mm/${d.year}';
-}
+String _fmt(DateTime d) => formatDate(d);

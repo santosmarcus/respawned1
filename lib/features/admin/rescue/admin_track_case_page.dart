@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -26,6 +25,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 // Raw case-doc status values written by the pet-transporter app's own
 // transit flow (see transit_progress_page.dart) once it has physically
@@ -122,10 +122,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-            ),
+            style: AppButtons.primary,
             child: const Text('Continue'),
           ),
         ],
@@ -173,13 +170,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       );
       if (outcome.acted && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              outcome.wholeCaseClosed
+          appSnackBar(outcome.wholeCaseClosed
                   ? 'Case closed.'
-                  : 'Animal marked deceased.',
-            ),
-          ),
+                  : 'Animal marked deceased.'),
         );
         // Only leave this tracking page once the CASE itself is closed —
         // a per-animal death that leaves the case active (other animals
@@ -190,10 +183,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not close case: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not close case: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -335,10 +325,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       if (mounted) {
         setState(() => _isProceedingToTreatment = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not move this case to treatment: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not move this case to treatment: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -462,19 +449,13 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Animal received — transport complete.'),
-            backgroundColor: Colors.green,
-          ),
+          appSnackBar('Animal received — transport complete.', kind: AppMessageKind.success),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not confirm arrival: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not confirm arrival: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -613,7 +594,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE05353),
+                  color: AppColors.error,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -790,7 +771,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE0A353),
+                      color: AppColors.warning,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
@@ -870,7 +851,6 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               ),
             ),
             actions: [
-              const AdminAlertsBell(),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, color: AppColors.background),
                 enabled: !_closing,
@@ -1860,14 +1840,7 @@ class _PendingAssignmentBannerState
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFE05353),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
+            style: AppButtons.danger,
             child: Text(
               'Cancel Offer',
               style: GoogleFonts.zain(fontWeight: FontWeight.w700),
@@ -1888,21 +1861,14 @@ class _PendingAssignmentBannerState
           );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Offer cancelled. You may select another transporter.',
-            ),
-          ),
+          appSnackBar('Offer cancelled. You may select another transporter.'),
         );
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not cancel this offer: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not cancel this offer: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -1966,8 +1932,8 @@ class _PendingAssignmentBannerState
             OutlinedButton(
               onPressed: _cancelling ? null : _cancelOffer,
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFE05353),
-                side: const BorderSide(color: Color(0xFFE05353)),
+                foregroundColor: AppColors.error,
+                side: const BorderSide(color: AppColors.error),
                 minimumSize: const Size(0, 32),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
               ),
@@ -2016,7 +1982,7 @@ class _DeclinedAssignmentBanner extends StatelessWidget {
             const Icon(
               Icons.cancel_outlined,
               size: 28,
-              color: Color(0xFFE05353),
+              color: AppColors.error,
             ),
             const SizedBox(height: 8),
             Text(

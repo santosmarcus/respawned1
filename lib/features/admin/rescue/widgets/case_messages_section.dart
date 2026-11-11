@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Case Messages (spec §4) — reuses the exact same `cases/{caseId}/messages`
 /// thread already read/written by the reporter-side track_case_page.dart
@@ -55,7 +56,7 @@ class _CaseMessagesSectionState extends State<CaseMessagesSection> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send message: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not send message: $e', kind: AppMessageKind.error),
         );
       }
     } finally {

@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/services/animal_record_export_service.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Preview / Share / Save entry point for AnimalRecordExportService — the
 /// bottom-sheet UI equivalent of ExportTransferSheet, for a single Animal
@@ -39,7 +40,7 @@ class _AnimalRecordExportSheetBodyState extends State<_AnimalRecordExportSheetBo
       if (mounted) {
         setState(() => _busy = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not export record: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not export record: $e', kind: AppMessageKind.error),
         );
       }
     }

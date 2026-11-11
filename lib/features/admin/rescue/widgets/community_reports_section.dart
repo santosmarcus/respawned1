@@ -7,14 +7,10 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
-String _formatReportDateTime(DateTime? d) {
-  if (d == null) return '';
-  final h = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
-  final m = d.minute.toString().padLeft(2, '0');
-  final ampm = d.hour >= 12 ? 'PM' : 'AM';
-  return '$h:$m $ampm, ${d.month}/${d.day}/${d.year}';
-}
+String _formatReportDateTime(DateTime? d) => formatDateTimeOr(d, '');
 
 /// Read-only view of `cases/{caseId}/communityReports` — the same
 /// subcollection the user-side track_case_page.dart's
@@ -148,10 +144,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not approve: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not approve: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -204,10 +197,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not reject: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not reject: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -228,8 +218,8 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
         final rejectButton = OutlinedButton(
           onPressed: _busy ? null : _reject,
           style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.redAccent,
-            side: const BorderSide(color: Colors.redAccent),
+            foregroundColor: AppColors.error,
+            side: const BorderSide(color: AppColors.error),
             minimumSize: const Size(0, 40),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
@@ -410,7 +400,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
                     style: GoogleFonts.zain(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: Colors.redAccent,
+                      color: AppColors.error,
                     ),
                   ),
                 ],

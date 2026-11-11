@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
@@ -11,6 +10,7 @@ import 'package:respawnd1/core/repos/transporter_application_repository.dart';
 import 'package:respawnd1/core/utils/transporter_trip_stats.dart';
 import 'package:respawnd1/features/admin/volunteers/transporter_applications_page.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 /// Admin view of one pet transporter: contact, vehicle, verification,
 /// availability, trip counts and their submitted application documents.
@@ -59,7 +59,7 @@ class TransporterDetailPage extends StatelessWidget {
                 _row(Icons.circle, 'Status', t.isOnline ? 'Online now' : 'Offline',
                     iconColor: t.isOnline ? AppColors.greenrspwn : AppColors.slaterspwn),
                 _row(Icons.schedule, 'Last seen',
-                    t.lastSeenAt == null ? null : DateFormat('MMM d, y · h:mm a').format(t.lastSeenAt!)),
+                    t.lastSeenAt == null ? null : formatDateTime(t.lastSeenAt!)),
               ]),
               Text('Application', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               const SizedBox(height: 8),

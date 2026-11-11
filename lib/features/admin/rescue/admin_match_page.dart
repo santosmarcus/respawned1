@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 // Admin/org-facing queue for verifying proposed lost  found pet matches.
 class AdminMatchVerificationPage extends StatelessWidget {
@@ -107,17 +108,16 @@ class _MatchReviewCardState extends State<_MatchReviewCard> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(approve ? 'Match approved' : 'Match rejected'),
-            backgroundColor: approve ? Colors.green : Colors.redAccent,
+          appSnackBar(
+            approve ? 'Match approved' : 'Match rejected',
+            kind: approve ? AppMessageKind.success : AppMessageKind.error,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update match: $e'),
-              backgroundColor: Colors.redAccent),
+          appSnackBar('Failed to update match: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -180,13 +180,7 @@ class _MatchReviewCardState extends State<_MatchReviewCard> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: _busy ? null : () => _resolve(false),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.redAccent,
-                        side: const BorderSide(color: Colors.redAccent),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24)),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
+                      style: AppButtons.dangerOutline,
                       child: Text('Not a match',
                           style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
                     ),
@@ -195,14 +189,7 @@ class _MatchReviewCardState extends State<_MatchReviewCard> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _busy ? null : () => _resolve(true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24)),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        elevation: 0,
-                      ),
+                      style: AppButtons.primary,
                       child: _busy
                           ? const SizedBox(
                           height: 18, width: 18,

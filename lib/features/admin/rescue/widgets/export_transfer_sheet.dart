@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/services/transfer_export_service.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Shared "Export Transfer Details" entry point (Transfer/Export spec) —
 /// the ONE place that offers animal selection (single/multiple/all) plus
@@ -81,12 +82,12 @@ class _ExportTransferSheetState extends State<_ExportTransferSheet> {
   Future<void> _run(Future<void> Function(TransferExportService) action) async {
     if (_selectedIndexes.isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Select at least one animal.'), backgroundColor: Colors.redAccent));
+          .showSnackBar(appSnackBar('Select at least one animal.', kind: AppMessageKind.error));
       return;
     }
     if (_destinationController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a destination name.'), backgroundColor: Colors.redAccent));
+          .showSnackBar(appSnackBar('Enter a destination name.', kind: AppMessageKind.error));
       return;
     }
     setState(() => _busy = true);
@@ -96,7 +97,7 @@ class _ExportTransferSheetState extends State<_ExportTransferSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.redAccent));
+            .showSnackBar(appSnackBar('Export failed: $e', kind: AppMessageKind.error));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -199,13 +200,7 @@ class _ExportTransferSheetState extends State<_ExportTransferSheet> {
                             transferredByUid: widget.transferredByUid,
                             transferredByName: widget.transferredByName,
                           )),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                      style: AppButtons.primary,
                       child: const Text('Share'),
                     ),
                   ),

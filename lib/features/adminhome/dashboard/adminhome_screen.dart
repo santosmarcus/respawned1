@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_view.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_alerts.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
@@ -16,7 +17,13 @@ class AdminHomeScreen extends StatefulWidget {
   State<AdminHomeScreen> createState() => _AdminHomeScreenState();
 }
 
-enum _DashTab { today, analytics }
+enum _DashTab {
+  today('Today'),
+  analytics('Analytics');
+
+  const _DashTab(this.label);
+  final String label;
+}
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   _DashTab _tab = _DashTab.today;
@@ -72,15 +79,31 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             },
           ),
         ],
-        // Reference header: menu + bell on top, greeting below.
+        // Reference header: menu + bell on top, greeting below, then the
+        // same tab bar every admin screen uses.
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(46),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(48, 0, 16, 14),
-              child: Text('Welcome, Admin', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background)),
-            ),
+          preferredSize: const Size.fromHeight(46 + AdminTabBar.height),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 46,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(48, 0, 16, 14),
+                    child:
+                        Text('Welcome, Admin', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background)),
+                  ),
+                ),
+              ),
+              AdminTabBar(
+                tabs: [for (final t in _DashTab.values) AdminTab(t.label)],
+                selectedIndex: _tab.index,
+                onSelected: (i) => setState(() => _tab = _DashTab.values[i]),
+              ),
+            ],
           ),
         ),
       ),
@@ -104,8 +127,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     if (_tab == _DashTab.analytics) const AnalyticsPeriodButton() else const _LivePill(),
                   ],
                 ),
-                const SizedBox(height: 12),
-                _TabSwitch(value: _tab, onChanged: (t) => setState(() => _tab = t)),
                 const SizedBox(height: 14),
                 if (_tab == _DashTab.today) TodayView(priorityKey: _priorityKey) else const AnalyticsView(),
               ],
@@ -138,54 +159,6 @@ class _LivePill extends StatelessWidget {
           const SizedBox(width: 6),
           Text('Live', style: dashBody(size: 14, weight: FontWeight.w700)),
         ],
-      ),
-    );
-  }
-}
-
-class _TabSwitch extends StatelessWidget {
-  final _DashTab value;
-  final ValueChanged<_DashTab> onChanged;
-  const _TabSwitch({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    Widget tab(_DashTab t, String label) {
-      final on = value == t;
-      return Expanded(
-        child: Semantics(
-          selected: on,
-          button: true,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => onChanged(t),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: on ? AppColors.textPrimary : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                label,
-                style: GoogleFonts.zain(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: on ? AppColors.background : AppColors.textSecondary,
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: const Color(0xFFEFECE3), borderRadius: BorderRadius.circular(10)),
-      child: Row(
-        children: [tab(_DashTab.today, 'Today'), const SizedBox(width: 4), tab(_DashTab.analytics, 'Analytics')],
       ),
     );
   }

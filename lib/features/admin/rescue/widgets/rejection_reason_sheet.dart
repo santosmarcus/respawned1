@@ -121,13 +121,7 @@ class _RejectionReasonSheetBodyState extends State<_RejectionReasonSheetBody> {
                           ),
                         )
                     : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE05353),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.danger,
                 child: Text('Confirm Rejection', style: GoogleFonts.tiltWarp(fontSize: 15)),
               ),
             ),

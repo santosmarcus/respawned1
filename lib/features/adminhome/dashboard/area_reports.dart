@@ -120,7 +120,7 @@ const _chartPalette = [
   AppColors.greenrspwn,
   AppColors.lavenderrspwn,
   AppColors.tearspwn,
-  Color(0xFFE05C5C),
+  AppColors.error,
   Color(0xFF8C6A3F),
   Color(0xFF4F8A8B),
   Color(0xFFF29E4C),

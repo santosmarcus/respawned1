@@ -193,7 +193,7 @@ class _AdmitAnimalPageState extends ConsumerState<AdmitAnimalPage> {
 
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+              Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
             ],
 
             const Spacer(),
@@ -201,15 +201,7 @@ class _AdmitAnimalPageState extends ConsumerState<AdmitAnimalPage> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: (_reason == null || _isSubmitting) ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  disabledForegroundColor: AppColors.textSecondary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _isSubmitting
                     ? const SizedBox(
                         height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))

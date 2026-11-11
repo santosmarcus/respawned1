@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 /// Bottom sheet for the Rescue Reports list: urgency, status, species,
 /// date range, and location filters. Status here reaches the
@@ -69,7 +70,7 @@ class _RescueFilterSheetBodyState extends State<_RescueFilterSheetBody> {
   }
 
   String _dateLabel(DateTime? d) =>
-      d == null ? 'Any' : '${d.month}/${d.day}/${d.year}';
+      d == null ? 'Any' : formatDate(d);
 
   @override
   Widget build(BuildContext context) {
@@ -219,12 +220,7 @@ class _RescueFilterSheetBodyState extends State<_RescueFilterSheetBody> {
                       widget.onApply(const RescueFilters());
                       Navigator.pop(context);
                     },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.outline,
                     child: Text('Clear All', style: GoogleFonts.tiltWarp(fontSize: 15)),
                   ),
                 ),
@@ -249,12 +245,7 @@ class _RescueFilterSheetBodyState extends State<_RescueFilterSheetBody> {
                       );
                       Navigator.pop(context);
                     },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.primary,
                     child: Text('Apply',
                         style:
                             GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),

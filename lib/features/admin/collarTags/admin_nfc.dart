@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class AdminNfc extends StatefulWidget {
   const AdminNfc({super.key});
@@ -107,7 +108,7 @@ class _AdminNfcState extends State<AdminNfc> {
   void _showSnack(String msg) {
     if (mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+          .showSnackBar(appSnackBar(msg));
     }
   }
 
@@ -142,7 +143,7 @@ class _AdminNfcState extends State<AdminNfc> {
 
             if (!_nfcAvailable)
               _Banner(
-                color: Colors.red,
+                color: AppColors.error,
                 icon: Icons.warning_amber_rounded,
                 text: 'NFC is not available or enabled on this device.',
               ),
@@ -508,12 +509,7 @@ class _FullWidthButton extends StatelessWidget {
           label: Text(label,
               style: GoogleFonts.tiltWarp(
                   fontSize: 15, color: AppColors.textPrimary)),
-          style: OutlinedButton.styleFrom(
-            side: const BorderSide(color: AppColors.textPrimary),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30)),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-          ),
+          style: AppButtons.outline,
         ),
       );
     }

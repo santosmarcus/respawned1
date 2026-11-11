@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -15,6 +14,7 @@ import 'package:respawnd1/core/utils/adoption_readiness.dart';
 import 'package:respawnd1/features/admin/animals/widgets/adoption_readiness_dialog.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// The existing animal-record form — reused as-is by both a standalone
 /// "Create Record" entry point and, with [prefillData]/[linkedCaseId]/
@@ -279,15 +279,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(ctx, true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.primary,
                     child: Text(
                       'Done',
                       style: GoogleFonts.tiltWarp(
@@ -422,7 +414,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // to. TODO(nfc): NFC support is not implemented.
   void _showTagNotAvailable() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Add the QR tag from the animal profile after saving.')),
+      appSnackBar('Add the QR tag from the animal profile after saving.'),
     );
   }
 
@@ -736,10 +728,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     ];
     if (missing.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Please fill in: ${missing.join(', ')}.'),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('Please fill in: ${missing.join(', ')}.', kind: AppMessageKind.error),
       );
       if (missingImage) {
         setState(() => _imageError = 'At least one image is required.');
@@ -810,12 +799,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           if (mounted) {
             setState(() => _isLoading = false);
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'The animal must be confirmed received before creating records.',
-                ),
-                backgroundColor: Colors.redAccent,
-              ),
+              appSnackBar('The animal must be confirmed received before creating records.', kind: AppMessageKind.error),
             );
           }
           return;
@@ -1046,12 +1030,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              widget.isEditing ? 'Profile updated!' : 'Animal record created!',
-            ),
-            backgroundColor: Colors.green,
-          ),
+          appSnackBar(widget.isEditing ? 'Profile updated!' : 'Animal record created!', kind: AppMessageKind.success),
         );
         // See widget.popOnSuccess's doc comment — AnimalRecordsFlowPage
         // stays on screen and reactively advances to the next animal
@@ -1061,10 +1040,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Error: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -1089,9 +1065,6 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             color: AppColors.background,
           ),
         ),
-        actions: [
-          if (!widget.isEditing) const AdminAlertsBell(),
-        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -1135,7 +1108,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     TextSpan(
                       text: '* ',
                       style: TextStyle(
-                        color: Colors.redAccent,
+                        color: AppColors.error,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -1219,7 +1192,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               const SizedBox(height: 8),
               Text(
                 _imageError!,
-                style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent),
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.error),
               ),
             ],
 
@@ -1658,13 +1631,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                     color: AppColors.textSecondary,
                   ),
                 ),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: AppColors.slaterspwn),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
+                style: AppButtons.outline,
               ),
             ),
 
@@ -1676,16 +1643,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _createRecord,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
+                style: AppButtons.primary,
                 child: _isLoading
                     ? const SizedBox(
                         height: 22,
@@ -1740,7 +1698,7 @@ class _FieldLabel extends StatelessWidget {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
-            color: Colors.redAccent,
+            color: AppColors.error,
           ),
         ),
     ],
@@ -1955,7 +1913,7 @@ class _ExistingImageThumb extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(2),
                   decoration: const BoxDecoration(
-                    color: Color(0xFFE05353),
+                    color: AppColors.error,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.close, size: 14, color: Colors.white),
@@ -1999,7 +1957,7 @@ class _PickedImageThumb extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(2),
                   decoration: const BoxDecoration(
-                    color: Color(0xFFE05353),
+                    color: AppColors.error,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.close, size: 14, color: Colors.white),

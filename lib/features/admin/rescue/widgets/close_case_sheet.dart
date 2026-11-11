@@ -114,7 +114,7 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: const Color(0xFFE0A353).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(color: AppColors.warning.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
                 child: Text(
                   'Closing will cancel the pending/active transporter assignment, current route, and clinic destination.',
                   style: GoogleFonts.zain(fontSize: 12, color: const Color(0xFF9C6B10)),
@@ -212,13 +212,7 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
                       ),
                     )
                         : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE05353),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: AppColors.slaterspwn,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      elevation: 0,
-                    ),
+                    style: AppButtons.danger,
                     child: const Text('Close Case'),
                   ),
                 ),

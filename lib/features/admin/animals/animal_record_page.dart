@@ -7,7 +7,8 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/widgets/admin_alerts_bell.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart' show kAgeGroupOptions, matchesAgeGroup;
 import 'animal_record_detail_page.dart';
@@ -448,12 +449,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                         setState(() {});
                         Navigator.pop(ctx);
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      ),
+                      style: AppButtons.primary,
                       child: Text('Apply', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                     ),
                   ),
@@ -481,26 +477,12 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       child: Scaffold(
       backgroundColor: AppColors.background,
       drawer: _selecting ? null : const AdminDrawer(active: AdminModule.records),
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        automaticallyImplyLeading: !_selecting,
-        leading: _selecting
-            ? null
-            : Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu, color: AppColors.background),
-                  tooltip: 'Menu',
-                  onPressed: () => Scaffold.of(context).openDrawer(),
-                ),
-              ),
-        // Page title restored to the top header (spec) — same typography/
-        // placement as Volunteers/Collar Tags. The selection-mode "N
-        // selected" title takes over exactly as before. The body's own
-        // smaller title is removed below so it's never shown twice.
-        title: Text(
-          _selecting ? '${_selectedIds.length} selected' : 'Animal Records',
-          style: GoogleFonts.tiltWarp(fontSize: _selecting ? 16 : 18, color: AppColors.background),
-        ),
+      appBar: AdminAppBar(
+        // The selection-mode "N selected" title and Cancel take over while
+        // records are being picked.
+        title: _selecting ? '${_selectedIds.length} selected' : 'Animal Records',
+        titleSize: _selecting ? 16 : 18,
+        showLeading: !_selecting,
         actions: [
           if (_selecting)
             // Visible text label, not just a close icon — an icon alone
@@ -509,110 +491,27 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
               onPressed: _clearSelection,
               child: Text('Cancel',
                   style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.background)),
-            )
-          else
-            const AdminAlertsBell(),
+            ),
         ],
       ),
       body: Column(
         children: [
-          const SizedBox(height: 16),
-
-          // Search + filter — same styling as Rescue Reports (white
-          // background, slate border, rounded 24) instead of the old solid
-          // yellow box.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: AppColors.slaterspwn),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.search, size: 18, color: AppColors.textSecondary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (v) => setState(() => _searchQuery = v),
-                            decoration: InputDecoration(
-                              hintText: 'Search name, species, breed, tag, case ID…',
-                              hintStyle: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: _openFilterSheet,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: _sheetActiveFilterCount > 0 ? AppColors.yellowrspwn : Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.slaterspwn),
-                        ),
-                        child: const Icon(Icons.tune,
-                            color: AppColors.textPrimary, size: 20),
-                      ),
-                      if (_sheetActiveFilterCount > 0)
-                        Positioned(
-                          top: -4,
-                          right: -4,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(color: Color(0xFFE05C5C), shape: BoxShape.circle),
-                            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                            child: Text(
-                              '$_sheetActiveFilterCount',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                // List/Grid toggle — page-local only; the project has no
-                // shared_preferences (or similar) dependency yet to persist
-                // it across sessions, so it just resets to List on reopen.
-                GestureDetector(
-                  onTap: () => setState(() => _isGrid = !_isGrid),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.slaterspwn),
-                    ),
-                    child: Tooltip(
-                      message: _isGrid ? 'Switch to list view' : 'Switch to grid view',
-                      child: Icon(_isGrid ? Icons.view_list_outlined : Icons.grid_view_outlined,
-                          color: AppColors.textPrimary, size: 20, semanticLabel: _isGrid ? 'List view' : 'Grid view'),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: 'Search name, species, breed, tag, case ID…',
+            onChanged: (v) => setState(() => _searchQuery = v),
+            activeFilterCount: _sheetActiveFilterCount,
+            onFilter: _openFilterSheet,
+            trailing: [
+              // List/Grid toggle — page-local only; the project has no
+              // shared_preferences (or similar) dependency yet to persist
+              // it across sessions, so it just resets to List on reopen.
+              AdminSquareButton(
+                icon: _isGrid ? Icons.view_list_outlined : Icons.grid_view_outlined,
+                tooltip: _isGrid ? 'Switch to list view' : 'Switch to grid view',
+                onTap: () => setState(() => _isGrid = !_isGrid),
+              ),
+            ],
           ),
 
           const SizedBox(height: 12),

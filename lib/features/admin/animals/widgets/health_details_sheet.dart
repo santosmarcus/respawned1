@@ -6,6 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Structured health-detail editing (spec section 6) — separate from the
 /// main Animal Record form since these fields change far more often than a
@@ -104,7 +106,7 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
       if (mounted) {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save medical profile: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not save medical profile: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -159,7 +161,7 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(_lastCheckup == null ? 'Not set' : '${_lastCheckup!.month}/${_lastCheckup!.day}/${_lastCheckup!.year}',
+                    Text(_lastCheckup == null ? 'Not set' : formatDate(_lastCheckup!),
                         style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
                     const Icon(Icons.calendar_today_outlined, size: 14),
                   ],
@@ -172,13 +174,7 @@ class _HealthDetailsSheetBodyState extends ConsumerState<_HealthDetailsSheetBody
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _saving ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _saving
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                     : Text('Save Medical Profile', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),

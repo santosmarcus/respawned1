@@ -13,6 +13,7 @@ import 'dart:io';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class AdminQrGeneratorScreen extends StatefulWidget {
   const AdminQrGeneratorScreen({super.key});
@@ -243,7 +244,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
   void _showSnack(String msg) {
     if (mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+          .showSnackBar(appSnackBar(msg));
     }
   }
 
@@ -421,7 +422,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                                   : Icons.lock_open,
                               size: 18,
                               color: _selected!.qrEnabled
-                                  ? Colors.redAccent
+                                  ? AppColors.error
                                   : AppColors.textPrimary,
                             ),
                             label: Text(
@@ -430,14 +431,14 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
                                   color: _selected!.qrEnabled
-                                      ? Colors.redAccent
+                                      ? AppColors.error
                                       : AppColors.textPrimary),
                             ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.textPrimary,
                               side: BorderSide(
                                 color: _selected!.qrEnabled
-                                    ? Colors.redAccent
+                                    ? AppColors.error
                                     : AppColors.textPrimary,
                                 width: 1.5,
                               ),
@@ -483,22 +484,7 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                                   color: AppColors
                                       .textPrimary),
                             ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                              AppColors.yellowrspwn,
-                              foregroundColor:
-                              AppColors.textPrimary,
-                              shape:
-                              RoundedRectangleBorder(
-                                borderRadius:
-                                BorderRadius.circular(
-                                    30),
-                              ),
-                              padding:
-                              const EdgeInsets.symmetric(
-                                  vertical: 12),
-                              elevation: 0,
-                            ),
+                            style: AppButtons.primary,
                           ),
                         ),
                       ],

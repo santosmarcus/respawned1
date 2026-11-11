@@ -6,6 +6,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_application.dart';
 import 'package:respawnd1/core/repos/volunteer_application_repository.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Staff review of general volunteer applications (paper 1.4.5).
 class VolunteerApplicationsPage extends StatefulWidget {
@@ -52,7 +56,7 @@ class _VolunteerApplicationsPageState extends State<VolunteerApplicationsPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save the review: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not save the review: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -60,57 +64,38 @@ class _VolunteerApplicationsPageState extends State<VolunteerApplicationsPage> {
 
   @override
   Widget build(BuildContext context) {
+    void selectTab(int index) => setState(() => _tab = VolunteerApplicationStatus.values[index]);
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.textPrimary,
-        iconTheme: const IconThemeData(color: AppColors.background),
-        title: Text('Volunteer applications',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
+      appBar: AdminAppBar(
+        title: 'Volunteer Applications',
+        showDrawerButton: false,
+        bottom: AdminTabBar(
+          tabs: [for (final s in VolunteerApplicationStatus.values) AdminTab(s.label)],
+          selectedIndex: _tab.index,
+          onSelected: selectTab,
+        ),
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            // One non-wrapping row: scrolls sideways on narrow screens
-            // instead of dropping a chip onto a second line.
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final s in VolunteerApplicationStatus.values)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(s.label, maxLines: 1, softWrap: false),
-                        selected: _tab == s,
-                        showCheckmark: false,
-                        selectedColor: AppColors.yellowrspwn,
-                        onSelected: (_) => setState(() => _tab = s),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
           Expanded(
-            child: StreamBuilder<List<VolunteerApplication>>(
+            child: AdminTabSwipe(
+              index: _tab.index,
+              count: VolunteerApplicationStatus.values.length,
+              onSelected: selectTab,
+              child: StreamBuilder<List<VolunteerApplication>>(
               stream: _repo.watchByStatus(_tab),
               builder: (context, snap) {
                 if (snap.hasError) {
-                  return Center(child: Text('Could not load applications.', style: GoogleFonts.zain()));
+                  return const AdminListMessage('Could not load applications.');
                 }
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
                 }
                 final apps = snap.data!;
                 if (apps.isEmpty) {
-                  return Center(
-                    child: Text('No applications here.',
-                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-                  );
+                  return const AdminListMessage('No applications here.');
                 }
                 return ListView.separated(
                   padding: const EdgeInsets.all(16),
@@ -127,6 +112,7 @@ class _VolunteerApplicationsPageState extends State<VolunteerApplicationsPage> {
                   ),
                 );
               },
+            ),
             ),
           ),
         ],

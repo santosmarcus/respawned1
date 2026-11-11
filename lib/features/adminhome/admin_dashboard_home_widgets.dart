@@ -19,6 +19,7 @@ import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Action Required + Current Operations — replaces adminhome_screen.dart's
 /// old hardcoded gauge/"Pending Requests" placeholder block with real,
@@ -236,7 +237,7 @@ class ActionRequiredSection extends ConsumerWidget {
       if (critical > 0) {
         rows.add(_AlertRow(
           icon: Icons.priority_high,
-          color: const Color(0xFFE05353),
+          color: AppColors.error,
           title: '$critical critical rescue report${critical == 1 ? '' : 's'} awaiting review',
           subtitle: 'Urgency: Critical · status: pending review',
           onTap: () => _openRescueReview(context, ref),
@@ -255,7 +256,7 @@ class ActionRequiredSection extends ConsumerWidget {
     } else if (reviewCases.hasError) {
       rows.add(_AlertRow(
         icon: Icons.error_outline,
-        color: Colors.redAccent,
+        color: AppColors.error,
         title: 'Could not load Rescue Review data',
         subtitle: '${reviewCases.error}',
         onTap: () => _openRescueReview(context, ref),
@@ -277,7 +278,7 @@ class ActionRequiredSection extends ConsumerWidget {
     if (staleOffers != null && staleOffers.isNotEmpty) {
       rows.add(_AlertRow(
         icon: Icons.hourglass_disabled_outlined,
-        color: const Color(0xFFE05353),
+        color: AppColors.error,
         title: '${staleOffers.length} unanswered transporter offer${staleOffers.length == 1 ? '' : 's'} expired',
         subtitle: 'Pending offer passed its own response window',
         onTap: () => _openRescueAssign(context, ref),
@@ -301,7 +302,7 @@ class ActionRequiredSection extends ConsumerWidget {
       if (activeReturns > 0) {
         rows.add(_AlertRow(
           icon: Icons.assignment_return_outlined,
-          color: const Color(0xFFE05353),
+          color: AppColors.error,
           title: '$activeReturns active return request${activeReturns == 1 ? '' : 's'}',
           subtitle: 'A return is in progress for an adopted animal',
           onTap: () => _openAdoptions(context, AdoptionStatus.adopted),
@@ -313,7 +314,7 @@ class ActionRequiredSection extends ConsumerWidget {
     if (overdueFollowUps != null && overdueFollowUps.isNotEmpty) {
       rows.add(_AlertRow(
         icon: Icons.event_busy_outlined,
-        color: const Color(0xFFE05353),
+        color: AppColors.error,
         title: '${overdueFollowUps.length} overdue post-adoption follow-up${overdueFollowUps.length == 1 ? '' : 's'}',
         subtitle: 'Past their own scheduled check-in date',
         onTap: () => _openAdoptions(context, AdoptionStatus.adopted),
@@ -487,10 +488,7 @@ class _CapacityMetricCardState extends ConsumerState<_CapacityMetricCard> {
       debugPrint('[TopMetricsRow] Could not resolve organization membership: $e\n$st');
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(
-            content: const Text('Could not load the organization profile.'),
-            action: SnackBarAction(label: 'Retry', onPressed: _open),
-          ),
+          appSnackBar('Could not load the organization profile.', action: SnackBarAction(label: 'Retry', onPressed: _open)),
         );
       }
     } finally {

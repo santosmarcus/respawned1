@@ -75,7 +75,7 @@ class _ReadinessDialogState extends State<_ReadinessDialog> {
                         },
                     },
                   }),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+          style: AppButtons.primary,
           child: const Text('Mark Adoptable'),
         ),
       ],
@@ -93,7 +93,7 @@ class _CheckTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final (icon, color) = switch (check.state) {
       ReadinessState.ok => (Icons.check_circle, AppColors.greenrspwn),
-      ReadinessState.blocked => (Icons.block, Colors.redAccent),
+      ReadinessState.blocked => (Icons.block, AppColors.error),
       ReadinessState.needsConfirmation =>
         confirmed ? (Icons.check_circle, AppColors.greenrspwn) : (Icons.radio_button_unchecked, AppColors.textSecondary),
     };
@@ -114,7 +114,7 @@ class _CheckTile extends StatelessWidget {
             padding: const EdgeInsets.only(left: 24),
             child: Text(check.finding,
                 style: GoogleFonts.zain(
-                    fontSize: 12, color: check.state == ReadinessState.blocked ? Colors.redAccent : AppColors.textSecondary)),
+                    fontSize: 12, color: check.state == ReadinessState.blocked ? AppColors.error : AppColors.textSecondary)),
           ),
           if (check.confirmation != null)
             CheckboxListTile(

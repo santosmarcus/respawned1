@@ -8,6 +8,7 @@ import 'package:respawnd1/core/models/rescue/org_referral_candidate.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 enum _TransferTargetType { organization, volunteer }
 
@@ -99,7 +100,7 @@ class _TransferAnimalRecordSheetBodyState extends ConsumerState<_TransferAnimalR
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not transfer animal: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not transfer animal: $e', kind: AppMessageKind.error),
         );
         setState(() => _sending = false);
       }
@@ -253,15 +254,7 @@ class _TransferAnimalRecordSheetBodyState extends ConsumerState<_TransferAnimalR
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: (!_canConfirm || _sending) ? null : _confirm,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  disabledForegroundColor: AppColors.textSecondary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _sending
                     ? const SizedBox(
                         height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))

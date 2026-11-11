@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Release Animal — a limited, temporary handoff-to-reporter flow. Only
 /// ever shown when the reporter indicated adoption interest at submission
@@ -71,7 +72,7 @@ class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not confirm release: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not confirm release: $e', kind: AppMessageKind.error),
         );
         setState(() => _saving = false);
       }
@@ -154,12 +155,7 @@ class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () => Navigator.pop(context, false),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.outline,
                     child: Text('Cancel', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                   ),
                 ),
@@ -167,12 +163,7 @@ class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _saving ? null : _confirm,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: AppButtons.primary,
                     child: _saving
                         ? const SizedBox(
                             height: 20,

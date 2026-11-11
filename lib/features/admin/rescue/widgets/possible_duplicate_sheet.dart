@@ -7,6 +7,8 @@ import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Possible Duplicate modal. The system suggests nearby active reports of
 /// the same species; the organization makes the final call — merge
@@ -104,7 +106,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not merge: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not merge: $e', kind: AppMessageKind.error),
         );
         setState(() => _busy = false);
       }
@@ -132,7 +134,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not update: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not update: $e', kind: AppMessageKind.error),
         );
         setState(() => _busy = false);
       }
@@ -183,11 +185,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
               alignment: Alignment.centerLeft,
               child: OutlinedButton(
                 onPressed: () => _viewReport(widget.sourceCase),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
+                style: AppButtons.outline,
                 child: Text('View Current Report (#${widget.sourceCase.shortCaseId})',
                     style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
               ),
@@ -273,11 +271,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
                                 Expanded(
                                   child: OutlinedButton(
                                     onPressed: _busy ? null : () => _viewReport(candidate),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: AppColors.textPrimary,
-                                      side: const BorderSide(color: AppColors.slaterspwn),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                    ),
+                                    style: AppButtons.outline,
                                     child: Text('View Report', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
                                   ),
                                 ),
@@ -285,11 +279,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
                                 Expanded(
                                   child: OutlinedButton(
                                     onPressed: _busy ? null : () => _compare(candidate),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: AppColors.textPrimary,
-                                      side: const BorderSide(color: AppColors.slaterspwn),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                    ),
+                                    style: AppButtons.outline,
                                     child: Text('Compare', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
                                   ),
                                 ),
@@ -300,12 +290,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
                               width: double.infinity,
                               child: OutlinedButton(
                                 onPressed: _busy ? null : () => _merge(candidate),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: AppColors.textPrimary,
-                                  side: const BorderSide(color: AppColors.textPrimary),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20)),
-                                ),
+                                style: AppButtons.outline,
                                 child: Text('Merge into this case',
                                     style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
                               ),
@@ -323,12 +308,7 @@ class _PossibleDuplicateSheetBodyState extends State<_PossibleDuplicateSheetBody
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _busy ? null : _keepSeparate,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _busy
                     ? const SizedBox(
                         height: 20,
@@ -399,7 +379,7 @@ class _CompareCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ts = c.createdAt;
-    final timeStr = ts != null ? '${ts.month}/${ts.day}/${ts.year} ${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}' : 'Unknown';
+    final timeStr = ts != null ? formatDateTime(ts) : 'Unknown';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),

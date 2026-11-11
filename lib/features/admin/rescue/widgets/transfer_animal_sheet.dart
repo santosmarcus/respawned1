@@ -10,6 +10,8 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/rescue/widgets/clinic_picker_body.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/organization_picker_list.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 enum TransferDestinationType { organization, clinic, volunteer }
 
@@ -171,7 +173,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not transfer animal: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not transfer animal: $e', kind: AppMessageKind.error),
         );
         setState(() => _sending = false);
       }
@@ -269,7 +271,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('${_transferDate.month}/${_transferDate.day}/${_transferDate.year}',
+                            Text(formatDate(_transferDate),
                                 style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                             const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.textPrimary),
                           ],
@@ -302,13 +304,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _canSubmit ? _confirm : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _sending
                     ? const SizedBox(
                         height: 20,
@@ -355,12 +351,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
             onPressed: _pickClinic,
             icon: const Icon(Icons.local_hospital_outlined, size: 18),
             label: Text(clinic == null ? 'Choose Clinic' : 'Change Clinic'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.textPrimary,
-              side: const BorderSide(color: AppColors.slaterspwn),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
+            style: AppButtons.outline,
           ),
         ),
       ],
@@ -432,7 +423,7 @@ class _DestinationCard extends StatelessWidget {
                   Container(
                     margin: const EdgeInsets.only(right: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(color: const Color(0xFFE05353), borderRadius: BorderRadius.circular(20)),
+                    decoration: BoxDecoration(color: AppColors.error, borderRadius: BorderRadius.circular(20)),
                     child: Text(trailingBadge!, style: GoogleFonts.zain(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
                 if (selected) const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 18),

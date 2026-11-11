@@ -7,6 +7,7 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/animal_treatment_state.dart';
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 /// Extra fields shown on a Rejected-tab card only (Rejected Rescue Reports
 /// spec) — reporter/reason/rejected-date/rejected-by/Community Adoption
@@ -104,10 +105,8 @@ class RescueCaseCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = rescueCase;
     final ts = c.createdAt;
-    final timeStr = ts != null
-        ? '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')} ${ts.hour >= 12 ? 'PM' : 'AM'}'
-        : '';
-    final dateStr = ts != null ? '${ts.month}/${ts.day}/${ts.year}' : '';
+    final timeStr = ts != null ? formatTime(ts) : '';
+    final dateStr = ts != null ? formatDate(ts) : '';
     final thumbnail = c.photoUrls.isNotEmpty ? c.photoUrls.first : null;
     // Treatment-stage cards show the clinic name instead of the reported
     // address — still exactly one line, same compact shape.
@@ -262,7 +261,7 @@ class RescueCaseCard extends StatelessWidget {
   List<Widget> _rejectionInfoLines(RejectionCardInfo info) {
     final rejectedDate = info.rejectedDate;
     final rejectedDateStr = rejectedDate != null
-        ? '${rejectedDate.month}/${rejectedDate.day}/${rejectedDate.year}'
+        ? formatDate(rejectedDate)
         : 'Unknown';
     return [
       const SizedBox(height: 3),
@@ -299,7 +298,7 @@ class RescueCaseCard extends StatelessWidget {
   List<Widget> _closureInfoLines(ClosureCardInfo info) {
     final closedDate = info.closedDate;
     final closedDateStr = closedDate != null
-        ? '${closedDate.month}/${closedDate.day}/${closedDate.year}'
+        ? formatDate(closedDate)
         : 'Unknown date';
     return [
       const SizedBox(height: 3),

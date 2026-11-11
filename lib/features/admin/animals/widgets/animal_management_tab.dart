@@ -13,6 +13,8 @@ import 'package:respawnd1/features/admin/animals/widgets/animal_record_export_sh
 import 'package:respawnd1/features/admin/animals/widgets/transfer_animal_record_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Organization-management actions — deliberately separate from the
 /// Medical tab's clinical content. Only enabled when they make sense for
@@ -36,7 +38,7 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Action failed: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Action failed: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -161,7 +163,7 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
 
   void _generateTag() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('QR/NFC tag generation is not available yet.')),
+      appSnackBar('QR/NFC tag generation is not available yet.'),
     );
   }
 
@@ -186,7 +188,7 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, messageController.text.trim()),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+            style: AppButtons.primary,
             child: const Text('Publish'),
           ),
         ],
@@ -202,17 +204,17 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
           );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Published to Facebook Page.'), backgroundColor: AppColors.greenrspwn),
+          appSnackBar('Published to Facebook Page.', kind: AppMessageKind.success),
         );
       }
     } on FacebookOperationException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(e.message, kind: AppMessageKind.error));
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not publish to Facebook.'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not publish to Facebook.', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -409,7 +411,7 @@ class _MarkDeceasedDialogState extends State<_MarkDeceasedDialog> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(_date == null ? 'Date (optional)' : '${_date!.month}/${_date!.day}/${_date!.year}',
+                  Text(_date == null ? 'Date (optional)' : formatDate(_date!),
                       style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
                   const Icon(Icons.calendar_today_outlined, size: 16),
                 ],
@@ -444,7 +446,7 @@ class _MarkDeceasedDialogState extends State<_MarkDeceasedDialog> {
                 cause: _causeController.text.trim().isEmpty ? null : _causeController.text.trim(),
                 notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
               )),
-          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE05353), foregroundColor: Colors.white),
+          style: AppButtons.danger,
           child: const Text('Confirm'),
         ),
       ],
