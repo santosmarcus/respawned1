@@ -10,7 +10,6 @@ import 'package:respawnd1/features/admin/animals/state/animal_records_providers.
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'animal_page.dart';
 
 //Data Model
@@ -406,10 +405,7 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
         ],
         onTap: (index) {
           if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
+            Navigator.popUntil(context, (route) => route.isFirst);
           }
           else if (index == 1) {
             Navigator.push(

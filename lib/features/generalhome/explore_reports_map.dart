@@ -46,6 +46,14 @@ Color urgencyRingColor(String? urgency) {
 /// instead of urgency.
 double _hueForColor(Color color) => HSVColor.fromColor(color).hue;
 
+// BitmapDescriptor has no value equality, so a fresh defaultMarkerWithHue on
+// every build makes the map treat every pin as changed and re-send them all
+// to the native view (visible flicker on every filter tap / icon load).
+// Reusing one instance per hue keeps unchanged markers identical.
+final Map<double, BitmapDescriptor> _fallbackIconByHue = {};
+BitmapDescriptor _fallbackIcon(double hue) =>
+    _fallbackIconByHue.putIfAbsent(hue, () => BitmapDescriptor.defaultMarkerWithHue(hue));
+
 /// Report categories shown on the map. Each one gets its own pin color +
 /// icon so a report's type is readable at a glance, e.g. red = Illness,
 /// blue = Lost Pet.
@@ -937,11 +945,15 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
       markerId: MarkerId(r.caseId),
       position: position,
       icon: _iconCache[r.caseId] ??
-          BitmapDescriptor.defaultMarkerWithHue(
+          _fallbackIcon(
             r.isCommunityAdoptionEligible
                 ? BitmapDescriptor.hueViolet
                 : _hueForColor(category.color),
           ),
+      // Handle the tap ourselves — otherwise the map also pans to the pin
+      // and pops an info window underneath the preview sheet, which reads
+      // as the map jumping/reloading.
+      consumeTapEvents: true,
       onTap: () => _showReportPreview(r, category),
     );
   }
