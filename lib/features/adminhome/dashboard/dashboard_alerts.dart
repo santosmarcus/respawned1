@@ -13,8 +13,7 @@ import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart'
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
-import 'package:respawnd1/features/adminhome/admin_dashboard_home_widgets.dart'
-    show overdueFollowUpsProvider, staleTransportOffersProvider;
+import 'package:respawnd1/features/adminhome/admin_dashboard_home_widgets.dart' show staleTransportOffersProvider;
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
@@ -24,12 +23,14 @@ enum AlertArea {
   rescue,
   care,
   adoption,
+  people,
   funds;
 
   String get label => switch (this) {
     AlertArea.rescue => 'Rescue',
     AlertArea.care => 'Care',
     AlertArea.adoption => 'Adoption',
+    AlertArea.people => 'People',
     AlertArea.funds => 'Funds',
   };
 }
@@ -91,7 +92,9 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   final pendingApps = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.pending)));
   final approvedApps = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.approved)));
   final adoptedBucket = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.adopted)));
-  final overdueFollowUps = ref.watch(overdueFollowUpsProvider);
+  final openFollowUps = ref.watch(orgOpenFollowUpsProvider);
+  final volunteerApps = ref.watch(pendingVolunteerApplicationsProvider);
+  final transporterApps = ref.watch(pendingTransporterApplicationsProvider);
   final canManageFinances = ref.watch(canManageFinancesProvider).asData?.value ?? false;
   final needsDecision = canManageFinances ? ref.watch(campaignsNeedingDecisionProvider) : null;
   final payments = canManageFinances ? ref.watch(paymentAttemptsProvider) : null;
@@ -115,7 +118,9 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   track(pendingApps, 'adoption applications');
   track(approvedApps, 'approved adoptions');
   track(adoptedBucket, 'adoption returns');
-  track(overdueFollowUps, 'post-adoption follow-ups');
+  track(openFollowUps, 'post-adoption follow-ups');
+  track(volunteerApps, 'volunteer applications');
+  track(transporterApps, 'transporter applications');
   track(careRecords, 'preventive care records');
   if (needsDecision != null) track(needsDecision, 'campaign decisions');
 
@@ -352,7 +357,10 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
     );
   }
 
-  final overdue = overdueFollowUps.asData?.value ?? const [];
+  final now = DateTime.now();
+  final overdue = (openFollowUps.asData?.value ?? const <OpenFollowUp>[])
+      .where((f) => f.record.displayStatus(now) == 'Overdue')
+      .toList();
   if (overdue.isNotEmpty) {
     alerts.add(
       DashAlert(
@@ -360,9 +368,13 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         icon: Icons.event_busy_outlined,
         title: '${plural(overdue.length, 'post-adoption follow-up')} overdue',
         status: 'Past scheduled check-in date',
+        subject: overdue.length == 1 ? '${overdue.first.app.animalName} · ${overdue.first.app.adopterName}' : null,
+        timing: overdue.length == 1 ? 'Due ${shortDate(overdue.first.record.scheduledDate)}' : null,
         action: 'Contact adopters and record the follow-up',
         area: AlertArea.adoption,
-        open: (context, _) => openAdoptionQueue(context, AdoptionStatus.adopted),
+        open: (context, _) => overdue.length == 1
+            ? openApplication(context, overdue.first.app)
+            : openAdoptionQueue(context, AdoptionStatus.adopted),
       ),
     );
   }
@@ -399,6 +411,48 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         action: 'Coordinate release with the adopter',
         area: AlertArea.adoption,
         open: (context, _) => openAdoptionQueue(context, AdoptionStatus.approved),
+      ),
+    );
+  }
+
+  // ── People: applications waiting for review ───────────────────────────
+  DateTime? oldestOf(Iterable<DateTime?> times) =>
+      times.whereType<DateTime>().fold<DateTime?>(null, (m, t) => m == null || t.isBefore(m) ? t : m);
+
+  final riders = transporterApps.asData?.value ?? const [];
+  if (riders.isNotEmpty) {
+    final oldest = oldestOf(riders.map((a) => a.submittedAt));
+    alerts.add(
+      DashAlert(
+        severity: DashSeverity.info,
+        icon: Icons.two_wheeler_outlined,
+        title: '${plural(riders.length, 'transporter application')} to review',
+        status: 'Pending verification',
+        subject: riders.length == 1 && riders.first.name.isNotEmpty ? riders.first.name : null,
+        timing: oldest == null ? null : 'Oldest submitted ${elapsedSince(oldest)}',
+        action: 'Check the documents, then approve or decline',
+        area: AlertArea.people,
+        button: 'Review',
+        open: (context, _) => openTransporterApplications(context),
+      ),
+    );
+  }
+
+  final helpers = volunteerApps.asData?.value ?? const [];
+  if (helpers.isNotEmpty) {
+    final oldest = oldestOf(helpers.map((a) => a.submittedAt));
+    alerts.add(
+      DashAlert(
+        severity: DashSeverity.info,
+        icon: Icons.groups_outlined,
+        title: '${plural(helpers.length, 'volunteer application')} to review',
+        status: 'Pending',
+        subject: helpers.length == 1 && helpers.first.name.isNotEmpty ? helpers.first.name : null,
+        timing: oldest == null ? null : 'Oldest submitted ${elapsedSince(oldest)}',
+        action: 'Review availability and experience, then approve or decline',
+        area: AlertArea.people,
+        button: 'Review',
+        open: (context, _) => openVolunteerApplications(context),
       ),
     );
   }

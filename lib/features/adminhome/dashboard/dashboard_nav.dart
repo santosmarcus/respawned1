@@ -13,6 +13,8 @@ import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart'
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
+import 'package:respawnd1/features/admin/events/admin_event_detail_page.dart';
+import 'package:respawnd1/features/admin/events/admin_events_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
@@ -20,6 +22,8 @@ import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
+import 'package:respawnd1/features/admin/volunteers/transporter_applications_page.dart';
+import 'package:respawnd1/features/admin/volunteers/volunteer_applications_page.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 
 /// Every dashboard tap opens an EXISTING screen with that screen's own
@@ -82,3 +86,12 @@ void openCampaign(BuildContext context, String campaignId) =>
     _push(context, (_) => DonationAdminInfoPage(campaignId: campaignId));
 
 void openVolunteers(BuildContext context) => _push(context, (_) => const VolunteersPage());
+
+void openVolunteerApplications(BuildContext context) => _push(context, (_) => const VolunteerApplicationsPage());
+
+void openTransporterApplications(BuildContext context) =>
+    _push(context, (_) => const TransporterApplicationsPage());
+
+void openEvents(BuildContext context) => _push(context, (_) => const AdminEventsPage());
+
+void openEvent(BuildContext context, String eventId) => _push(context, (_) => AdminEventDetailPage(eventId: eventId));

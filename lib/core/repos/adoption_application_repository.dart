@@ -677,6 +677,21 @@ class AdoptionApplicationRepository {
     });
   }
 
+  /// Every still-open follow-up (scheduled or reminder sent) across every
+  /// application, with its application id. Same query as
+  /// [streamOverdueFollowUps], so it needs no new index.
+  Stream<List<({String applicationId, FollowUpRecord record})>> streamOpenFollowUps() {
+    return _db
+        .collectionGroup('followUps')
+        .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name])
+        .snapshots()
+        .map((snap) => [
+              for (final d in snap.docs)
+                if (d.reference.parent.parent != null)
+                  (applicationId: d.reference.parent.parent!.id, record: FollowUpRecord.fromFirestore(d)),
+            ]);
+  }
+
   // ---- Release Details (pre-release) ------------------------------------
 
   Future<void> setScheduledReleaseDate({required String applicationId, required DateTime date}) async {

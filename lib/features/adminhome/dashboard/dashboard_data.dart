@@ -4,13 +4,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/models/rescue/transporter_application.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
+import 'package:respawnd1/core/models/volunteer/volunteer_application.dart';
+import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
+import 'package:respawnd1/core/repos/transporter_application_repository.dart';
+import 'package:respawnd1/core/repos/volunteer_application_repository.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
+import 'package:respawnd1/features/admin/events/state/event_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
@@ -40,7 +47,28 @@ class RescueSnapshot {
 
   int count(RescueStage s) => byStage[s]?.length ?? 0;
   List<RescueCase> of(RescueStage s) => byStage[s] ?? const [];
+
+  /// Critical cases still waiting on staff: not yet reviewed, without a
+  /// clinic or rider, or stalled in the field. Cases already in transit, at
+  /// the vet or in intake are moving and are not counted.
+  List<RescueCase> get urgentWaiting => [
+    for (final s in kWaitingStages) ...of(s),
+  ].where((c) => UrgencyLevel.fromFirestoreValue(c.urgency) == UrgencyLevel.critical).toList();
 }
+
+const List<RescueStage> kWaitingStages = [
+  RescueStage.review,
+  RescueStage.clinic,
+  RescueStage.transporter,
+  RescueStage.fieldIssue,
+];
+
+/// Where a tap on the urgent count should land: the Review tab while any
+/// urgent case still needs review or a clinic, otherwise Assign.
+RescuePipelineTab urgentTabFor(List<RescueCase> urgent) =>
+    urgent.isNotEmpty && urgent.every((c) => c.status == RescueStatus.awaitingAssignment)
+        ? RescuePipelineTab.assign
+        : RescuePipelineTab.review;
 
 final dashboardRescueSnapshotProvider = Provider.autoDispose<AsyncValue<RescueSnapshot>>((ref) {
   final review = ref.watch(casesForTabProvider(RescuePipelineTab.review));
@@ -281,6 +309,55 @@ const List<RescueStatus> kClosedCaseStatuses = [
 
 final closedCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((ref) {
   return ref.watch(casesByStatusesProvider(kClosedCaseStatuses));
+});
+
+// ─── People: volunteer and transporter applications ─────────────────────
+
+final pendingVolunteerApplicationsProvider = StreamProvider.autoDispose<List<VolunteerApplication>>((ref) {
+  return VolunteerApplicationRepository().watchByStatus(VolunteerApplicationStatus.pending);
+});
+
+final pendingTransporterApplicationsProvider = StreamProvider.autoDispose<List<TransporterApplication>>((ref) {
+  return TransporterApplicationRepository().watchByStatus(TransporterApplicationStatus.pending);
+});
+
+// ─── Events ──────────────────────────────────────────────────────────────
+
+/// The organization's events that haven't ended and aren't cancelled,
+/// soonest first.
+final upcomingEventsProvider = Provider.autoDispose<AsyncValue<List<VolunteerEvent>>>((ref) {
+  final orgId = ref.watch(currentOrganizationIdProvider);
+  if (orgId.hasError) return AsyncValue.error(orgId.error!, orgId.stackTrace ?? StackTrace.current);
+  if (!orgId.hasValue) return const AsyncValue.loading();
+  final id = orgId.requireValue;
+  if (id == null) return const AsyncValue.data([]);
+  return ref.watch(organizationEventsProvider(id)).whenData(
+        (list) => list.where((e) => !e.isCancelled && !e.isPast).toList()..sort((a, b) => a.startAt.compareTo(b.startAt)),
+      );
+});
+
+// ─── Post-adoption follow-ups (this organization only) ───────────────────
+
+typedef OpenFollowUp = ({AdoptionApplication app, FollowUpRecord record});
+
+/// Every still-open follow-up whose adoption belongs to this organization.
+/// The follow-up stream itself spans all organizations, so it is matched
+/// against the organization's own adopted applications.
+final orgOpenFollowUpsProvider = Provider.autoDispose<AsyncValue<List<OpenFollowUp>>>((ref) {
+  final open = ref.watch(_openFollowUpsProvider);
+  final adopted = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.adopted)));
+  if (open.hasError) return AsyncValue.error(open.error!, open.stackTrace ?? StackTrace.current);
+  if (adopted.hasError) return AsyncValue.error(adopted.error!, adopted.stackTrace ?? StackTrace.current);
+  if (!open.hasValue || !adopted.hasValue) return const AsyncValue.loading();
+  final byId = {for (final a in adopted.requireValue) a.id: a};
+  return AsyncValue.data([
+    for (final f in open.requireValue)
+      if (byId[f.applicationId] != null) (app: byId[f.applicationId]!, record: f.record),
+  ]);
+});
+
+final _openFollowUpsProvider = StreamProvider.autoDispose<List<({String applicationId, FollowUpRecord record})>>((ref) {
+  return ref.watch(adoptionApplicationRepositoryProvider).streamOpenFollowUps();
 });
 
 // ─── Small helpers ───────────────────────────────────────────────────────

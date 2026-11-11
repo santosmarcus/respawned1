@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
@@ -1042,6 +1043,7 @@ class _PreventionCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final vaxAsync = ref.watch(vaccinationsByAnimalProvider);
+    final care = ref.watch(careRecordsByAnimalProvider).asData?.value;
     final snap = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
     return SectionCard(
       icon: Icons.vaccines,
@@ -1057,8 +1059,16 @@ class _PreventionCard extends ConsumerWidget {
           final overdue = withRecords.length - current;
           final notRecorded = inCare.length - withRecords.length;
           final rate = withRecords.isEmpty ? null : current / withRecords.length;
-          final dewormedYes = inCare.where((a) => a.health.dewormed == true).length;
-          final dewormedKnown = inCare.where((a) => a.health.dewormed != null).length;
+          // From care records: "current" = the latest record of that type
+          // isn't past its next-due date. Animals without one are left out.
+          String careChip(CareType type) {
+            if (care == null) return '${type.label} —';
+            final latest = [
+              for (final a in inCare) CareRecord.latestByType(care[a.id] ?? const <CareRecord>[])[type],
+            ].whereType<CareRecord>().toList();
+            final current = latest.where((r) => r.status != VaccineStatus.overdue).length;
+            return '${type.label} current $current of ${latest.length} recorded';
+          }
           final quarantines = snap == null
               ? 0
               : [
@@ -1129,9 +1139,9 @@ class _PreventionCard extends ConsumerWidget {
                 runSpacing: 5,
                 children: [
                   if (overdue > 0) StatusChip('$overdue overdue', tone: ChipTone.red, icon: Icons.error_outline),
-                  StatusChip('Dewormed $dewormedYes of $dewormedKnown recorded', tone: ChipTone.info),
+                  StatusChip(careChip(CareType.deworming), tone: ChipTone.info),
+                  StatusChip(careChip(CareType.fleaTick), tone: ChipTone.info),
                   StatusChip('Quarantine active $quarantines', tone: quarantines > 0 ? ChipTone.amber : ChipTone.green),
-                  const StatusChip('Flea/tick not tracked', tone: ChipTone.notRecorded),
                   const StatusChip('Illness log not tracked', tone: ChipTone.notRecorded),
                 ],
               ),

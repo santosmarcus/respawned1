@@ -7,7 +7,6 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
-import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
@@ -19,7 +18,9 @@ import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
+import 'package:respawnd1/features/adminhome/dashboard/events_card.dart';
 import 'package:respawnd1/features/adminhome/dashboard/rescue_readiness.dart';
+import 'package:respawnd1/features/adminhome/dashboard/week_schedule.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
@@ -38,6 +39,8 @@ class TodayView extends StatelessWidget {
         const SizedBox(height: 14),
         KeyedSubtree(key: priorityKey, child: const PriorityActionsCard()),
         const SizedBox(height: 14),
+        const WeekScheduleCard(),
+        const SizedBox(height: 14),
         const RescueReadinessCard(),
         const SizedBox(height: 14),
         const RescueSummaryCard(),
@@ -45,6 +48,8 @@ class TodayView extends StatelessWidget {
         const ShelterCareCard(),
         const SizedBox(height: 14),
         const AdoptionSummaryCard(),
+        const SizedBox(height: 14),
+        const EventsCard(),
         const SizedBox(height: 14),
         const DonationsFundsCard(),
         const SizedBox(height: 14),
@@ -78,11 +83,17 @@ class GlanceCard extends ConsumerWidget {
     final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
     final payments = canManage ? ref.watch(paymentAttemptsProvider).asData?.value : null;
     final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
+    final volunteerApps = ref.watch(pendingVolunteerApplicationsProvider).asData?.value;
+    final transporterApps = ref.watch(pendingTransporterApplicationsProvider).asData?.value;
+    final events = ref.watch(upcomingEventsProvider).asData?.value;
 
     String n(int? v) => v == null ? '—' : '$v';
     ChipTone? warnIf(int? v) => (v ?? 0) > 0 ? ChipTone.amber : null;
 
-    final urgent = snap?.all.where((c) => UrgencyLevel.fromFirestoreValue(c.urgency) == UrgencyLevel.critical).length;
+    final urgentCases = snap?.urgentWaiting;
+    final urgent = urgentCases?.length;
+    final weekEnd = DateTime.now().add(const Duration(days: 7));
+    final eventsThisWeek = events?.where((e) => e.startAt.isBefore(weekEnd)).length;
     final returns = adopted == null ? null : activeReturnsIn(adopted).length;
     final toVerify = payments?.where((p) => p.status == 'needs_review').length;
     final active = campaigns?.where((c) => !c.isDraft && !c.isArchived && !c.isEnded && c.status == 'active').toList();
@@ -117,9 +128,9 @@ class GlanceCard extends ConsumerWidget {
               _Tile(
                 Icons.sos,
                 n(urgent),
-                'Urgent rescues',
+                'Urgent, not moving',
                 tone: (urgent ?? 0) > 0 ? ChipTone.red : null,
-                onTap: () => openRescueTab(context, ref, RescuePipelineTab.review),
+                onTap: () => openRescueTab(context, ref, urgentTabFor(urgentCases ?? const [])),
               ),
               _Tile(
                 Icons.fact_check,
@@ -131,7 +142,7 @@ class GlanceCard extends ConsumerWidget {
               _Tile(
                 Icons.medication,
                 n(occ?.atVet),
-                'Need medical care',
+                'At the vet',
                 tone: warnIf(occ?.atVet),
                 onTap: () => openRescueTab(context, ref, RescuePipelineTab.treatment),
               ),
@@ -151,7 +162,7 @@ class GlanceCard extends ConsumerWidget {
               _Tile(
                 Icons.home,
                 n(approved?.length),
-                'Handovers due',
+                'Awaiting handover',
                 onTap: () => openAdoptionQueue(context, AdoptionStatus.approved),
               ),
               _Tile(
@@ -160,6 +171,32 @@ class GlanceCard extends ConsumerWidget {
                 'Return requests',
                 tone: warnIf(returns),
                 onTap: () => openAdoptionQueue(context, AdoptionStatus.adopted),
+              ),
+            ],
+          ),
+          _GlanceGroup(
+            icon: Icons.groups,
+            name: 'People',
+            onOpen: () => openVolunteers(context),
+            tiles: [
+              _Tile(
+                Icons.two_wheeler,
+                n(transporterApps?.length),
+                'Transporters to verify',
+                tone: warnIf(transporterApps?.length),
+                onTap: () => openTransporterApplications(context),
+              ),
+              _Tile(
+                Icons.person_add_alt,
+                n(volunteerApps?.length),
+                'Volunteer applications',
+                onTap: () => openVolunteerApplications(context),
+              ),
+              _Tile(
+                Icons.event,
+                n(eventsThisWeek),
+                'Events in 7 days',
+                onTap: () => openEvents(context),
               ),
             ],
           ),
@@ -521,9 +558,8 @@ class RescueSummaryCard extends ConsumerWidget {
         value: snapAsync,
         what: 'rescue cases',
         builder: (snap) {
-          final urgent = snap.all
-              .where((c) => UrgencyLevel.fromFirestoreValue(c.urgency) == UrgencyLevel.critical)
-              .length;
+          final urgentCases = snap.urgentWaiting;
+          final urgent = urgentCases.length;
           // Current wait = time since the clinic was chosen for cases still
           // waiting for a rider. Uses recorded timestamps only.
           final waits = snap
@@ -544,9 +580,9 @@ class RescueSummaryCard extends ConsumerWidget {
                     Expanded(
                       child: BigStat(
                         value: '$urgent',
-                        label: 'Urgent',
+                        label: 'Urgent, not moving',
                         color: urgent > 0 ? DashSeverity.critical.color : null,
-                        onTap: () => openRescueTab(context, ref, RescuePipelineTab.review),
+                        onTap: () => openRescueTab(context, ref, urgentTabFor(urgentCases)),
                       ),
                     ),
                     Expanded(
@@ -648,12 +684,13 @@ class ShelterCareCard extends ConsumerWidget {
               const CardLabel('Today’s care'),
               const _NotTrackedRow(
                 icon: Icons.restaurant,
-                text: 'Feeding, water, cleaning and medication rounds aren’t recorded as tasks yet.',
+                text: 'Feeding, water and cleaning rounds aren’t recorded as tasks yet.',
               ),
               const SizedBox(height: 6),
-              const _NotTrackedRow(
-                icon: Icons.videocam,
-                text: 'Carer videos are attached to treatment updates on each case, not collected here yet.',
+              const DetailLine(
+                Icons.medication,
+                'Carers log medication doses, with optional photos, on each animal’s Medical tab. Missed doses show there.',
+                maxLines: null,
               ),
               CardLabel('Health records · ${plural(total, 'animal')} in care'),
               if (vax == null && vaxAsync.isLoading)
