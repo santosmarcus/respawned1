@@ -5,20 +5,27 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
+import 'donation_admin_filters.dart';
 import 'donation_admin_info.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 
 class DonationAdminSearchPage extends ConsumerStatefulWidget {
-  /// 0 All, 1 Donations, 2 Sponsorships.
+  /// 0 All, 1 Donations, 2 Sponsorships. Ignored when [fixedType] is set.
   final int initialTab;
-  /// Statuses shown at first (all when null); "View Past Donations" passes the ended ones.
+
+  /// 'donation' or 'sponsorship': only that type is listed and the type tab
+  /// row is hidden (the home screen's tab already picked it).
+  final String? fixedType;
+
+  /// Statuses shown at first (all but archived when null).
   final Set<String>? initialStatuses;
   final String title;
   const DonationAdminSearchPage({
     super.key,
     this.initialTab = 0,
+    this.fixedType,
     this.initialStatuses,
     this.title = 'Search Donation/Sponsorship',
   });
@@ -33,8 +40,15 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
   String _query = '';
   // Filter sheet: which lifecycle statuses to show (all but archived by
   // default — archived listings are fully allocated; tick it to audit them).
-  late Set<String> _statuses =
-  Set.of(widget.initialStatuses ?? const {'draft', 'active', 'paused', 'goal_met', 'goal_not_met', 'closed'});
+  late Set<String> _statuses = Set.of(widget.initialStatuses ?? defaultSearchStatuses);
+
+  String? get _type =>
+      widget.fixedType ??
+      switch (_tab) {
+        1 => 'donation',
+        2 => 'sponsorship',
+        _ => null,
+      };
 
   Future<void> _openFilter() async {
     final picked = Set<String>.of(_statuses);
@@ -60,15 +74,7 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
     if (result != null) setState(() => _statuses = result);
   }
 
-  bool _matches(DonationListing l) {
-    if (_tab == 1 && l.type != 'donation') return false;
-    if (_tab == 2 && l.type != 'sponsorship') return false;
-    if (!_statuses.contains(l.status)) return false;
-    if (_query.isEmpty) return true;
-    return l.title.toLowerCase().contains(_query) ||
-        (l.animalName ?? '').toLowerCase().contains(_query) ||
-        l.organizer.toLowerCase().contains(_query);
-  }
+  bool _matches(DonationListing l) => matchesListingSearch(l, type: _type, statuses: _statuses, query: _query);
 
   @override
   Widget build(BuildContext context) {
@@ -79,7 +85,9 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
         children: [
           DonationAdminHeader(
             title: widget.title,
-            helpText: 'Every listing, including drafts and ended campaigns. Drafts are only visible here until you publish them.',
+            helpText:
+                'Every listing, including drafts and ended campaigns. Drafts are only visible here until you '
+                'publish them. Use the filter to change which statuses are shown, including archived ones.',
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 8, 0),
@@ -108,40 +116,53 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
               ],
             ),
           ),
-          Container(
-            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.slaterspwn))),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                for (var i = 0; i < _tabs.length; i++)
-                  InkWell(
-                    onTap: () => setState(() => _tab = i),
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
-                      decoration: BoxDecoration(
-                        border: Border(
-                            bottom: BorderSide(color: i == _tab ? AppColors.textPrimary : Colors.transparent, width: 2)),
-                      ),
-                      child: Text(_tabs[i],
+          if (widget.fixedType == null)
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: AppColors.slaterspwn)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  for (var i = 0; i < _tabs.length; i++)
+                    InkWell(
+                      onTap: () => setState(() => _tab = i),
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(color: i == _tab ? AppColors.textPrimary : Colors.transparent, width: 2),
+                          ),
+                        ),
+                        child: Text(
+                          _tabs[i],
                           style: GoogleFonts.zain(
-                              fontSize: 14,
-                              color: i == _tab ? AppColors.textPrimary : AppColors.textSecondary,
-                              fontWeight: i == _tab ? FontWeight.w800 : FontWeight.w500)),
+                            fontSize: 14,
+                            color: i == _tab ? AppColors.textPrimary : AppColors.textSecondary,
+                            fontWeight: i == _tab ? FontWeight.w800 : FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
           Expanded(
             child: async.when(
               loading: () => const Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
-              error: (e, _) => Center(child: Text('Could not load listings: $e', style: GoogleFonts.zain(color: Colors.redAccent))),
+              error: (e, _) => Center(
+                child: Text('Could not load listings: $e', style: GoogleFonts.zain(color: Colors.redAccent)),
+              ),
               data: (all) {
                 final items = all.where(_matches).toList();
                 if (items.isEmpty) {
                   return Center(
-                      child: Text('No listings found.', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary)));
+                    child: Text(
+                      'No listings found.',
+                      style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary),
+                    ),
+                  );
                 }
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -150,7 +171,9 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
                       CampaignCard(
                         listing: l,
                         onTap: () => Navigator.push(
-                            context, MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: l.id))),
+                          context,
+                          MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: l.id)),
+                        ),
                       ),
                   ],
                 );
