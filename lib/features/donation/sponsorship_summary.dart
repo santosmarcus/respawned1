@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:intl/intl.dart';
 import '../../app_theme.dart';
 import '../generalhome/history_provider.dart';
 import 'cancel_dialog.dart';
 import 'models.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 final donationSummaryProvider = ChangeNotifierProvider.autoDispose.family<DonationSummaryNotifier, DonationSummaryParams>((ref, params) {
   return DonationSummaryNotifier(
@@ -156,7 +157,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                     children: [
                       Icon(
                         currentHistoryItem?.sponsorshipStatus == 'inactive' ? Icons.cancel_outlined : Icons.check_circle, 
-                        color: currentHistoryItem?.sponsorshipStatus == 'inactive' ? Colors.red : AppColors.greenrspwn, 
+                        color: currentHistoryItem?.sponsorshipStatus == 'inactive' ? AppColors.error : AppColors.greenrspwn, 
                         size: 80
                       ),
                       const SizedBox(height: 12),
@@ -262,7 +263,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                             style: GoogleFonts.zain(
                               fontSize: 15, 
                               fontWeight: FontWeight.bold, 
-                              color: currentHistoryItem?.sponsorshipStatus == 'active' ? AppColors.greenrspwn : Colors.red
+                              color: currentHistoryItem?.sponsorshipStatus == 'active' ? AppColors.greenrspwn : AppColors.error
                             ),
                           ),
                         ],
@@ -276,11 +277,11 @@ class DonationSummaryScreen extends ConsumerWidget {
                             style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
                           ),
                           Text(
-                            DateFormat('MMMM dd, yyyy').format(currentHistoryItem!.nextChargeDate!),
+                            formatDate(currentHistoryItem!.nextChargeDate!),
                             style: GoogleFonts.zain(
                               fontSize: 15, 
                               fontWeight: FontWeight.bold, 
-                              color: isInactive ? Colors.red : AppColors.greenrspwn
+                              color: isInactive ? AppColors.error : AppColors.greenrspwn
                             ),
                           ),
                         ],
@@ -352,7 +353,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                             style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
                           ),
                           Text(
-                            DateFormat('yyyy-MM-dd HH:mm').format(donation.timestamp),
+                            formatDateTime(donation.timestamp),
                             style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                           ),
                         ],
@@ -370,14 +371,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                         onPressed: () {
                           _showCancelDialog(context, ref, currentHistoryItem!);
                         },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red),
-                          padding: const EdgeInsets.symmetric(vertical: 14.0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                          ),
-                        ),
+                        style: AppButtons.dangerOutline,
                         child: Text(
                           'Cancel Sponsorship',
                           style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
@@ -391,7 +385,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                         onPressed: () {
                           ref.read(historyProvider.notifier).unCancelSponsorship(currentHistoryItem!.id);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Sponsorship reactivated successfully.')),
+                            appSnackBar('Sponsorship reactivated successfully.'),
                           );
                         },
                         style: ElevatedButton.styleFrom(
@@ -420,15 +414,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                           // Placeholder for navigating to history
                           debugPrint('View History pressed');
                         },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14.0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                          ),
-                          backgroundColor: AppColors.yellowrspwn,
-                          foregroundColor: AppColors.textPrimary,
-                          elevation: 0,
-                        ),
+                        style: AppButtons.primary,
                         child: Text(
                           'History',
                           style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
@@ -441,15 +427,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                         onPressed: () {
                           Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
                         },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14.0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                          ),
-                          backgroundColor: AppColors.yellowrspwn,
-                          foregroundColor: AppColors.textPrimary,
-                          elevation: 0,
-                        ),
+                        style: AppButtons.primary,
                         child: Text(
                           'Home',
                           style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
@@ -470,7 +448,7 @@ class DonationSummaryScreen extends ConsumerWidget {
 
   void _showCancelDialog(BuildContext context, WidgetRef ref, HistoryItem item) {
     final expiryDate = item.nextChargeDate != null 
-        ? DateFormat('MMMM dd, yyyy').format(item.nextChargeDate!)
+        ? formatDate(item.nextChargeDate!)
         : 'the end of your current period';
     showCancelDialog(
       context: context,
@@ -479,7 +457,7 @@ class DonationSummaryScreen extends ConsumerWidget {
       onConfirm: () {
         ref.read(historyProvider.notifier).cancelSponsorship(item.id);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sponsorship cancelled successfully.')),
+          appSnackBar('Sponsorship cancelled successfully.'),
         );
       },
     );

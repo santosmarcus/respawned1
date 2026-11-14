@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:intl/intl.dart';
 import '../../app_theme.dart';
 import '../generalhome/history_provider.dart';
 import '../generalhome/history_screen.dart';
@@ -11,6 +10,8 @@ import 'cancel_dialog.dart';
 import 'certificate_view.dart';
 import 'donation_page.dart';
 import 'models.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 final donationSummaryProvider = ChangeNotifierProvider.autoDispose.family<DonationSummaryNotifier, DonationSummaryParams>((ref, params) {
   return DonationSummaryNotifier(
@@ -165,7 +166,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                     children: [
                       Icon(
                         isInactive ? Icons.cancel_outlined : Icons.check_circle,
-                        color: isInactive ? Colors.red : AppColors.greenrspwn,
+                        color: isInactive ? AppColors.error : AppColors.greenrspwn,
                         size: 80,
                       ),
                       const SizedBox(height: 12),
@@ -265,11 +266,11 @@ class DonationSummaryScreen extends ConsumerWidget {
                             style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
                           ),
                           Text(
-                            DateFormat('MMMM dd, yyyy').format(currentHistoryItem!.nextChargeDate!),
+                            formatDate(currentHistoryItem!.nextChargeDate!),
                             style: GoogleFonts.zain(
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
-                                color: isInactive ? Colors.red : AppColors.greenrspwn
+                                color: isInactive ? AppColors.error : AppColors.greenrspwn
                             ),
                           ),
                         ],
@@ -379,7 +380,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                             style: GoogleFonts.zain(fontSize: 14),
                           ),
                           Text(
-                            DateFormat('yyyy-MM-dd HH:mm').format(donation.timestamp),
+                            formatDateTime(donation.timestamp),
                             style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                           ),
                         ],
@@ -401,7 +402,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isInactive ? AppColors.greenrspwn : Colors.red,
+                        backgroundColor: isInactive ? AppColors.greenrspwn : AppColors.error,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14.0),
                         shape: RoundedRectangleBorder(
@@ -424,15 +425,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () => _showCancelInKindDialog(context, ref, currentHistoryItem!.id),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14.0),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30.0),
-                        ),
-                        elevation: 0,
-                      ),
+                      style: AppButtons.danger,
                       child: Text(
                         'Cancel Donation',
                         style: GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold),
@@ -456,12 +449,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                       ),
                       icon: const Icon(Icons.workspace_premium_outlined),
                       label: Text('View Certificate', style: GoogleFonts.tiltWarp(fontSize: 15)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textPrimary,
-                        side: const BorderSide(color: AppColors.textPrimary),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      ),
+                      style: AppButtons.outline,
                     ),
                   ),
                 ],
@@ -478,15 +466,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                                 builder: (context) => const HistoryPage()),
                           );
                         },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14.0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                          ),
-                          backgroundColor: AppColors.yellowrspwn,
-                          foregroundColor: AppColors.textPrimary,
-                          elevation: 0,
-                        ),
+                        style: AppButtons.primary,
                         child: Text(
                           'History',
                           style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
@@ -504,15 +484,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                                 (route) => false,
                           );
                         },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14.0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                          ),
-                          backgroundColor: AppColors.yellowrspwn,
-                          foregroundColor: AppColors.textPrimary,
-                          elevation: 0,
-                        ),
+                        style: AppButtons.primary,
                         child: Text(
                           'Home',
                           style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
@@ -551,10 +523,10 @@ class DonationSummaryScreen extends ConsumerWidget {
               ref.read(historyProvider.notifier).updateStatus(id, InKindStatus.cancelled);
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Donation cancelled.')),
+                appSnackBar('Donation cancelled.'),
               );
             },
-            child: const Text('Yes, Cancel', style: TextStyle(color: Colors.red)),
+            child: const Text('Yes, Cancel', style: TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -562,7 +534,7 @@ class DonationSummaryScreen extends ConsumerWidget {
   }
 
   void _showCancelDialog(BuildContext context, WidgetRef ref, HistoryItem item) {
-    final expiryDate = DateFormat('MMMM dd, yyyy').format(item.nextChargeDate!);
+    final expiryDate = formatDate(item.nextChargeDate!);
     showCancelDialog(
       context: context,
       title: 'Are You Sure?',
@@ -570,7 +542,7 @@ class DonationSummaryScreen extends ConsumerWidget {
       onConfirm: () {
         ref.read(historyProvider.notifier).cancelSponsorship(item.id);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sponsorship cancelled successfully.')),
+          appSnackBar('Sponsorship cancelled successfully.'),
         );
       },
     );
@@ -596,7 +568,7 @@ class DonationSummaryScreen extends ConsumerWidget {
               ref.read(historyProvider.notifier).unCancelSponsorship(id);
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Sponsorship reactivated successfully!')),
+                appSnackBar('Sponsorship reactivated successfully!'),
               );
             },
             child: const Text('Yes, Reactivate', style: TextStyle(color: AppColors.greenrspwn)),
@@ -618,7 +590,7 @@ class DonationSummaryScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Enter the new amount for your next charge on ${DateFormat('MMM dd, yyyy').format(item.nextChargeDate!)}.',
+              'Enter the new amount for your next charge on ${formatDate(item.nextChargeDate!)}.',
               style: GoogleFonts.zain(fontSize: 16),
             ),
             const SizedBox(height: 16),
@@ -651,7 +623,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                 ref.read(historyProvider.notifier).updateSponsorshipAmount(item.id, amount);
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Next payment amount updated to ₱${amount.toInt()}.')),
+                  appSnackBar('Next payment amount updated to ₱${amount.toInt()}.'),
                 );
               }
             },

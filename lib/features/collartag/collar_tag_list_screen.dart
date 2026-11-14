@@ -258,14 +258,7 @@ class _CollarTagsListScreenState extends State<CollarTagsListScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _createNew,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  elevation: 0,
-                ),
+                style: AppButtons.primary,
                 child: Text(
                   'Create Now!',
                   style: GoogleFonts.tiltWarp(

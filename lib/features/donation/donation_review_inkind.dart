@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../app_theme.dart';
 import 'models.dart';
 import 'donation_summary_inkind.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class DonationReviewInKindScreen extends ConsumerStatefulWidget {
   final InKindDonationReviewParams params;
@@ -119,7 +120,7 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar("Error: $e"));
       }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -191,11 +192,7 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: _isProcessing ? null : _submit,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30.0)),
-                        backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary, elevation: 0,
-                      ),
+                      style: AppButtons.primary,
                       child: _isProcessing 
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                         : Text('Confirm Donation', style: GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold)),

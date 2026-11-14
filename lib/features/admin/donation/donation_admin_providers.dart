@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/expense.dart';
+import 'package:respawnd1/core/repos/general_expense_repository.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
@@ -125,6 +127,24 @@ final linkableAnimalsProvider = StreamProvider.autoDispose<List<AnimalRecord>>((
     list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return list;
   });
+});
+
+/// One organization's general (non-case) expenses, newest first.
+final generalExpensesProvider = StreamProvider.autoDispose.family<List<Expense>, String>((ref, orgId) {
+  return GeneralExpenseRepository().watch(orgId);
+});
+
+/// The signed-in staff member's organization's general expenses; empty when
+/// the account has no organization (platform staff). Only watched by
+/// finance-gated widgets, since firestore.rules limits orgExpenses to
+/// financial administrators.
+final myGeneralExpensesProvider = StreamProvider.autoDispose<List<Expense>>((ref) async* {
+  final orgId = await ref.watch(currentOrganizationIdProvider.future);
+  if (orgId == null || orgId.isEmpty) {
+    yield const [];
+    return;
+  }
+  yield* GeneralExpenseRepository().watch(orgId);
 });
 
 /// UI-only hint mirroring loadActor() in functions/campaigns.js: financial

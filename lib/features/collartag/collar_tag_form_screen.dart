@@ -11,6 +11,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_id_tag_screen.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class CollarTagFormScreen extends StatefulWidget {
   final CollarTagData? existingTag;
@@ -193,7 +194,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fix the highlighted fields.')),
+        appSnackBar('Please fix the highlighted fields.'),
       );
       return;
     }
@@ -304,7 +305,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          appSnackBar('Error: $e'),
         );
       }
     } finally {
@@ -381,7 +382,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                           style: GoogleFonts.zain(
                               fontSize: 13, color: AppColors.textPrimary)),
                       const Text(' *',
-                          style: TextStyle(color: Colors.red, fontSize: 13)),
+                          style: TextStyle(color: AppColors.error, fontSize: 13)),
                     ],
                   ),
                 ],
@@ -421,7 +422,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                             ),
                           ),
                           const Text(' *',
-                              style: TextStyle(color: Colors.red, fontSize: 13)),
+                              style: TextStyle(color: AppColors.error, fontSize: 13)),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -566,14 +567,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _submitting ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    elevation: 0,
-                  ),
+                  style: AppButtons.primary,
                   child: _submitting
                       ? const SizedBox(
                     height: 20,
@@ -627,7 +621,7 @@ Widget _field(
             ),
             if (required)
               const Text(' *',
-                  style: TextStyle(color: Colors.red, fontSize: 13)),
+                  style: TextStyle(color: AppColors.error, fontSize: 13)),
           ],
         ),
         const SizedBox(height: 4),
@@ -681,12 +675,12 @@ Widget _field(
 
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Colors.redAccent, width: 1),
+              borderSide: const BorderSide(color: AppColors.error, width: 1),
             ),
 
             focusedErrorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
+              borderSide: const BorderSide(color: AppColors.error, width: 1.5),
             ),
           ),
         ),
@@ -714,7 +708,7 @@ Widget _datePickerField({
             ),
             if (required)
               const Text(' *',
-                  style: TextStyle(color: Colors.red, fontSize: 13)),
+                  style: TextStyle(color: AppColors.error, fontSize: 13)),
           ],
         ),
         const SizedBox(height: 4),

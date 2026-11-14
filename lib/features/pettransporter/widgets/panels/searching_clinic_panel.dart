@@ -97,13 +97,7 @@ class SearchingClinicPanel extends StatelessWidget {
                 width: double.infinity,
                 child: OutlinedButton(
                   onPressed: onRetry,
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                  ),
+                  style: AppButtons.outline,
                   child: Text(
                     'Retry',
                     style: GoogleFonts.tiltWarp(

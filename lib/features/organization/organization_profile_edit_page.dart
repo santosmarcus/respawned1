@@ -20,6 +20,8 @@ import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/features/organization/widgets/facebook_integration_section.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 /// Admin-facing Organization Profile editor (spec §7-9) — distinct from
 /// lib/features/organization/organization_profile_page.dart, which is the
@@ -166,7 +168,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not join this organization: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not join this organization: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -397,13 +399,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () => Navigator.pop(sheetContext),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                      style: AppButtons.primary,
                       child: Text('Done', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
                     ),
                   ),
@@ -449,31 +445,31 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     final websiteError = _websiteError(_websiteController.text);
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Organization name is required.'), backgroundColor: Colors.redAccent),
+        appSnackBar('Organization name is required.', kind: AppMessageKind.error),
       );
       return;
     }
     if (location.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location is required.'), backgroundColor: Colors.redAccent),
+        appSnackBar('Location is required.', kind: AppMessageKind.error),
       );
       return;
     }
     if (emailError != null || phoneError != null || websiteError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(emailError ?? phoneError ?? websiteError!), backgroundColor: Colors.redAccent),
+        appSnackBar(emailError ?? phoneError ?? websiteError!, kind: AppMessageKind.error),
       );
       return;
     }
     if (_acceptedSpecies.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select at least one accepted species.'), backgroundColor: Colors.redAccent),
+        appSnackBar('Select at least one accepted species.', kind: AppMessageKind.error),
       );
       return;
     }
     if (_serviceAreas.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add at least one service area.'), backgroundColor: Colors.redAccent),
+        appSnackBar('Add at least one service area.', kind: AppMessageKind.error),
       );
       return;
     }
@@ -492,31 +488,18 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         capacityValue = int.tryParse(capacityText);
         if (capacityValue == null || capacityValue < 0) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Shelter capacity must be a whole positive number.'), backgroundColor: Colors.redAccent),
+            appSnackBar('Shelter capacity must be a whole positive number.', kind: AppMessageKind.error),
           );
           return;
         }
         final occupancy = await currentShelterOccupancy();
         if (occupancy > capacityValue) {
           if (!mounted) return;
-          final confirmed = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              backgroundColor: AppColors.background,
-              title: Text('Below Current Occupancy', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-              content: Text(
-                'Current occupancy is $occupancy animals. Setting capacity to $capacityValue will place the shelter over capacity.',
-                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
-                  child: const Text('Save Anyway'),
-                ),
-              ],
-            ),
+          final confirmed = await showConfirmActionDialog(
+            context,
+            title: 'Below Current Occupancy',
+            message: 'Current occupancy is $occupancy animals. Setting capacity to $capacityValue will place the shelter over capacity.',
+            confirmLabel: 'Save Anyway',
           );
           if (confirmed != true) return;
         }
@@ -581,7 +564,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
             _pendingAvatar = null;
             _saving = false;
           });
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Organization created.')));
+          ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Organization created.'));
         }
         return;
       }
@@ -625,12 +608,12 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
           _saving = false;
           _editing = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Organization profile saved.')));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Organization profile saved.'));
       }
     } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not save: $e', kind: AppMessageKind.error));
       }
     }
   }
@@ -906,7 +889,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                             : null,
                         label: Text(_isSupportedServiceArea(area) ? area.name : '${area.name} (Unsupported)'),
                         onDeleted: () => _removeServiceArea(area),
-                        backgroundColor: _isSupportedServiceArea(area) ? AppColors.lavenderrspwn : const Color(0xFFE05353),
+                        backgroundColor: _isSupportedServiceArea(area) ? AppColors.lavenderrspwn : AppColors.error,
                         labelStyle: _isSupportedServiceArea(area) ? null : const TextStyle(color: Colors.white),
                         deleteIconColor: _isSupportedServiceArea(area) ? null : Colors.white,
                       ),
@@ -963,13 +946,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _saving ? null : _save,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      disabledBackgroundColor: AppColors.slaterspwn,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
+                    style: AppButtons.primary,
                     child: _saving
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                         : Text(_isBootstrapping ? 'Create Organization' : 'Save',
@@ -1050,14 +1027,7 @@ class _InvitationCard extends StatelessWidget {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: (accepting || disabled) ? null : onJoin,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                disabledBackgroundColor: AppColors.slaterspwn,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
+              style: AppButtons.primary,
               child: accepting
                   ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                   : Text('Join Organization', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),

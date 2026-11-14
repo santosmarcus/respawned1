@@ -9,6 +9,7 @@ import 'package:respawnd1/features/organization/organization_member_pending_page
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
   final String firstName;
@@ -82,10 +83,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Your session expired. Please sign in again.'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Your session expired. Please sign in again.', kind: AppMessageKind.error),
         );
       }
       return;
@@ -159,10 +157,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not save your details: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not save your details: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -255,12 +250,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
                   onPressed: _selectedRole == null || _isLoading
                       ? null
                       : _handleNext,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    fixedSize:
-                    Size(MediaQuery.of(context).size.width * 0.55, 50),
-                    disabledBackgroundColor: AppColors.slaterspwn,
-                  ),
+                  style: AppButtons.primary.copyWith(fixedSize: WidgetStatePropertyAll(Size(MediaQuery.of(context).size.width * 0.55, 50))),
                   child: _isLoading
                       ? const SizedBox(
                       height: 22, width: 22,

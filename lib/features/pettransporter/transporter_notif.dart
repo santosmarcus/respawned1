@@ -566,7 +566,7 @@ class _TransporterNotificationTile extends StatelessWidget {
       case 'New Assignment':
         return AppColors.greenrspwn;
       case 'Rescue Location Updated':
-        return Colors.orangeAccent;
+        return AppColors.warning;
       case 'Clinic Changed':
         return AppColors.lavenderrspwn;
       default:
@@ -643,7 +643,7 @@ class _TransporterNotificationTile extends StatelessWidget {
                     width: 8,
                     height: 8,
                     decoration: const BoxDecoration(
-                      color: Colors.redAccent,
+                      color: AppColors.error,
                       shape: BoxShape.circle,
                     ),
                   ),

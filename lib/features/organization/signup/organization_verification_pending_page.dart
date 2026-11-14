@@ -82,12 +82,7 @@ class OrganizationVerificationPendingPage extends StatelessWidget {
             ElevatedButton(
               onPressed: () => Navigator.pushAndRemoveUntil(
                   context, MaterialPageRoute(builder: (_) => const AdminHomeScreen()), (route) => false),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              ),
+              style: AppButtons.primary,
               child: Text('Continue', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
             ),
           ],
@@ -97,7 +92,7 @@ class OrganizationVerificationPendingPage extends StatelessWidget {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cancel_outlined, size: 56, color: Color(0xFFE05353)),
+            const Icon(Icons.cancel_outlined, size: 56, color: AppColors.error),
             const SizedBox(height: 16),
             Text('Verification Rejected', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
             const SizedBox(height: 10),
@@ -120,12 +115,7 @@ class OrganizationVerificationPendingPage extends StatelessWidget {
             ElevatedButton(
               onPressed: () => Navigator.pushReplacement(
                   context, MaterialPageRoute(builder: (_) => OrganizationVerificationScreen(organizationId: organizationId))),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              ),
+              style: AppButtons.primary,
               child: Text('Update Documents', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
             ),
           ],
@@ -141,12 +131,7 @@ class OrganizationVerificationPendingPage extends StatelessWidget {
             ElevatedButton(
               onPressed: () => Navigator.pushReplacement(
                   context, MaterialPageRoute(builder: (_) => OrganizationVerificationScreen(organizationId: organizationId))),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              ),
+              style: AppButtons.primary,
               child: Text('Continue Verification', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
             ),
           ],

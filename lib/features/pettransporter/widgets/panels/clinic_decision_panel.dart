@@ -92,7 +92,7 @@ class ClinicDecisionPanel extends StatelessWidget {
                 const SizedBox(width: 4),
                 const Text(
                   '*',
-                  style: TextStyle(color: Colors.red, fontSize: 13),
+                  style: TextStyle(color: AppColors.error, fontSize: 13),
                 ),
               ],
             ),

@@ -11,6 +11,8 @@ import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/core/widgets/reason_picker.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
 class RescueRequest extends StatefulWidget {
   final String caseId;
@@ -105,31 +107,27 @@ class _RescueRequestState extends State<RescueRequest> {
         if (hasOtherActiveCase) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                    'You already have an ongoing transit. Finish it before accepting a new one.'),
-                backgroundColor: Colors.redAccent,
+              appSnackBar(
+                'You already have an ongoing transit. Finish it before accepting a new one.',
+                kind: AppMessageKind.error,
               ),
             );
           }
           return;
         }
 
-        await FirebaseFirestore.instance
-            .collection('cases')
-            .doc(widget.caseId)
-            .update({
-          'status': 'accepted',
-          'assignedVolunteerId': uid,
-          'assignedVolunteerName':
-          riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
-          'statusHistory': FieldValue.arrayUnion([
-            {
-              'status': 'Rider accepted the rescue request.',
-              'timestamp': Timestamp.now(),
-            }
-          ]),
-        });
+        await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+          caseId: widget.caseId,
+          action: 'transporter_claimed',
+          statusLine: 'Rider accepted the rescue request.',
+          actorRole: 'transporter',
+          fields: {
+            'status': 'accepted',
+            'assignedVolunteerId': uid,
+            'assignedVolunteerName':
+                riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
+          },
+        );
       }
 
       if (mounted) {
@@ -143,10 +141,7 @@ class _RescueRequestState extends State<RescueRequest> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to accept request: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to accept request: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -191,14 +186,6 @@ class _RescueRequestState extends State<RescueRequest> {
             'timestamp': Timestamp.now(),
           }
         ]),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': reasonText.isEmpty
-                ? 'A rider declined this request.'
-                : 'A rider declined this request: $reasonText.',
-            'timestamp': Timestamp.now(),
-          }
-        ]),
       };
 
       if (wasAssignedToMe && currentStatus == 'assigned') {
@@ -207,16 +194,22 @@ class _RescueRequestState extends State<RescueRequest> {
         updateData['assignedVolunteerName'] = null;
       }
 
-      await caseRef.update(updateData);
+      await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+        caseId: widget.caseId,
+        action: 'transporter_declined',
+        statusLine: reasonText.isEmpty
+            ? 'A rider declined this request.'
+            : 'A rider declined this request: $reasonText.',
+        actorRole: 'transporter',
+        details: {'reasons': reasons},
+        fields: updateData,
+      );
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to decline request: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to decline request: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -367,7 +360,7 @@ class _RescueRequestState extends State<RescueRequest> {
                               horizontal: 10, vertical: 3),
                           decoration: BoxDecoration(
                             color: urgency == 'Critical'
-                                ? Colors.red
+                                ? AppColors.error
                                 : AppColors.yellowrspwn,
                             borderRadius: BorderRadius.circular(20),
                           ),
@@ -540,15 +533,7 @@ class _RescueRequestState extends State<RescueRequest> {
                         (isHighRisk && !_riskAcknowledged)
                         ? null
                         : _startNow,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      elevation: 0,
-                    ),
+                    style: AppButtons.primary,
                     child: _isAccepting
                         ? const SizedBox(
                       height: 22,

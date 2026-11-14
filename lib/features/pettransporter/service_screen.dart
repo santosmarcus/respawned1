@@ -13,6 +13,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class ServiceScreen extends StatefulWidget{
   const ServiceScreen({super.key});
@@ -397,7 +398,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
             child: ElevatedButton.icon(
               onPressed: _goOffline,
               icon: const Icon(Icons.circle_rounded,
-                  size: 10, color: Colors.green),
+                  size: 10, color: AppColors.success),
               label: Text(
                 'Online',
                 style: GoogleFonts.tiltWarp(
@@ -517,7 +518,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
     if (!mounted) return;
     setState(() => _loadingLocation = false);
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
+        appSnackBar(msg, kind: AppMessageKind.error));
   }
   /// Opens the service-range picker. Returns true when a range was applied.
   Future<bool> _openFilter({String? title}) async {
@@ -801,10 +802,10 @@ class _RequestCard extends StatelessWidget {
     String badgeLabel = urgency;
     switch (urgency) {
       case 'Critical':
-        badgeColor = Colors.red;
+        badgeColor = AppColors.error;
         break;
       case 'Medium':
-        badgeColor = Colors.orange;
+        badgeColor = AppColors.warning;
         break;
       default:
         badgeColor = Colors.lightGreen;

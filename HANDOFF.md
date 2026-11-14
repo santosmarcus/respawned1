@@ -105,6 +105,12 @@ These commits landed before the `dev` merge and are in this branch's history. Th
 **Checklist for these:** add a single care record and a batch of past records, then check the badges and history. Mark an animal in active treatment as adoptable (should be blocked), then one that's discharged (should ask for confirmations).
 
 ### Known gaps
+- **Known-limits pass (2026-11-15):**
+  - Styling: public, adopter, transporter and organization screens now use the shared helpers. Snackbars use `appSnackBar`, the five inline error boxes use `AppErrorBanner`, meaning colours use `AppColors.error/warning/success`, standard buttons use `AppButtons`, display dates use `formatDate`/`formatDateTime`, and plain yes/no dialogs use `showConfirmActionDialog`. Still hand-styled: 24 one-off button styles (conditional or green/white colours), 15 dialogs with text fields or custom content, and greys.
+  - Case timeline: every case action now writes the status line and the activity log together through `recordAction`/`recordActionIn`/`recordActionInBatch`, including transporter transit steps, claim/decline and the reporter's adoption-interest/arrival updates, which used to write no activity log at all.
+  - Dashboard: "Donations & funds" shows unfunded general expenses and counts their missing receipts.
+  - Attachments: medical record attachments accept PDFs (`file_picker`), stored with type `document` and opened in the device's PDF viewer.
+  - Not checked on a device yet: the restyled screens, picking and opening a PDF, and a transporter run end to end.
 - **Access-control pass (not deployed yet, needs the same coordinated release):**
   - Animal medical subcollections (`medications`, `medicationDoses`, `vaccinations`, `careRecords`, `careUpdates`, `medicalEpisodes`) are readable only by the owning org's staff, its carers and platform staff. The animal doc itself stays readable.
   - `donations` is readable only by the donor and staff. The public donor count now reads `campaigns/{id}.numdonors`, and the organization profile's Donations tab now lists the org's campaigns (it was listing raw donation records).

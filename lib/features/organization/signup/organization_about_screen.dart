@@ -6,6 +6,8 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_screen.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 /// Step 1 of the Organization signup flow (spec §2): collects the fields
 /// the draft `organizations/{orgId}` doc needs before verification uploads
@@ -66,7 +68,7 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Your session expired. Please sign in again.'), backgroundColor: Colors.redAccent),
+        appSnackBar('Your session expired. Please sign in again.', kind: AppMessageKind.error),
       );
       return;
     }
@@ -106,7 +108,7 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
       if (mounted) {
         setState(() => _submitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save your organization: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not save your organization: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -130,27 +132,8 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
   }
 
   Future<bool?> _showPossibleDuplicateDialog(String similarName) {
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Possible existing organization', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: Text(
-          'An organization with a similar name or address ("$similarName") already exists. If this isn\'t a duplicate, '
-          'you can continue — our verification review will confirm this before approval.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Go Back')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
-            child: const Text('Continue Anyway'),
-          ),
-        ],
-      ),
-    );
+    return showConfirmActionDialog(context, title: 'Possible existing organization', message: 'An organization with a similar name or address ("$similarName") already exists. If this isn\'t a duplicate, '
+          'you can continue — our verification review will confirm this before approval.', confirmLabel: 'Continue Anyway', cancelLabel: 'Go Back');
   }
 
   @override
@@ -206,13 +189,7 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: _submitting ? null : _submit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.yellowrspwn,
-                          foregroundColor: AppColors.textPrimary,
-                          disabledBackgroundColor: AppColors.slaterspwn,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                        ),
+                        style: AppButtons.primary,
                         child: _submitting
                             ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                             : Text('Next', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),

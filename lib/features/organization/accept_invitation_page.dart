@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/main.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Development-only invitation acceptance (spec §12's explicit fallback):
 /// there is no email-delivery or deep-link backend in this codebase, so
@@ -38,7 +39,7 @@ class _AcceptInvitationPageState extends State<AcceptInvitationPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user?.email == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sign in with an email/password or Google account first.'), backgroundColor: Colors.redAccent),
+        appSnackBar('Sign in with an email/password or Google account first.', kind: AppMessageKind.error),
       );
       return;
     }
@@ -47,13 +48,16 @@ class _AcceptInvitationPageState extends State<AcceptInvitationPage> {
     try {
       await _repo.acceptInvitation(invitationId: invitationId, uid: user!.uid, signedInEmail: user.email!);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invitation accepted.')));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Invitation accepted.'));
         Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const AuthWrapper()), (route) => false);
       }
     } catch (e) {
       if (mounted) {
         setState(() => _submitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not accept invitation: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+          'Could not accept invitation: $e',
+          kind: AppMessageKind.error,
+        ));
       }
     }
   }
@@ -88,13 +92,7 @@ class _AcceptInvitationPageState extends State<AcceptInvitationPage> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _submitting ? null : _accept,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
+                style: AppButtons.primary,
                 child: _submitting
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                     : Text('Accept Invitation', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),

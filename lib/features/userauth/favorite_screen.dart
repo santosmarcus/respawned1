@@ -207,7 +207,7 @@ class _FavoriteCard extends StatelessWidget {
                       GestureDetector(
                         onTap: onFavorite,
                         behavior: HitTestBehavior.opaque,
-                        child: const Icon(Icons.favorite, size: 20, color: Color(0xFFE05C5C)),
+                        child: const Icon(Icons.favorite, size: 20, color: AppColors.error),
                       ),
                     ],
                   ),

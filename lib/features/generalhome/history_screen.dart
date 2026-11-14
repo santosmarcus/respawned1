@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
@@ -16,6 +15,7 @@ import 'package:respawnd1/features/generalhome/history_provider.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -283,7 +283,7 @@ class _RescueHistoryCard extends StatelessWidget {
                         style: GoogleFonts.zain(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: _isRejected ? const Color(0xFFE05353) : AppColors.textPrimary)),
+                            color: _isRejected ? AppColors.error : AppColors.textPrimary)),
                   ]),
                   if (_isRejected) ...[
                     const SizedBox(height: 4),
@@ -580,7 +580,7 @@ class _DonationHistoryCard extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${DateFormat('MM/dd/yyyy').format(item.dateTime)} at ${DateFormat('HH:mm:ss').format(item.dateTime)}',
+                    formatDateTime(item.dateTime),
                     style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                   ),
                   Text(
@@ -614,15 +614,15 @@ class _DonationHistoryCard extends ConsumerWidget {
       String label;
       switch (item.status!) {
         case InKindStatus.complete:
-          bgColor = const Color(0xFF4CAF50);
+          bgColor = AppColors.success;
           label = 'Complete';
           break;
         case InKindStatus.inProgress:
-          bgColor = const Color(0xFFFFA726);
+          bgColor = AppColors.warning;
           label = 'In Progress';
           break;
         case InKindStatus.cancelled:
-          bgColor = const Color(0xFFF44336);
+          bgColor = AppColors.error;
           label = 'Cancelled';
           break;
       }
@@ -632,15 +632,15 @@ class _DonationHistoryCard extends ConsumerWidget {
       String label;
       switch (item.sponsorshipStatus!) {
         case 'active':
-          bgColor = const Color(0xFF4CAF50);
+          bgColor = AppColors.success;
           label = 'Active';
           break;
         case 'cancelled':
-          bgColor = const Color(0xFFFFA726);
+          bgColor = AppColors.warning;
           label = 'Cancelled';
           break;
         case 'inactive':
-          bgColor = const Color(0xFFF44336);
+          bgColor = AppColors.error;
           label = 'Inactive';
           break;
         default:

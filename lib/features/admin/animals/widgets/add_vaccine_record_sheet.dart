@@ -308,7 +308,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
             AttachmentPicker(
               items: _attachments,
               enabled: !_saving,
-              label: 'Attach vaccine card photo',
+              label: 'Attach vaccine card (photo or PDF)',
               onChanged: (v) => setState(() => _attachments = v),
             ),
 

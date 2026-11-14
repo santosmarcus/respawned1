@@ -332,7 +332,7 @@ class _OrganizationCard extends StatelessWidget {
                         : Icons.favorite_border,
                     size: 22,
                     color: organization.favorited
-                        ? const Color(0xFFE05C5C)
+                        ? AppColors.error
                         : AppColors.textPrimary,
                   ),
                 ),

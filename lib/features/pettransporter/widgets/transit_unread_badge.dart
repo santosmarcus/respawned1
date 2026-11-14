@@ -2,6 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/app_theme.dart';
 
 class TransitUnreadBadge extends StatelessWidget {
   final String caseId;
@@ -44,7 +45,7 @@ class TransitUnreadBadge extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 4),
             constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
             decoration: const BoxDecoration(
-              color: Colors.red,
+              color: AppColors.error,
               shape: BoxShape.circle,
             ),
             child: Center(

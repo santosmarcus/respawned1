@@ -7,6 +7,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/community_adoption.dart';
 import 'package:respawnd1/core/repos/community_adoption_repository.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// The actual Community Adoption transaction screen — reached only from
 /// community_adoption_track_page.dart's location-gated button, so by the
@@ -193,7 +194,7 @@ class _CommunityAdoptionListingPageState extends State<CommunityAdoptionListingP
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar(message));
   }
 
   Future<void> _submit() async {
@@ -406,13 +407,7 @@ class _CommunityAdoptionListingPageState extends State<CommunityAdoptionListingP
                               width: 260,
                               child: ElevatedButton(
                                 onPressed: _submitting ? null : _submit,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.yellowrspwn,
-                                  foregroundColor: AppColors.textPrimary,
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                                ),
+                                style: AppButtons.primary,
                                 child: _submitting
                                     ? const SizedBox(
                                         width: 20,
@@ -650,7 +645,7 @@ class _FieldLabel extends StatelessWidget {
         children: [
           TextSpan(text: text, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           if (required)
-            TextSpan(text: ' *', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: const Color(0xFFE05353))),
+            TextSpan(text: ' *', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.error)),
         ],
       ),
     );

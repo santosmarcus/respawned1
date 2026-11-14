@@ -5,13 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:intl/intl.dart';
 import '../../app_theme.dart';
 import '../generalhome/history_provider.dart';
 import 'models.dart';
 import 'donation_summary.dart';
 import 'campaign_completed_page.dart';
 import 'donation_payment_service.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 final donationReviewProvider = ChangeNotifierProvider.autoDispose.family<DonationReviewNotifier, DonationReviewParams>((ref, params) {
   final notifier = DonationReviewNotifier(params: params);
@@ -320,7 +320,7 @@ class DonationReviewScreen extends ConsumerWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 28),
+            const Icon(Icons.error_outline, color: AppColors.error, size: 28),
             const SizedBox(width: 10),
             Text(
               'Payment Failed',
@@ -355,12 +355,12 @@ class DonationReviewScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           Text(
             'Your last payment attempt didn\'t go through. You can try again on the payment page.',
-            style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent),
+            style: GoogleFonts.zain(fontSize: 14, color: AppColors.error),
           ),
         ],
         if (donation.notice != null) ...[
           const SizedBox(height: 8),
-          Text(donation.notice!, style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
+          Text(donation.notice!, style: GoogleFonts.zain(fontSize: 14, color: AppColors.error)),
         ],
         const SizedBox(height: 12),
         if (donation.canReopenCheckout)
@@ -389,7 +389,7 @@ class DonationReviewScreen extends ConsumerWidget {
               child: TextButton(
                 onPressed: donation.isCancelling ? null : donation.cancelPayment,
                 child: Text(donation.isCancelling ? 'Cancelling…' : 'Cancel payment',
-                    style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.redAccent)),
+                    style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.error)),
               ),
             ),
           ],
@@ -529,7 +529,7 @@ class DonationReviewScreen extends ConsumerWidget {
                               style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
                             ),
                             Text(
-                              DateFormat('MMMM dd, yyyy').format(DateTime.now().add(const Duration(days: 30))),
+                              formatDate(DateTime.now().add(const Duration(days: 30))),
                               style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.bold),
                             ),
                           ],
@@ -587,11 +587,11 @@ class DonationReviewScreen extends ConsumerWidget {
                           ),
                           Row(
                             children: [
-                              const Icon(Icons.lock_outline, size: 16, color: Colors.green),
+                              const Icon(Icons.lock_outline, size: 16, color: AppColors.success),
                               const SizedBox(width: 4),
                               Text(
                                 'Secured by PayMongo',
-                                style: GoogleFonts.zain(fontSize: 14, color: Colors.green, fontWeight: FontWeight.bold),
+                                style: GoogleFonts.zain(fontSize: 14, color: AppColors.success, fontWeight: FontWeight.bold),
                               ),
                             ],
                           ),
@@ -674,15 +674,7 @@ class DonationReviewScreen extends ConsumerWidget {
                           _showErrorDialog(context, notifier.errorMessage!);
                         }
                       },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30.0),
-                        ),
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        elevation: 0,
-                      ),
+                      style: AppButtons.primary,
                       child: donation.isProcessing
                           ? Row(
                         mainAxisAlignment: MainAxisAlignment.center,

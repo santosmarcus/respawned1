@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:respawnd1/core/constants/maps_config.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Result handed back to whoever pushed [LastSeenLocationPicker].
 class PickedLostLocation {
@@ -119,13 +120,10 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
       if (!serviceEnabled) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Please enable location services for accurate pinning.'),
-              action: SnackBarAction(
+            appSnackBar('Please enable location services for accurate pinning.', action: SnackBarAction(
                 label: 'Settings',
                 onPressed: () => Geolocator.openLocationSettings(),
-              ),
-            ),
+              )),
           );
         }
         await _fallbackToLastKnownOrDefault(
@@ -141,13 +139,10 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
           permission == LocationPermission.deniedForever) {
         if (mounted && permission == LocationPermission.deniedForever) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Location permission permanently denied.'),
-              action: SnackBarAction(
+            appSnackBar('Location permission permanently denied.', action: SnackBarAction(
                 label: 'App Settings',
                 onPressed: () => Geolocator.openAppSettings(),
-              ),
-            ),
+              )),
           );
         }
         await _fallbackToLastKnownOrDefault(
@@ -244,7 +239,7 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
         if (mounted) {
           setState(() => _loadingLocation = false);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not find that address.')),
+            appSnackBar('Could not find that address.'),
           );
         }
       }
@@ -252,7 +247,7 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
       if (mounted) {
         setState(() => _loadingLocation = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Address search failed: $e')),
+          appSnackBar('Address search failed: $e'),
         );
       }
     }
@@ -469,14 +464,7 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: (_hasResolvedLocation && !_loadingLocation) ? _confirm : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  elevation: 0,
-                ),
+                style: AppButtons.primary,
                 child: Text(
                   widget.confirmLabel ?? 'Confirm Last Seen Location',
                   style: GoogleFonts.tiltWarp(

@@ -207,41 +207,36 @@ class CaseStatusRepository {
       // this same report doc (newAddress/newLat/newLng), and the case's
       // prior address/lat/lng are preserved in statusHistory below rather
       // than simply overwritten with no trace.
-      tx.update(caseRef, {
-        'address': newAddress,
-        'lat': newLat,
-        'lng': newLng,
-        'locationHistory': FieldValue.arrayUnion([
-          {
-            'previousAddress': caseData['address'],
-            'previousLat': caseData['lat'],
-            'previousLng': caseData['lng'],
-            'address': newAddress,
-            'lat': newLat,
-            'lng': newLng,
-            'source': 'community_report',
-            'reportId': reportId,
-            'approvedBy': actorName,
-            'approvedByUid': actorUid,
-            'approvedAt': now,
-          },
-        ]),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status':
-                'Location updated to "$newAddress" (community report approved by $actorName).',
-            'timestamp': now,
-          },
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'community_location_approved',
+        statusLine: 'Location updated to "$newAddress" (community report approved by $actorName).',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {'reportId': reportId},
+        fields: {
+          'address': newAddress,
+          'lat': newLat,
+          'lng': newLng,
+          'locationHistory': FieldValue.arrayUnion([
+            {
+              'previousAddress': caseData['address'],
+              'previousLat': caseData['lat'],
+              'previousLng': caseData['lng'],
+              'address': newAddress,
+              'lat': newLat,
+              'lng': newLng,
+              'source': 'community_report',
+              'reportId': reportId,
+              'approvedBy': actorName,
+              'approvedByUid': actorUid,
+              'approvedAt': now,
+            },
+          ]),
+        },
+      );
     });
-    await _store.addActivityLog(
-      caseId: caseId,
-      action: 'community_location_approved',
-      actorUid: actorUid,
-      actorName: actorName,
-      details: {'reportId': reportId},
-    );
   }
 
   Future<void> rejectLocationUpdate({
@@ -267,14 +262,15 @@ class CaseStatusRepository {
         'rejectedAt': Timestamp.now(),
         if (reason != null && reason.isNotEmpty) 'rejectionReason': reason,
       });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'community_location_rejected',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {'reportId': reportId, 'reason': ?reason},
+      );
     });
-    await _store.addActivityLog(
-      caseId: caseId,
-      action: 'community_location_rejected',
-      actorUid: actorUid,
-      actorName: actorName,
-      details: {'reportId': reportId, 'reason': ?reason},
-    );
   }
 
   /// "Retry search" — keeps the case open, updates the rescue location,
@@ -308,22 +304,21 @@ class CaseStatusRepository {
         'lng': data['lng'],
         'replacedAt': Timestamp.now(),
       });
-      tx.update(caseRef, {
-        'lat': lat,
-        'lng': lng,
-        'address': ?address,
-        'previousLocations': previous,
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Rescue location updated.', 'timestamp': Timestamp.now()},
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'location_updated',
+        statusLine: 'Rescue location updated.',
+        actorUid: actorUid,
+        actorName: actorName,
+        fields: {
+          'lat': lat,
+          'lng': lng,
+          'address': ?address,
+          'previousLocations': previous,
+        },
+      );
     });
-    await _store.addActivityLog(
-      caseId: caseId,
-      action: 'location_updated',
-      actorUid: actorUid,
-      actorName: actorName,
-    );
   }
 
   /// Smallest backward-compatible per-animal outcome structure: [RescueCase.
@@ -371,23 +366,19 @@ class CaseStatusRepository {
       };
       final animalLabel =
           (animals[animalIndex]['species'] as String?) ?? 'Animal';
-      tx.update(caseRef, {
-        'animals': animals,
-        ...RescueCaseStore.stageSummaryUpdate(animals),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Animal death reported during rescue: $animalLabel.',
-            'timestamp': Timestamp.now(),
-          },
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'animal_death_reported',
+        statusLine: 'Animal death reported during rescue: $animalLabel.',
+        actorName: confirmedBy,
+        details: {'animalIndex': animalIndex, 'reason': reason},
+        fields: {
+          'animals': animals,
+          ...RescueCaseStore.stageSummaryUpdate(animals),
+        },
+      );
     });
-    await _store.addActivityLog(
-      caseId: caseId,
-      action: 'animal_death_reported',
-      actorName: confirmedBy,
-      details: {'animalIndex': animalIndex, 'reason': reason},
-    );
   }
 
   /// Shared "Close Case" flow — reused by every exception path (owner
@@ -489,6 +480,12 @@ class CaseStatusRepository {
         animalIndexes.isNotEmpty &&
         rawAnimals.isNotEmpty;
 
+    final logDetails = {
+      'reason': reason.name,
+      'closedFromStatus': closedFromStatus,
+      'animalIndexes': ?animalIndexes,
+    };
+
     final wholeCaseClosed = await _store.db.runTransaction<bool>((tx) async {
       final snap = await tx.get(caseRef);
       final data = snap.data();
@@ -543,75 +540,69 @@ class CaseStatusRepository {
         final animalLabel = targets.length == 1
             ? ((animals[targets.first]['species'] as String?) ?? 'Animal')
             : '${targets.length} animals';
-        tx.update(caseRef, {
-          'animals': animals,
-          ...RescueCaseStore.stageSummaryUpdate(animals),
-          ...closureMeta,
-          // Only the animals actually died — the case itself only becomes
-          // terminal once every animal is resolved (spec §13's Animal-1-
-          // died/Animal-2-still-in-treatment example: the case must NOT
-          // disappear from Treatment while Animal 2 is still active).
-          if (allResolved) 'status': RescueStatus.cancelled.firestoreValue,
-          if (allResolved) 'closureReason': reason.name,
-          if (allResolved) 'closureDetails': details,
-          if (allResolved) 'closedAt': now,
-          if (allResolved) 'closedBy': actorUid,
-          if (allResolved) 'closedByName': actorName,
-          if (allResolved) 'closedFromStatus': closedFromStatus,
-          'statusHistory': FieldValue.arrayUnion([
-            {
-              'status':
-                  'Animal death reported: $animalLabel.${allResolved ? ' All animals resolved — case closed.' : ''}',
-              'timestamp': now,
-            },
-          ]),
-        });
+        _store.recordActionIn(
+          tx,
+          caseId: caseId,
+          action: allResolved ? 'case_closed' : 'animal_deceased',
+          statusLine:
+              'Animal death reported: $animalLabel.${allResolved ? ' All animals resolved — case closed.' : ''}',
+          actorUid: actorUid,
+          actorName: actorName,
+          details: logDetails,
+          fields: {
+            'animals': animals,
+            ...RescueCaseStore.stageSummaryUpdate(animals),
+            ...closureMeta,
+            // Only the animals actually died — the case itself only becomes
+            // terminal once every animal is resolved (spec §13's Animal-1-
+            // died/Animal-2-still-in-treatment example: the case must NOT
+            // disappear from Treatment while Animal 2 is still active).
+            if (allResolved) 'status': RescueStatus.cancelled.firestoreValue,
+            if (allResolved) 'closureReason': reason.name,
+            if (allResolved) 'closureDetails': details,
+            if (allResolved) 'closedAt': now,
+            if (allResolved) 'closedBy': actorUid,
+            if (allResolved) 'closedByName': actorName,
+            if (allResolved) 'closedFromStatus': closedFromStatus,
+          },
+        );
         return allResolved;
       }
 
-      tx.update(caseRef, {
-        'status': RescueStatus.cancelled.firestoreValue,
-        'closureReason': reason.name,
-        'closureDetails': details,
-        'closedAt': Timestamp.now(),
-        'closedBy': actorUid,
-        'closedByName': actorName,
-        'closedFromStatus': closedFromStatus,
-        ...closureMeta,
-        'closureLastKnownLocation': ?lastKnownLocation,
-        'closureClinicDetails': ?clinicUnavailableDetails,
-        // Read by assign_rider_page.dart / rescue_detail_page.dart so the
-        // requested service type actually shows up wherever the case is
-        // presented as a service request afterward, instead of only living
-        // inside the free-text closureDetails.
-        'closureServiceType': ?serviceTypeNeeded,
-        // Informational/audit only for a non-death reason applied to a
-        // subset of animals — this codebase has no per-animal field for
-        // "this specific animal's duplicate-report/owner-reclaimed/etc.
-        // story ended" the way it does for death, so the case itself still
-        // closes as a whole for every reason other than isDeathReason.
-        'closureAppliesToAnimalIndexes': ?animalIndexes,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Case closed: ${reason.label}.',
-            'timestamp': Timestamp.now(),
-          },
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'case_closed',
+        statusLine: 'Case closed: ${reason.label}.',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: logDetails,
+        fields: {
+          'status': RescueStatus.cancelled.firestoreValue,
+          'closureReason': reason.name,
+          'closureDetails': details,
+          'closedAt': Timestamp.now(),
+          'closedBy': actorUid,
+          'closedByName': actorName,
+          'closedFromStatus': closedFromStatus,
+          ...closureMeta,
+          'closureLastKnownLocation': ?lastKnownLocation,
+          'closureClinicDetails': ?clinicUnavailableDetails,
+          // Read by assign_rider_page.dart / rescue_detail_page.dart so the
+          // requested service type actually shows up wherever the case is
+          // presented as a service request afterward, instead of only living
+          // inside the free-text closureDetails.
+          'closureServiceType': ?serviceTypeNeeded,
+          // Informational/audit only for a non-death reason applied to a
+          // subset of animals — this codebase has no per-animal field for
+          // "this specific animal's duplicate-report/owner-reclaimed/etc.
+          // story ended" the way it does for death, so the case itself still
+          // closes as a whole for every reason other than isDeathReason.
+          'closureAppliesToAnimalIndexes': ?animalIndexes,
+        },
+      );
       return true;
     });
-
-    await _store.addActivityLog(
-      caseId: caseId,
-      action: wholeCaseClosed ? 'case_closed' : 'animal_deceased',
-      actorUid: actorUid,
-      actorName: actorName,
-      details: {
-        'reason': reason.name,
-        'closedFromStatus': closedFromStatus,
-        'animalIndexes': ?animalIndexes,
-      },
-    );
     return wholeCaseClosed;
   }
 

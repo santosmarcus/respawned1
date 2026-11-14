@@ -29,7 +29,7 @@ import '../../app_theme.dart';
 Color urgencyRingColor(String? urgency) {
   switch (urgency) {
     case 'Critical':
-      return Colors.redAccent;
+      return AppColors.error;
     case 'Medium':
       return AppColors.yellowrspwn;
     case 'Low':
@@ -66,8 +66,8 @@ class ReportCategory {
 }
 
 const List<ReportCategory> kReportCategories = [
-  ReportCategory('Illness', Color(0xFFE53935), Icons.sick_outlined),
-  ReportCategory('Injury', Color(0xFFFB8C00), Icons.healing),
+  ReportCategory('Illness', AppColors.error, Icons.sick_outlined),
+  ReportCategory('Injury', AppColors.warning, Icons.healing),
   ReportCategory('Abandonment', Color(0xFF8D6E63), Icons.no_accounts),
   ReportCategory('Neglect or Abuse', Color(0xFFAD1457), Icons.report),
   ReportCategory('Pet Surrender', Color(0xFF00897B), Icons.pets),
@@ -577,8 +577,8 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
           center: LatLng(r.lat, r.lng),
           radius: GeofenceConfig.caseGeofenceRadiusMeters,
           strokeWidth: 1,
-          strokeColor: Colors.redAccent.withValues(alpha: 0.6),
-          fillColor: Colors.redAccent.withValues(alpha: 0.08),
+          strokeColor: AppColors.error.withValues(alpha: 0.6),
+          fillColor: AppColors.error.withValues(alpha: 0.08),
         ));
       }
     }
@@ -1146,12 +1146,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                     ),
                   );
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  elevation: 0,
-                ),
+                style: AppButtons.primary,
                 child: Text('View Details', style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
               ),
             ),

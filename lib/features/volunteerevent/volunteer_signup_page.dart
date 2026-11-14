@@ -7,6 +7,7 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'volunteer_page.dart';
 import 'volunteer_signup_success.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class VolunteerSignUpPage extends StatefulWidget {
   final VolunteerEvent event;
@@ -48,9 +49,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
     final mobile = _mobileController.text.trim();
 
     if (name.isEmpty || email.isEmpty || mobile.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Please fill in all fields.'),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Please fill in all fields.', kind: AppMessageKind.error));
       return;
     }
 
@@ -69,16 +68,12 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
     } on EventRegistrationException catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.message),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar(e.message, kind: AppMessageKind.error));
       return;
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Registration failed: $e'),
-          backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Registration failed: $e', kind: AppMessageKind.error));
       return;
     }
 
@@ -189,16 +184,7 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _handleSignUp,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  disabledBackgroundColor:
-                  AppColors.yellowrspwn.withValues(alpha: 0.6),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                  elevation: 0,
-                ),
+                style: AppButtons.primary,
                 child: _isLoading
                     ? const SizedBox(
                     height: 20, width: 20,

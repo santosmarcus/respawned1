@@ -271,19 +271,19 @@ class ActivityCard extends StatelessWidget{
                             margin: const EdgeInsets.only(bottom: 6),
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE05353).withValues(alpha: 0.15),
+                              color: AppColors.error.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.block, size: 12, color: Color(0xFFE05353)),
+                                const Icon(Icons.block, size: 12, color: AppColors.error),
                                 const SizedBox(width: 4),
                                 Text('Rejected',
                                     style: GoogleFonts.zain(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w700,
-                                        color: const Color(0xFFE05353))),
+                                        color: AppColors.error)),
                               ],
                             ),
                           ),

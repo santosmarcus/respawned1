@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:respawnd1/core/constants/maps_config.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:respawnd1/features/pettransporter/transit_rules.dart';
 
@@ -71,14 +72,20 @@ class TransitCaseService {
     unawaited(caseRef.update({'riderLastLat': lat, 'riderLastLng': lng}));
   }
 
-  Map<String, dynamic> _historyEntry(String label) => {
-    'statusHistory': FieldValue.arrayUnion([
-      {'status': label, 'timestamp': Timestamp.now()},
-    ]),
-  };
+  /// Applies [fields], adds [statusLine] to what the reporter sees and logs
+  /// [action] for staff, in one write (RescueCaseStore.recordAction).
+  Future<void> _record(String action, String statusLine, Map<String, dynamic> fields) {
+    return RescueCaseStore(_db).recordAction(
+      caseId: caseId,
+      action: action,
+      statusLine: statusLine,
+      fields: fields,
+      actorRole: 'transporter',
+    );
+  }
 
   Future<void> setStatus(String status, String statusLabel) {
-    return caseRef.update({'status': status, ..._historyEntry(statusLabel)});
+    return _record('transit_$status', statusLabel, {'status': status});
   }
 
   Future<List<String>> uploadVerificationImages(
@@ -97,10 +104,9 @@ class TransitCaseService {
   }
 
   Future<void> submitPickupVerification(List<String> urls) {
-    return caseRef.update({
+    return _record('transit_picked_up', 'Animal rescued. On the way to treatment.', {
       'status': 'treatment',
       'pickupVerificationUrls': urls,
-      ..._historyEntry('Animal rescued. On the way to treatment.'),
     });
   }
 
@@ -120,14 +126,13 @@ class TransitCaseService {
 
     final next = statusAfterTreatmentAccepted(data);
 
-    await caseRef.update({
+    await _record('transit_treatment_accepted', next.label, {
       'status': next.status,
       'clinicVerificationUrls': clinicUrls,
       'shelterName': shelter?.name ?? kFallbackShelterName,
       'shelterAddress': shelter?.address ?? kFallbackShelterAddress,
       'shelterLat': shelter?.lat ?? fallback!.lat,
       'shelterLng': shelter?.lng ?? fallback!.lng,
-      ..._historyEntry(next.label),
     });
 
     unawaited(
@@ -152,7 +157,7 @@ class TransitCaseService {
     final currentAddress = clinicAddressFrom(data);
     final currentPlaceId = data['dropoffPlaceId'] as String?;
 
-    await caseRef.update({
+    await _record('transit_treatment_rejected', 'Treatment has been rejected - $reason', {
       'status': 'searching_clinic',
       'lastRejectionReason': reason,
       'rejectedClinics': FieldValue.arrayUnion([
@@ -162,7 +167,6 @@ class TransitCaseService {
           'timestamp': Timestamp.now(),
         },
       ]),
-      ..._historyEntry('Treatment has been rejected - $reason'),
     });
 
     // Log the decline against the clinic itself so future rescues routed
@@ -251,11 +255,8 @@ class TransitCaseService {
         throw Exception('Could not reach clinic search. Please try again.');
       }
 
-      await caseRef.update({
+      await _record('transit_no_clinic_found', 'No more nearby clinics available. Proceeding directly to shelter.', {
         'status': 'in_transit_shelter',
-        ..._historyEntry(
-          'No more nearby clinics available. Proceeding directly to shelter.',
-        ),
       });
       return ClinicSearchOutcome.proceedingToShelter;
     }
@@ -267,14 +268,13 @@ class TransitCaseService {
     final newPlaceId = candidate['place_id'] as String?;
     final newName = (candidate['name'] ?? newAddress).toString();
 
-    await caseRef.update({
+    await _record('transit_rerouted_to_clinic', 'Finding nearby clinics… routed to $newAddress', {
       'status': 'dropoff',
       'dropoffAddress': newAddress,
       'dropoffPlaceId': newPlaceId,
       'dropoffName': newName,
       if (loc != null) 'dropoffLat': loc['lat'],
       if (loc != null) 'dropoffLng': loc['lng'],
-      ..._historyEntry('Finding nearby clinics… routed to $newAddress'),
     });
     return ClinicSearchOutcome.routedToClinic;
   }
@@ -302,23 +302,23 @@ class TransitCaseService {
   };
 
   Future<void> completeShelterDropoff(List<String> shelterUrls) {
-    return caseRef.update({
+    return _record('transit_completed_shelter', 'Animal delivered to shelter. Rescue completed.', {
       'status': 'completed',
       'shelterVerificationUrls': shelterUrls,
       ..._transitCompletedStamp,
-      ..._historyEntry('Animal delivered to shelter. Rescue completed.'),
     });
   }
 
   Future<void> confirmAdopterPickup() {
-    return caseRef.update({
-      'status': 'completed',
-      'adopterPickupConfirmedAt': Timestamp.now(),
-      ..._transitCompletedStamp,
-      ..._historyEntry(
-        'Animal handed off directly to the interested adopter at the treatment location. Rescue completed.',
-      ),
-    });
+    return _record(
+      'transit_completed_adopter_pickup',
+      'Animal handed off directly to the interested adopter at the treatment location. Rescue completed.',
+      {
+        'status': 'completed',
+        'adopterPickupConfirmedAt': Timestamp.now(),
+        ..._transitCompletedStamp,
+      },
+    );
   }
 
   Future<void> applyEndReason(EndReasonOutcome outcome) {
@@ -343,9 +343,8 @@ class TransitCaseService {
         'transporterFaultVerified': false,
     };
 
-    return caseRef.update({
+    return _record('transit_ended_early', outcome.statusLabel, {
       'status': outcome.status,
-      ..._historyEntry(outcome.statusLabel),
       ...extra,
     });
   }

@@ -17,6 +17,7 @@ import 'collar_tag_form_screen.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'pet_found_chat.dart';
 import 'lost_pet_location_picker.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 //  Pet Identification Card Screen
 class CollarIdTagCardScreen extends StatefulWidget {
@@ -132,7 +133,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
   void _showSnack(String msg) {
     if (mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+          .showSnackBar(appSnackBar(msg));
     }
   }
 
@@ -336,14 +337,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _updatingStatus ? null : _handlePrimaryAction,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    elevation: 0,
-                  ),
+                  style: AppButtons.primary,
                   child: _updatingStatus
                       ? const SizedBox(
                     height: 20,

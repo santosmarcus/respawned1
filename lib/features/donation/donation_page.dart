@@ -400,7 +400,7 @@ class _DonationCard extends StatelessWidget {
               ),
               Positioned(
                 top: 10, right: 12,
-                child: IconButton(icon: Icon(favorited ? Icons.favorite : Icons.favorite_border, color: favorited ? const Color(0xFFE05C5C) : AppColors.textPrimary), onPressed: onFavorite),
+                child: IconButton(icon: Icon(favorited ? Icons.favorite : Icons.favorite_border, color: favorited ? AppColors.error : AppColors.textPrimary), onPressed: onFavorite),
               ),
               if (donation.isEnded)
                 Positioned(
@@ -513,7 +513,7 @@ class _SponsorPetCard extends StatelessWidget {
                 ],
               ),
             ),
-            IconButton(icon: Icon(favorited ? Icons.favorite : Icons.favorite_border, color: favorited ? const Color(0xFFE05C5C) : AppColors.textPrimary), onPressed: onFavorite),
+            IconButton(icon: Icon(favorited ? Icons.favorite : Icons.favorite_border, color: favorited ? AppColors.error : AppColors.textPrimary), onPressed: onFavorite),
           ],
         ),
       ),

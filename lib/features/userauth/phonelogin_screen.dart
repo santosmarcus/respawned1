@@ -190,7 +190,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 const SizedBox(height: 8),
                 Text(_errorMessage!,
                     style: GoogleFonts.zain(
-                        fontSize: 13, color: Colors.red.shade700)),
+                        fontSize: 13, color: AppColors.error)),
               ],
 
               const SizedBox(height: 32),
@@ -201,10 +201,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                     : _codeSent
                     ? _verifyOtp
                     : _sendOtp,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  fixedSize: Size(MediaQuery.of(context).size.width * 0.60, 50),
-                ),
+                style: AppButtons.primary.copyWith(fixedSize: WidgetStatePropertyAll(Size(MediaQuery.of(context).size.width * 0.60, 50))),
                 child: _isLoading
                     ? const SizedBox(
                     height: 22,

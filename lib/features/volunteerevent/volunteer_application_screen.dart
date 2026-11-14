@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_application.dart';
 import 'package:respawnd1/core/repos/volunteer_application_repository.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Banner on the Volunteer page: apply, or see where an application stands.
 class VolunteerApplicationBanner extends StatelessWidget {
@@ -41,11 +42,7 @@ class VolunteerApplicationBanner extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
+                style: AppButtons.primary,
                 onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => VolunteerApplicationScreen(existing: app)),
@@ -101,7 +98,7 @@ class _VolunteerApplicationScreenState extends State<VolunteerApplicationScreen>
     );
     final problems = app.validate();
     if (problems.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(problems.first)));
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar(problems.first));
       return;
     }
     setState(() => _saving = true);
@@ -109,13 +106,13 @@ class _VolunteerApplicationScreenState extends State<VolunteerApplicationScreen>
       await VolunteerApplicationRepository().submit(app);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Application sent. The organization will review it.')),
+        appSnackBar('Application sent. The organization will review it.'),
       );
       Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send the application: $e'), backgroundColor: Colors.redAccent),
+          appSnackBar('Could not send the application: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -177,12 +174,7 @@ class _VolunteerApplicationScreenState extends State<VolunteerApplicationScreen>
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _saving ? null : _submit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              ),
+              style: AppButtons.primary,
               child: Text(_saving ? 'Sending…' : 'Send application',
                   style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
             ),

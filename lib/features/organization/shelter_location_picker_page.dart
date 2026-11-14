@@ -253,7 +253,7 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
           if (_errorMessage != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(_errorMessage!, style: GoogleFonts.zain(fontSize: 12, color: Colors.redAccent)),
+              child: Text(_errorMessage!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
             ),
 
           Expanded(
@@ -315,13 +315,7 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: (selected == null || _saving) ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  disabledBackgroundColor: AppColors.slaterspwn,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: AppButtons.primary,
                 child: _saving
                     ? const SizedBox(
                         height: 20,

@@ -89,7 +89,7 @@ class _OrganizationMemberPendingPageState extends State<OrganizationMemberPendin
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const StaffMembersPage(organizationId: null))),
                     icon: const Icon(Icons.mail_outline),
                     label: const Text('View My Invitations'),
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                    style: AppButtons.primary,
                   ),
                 ],
               ),

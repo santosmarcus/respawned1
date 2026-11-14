@@ -489,7 +489,7 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: const BoxDecoration(
-                              color: Color(0xFFE05C5C),
+                              color: AppColors.error,
                               shape: BoxShape.circle,
                             ),
                             constraints: const BoxConstraints(
@@ -653,12 +653,7 @@ class _ErrorState extends StatelessWidget {
             const SizedBox(height: 18),
             ElevatedButton(
               onPressed: onRetry,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
+              style: AppButtons.primary,
               child: Text('Retry', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700)),
             ),
           ],
@@ -1043,14 +1038,7 @@ class _AdoptionFilterSheetState extends State<AdoptionFilterSheet> {
                   height: 50,
                   child: ElevatedButton(
                     onPressed: _apply,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
+                    style: AppButtons.primary,
                     child: Text(
                       'Apply Filters',
                       style: GoogleFonts.tiltWarp(

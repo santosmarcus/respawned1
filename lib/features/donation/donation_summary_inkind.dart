@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import '../../app_theme.dart';
 import '../generalhome/history_screen.dart';
 import 'cancel_dialog.dart';
 import 'donation_page.dart';
 import 'models.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 class InKindDonationSummaryParams {
   final String charityName;
@@ -122,8 +122,8 @@ class InKindDonationSummaryScreen extends StatelessWidget {
                           ? Icons.cancel
                           : Icons.check_circle,
                       color: params.status == InKindStatus.cancelled
-                          ? Colors.red
-                          : Colors.green,
+                          ? AppColors.error
+                          : AppColors.success,
                       size: 80,
                     ),
                     const SizedBox(height: 10),
@@ -244,8 +244,7 @@ class InKindDonationSummaryScreen extends StatelessWidget {
                           style: GoogleFonts.zain(fontSize: 14),
                         ),
                         Text(
-                          DateFormat('yyyy-MM-dd HH:mm')
-                              .format(params.timestamp),
+                          formatDateTime(params.timestamp),
                           style: GoogleFonts.zain(
                               fontSize: 14, fontWeight: FontWeight.w500),
                         ),
@@ -325,15 +324,7 @@ class InKindDonationSummaryScreen extends StatelessWidget {
                         },
                       );
                     },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14.0),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30.0),
-                      ),
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                    ),
+                    style: AppButtons.danger,
                     child: Text(
                       'Cancel Donation',
                       style: GoogleFonts.tiltWarp(

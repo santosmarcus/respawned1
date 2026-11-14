@@ -9,6 +9,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:respawnd1/features/userauth/signup_screen.dart';
 import 'package:respawnd1/features/userauth/phonelogin_screen.dart';
 import 'package:respawnd1/features/userauth/forgotpass_screen.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 
 class LoginScreen extends StatefulWidget {
@@ -190,28 +191,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               if (_errorMessage != null) ...[
                 const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline,
-                          color: Colors.red.shade700, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(_errorMessage!,
-                            style: GoogleFonts.zain(
-                                fontSize: 13,
-                                color: Colors.red.shade700)),
-                      ),
-                    ],
-                  ),
-                ),
+                AppErrorBanner(_errorMessage!),
               ],
 
               const SizedBox(height: 32),
@@ -219,10 +199,7 @@ class _LoginScreenState extends State<LoginScreen> {
               // Login button
               ElevatedButton(
                 onPressed: _isLoading ? null : _handleLogin,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  fixedSize: Size(MediaQuery.of(context).size.width * 0.60, 50),
-                ),
+                style: AppButtons.primary.copyWith(fixedSize: WidgetStatePropertyAll(Size(MediaQuery.of(context).size.width * 0.60, 50))),
                 child: _isLoading
                     ? const SizedBox(
                   height: 22,

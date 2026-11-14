@@ -10,6 +10,7 @@ import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/transporter_trip_stats.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 class TransporterProfile extends StatelessWidget {
   const TransporterProfile({super.key});
@@ -203,13 +204,7 @@ class TransporterProfile extends StatelessWidget {
                             ),
                           );
                         },
-                        style: OutlinedButton.styleFrom(
-                          side:
-                          const BorderSide(color: AppColors.textPrimary),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30)),
-                        ),
+                        style: AppButtons.outline,
                         child: Text('Resubmit Verification',
                             style: GoogleFonts.tiltWarp(
                                 fontSize: 14, color: AppColors.textPrimary)),
@@ -278,16 +273,11 @@ class TransporterProfile extends StatelessWidget {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       onPressed: () => _confirmLogout(context),
-                      icon: const Icon(Icons.logout, color: Colors.redAccent),
+                      icon: const Icon(Icons.logout, color: AppColors.error),
                       label: Text('Log Out',
                           style: GoogleFonts.tiltWarp(
-                              fontSize: 14, color: Colors.redAccent)),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.redAccent),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
-                      ),
+                              fontSize: 14, color: AppColors.error)),
+                      style: AppButtons.dangerOutline,
                     ),
                   ),
                 ],
@@ -300,30 +290,12 @@ class TransporterProfile extends StatelessWidget {
   }
 
   Future<void> _confirmLogout(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Log Out',
-            style: GoogleFonts.tiltWarp(
-                fontSize: 16, color: AppColors.textPrimary)),
-        content: Text('Are you sure you want to log out?',
-            style: GoogleFonts.zain(
-                fontSize: 13, color: AppColors.textSecondary)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel',
-                style: GoogleFonts.zain(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Log Out',
-                style: GoogleFonts.zain(
-                    color: Colors.redAccent, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Log Out',
+      message: 'Are you sure you want to log out?',
+      confirmLabel: 'Log Out',
+      destructive: true,
     );
 
     if (confirmed == true) {
@@ -354,7 +326,7 @@ class _VerificationBadge extends StatelessWidget {
         icon = Icons.verified_outlined;
         break;
       case 'rejected':
-        color = Colors.redAccent;
+        color = AppColors.error;
         label = 'Verification Rejected';
         icon = Icons.error_outline;
         break;

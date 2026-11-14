@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/profile/settings_widget.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 
 class CommunicationsSettingsPage extends StatefulWidget {
@@ -76,20 +77,14 @@ class _CommunicationsSettingsPageState
       }, SetOptions(merge: true));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Communication preferences saved.',
-                style: GoogleFonts.zain(color: AppColors.background)),
-            backgroundColor: AppColors.textPrimary,
-          ),
+          appSnackBar('Communication preferences saved.'),
         );
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Could not save: $e'),
-              backgroundColor: Colors.redAccent),
+          appSnackBar('Could not save: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -181,14 +176,7 @@ class _CommunicationsSettingsPageState
                 width: 200,
                 child: ElevatedButton(
                   onPressed: _saving ? null : _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.primary,
                   child: _saving
                       ? const SizedBox(
                     height: 20,

@@ -133,12 +133,7 @@ class _SelectUserTypeScreenState extends State<SelectUserTypeScreen> {
                           EnterNameScreen(role: _selectedRole!),
                     ),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    fixedSize:
-                    Size(MediaQuery.of(context).size.width * 0.55, 50),
-                    disabledBackgroundColor: AppColors.slaterspwn,
-                  ),
+                  style: AppButtons.primary.copyWith(fixedSize: WidgetStatePropertyAll(Size(MediaQuery.of(context).size.width * 0.55, 50))),
                   child: Text('Next',
                       style: Theme.of(context).textTheme.headlineLarge),
                 ),

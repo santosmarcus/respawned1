@@ -132,7 +132,7 @@ String? urgencyForRescueType(String? label) {
 Color urgencyColorFor(String? urgency) {
   switch (urgency) {
     case 'Critical':
-      return Colors.redAccent;
+      return AppColors.error;
     case 'Medium':
       return AppColors.yellowrspwn;
     case 'Low':

@@ -8,6 +8,8 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/organization/facebook_integration.dart';
 import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 /// Organization Profile's "Facebook Page Integration" section (Facebook
 /// Page Sharing spec §4). Embedded as a standalone [ConsumerStatefulWidget]
@@ -37,7 +39,7 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
   void _showMessage(String message, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: isError ? Colors.redAccent : AppColors.greenrspwn),
+      appSnackBar(message, kind: isError ? AppMessageKind.error : AppMessageKind.success),
     );
   }
 
@@ -155,23 +157,12 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
   }
 
   Future<void> _disconnect() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: const Text('Disconnect Facebook Page?'),
-        content: const Text(
-          'ResPAWnd will no longer be able to publish Animal Records to this Page. This does not remove ResPAWnd from the Page on Facebook\'s side — do that from Facebook Business Settings if needed.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
-            child: const Text('Disconnect'),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Disconnect Facebook Page?',
+      message: 'ResPAWnd will no longer be able to publish Animal Records to this Page. This does not remove ResPAWnd from the Page on Facebook\'s side — do that from Facebook Business Settings if needed.',
+      confirmLabel: 'Disconnect',
+      destructive: true,
     );
     if (confirmed != true) return;
     setState(() => _busy = true);
@@ -291,14 +282,14 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
     if (primary) {
       return ElevatedButton(
         onPressed: _busy ? null : onTap,
-        style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+        style: AppButtons.primary,
         child: child,
       );
     }
     return OutlinedButton(
       onPressed: _busy ? null : onTap,
       style: isDestructive
-          ? OutlinedButton.styleFrom(foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent))
+          ? AppButtons.dangerOutline
           : null,
       child: child,
     );

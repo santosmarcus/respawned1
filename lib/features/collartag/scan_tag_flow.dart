@@ -14,6 +14,7 @@ import 'animal_tag_scan.dart';
 import 'collar_id_tag_screen.dart';
 import 'collar_tag_data_model.dart';
 import 'pet_found_chat.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 const String _geocodingApiKey = 'AIzaSyCh•••••••••••••••••••••••••••••••';
 
@@ -186,10 +187,7 @@ Future<void> startTagScan(BuildContext context) async {
     if (context.mounted) {
       if (spinnerShowing) Navigator.pop(context); // dismiss spinner if still up
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not process this scan: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('Could not process this scan: $e', kind: AppMessageKind.error),
       );
     }
   }
@@ -335,14 +333,7 @@ class NoPetFoundScreen extends StatelessWidget {
                     MaterialPageRoute(builder: (_) => const RescuePage()),
                   );
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  elevation: 0,
-                ),
+                style: AppButtons.primary,
                 child: Text('Report as a Stray Instead',
                     style: GoogleFonts.tiltWarp(
                         fontSize: 15, fontWeight: FontWeight.bold)),

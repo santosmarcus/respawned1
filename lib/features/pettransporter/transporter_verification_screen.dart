@@ -9,6 +9,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/pettransporter/transporter_success_screen.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 class _VehicleTypeOption {
   final String type;
@@ -186,22 +188,11 @@ class _TransporterVerificationScreenState
   }
 
   Future<void> _confirmSignOut() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: const Text('Sign Out?'),
-        content: const Text(
-            "You'll need to sign back in to finish identity verification later."),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Sign Out')),
-        ],
-      ),
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Sign Out?',
+      message: "You'll need to sign back in to finish identity verification later.",
+      confirmLabel: 'Sign Out',
     );
     if (confirmed == true) {
       await AuthService().signOut();
@@ -359,27 +350,7 @@ class _TransporterVerificationScreenState
 
               if (_errorMessage != null) ...[
                 const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline,
-                          color: Colors.red.shade700, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(_errorMessage!,
-                            style: GoogleFonts.zain(
-                                fontSize: 13, color: Colors.red.shade700)),
-                      ),
-                    ],
-                  ),
-                ),
+                AppErrorBanner(_errorMessage!),
               ],
 
               const SizedBox(height: 32),
@@ -387,11 +358,7 @@ class _TransporterVerificationScreenState
               Center(
                 child: ElevatedButton(
                   onPressed: _submitting ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    fixedSize:
-                    Size(MediaQuery.of(context).size.width * 0.55, 50),
-                  ),
+                  style: AppButtons.primary.copyWith(fixedSize: WidgetStatePropertyAll(Size(MediaQuery.of(context).size.width * 0.55, 50))),
                   child: _submitting
                       ? const SizedBox(
                       height: 22,

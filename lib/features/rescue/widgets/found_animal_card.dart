@@ -101,7 +101,7 @@ class FoundAnimalCard extends StatelessWidget {
         color: Colors.white,
         border: Border.all(
           color: entry.hasAssessmentError
-              ? const Color(0xFFE05353)
+              ? AppColors.error
               : AppColors.slaterspwn,
           width: entry.hasAssessmentError ? 1.5 : 1,
         ),
@@ -214,7 +214,7 @@ class FoundAnimalCard extends StatelessWidget {
                 const Icon(
                   Icons.error_outline,
                   size: 14,
-                  color: Color(0xFFE05353),
+                  color: AppColors.error,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -223,7 +223,7 @@ class FoundAnimalCard extends StatelessWidget {
                     style: GoogleFonts.zain(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: const Color(0xFFE05353),
+                      color: AppColors.error,
                     ),
                   ),
                 ),

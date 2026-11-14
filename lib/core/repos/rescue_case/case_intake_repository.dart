@@ -56,7 +56,8 @@ class CaseIntakeRepository {
     final ref = _store.cases.doc();
     final now = Timestamp.now();
     final organizationId = await _organizationIdOfAnimal(sourceAnimalRecordId);
-    await ref.set({
+    final batch = _store.db.batch();
+    batch.set(ref, {
       'status': RescueStatus.awaitingAssignment.firestoreValue,
       'organizationId': ?organizationId,
       'sourceType': 'animalRecordAdmission',
@@ -81,7 +82,8 @@ class CaseIntakeRepository {
         },
       ],
     });
-    await _store.addActivityLog(
+    _store.recordActionInBatch(
+      batch,
       caseId: ref.id,
       action: 'animal_record_admission_created',
       actorUid: actorUid,
@@ -91,6 +93,7 @@ class CaseIntakeRepository {
         'reason': admissionReason,
       },
     );
+    await batch.commit();
     return ref.id;
   }
 
@@ -123,7 +126,8 @@ class CaseIntakeRepository {
     final ref = _store.cases.doc();
     final now = Timestamp.now();
     final organizationId = await _organizationIdOfAnimal(sourceAnimalRecordId);
-    await ref.set({
+    final batch = _store.db.batch();
+    batch.set(ref, {
       'status': RescueStatus.intake.firestoreValue,
       'organizationId': ?organizationId,
       'sourceType': 'adoptionReturn',
@@ -151,7 +155,8 @@ class CaseIntakeRepository {
         },
       ],
     });
-    await _store.addActivityLog(
+    _store.recordActionInBatch(
+      batch,
       caseId: ref.id,
       action: 'adoption_return_intake_created',
       actorUid: actorUid,
@@ -161,6 +166,7 @@ class CaseIntakeRepository {
         'returnRequestId': returnRequestId,
       },
     );
+    await batch.commit();
     // Same medicalEpisodes + currentCaseId linkage AnimalRecordRepository.
     // admitAnimal already writes for its own sourceAnimalRecordId flow —
     // without this, the existing record's Medical tab (_EpisodesSection)

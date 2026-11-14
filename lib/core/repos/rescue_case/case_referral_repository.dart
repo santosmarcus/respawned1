@@ -104,7 +104,8 @@ class CaseReferralRepository {
     required String actorName,
   }) async {
     final referralRef = _store.referralsOf(caseId).doc();
-    await referralRef.set({
+    final batch = _store.db.batch();
+    batch.set(referralRef, {
       'type': ReferralType.rescueVolunteer.name,
       'status': ReferralStatus.referredPending.name,
       'createdAt': FieldValue.serverTimestamp(),
@@ -112,12 +113,14 @@ class CaseReferralRepository {
       'createdByName': actorName,
       'note': note,
     });
-    await _store.addActivityLog(
+    _store.recordActionInBatch(
+      batch,
       caseId: caseId,
       action: 'referred_to_volunteer',
       actorUid: actorUid,
       actorName: actorName,
     );
+    await batch.commit();
     return referralRef.id;
   }
 }

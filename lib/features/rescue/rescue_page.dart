@@ -28,6 +28,7 @@ import 'package:respawnd1/features/rescue/widgets/rescue_video_preview_page.dart
 import 'package:respawnd1/features/rescue/widgets/scan_tag_button.dart';
 import 'package:respawnd1/features/rescue/widgets/stray_report_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/surrender_fields.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 // QRScannerPage moved to widgets/qr_scanner_page.dart; re-exported so
 // existing `import 'rescue_page.dart' show QRScannerPage` call sites
@@ -134,15 +135,10 @@ class _RescuePageState extends State<RescuePage> {
       if (!serviceEnabled) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text(
-                'Please enable location services for accurate pinning.',
-              ),
-              action: SnackBarAction(
+            appSnackBar('Please enable location services for accurate pinning.', action: SnackBarAction(
                 label: 'Settings',
                 onPressed: () => Geolocator.openLocationSettings(),
-              ),
-            ),
+              )),
           );
         }
         await _fallbackToLastKnownOrDefault(
@@ -160,13 +156,10 @@ class _RescuePageState extends State<RescuePage> {
           permission == LocationPermission.deniedForever) {
         if (mounted && permission == LocationPermission.deniedForever) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Location permission permanently denied.'),
-              action: SnackBarAction(
+            appSnackBar('Location permission permanently denied.', action: SnackBarAction(
                 label: 'App Settings',
                 onPressed: () => Geolocator.openAppSettings(),
-              ),
-            ),
+              )),
           );
         }
         await _fallbackToLastKnownOrDefault(
@@ -248,9 +241,7 @@ class _RescuePageState extends State<RescuePage> {
         setState(() => _loadingLocation = false);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Address not found. Try a different search.'),
-            ),
+            appSnackBar('Address not found. Try a different search.'),
           );
         }
       }
@@ -367,14 +358,9 @@ class _RescuePageState extends State<RescuePage> {
 
     if (placeCount < picked.length && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            placeCount == 0
+        appSnackBar(placeCount == 0
                 ? 'You already have ${_form.mediaFiles.length} photos/videos added — remove one first.'
-                : 'Only $placeCount of ${picked.length} photos were added (max ${_form.mediaFiles.length} total).',
-          ),
-          backgroundColor: Colors.redAccent,
-        ),
+                : 'Only $placeCount of ${picked.length} photos were added (max ${_form.mediaFiles.length} total).', kind: AppMessageKind.error),
       );
     }
   }
@@ -401,10 +387,7 @@ class _RescuePageState extends State<RescuePage> {
       if (availability != NFCAvailability.available) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('NFC is not available on this device.'),
-              backgroundColor: Colors.redAccent,
-            ),
+            appSnackBar('NFC is not available on this device.', kind: AppMessageKind.error),
           );
         }
         return;
@@ -412,10 +395,7 @@ class _RescuePageState extends State<RescuePage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Hold your device near the NFC tag…'),
-            duration: Duration(seconds: 4),
-          ),
+          appSnackBar('Hold your device near the NFC tag…', duration: Duration(seconds: 4)),
         );
       }
 
@@ -432,10 +412,7 @@ class _RescuePageState extends State<RescuePage> {
       await FlutterNfcKit.finish();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('NFC scan failed: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('NFC scan failed: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -457,19 +434,13 @@ class _RescuePageState extends State<RescuePage> {
     final tagId = AppLinks.tagIdFromScan(result);
     if (tagId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Tag scanned: $result'),
-          backgroundColor: Colors.green,
-        ),
+        appSnackBar('Tag scanned: $result', kind: AppMessageKind.success),
       );
       return;
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Tag scanned — checking for a registered pet…'),
-        backgroundColor: Colors.green,
-      ),
+      appSnackBar('Tag scanned — checking for a registered pet…', kind: AppMessageKind.success),
     );
 
     await _awaitResolvedLocation();
@@ -491,14 +462,9 @@ class _RescuePageState extends State<RescuePage> {
 
       if (!outcome.tagExists) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _form.isLostPetType
+          appSnackBar(_form.isLostPetType
                   ? 'Tag scanned, but no registered profile was found for it.'
-                  : 'Tag scanned: $result',
-            ),
-            backgroundColor: Colors.green,
-          ),
+                  : 'Tag scanned: $result', kind: AppMessageKind.success),
         );
         return;
       }
@@ -517,10 +483,7 @@ class _RescuePageState extends State<RescuePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not check this tag: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not check this tag: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -735,15 +698,7 @@ class _RescuePageState extends State<RescuePage> {
                               _form.isRescueOrgAcquisition))
                       ? null
                       : _handleSubmit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    elevation: 0,
-                  ),
+                  style: AppButtons.primary,
                   child: _isLoading
                       ? const SizedBox(
                           height: 22,
@@ -773,7 +728,7 @@ class _RescuePageState extends State<RescuePage> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+      appSnackBar(message, kind: AppMessageKind.error),
     );
   }
 
@@ -854,10 +809,7 @@ class _RescuePageState extends State<RescuePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to submit: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to submit: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -925,14 +877,7 @@ class _RescuePageState extends State<RescuePage> {
                       MaterialPageRoute(builder: (_) => const HomeScreen()),
                     );
                   },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    elevation: 0,
-                  ),
+                  style: AppButtons.primary,
                   child: Text(
                     'Done',
                     style: GoogleFonts.zain(fontWeight: FontWeight.w600),
@@ -946,10 +891,7 @@ class _RescuePageState extends State<RescuePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to submit: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to submit: $e', kind: AppMessageKind.error),
         );
       }
     } finally {

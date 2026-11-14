@@ -40,7 +40,7 @@ class HomePhotosPicker extends StatelessWidget {
                 color: AppColors.textPrimary,
               ),
             ),
-            const Text(' *', style: TextStyle(color: Colors.red, fontSize: 13)),
+            const Text(' *', style: TextStyle(color: AppColors.error, fontSize: 13)),
             const SizedBox(width: 4),
             const AdoptionInfoTooltip(
               message:
@@ -141,7 +141,7 @@ class AdoptionPhotoThumb extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(2),
                 decoration: const BoxDecoration(
-                  color: Color(0xFFE05353),
+                  color: AppColors.error,
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.close, size: 14, color: Colors.white),

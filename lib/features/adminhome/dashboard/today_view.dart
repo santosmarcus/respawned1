@@ -1039,6 +1039,7 @@ class _FundsBody extends ConsumerWidget {
     final donations = ref.watch(allDonationsProvider).asData?.value;
     final campaignsAsync = ref.watch(adminCampaignsProvider);
     final expenses = ref.watch(allCaseExpensesProvider);
+    final general = ref.watch(myGeneralExpensesProvider).asData?.value;
 
     final since = DateTime.now().subtract(const Duration(days: 30));
     final pendingList = payments?.where((p) => p.status == 'needs_review' || p.status == 'pending').toList();
@@ -1054,7 +1055,7 @@ class _FundsBody extends ConsumerWidget {
         final live = all.where((c) => !c.isDraft && !c.isArchived && c.status != 'closed').toList();
         double bal(Iterable<DonationListing> l) =>
             l.fold(0, (s, c) => s + (c.availableBalance > 0 ? c.availableBalance : 0));
-        final general = bal(live.where((c) => !c.restricted));
+        final unrestricted = bal(live.where((c) => !c.restricted));
         final restricted = bal(live.where((c) => c.restricted));
         final campaigns = live.where((c) => c.target > 0).toList()
           ..sort((a, b) => (b.collected / b.target).compareTo(a.collected / a.target));
@@ -1078,16 +1079,16 @@ class _FundsBody extends ConsumerWidget {
               ],
             ),
             const CardLabel('Available funds · verified only'),
-            if (general + restricted > 0)
+            if (unrestricted + restricted > 0)
               ClipRRect(
                 borderRadius: BorderRadius.circular(7),
                 child: SizedBox(
                   height: 14,
                   child: Row(
                     children: [
-                      if (general > 0)
+                      if (unrestricted > 0)
                         Expanded(
-                          flex: general.round(),
+                          flex: unrestricted.round(),
                           child: Container(color: AppColors.textPrimary),
                         ),
                       if (restricted > 0) ...[
@@ -1106,7 +1107,7 @@ class _FundsBody extends ConsumerWidget {
               spacing: 12,
               runSpacing: 4,
               children: [
-                LegendText(AppColors.textPrimary, 'General ${formatPeso(general)}'),
+                LegendText(AppColors.textPrimary, 'General ${formatPeso(unrestricted)}'),
                 LegendText(
                   AppColors.lavenderrspwn,
                   'Restricted ${formatPeso(restricted)}',
@@ -1137,7 +1138,9 @@ class _FundsBody extends ConsumerWidget {
                 final transport = list
                     .where((e) => e.category == ExpenseCategory.transport)
                     .fold<double>(0, (s, e) => s + e.outstandingAmount);
-                final missing = list.where((e) => (e.receiptUrl ?? '').isEmpty).length;
+                // General (non-case) running costs: utilities, rent, supplies, pay.
+                final running = general?.fold<double>(0, (s, e) => s + e.outstandingAmount);
+                final missing = [...list, ...?general].where((e) => (e.receiptUrl ?? '').isEmpty).length;
                 return [
                   _KvRow(
                     Icons.local_hospital,
@@ -1149,6 +1152,11 @@ class _FundsBody extends ConsumerWidget {
                     Icons.local_shipping,
                     'Unfunded transport',
                     Text(formatPeso(transport), style: GoogleFonts.tiltWarp(fontSize: 15)),
+                  ),
+                  _KvRow(
+                    Icons.home_work_outlined,
+                    'Unfunded general expenses',
+                    Text(running == null ? '—' : formatPeso(running), style: GoogleFonts.tiltWarp(fontSize: 15)),
                   ),
                   _KvRow(
                     Icons.receipt_long,

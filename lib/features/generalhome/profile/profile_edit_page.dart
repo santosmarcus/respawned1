@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/utils/validators.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 
 class ProfileEditPage extends StatefulWidget {
@@ -99,9 +100,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Could not upload photo: $e'),
-              backgroundColor: Colors.redAccent),
+          appSnackBar('Could not upload photo: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -153,10 +152,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   void _snack(String message, {bool error = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message, style: GoogleFonts.zain(color: AppColors.background)),
-        backgroundColor: error ? Colors.redAccent : AppColors.textPrimary,
-      ),
+      appSnackBar(message, kind: error ? AppMessageKind.error : AppMessageKind.info),
     );
   }
 
@@ -285,20 +281,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       }, SetOptions(merge: true));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Profile saved.',
-                style: GoogleFonts.zain(color: AppColors.background)),
-            backgroundColor: AppColors.textPrimary,
-          ),
+          appSnackBar('Profile saved.'),
         );
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Could not save: $e'),
-              backgroundColor: Colors.redAccent),
+          appSnackBar('Could not save: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -417,14 +407,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                 width: 200,
                 child: ElevatedButton(
                   onPressed: _saving ? null : _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.primary,
                   child: _saving
                       ? const SizedBox(
                     height: 20,

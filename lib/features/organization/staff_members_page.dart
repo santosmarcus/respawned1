@@ -9,6 +9,8 @@ import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/core/utils/validators.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 /// Staff Members + Invitations. Active members are read straight from
 /// `organizations/{orgId}/members` — the existing OrgMembershipService
@@ -224,13 +226,16 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                       onPressed: () async {
                         final emailError = AppValidators.email(emailController.text);
                         if (emailError != null) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(SnackBar(content: Text(emailError), backgroundColor: Colors.redAccent));
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(appSnackBar(
+                            emailError,
+                            kind: AppMessageKind.error,
+                          ));
                           return;
                         }
                         Navigator.pop(sheetContext, true);
                         await _submitInvite(emailController.text.trim(), role);
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary),
+                      style: AppButtons.primary,
                       child: const Text('Add Member'),
                     ),
                   ),
@@ -300,7 +305,10 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
 
   void _snack(String message, {bool error = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: error ? Colors.redAccent : null));
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+      message,
+      kind: error ? AppMessageKind.error : AppMessageKind.info,
+    ));
   }
 
   Future<void> _editMemberRole(String uid, OrgRole current) async {
@@ -336,17 +344,11 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     // same admin-less state. Multiple admins are fully supported (spec
     // §2/§13) — this only blocks the LAST one.
     if (current == OrgRole.admin && role != OrgRole.admin) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.background,
-          title: const Text('Change this member\'s role?'),
-          content: Text('They will become a ${role == OrgRole.admin ? 'Organization Admin' : 'Organization Member'}.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm')),
-          ],
-        ),
+      final confirmed = await showConfirmActionDialog(
+        context,
+        title: 'Change this member\'s role?',
+        message: 'They will become a ${role == OrgRole.admin ? 'Organization Admin' : 'Organization Member'}.',
+        confirmLabel: 'Confirm',
       );
       if (confirmed != true) return;
       if (await _repo.isFinalAdmin(organizationId: organizationId, uid: uid)) {
@@ -377,21 +379,12 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
       return;
     }
     if (!mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: Text('Remove this member?', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: const Text('They will lose access to this organization. This does not delete their account.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE05353), foregroundColor: Colors.white),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Remove this member?',
+      message: 'They will lose access to this organization. This does not delete their account.',
+      confirmLabel: 'Remove',
+      destructive: true,
     );
     if (confirmed != true) return;
     try {
@@ -436,21 +429,12 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     if (_processingInvitationId != null) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: const Text('Reject this invitation?'),
-        content: Text('You will not join ${_organizationNameFor(invite)}. This cannot be undone from here.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE05353), foregroundColor: Colors.white),
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Reject this invitation?',
+      message: 'You will not join ${_organizationNameFor(invite)}. This cannot be undone from here.',
+      confirmLabel: 'Reject',
+      destructive: true,
     );
     if (confirmed != true) return;
     setState(() => _processingInvitationId = invite.id);
@@ -747,7 +731,7 @@ class _MemberRow extends StatelessWidget {
                   Text('Can share to Facebook', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                 if (status != 'active')
                   Text(status[0].toUpperCase() + status.substring(1),
-                      style: GoogleFonts.zain(fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.error, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -835,7 +819,7 @@ class _InvitationRow extends StatelessWidget {
               OutlinedButton(onPressed: onChangeRole, child: const Text('Change Role')),
               OutlinedButton(
                 onPressed: onRevoke,
-                style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFE05353), side: const BorderSide(color: Color(0xFFE05353))),
+                style: AppButtons.dangerOutline,
                 child: const Text('Cancel Invitation'),
               ),
             ],
@@ -885,7 +869,7 @@ class _MyInvitationCard extends StatelessWidget {
               Expanded(
                 child: OutlinedButton(
                   onPressed: busy ? null : onReject,
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent)),
+                  style: AppButtons.dangerOutline,
                   child: const Text('Reject'),
                 ),
               ),

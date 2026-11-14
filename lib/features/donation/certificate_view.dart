@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../app_theme.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// A Certificate of Donation, stored by the backend at
 /// `users/{uid}/certificates/{id}` (id = payment id, or donation id for
@@ -140,7 +141,7 @@ class _CertificateScreenState extends State<CertificateScreen> {
         text: 'My Certificate of Donation from ${c.organizationName}',
       ));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not share: $e'));
     } finally {
       if (mounted) setState(() => _sharing = false);
     }
@@ -205,13 +206,7 @@ class _CertificateScreenState extends State<CertificateScreen> {
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.share_outlined),
                   label: Text('Share / Save', style: GoogleFonts.tiltWarp(fontSize: 16)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.primary,
                 ),
               ),
             ],

@@ -19,6 +19,8 @@ import 'package:respawnd1/features/adoption/steps/book_appointment_step.dart';
 import 'package:respawnd1/features/adoption/steps/time_to_meet_step.dart';
 import 'package:respawnd1/features/adoption/steps/withdrawn_step.dart';
 import 'package:respawnd1/features/adoption/widgets/adoption_step_tracker.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 // widget.animal is now always built from a live AnimalRecord
 // (adoption_page.dart's animalRecordToCard) — the old hardcoded catalog
@@ -149,10 +151,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     final room = _maxHomePhotos - currentTotal;
     if (room <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('You can upload at most $_maxHomePhotos home photos.'),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('You can upload at most $_maxHomePhotos home photos.', kind: AppMessageKind.error),
       );
       return;
     }
@@ -160,12 +159,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     final accepted = picked.take(room).toList();
     if (accepted.length < picked.length && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Only $room more photo(s) can be added (max $_maxHomePhotos total).',
-          ),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('Only $room more photo(s) can be added (max $_maxHomePhotos total).', kind: AppMessageKind.error),
       );
     }
     setState(
@@ -270,10 +264,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       if (mounted) {
         setState(() => _isLoadingExisting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load your application: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to load your application: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -288,20 +279,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     final missingAnswers = _form.missingRequiredAnswers();
     if (missingAnswers.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Please answer: ${missingAnswers.join(', ')}.'),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('Please answer: ${missingAnswers.join(', ')}.', kind: AppMessageKind.error),
       );
       return;
     }
 
     if (!_form.allAgreementsAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please accept all agreements before submitting.'),
-          backgroundColor: Colors.redAccent,
-        ),
+        appSnackBar('Please accept all agreements before submitting.', kind: AppMessageKind.error),
       );
       return;
     }
@@ -316,11 +301,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       if (stillActiveOrDone) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${widget.animal.name} already has an ongoing or completed adoption.',
-              ),
-              backgroundColor: Colors.redAccent,
+            appSnackBar(
+              '${widget.animal.name} already has an ongoing or completed adoption.',
+              kind: AppMessageKind.error,
             ),
           );
           setState(() => _isSubmitting = false);
@@ -340,10 +323,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to submit: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to submit: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -362,10 +342,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to book appointment: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to book appointment: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -382,45 +359,12 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
   }
 
   Future<void> _withdrawApplication() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Withdraw Application?',
-          style: GoogleFonts.tiltWarp(
-            fontWeight: FontWeight.bold,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Text(
-          'Are you sure you want to withdraw your adoption application for ${widget.animal.name}? This action cannot be undone.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.zain(
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Withdraw',
-              style: GoogleFonts.zain(
-                fontWeight: FontWeight.w700,
-                color: Colors.redAccent,
-              ),
-            ),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Withdraw Application?',
+      message: 'Are you sure you want to withdraw your adoption application for ${widget.animal.name}? This action cannot be undone.',
+      confirmLabel: 'Withdraw',
+      destructive: true,
     );
 
     if (confirmed != true || _adoptionId == null || !mounted) return;
@@ -436,10 +380,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to withdraw: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to withdraw: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -457,48 +398,9 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
 
     final nextAttempt = _deliveryAttempts + 1;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Request Reschedule?',
-          style: GoogleFonts.tiltWarp(
-            fontWeight: FontWeight.bold,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Text(
-          'This will use attempt $nextAttempt of $kMaxDeliveryAttempts. The '
+    final confirmed = await showConfirmActionDialog(context, title: 'Request Reschedule?', message: 'This will use attempt $nextAttempt of $kMaxDeliveryAttempts. The '
           'organization will reach out to arrange a new delivery date '
-          'and time for ${widget.animal.name}.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.zain(
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Request',
-              style: GoogleFonts.zain(
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+          'and time for ${widget.animal.name}.', confirmLabel: 'Request');
 
     if (confirmed != true || _adoptionId == null || !mounted) return;
 
@@ -514,10 +416,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to request reschedule: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to request reschedule: $e', kind: AppMessageKind.error),
         );
       }
     } finally {

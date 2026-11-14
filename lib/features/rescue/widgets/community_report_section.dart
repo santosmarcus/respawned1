@@ -13,6 +13,9 @@ import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
 /// Community sighting-update section — "Animal still here" / "Animal
 /// moved" / "Animal rescued" / "No animal present", with an optional photo,
@@ -122,32 +125,11 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
         picked.lng,
       );
       if (distanceKm > _farMoveThresholdKm) {
-        final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.background,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: const Text('Confirm New Location'),
-            content: const Text(
-              "This location is far from the animal's last known position. Confirm that the new pin is correct.",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                ),
-                child: const Text('Confirm'),
-              ),
-            ],
-          ),
+        final confirmed = await showConfirmActionDialog(
+          context,
+          title: 'Confirm New Location',
+          message: "This location is far from the animal's last known position. Confirm that the new pin is correct.",
+          confirmLabel: 'Confirm',
         );
         // Keeps the previously-confirmed location (if any) untouched when
         // the admin backs out — never silently applies an unconfirmed pin.
@@ -220,10 +202,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
       if (missingImage) setState(() => _showImageError = true);
       if (missingLocation) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please select the new location on the map.'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Please select the new location on the map.', kind: AppMessageKind.error),
         );
       }
       if (missingImage) {
@@ -270,8 +249,10 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
       }
 
       // Deliberately never touches the parent case's own `status` — a
-      // sighting update is purely additive, never an automatic close.
-      await reportRef.set({
+      // sighting update is purely additive, never an automatic close. The
+      // report and its staff activity-log entry go in one batch.
+      final batch = FirebaseFirestore.instance.batch();
+      batch.set(reportRef, {
         'caseId': widget.caseId,
         'reporterId': uid,
         'reporterName': name.isEmpty ? 'A community member' : name,
@@ -291,18 +272,15 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .collection('activityLogs')
-          .add({
-            'action': 'community_report_submitted',
-            'actorUid': uid,
-            'actorName': name.isEmpty ? 'A community member' : name,
-            'actorRole': null,
-            'details': {'type': _selectedType},
-            'timestamp': FieldValue.serverTimestamp(),
-          });
+      RescueCaseStore(FirebaseFirestore.instance).recordActionInBatch(
+        batch,
+        caseId: widget.caseId,
+        action: 'community_report_submitted',
+        actorUid: uid,
+        actorName: name.isEmpty ? 'A community member' : name,
+        details: {'type': _selectedType},
+      );
+      await batch.commit();
 
       if (mounted) {
         setState(() {
@@ -315,19 +293,13 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
         });
         _commentController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Thanks! Your report has been submitted.'),
-            backgroundColor: AppColors.greenrspwn,
-          ),
+          appSnackBar('Thanks! Your report has been submitted.', kind: AppMessageKind.success),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not submit report: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not submit report: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -428,7 +400,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                         ),
                         const TextSpan(
                           text: ' *',
-                          style: TextStyle(color: Colors.redAccent),
+                          style: TextStyle(color: AppColors.error),
                         ),
                       ],
                     ),
@@ -443,7 +415,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                     decoration: BoxDecoration(
                       border: Border.all(
                         color: _showImageError
-                            ? Colors.redAccent
+                            ? AppColors.error
                             : AppColors.slaterspwn,
                         width: _showImageError ? 1.5 : 1,
                       ),
@@ -472,7 +444,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                     style: GoogleFonts.zain(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: Colors.redAccent,
+                      color: AppColors.error,
                     ),
                   ),
                 ],
@@ -495,7 +467,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                       ),
                       const TextSpan(
                         text: ' *',
-                        style: TextStyle(color: Colors.redAccent),
+                        style: TextStyle(color: AppColors.error),
                       ),
                     ],
                   ),
@@ -592,15 +564,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _submitting ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                ),
+                style: AppButtons.primary,
                 child: _submitting
                     ? const SizedBox(
                         height: 18,
@@ -671,7 +635,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
     if (status == null) return null;
     final (label, color) = switch (status) {
       'approved' => ('Location change approved', AppColors.greenrspwn),
-      'rejected' => ('Location change rejected', Colors.redAccent),
+      'rejected' => ('Location change rejected', AppColors.error),
       _ => ('Pending approval', const Color(0xFF9C6B10)),
     };
     final approvedAt = r.approvedAt;

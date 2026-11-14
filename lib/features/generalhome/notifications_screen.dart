@@ -886,7 +886,7 @@ class _NotificationTile extends StatelessWidget {
                     width: 8,
                     height: 8,
                     decoration: const BoxDecoration(
-                      color: Colors.redAccent,
+                      color: AppColors.error,
                       shape: BoxShape.circle,
                     ),
                   ),

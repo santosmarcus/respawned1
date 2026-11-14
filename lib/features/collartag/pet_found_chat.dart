@@ -1,9 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 class PetFoundChatScreen extends StatefulWidget {
   final String tagId;
@@ -95,7 +96,7 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not update: $e')));
+            .showSnackBar(appSnackBar('Could not update: $e'));
       }
     } finally {
       if (mounted) setState(() => _resolving = false);
@@ -112,13 +113,13 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start the call.')),
+          appSnackBar('Could not start the call.'),
         );
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start the call.')),
+          appSnackBar('Could not start the call.'),
         );
       }
     }
@@ -137,7 +138,7 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
     if (uri == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open this Facebook link.')),
+          appSnackBar('Could not open this Facebook link.'),
         );
       }
       return;
@@ -147,13 +148,13 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open this Facebook link.')),
+          appSnackBar('Could not open this Facebook link.'),
         );
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open this Facebook link.')),
+          appSnackBar('Could not open this Facebook link.'),
         );
       }
     }
@@ -174,13 +175,13 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open an email draft.')),
+          appSnackBar('Could not open an email draft.'),
         );
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open an email draft.')),
+          appSnackBar('Could not open an email draft.'),
         );
       }
     }
@@ -255,7 +256,7 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
             ? '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}'
             : 'Location not shared';
         final timeLabel = foundAt != null
-            ? DateFormat('MMM d, h:mm a').format(foundAt.toDate())
+            ? formatDateTime(foundAt.toDate())
             : '';
 
         return Scaffold(
@@ -459,14 +460,7 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           onPressed: _resolving ? null : _markAsFound,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.yellowrspwn,
-                            foregroundColor: AppColors.textPrimary,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(30)),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            elevation: 0,
-                          ),
+                          style: AppButtons.primary,
                           child: _resolving
                               ? const SizedBox(
                             height: 20,
@@ -582,13 +576,7 @@ class _RescueCompletedScreen extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: () =>
                       Navigator.popUntil(context, (r) => r.isFirst),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
-                    elevation: 0,
-                  ),
+                  style: AppButtons.primary,
                   child: Text('Done',
                       style: GoogleFonts.tiltWarp(
                           fontSize: 16,

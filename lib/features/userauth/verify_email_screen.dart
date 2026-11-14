@@ -117,7 +117,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                 height: 50,
                 child: ElevatedButton(
                   onPressed: _checking ? null : () => _check(),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn),
+                  style: AppButtons.primary,
                   child: _checking
                       ? const SizedBox(
                           height: 22, width: 22,

@@ -26,6 +26,7 @@ import 'package:respawnd1/features/pettransporter/widgets/transit_result_page.da
 import 'package:respawnd1/features/pettransporter/widgets/transit_tracking_map.dart';
 import 'package:respawnd1/features/pettransporter/widgets/transit_unread_badge.dart';
 import 'package:respawnd1/features/pettransporter/widgets/treatment_reject_dialog.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 // Moved out of this file; re-exported so existing imports of
 // transit_progress_page.dart that use these keep compiling unchanged.
@@ -100,7 +101,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+      appSnackBar(message, kind: AppMessageKind.error),
     );
   }
 
@@ -108,7 +109,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ).showSnackBar(appSnackBar(message));
   }
 
   /// False (with a snackbar) when none of [images] has been taken yet.
@@ -350,12 +351,12 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       icon = Icons.my_location;
     } else if (_isAtVerificationStop(data)) {
       text = "You're at ${stop.place} (detected by geofence). You can submit photo verification.";
-      color = Colors.green.shade700;
+      color = AppColors.success;
       icon = Icons.verified;
     } else {
       text = "You're ~${_distanceToStopMeters!.round()} m from ${stop.place}. "
           'Photo verification unlocks within ${kArrivalThresholdMeters.round()} m.';
-      color = Colors.orange.shade800;
+      color = AppColors.warning;
       icon = Icons.location_searching;
     }
 

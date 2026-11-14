@@ -22,7 +22,7 @@ class TransitOnlineBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.circle, size: 10, color: Colors.green),
+          const Icon(Icons.circle, size: 10, color: AppColors.success),
           const SizedBox(width: 6),
           Text(
             'Online',
@@ -218,14 +218,14 @@ class ClinicHistoryNote extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 4),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.orange.withValues(alpha: 0.12),
+            color: AppColors.warning.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+            border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.history, size: 14, color: Colors.orange),
+              const Icon(Icons.history, size: 14, color: AppColors.warning),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(

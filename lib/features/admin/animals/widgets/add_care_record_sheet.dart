@@ -203,7 +203,7 @@ class _AddCareRecordBodyState extends ConsumerState<_AddCareRecordBody> {
             AttachmentPicker(
               items: _attachments,
               enabled: !_saving,
-              label: isCheckup ? 'Attach vet notes' : 'Attach a photo',
+              label: isCheckup ? 'Attach vet notes (photo or PDF)' : 'Attach a photo or PDF',
               onChanged: (v) => setState(() => _attachments = v),
             ),
             if (_error != null) ...[

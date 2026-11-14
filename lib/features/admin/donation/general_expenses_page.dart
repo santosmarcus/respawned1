@@ -16,10 +16,6 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 
-final generalExpensesProvider = StreamProvider.autoDispose.family<List<Expense>, String>((ref, orgId) {
-  return GeneralExpenseRepository().watch(orgId);
-});
-
 /// The organization's running costs that aren't a rescue case's bill:
 /// utilities, rent, food and supplies, staff compensation. Financial admins
 /// only. Each can be paid from a campaign, which records it on that

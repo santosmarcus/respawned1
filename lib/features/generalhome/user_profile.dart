@@ -13,6 +13,7 @@ import 'package:respawnd1/features/generalhome/certificates_page.dart';
 import 'package:respawnd1/features/generalhome/profile/profile_edit_page.dart';
 import 'package:respawnd1/features/generalhome/profile/location_sharing_page.dart';
 import 'package:respawnd1/features/generalhome/profile/communications_setting_page.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -72,30 +73,12 @@ class _UserProfileState extends State<UserProfile> {
   }
 
   Future<void> _logout() async {
-    final confirmed = await showDialog<bool>(
-      context:context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: Text(
-          'Log Out',
-          style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
-        ),
-        content: Text(
-          'Are you sure you want to log out?',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel',
-                style: GoogleFonts.zain(color: AppColors.textPrimary)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Log out', style: GoogleFonts.zain(color: Colors.redAccent)),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Log Out',
+      message: 'Are you sure you want to log out?',
+      confirmLabel: 'Log out',
+      destructive: true,
     );
     if (confirmed == true){
       await AuthService().signOut();
@@ -267,7 +250,7 @@ class _UserProfileState extends State<UserProfile> {
             Center(
               child: TextButton(
                 onPressed: _logout,//TODO:
-                child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: Colors.redAccent,
+                child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: AppColors.error,
                 ),
                 ),
               ),

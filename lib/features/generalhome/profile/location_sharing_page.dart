@@ -7,6 +7,7 @@ import 'package:respawnd1/features/generalhome/profile/settings_widget.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:respawnd1/core/geofence/geofence_config.dart';
 import 'package:respawnd1/core/services/geofence_service.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class LocationSharingPage extends StatefulWidget {
   const LocationSharingPage({super.key});
@@ -64,20 +65,14 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
     GeofenceService.sync(force: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Location sharing preferences saved.',
-                style: GoogleFonts.zain(color: AppColors.background)),
-            backgroundColor: AppColors.textPrimary,
-          ),
+          appSnackBar('Location sharing preferences saved.'),
         );
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Could not save: $e'),
-              backgroundColor: Colors.redAccent),
+          appSnackBar('Could not save: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -91,9 +86,7 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
     setState(() => _backgroundGranted = granted);
     if (!granted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Choose "Allow all the time" under Location, then come back.'),
-        ),
+        appSnackBar('Choose "Allow all the time" under Location, then come back.'),
       );
     }
   }
@@ -224,14 +217,7 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
                 width: 200,
                 child: ElevatedButton(
                   onPressed: _saving ? null : _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.primary,
                   child: _saving
                       ? const SizedBox(
                     height: 20,

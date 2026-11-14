@@ -55,13 +55,7 @@ class CampaignCompletedPage extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: () => Navigator.push(
                       context, MaterialPageRoute(builder: (_) => CertificateScreen(certificateId: paymentId))),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.primary,
                   child: Text('View My Certificate', style: GoogleFonts.tiltWarp(fontSize: 17)),
                 ),
               ),
@@ -71,12 +65,7 @@ class CampaignCompletedPage extends StatelessWidget {
                 child: OutlinedButton(
                   onPressed: () => Navigator.push(
                       context, MaterialPageRoute(builder: (_) => DonationSummaryScreen(params: summary))),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  ),
+                  style: AppButtons.outline,
                   child: Text('View Receipt', style: GoogleFonts.tiltWarp(fontSize: 15)),
                 ),
               ),

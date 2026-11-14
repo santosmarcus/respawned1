@@ -121,7 +121,7 @@ class _EnterPhoneScreenState extends State<EnterPhoneScreen> {
                 const SizedBox(height: 8),
                 Text(_errorMessage!,
                     style: GoogleFonts.zain(
-                        fontSize: 13, color: Colors.red.shade700)),
+                        fontSize: 13, color: AppColors.error)),
               ],
 
               const Spacer(),
@@ -130,11 +130,7 @@ class _EnterPhoneScreenState extends State<EnterPhoneScreen> {
               Center(
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _handleNext,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    fixedSize:
-                    Size(MediaQuery.of(context).size.width * 0.55, 50),
-                  ),
+                  style: AppButtons.primary.copyWith(fixedSize: WidgetStatePropertyAll(Size(MediaQuery.of(context).size.width * 0.55, 50))),
                   child: _isLoading
                       ? const SizedBox(
                       height: 22, width: 22,

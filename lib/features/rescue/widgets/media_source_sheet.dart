@@ -132,11 +132,11 @@ Future<String?> showMediaSourceSheet(
             ListTile(
               leading: const Icon(
                 Icons.delete_outline,
-                color: Colors.redAccent,
+                color: AppColors.error,
               ),
               title: Text(
                 'Remove',
-                style: GoogleFonts.zain(fontSize: 15, color: Colors.redAccent),
+                style: GoogleFonts.zain(fontSize: 15, color: AppColors.error),
               ),
               onTap: () {
                 onRemove();

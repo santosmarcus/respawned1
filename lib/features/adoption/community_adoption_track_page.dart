@@ -391,13 +391,7 @@ class _AdoptionButtonSectionState extends State<_AdoptionButtonSection> {
             onPressed: () {
               Navigator.push(context, MaterialPageRoute(builder: (_) => CommunityAdoptionListingPage(caseId: widget.caseId)));
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-            ),
+            style: AppButtons.primary,
             child: Text('Community Adoption', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
           ),
         );

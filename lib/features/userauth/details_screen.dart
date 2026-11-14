@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/onboard_screen.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class EnterDetailsScreen extends StatefulWidget {
   //final String role;
@@ -187,28 +188,7 @@ class _EnterDetailsScreenState extends State<EnterDetailsScreen> {
 
               if (_errorMessage != null) ...[
                 const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline,
-                          color: Colors.red.shade700, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(_errorMessage!,
-                            style: GoogleFonts.zain(
-                                fontSize: 13,
-                                color: Colors.red.shade700)),
-                      ),
-                    ],
-                  ),
-                ),
+                AppErrorBanner(_errorMessage!),
               ],
 
               const SizedBox(height: 40),
@@ -216,11 +196,7 @@ class _EnterDetailsScreenState extends State<EnterDetailsScreen> {
               Center(
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _handleNext,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    fixedSize:
-                    Size(MediaQuery.of(context).size.width * 0.55, 50),
-                  ),
+                  style: AppButtons.primary.copyWith(fixedSize: WidgetStatePropertyAll(Size(MediaQuery.of(context).size.width * 0.55, 50))),
                   child: _isLoading
                       ? const SizedBox(
                       height: 22, width: 22,

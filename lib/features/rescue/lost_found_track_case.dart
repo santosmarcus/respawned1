@@ -3,9 +3,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 
 class LostFoundTrackCasePage extends StatefulWidget {
@@ -58,7 +59,7 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send message: $e')),
+          appSnackBar('Could not send message: $e'),
         );
       }
     } finally {
@@ -92,7 +93,7 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                 Clipboard.setData(ClipboardData(text: phone));
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Number copied.')),
+                  appSnackBar('Number copied.'),
                 );
               },
               child: Text('Copy',
@@ -270,15 +271,7 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                               title: isLost ? 'Contact Owner' : 'Contact Finder',
                               phone: data['contactNumber'] as String?,
                             ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.yellowrspwn,
-                              foregroundColor: AppColors.textPrimary,
-                              padding:
-                              const EdgeInsets.symmetric(vertical: 14),
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(30)),
-                            ),
+                            style: AppButtons.primary,
                             child: Text(
                               isLost ? 'Contact Owner' : 'Contact Finder',
                               style: GoogleFonts.tiltWarp(
@@ -740,7 +733,7 @@ class _MessagesList extends StatelessWidget {
             final fromMe = msg['senderId'] == uid;
             final ts = msg['timestamp'] as Timestamp?;
             final timeLabel = ts != null
-                ? DateFormat('h:mm a · MMMM d, yyyy').format(ts.toDate())
+                ? formatDateTime(ts.toDate())
                 : '';
             return Align(
               alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,

@@ -6,6 +6,7 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/animal_page.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Prefix of the QR payload printed for animal records (Animal Management >
 /// Add QR Tag). Collar tags use their own links (AppLinks.tagIdFromScan).
@@ -35,7 +36,7 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
       .get();
   if (!context.mounted) return true;
   if (snap.docs.isEmpty) {
-    messenger.showSnackBar(const SnackBar(content: Text('No animal record uses this QR tag.')));
+    messenger.showSnackBar(appSnackBar('No animal record uses this QR tag.'));
     return true;
   }
 

@@ -9,6 +9,7 @@ import 'volunteer_page.dart';
 import 'volunteer_signup_page.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'volunteer_eticket.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class VolunteerEventDetailPage extends StatefulWidget {
   final VolunteerEvent event;
@@ -39,7 +40,7 @@ class _VolunteerEventDetailPageState
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open Google Maps.')),
+        appSnackBar('Could not open Google Maps.'),
       );
     }
   }
@@ -74,7 +75,7 @@ class _VolunteerEventDetailPageState
               icon: Icon(
                 event.favorited ? Icons.favorite : Icons.favorite_border,
                 color: event.favorited
-                    ? const Color(0xFFE05C5C)
+                    ? AppColors.error
                     : AppColors.textPrimary,
                 size: 22,
               ),
@@ -261,7 +262,7 @@ class _VolunteerEventDetailPageState
                 style: GoogleFonts.zain(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: Colors.redAccent),
+                    color: AppColors.error),
               ),
               const SizedBox(height: 12),
             ],
@@ -282,15 +283,7 @@ class _VolunteerEventDetailPageState
                     ),
                   ).then((_) => setState(() {}));
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  elevation: 0,
-                ),
+                style: AppButtons.primary,
                 child: Text(
                   event.joined
                       ? 'View E-Ticket'
@@ -322,7 +315,7 @@ class _VolunteerEventDetailPageState
 
     if (data == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registration details not found.')),
+        appSnackBar('Registration details not found.'),
       );
       return;
     }

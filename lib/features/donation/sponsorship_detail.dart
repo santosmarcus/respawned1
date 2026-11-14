@@ -10,6 +10,7 @@ import 'donation_payment_service.dart';
 import 'donation_review.dart';
 import 'fund_tracking_section.dart';
 import 'sponsorship_summary.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class SponsorshipDetail extends StatefulWidget {
   final DonationListing sponsorship;
@@ -103,7 +104,7 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
             onPressed: () => SharePlus.instance.share(ShareParams(text: sponsorship.shareText)),
           ),
           IconButton(
-            icon: Icon(sponsorship.favorited ? Icons.favorite : Icons.favorite_border, color: sponsorship.favorited ? const Color(0xFFE05C5C) : AppColors.textPrimary),
+            icon: Icon(sponsorship.favorited ? Icons.favorite : Icons.favorite_border, color: sponsorship.favorited ? AppColors.error : AppColors.textPrimary),
             onPressed: () {
               widget.onFavorite();
               setState(() {});
@@ -240,7 +241,7 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
                     : () {
                   final amount = double.tryParse(_amountController.text);
                   if (amount == null || amount <= 0) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount')));
+                    ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Please enter a valid amount'));
                     return;
                   }
                   _openSponsorshipSheet(context, amount);
@@ -439,7 +440,7 @@ class _SponsorshipReviewSheetState extends State<SponsorshipReviewSheet> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _selectedPayment == null ? null : _submit,
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))),
+              style: AppButtons.primary,
               child: Text('Confirm Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 16)),
             ),
           ),

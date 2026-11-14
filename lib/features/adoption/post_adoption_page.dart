@@ -15,6 +15,8 @@ import 'package:respawnd1/core/models/adoption/return_request.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 String _formatDate(DateTime d) {
   const months = [
@@ -306,7 +308,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                         color: done
                                             ? AppColors.greenrspwn
                                             : (overdue
-                                            ? Colors.redAccent
+                                            ? AppColors.error
                                             : (isCurrent
                                             ? AppColors.textPrimary
                                             : AppColors.slaterspwn)),
@@ -333,7 +335,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                                 style: GoogleFonts.zain(
                                                   fontSize: 11,
                                                   color: overdue
-                                                      ? Colors.redAccent
+                                                      ? AppColors.error
                                                       : AppColors.textSecondary,
                                                 ),
                                               ),
@@ -393,7 +395,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                 style: GoogleFonts.zain(
                                   fontSize: 11,
                                   color: currentDue.displayStatus(now) == 'Overdue'
-                                      ? Colors.redAccent
+                                      ? AppColors.error
                                       : AppColors.textSecondary,
                                 ),
                               ),
@@ -567,10 +569,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
       if (tag.status == 'lost') {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content:
-              Text('$animalName is already reported lost — opening their ID card.'),
-            ),
+            appSnackBar('$animalName is already reported lost — opening their ID card.'),
           );
           Navigator.push(
             context,
@@ -583,46 +582,10 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
       }
 
       if (!context.mounted) return;
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          backgroundColor: AppColors.background,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            'Report $animalName as lost?',
-            style: GoogleFonts.tiltWarp(
-                fontSize: 16, color: AppColors.textPrimary),
-          ),
-          content: Text(
-            'This uses $animalName\'s registered ID tag. Their status '
+      final confirmed = await showConfirmActionDialog(context, title: 'Report $animalName as lost?', message: 'This uses $animalName\'s registered ID tag. Their status '
                 'switches to "Lost", your contact info becomes visible to '
                 'anyone who scans the tag, and you\'ll be notified here to '
-                'chat the moment someone finds them.',
-            style:
-            GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text('Cancel',
-                  style: GoogleFonts.zain(color: AppColors.textSecondary)),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
-              ),
-              child: Text('Report Lost',
-                  style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
-            ),
-          ],
-        ),
-      );
+                'chat the moment someone finds them.', confirmLabel: 'Report Lost');
 
       if (confirmed != true || !context.mounted) return;
 
@@ -674,10 +637,9 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                '$animalName reported lost. You\'ll be notified here the moment their tag is scanned.'),
-            backgroundColor: AppColors.greenrspwn,
+          appSnackBar(
+            '$animalName reported lost. You\'ll be notified here the moment their tag is scanned.',
+            kind: AppMessageKind.success,
           ),
         );
         Navigator.push(
@@ -695,10 +657,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not report lost pet: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not report lost pet: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -759,13 +718,7 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                 ),
               );
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-              elevation: 0,
-              shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-            ),
+            style: AppButtons.primary,
             child: Text('Link ID Tag',
                 style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
           ),
@@ -801,20 +754,16 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                '$animalName has been reported lost. Consider linking an ID tag for faster reunification.'),
-            backgroundColor: AppColors.greenrspwn,
+          appSnackBar(
+            '$animalName has been reported lost. Consider linking an ID tag for faster reunification.',
+            kind: AppMessageKind.success,
           ),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not file lost report: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Could not file lost report: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -1298,10 +1247,7 @@ class _PostAdoptionCheckinFormState extends State<PostAdoptionCheckinForm> {
 
   void _showSnack(String msg, {bool error = true}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: error ? Colors.redAccent : AppColors.greenrspwn,
-      ),
+      appSnackBar(msg, kind: error ? AppMessageKind.error : AppMessageKind.success),
     );
   }
 
@@ -1663,10 +1609,7 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
 
   void _showSnack(String msg, {bool error = true}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: error ? Colors.redAccent : AppColors.greenrspwn,
-      ),
+      appSnackBar(msg, kind: error ? AppMessageKind.error : AppMessageKind.success),
     );
   }
 
@@ -1954,10 +1897,7 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
 
   void _showSnack(String msg, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: error ? Colors.redAccent : AppColors.greenrspwn,
-      ),
+      appSnackBar(msg, kind: error ? AppMessageKind.error : AppMessageKind.success),
     );
   }
 

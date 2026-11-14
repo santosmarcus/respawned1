@@ -13,6 +13,8 @@ import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
 class TrackCasePage extends StatefulWidget {
   final String caseId;
@@ -1163,28 +1165,21 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
               .trim();
       final label = type == 'adopt';
 
-      await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .update({
-            'willingAdopterId': uid,
-            'willingAdopterName': name.isEmpty ? 'A general user' : name,
-            'willingAdopterType': type,
-            'statusHistory': FieldValue.arrayUnion([
-              {
-                'status':
-                    '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
-                'timestamp': Timestamp.now(),
-              },
-            ]),
-          });
+      await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+        caseId: widget.caseId,
+        action: 'adoption_interest_registered',
+        statusLine: '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
+        details: {'type': type},
+        fields: {
+          'willingAdopterId': uid,
+          'willingAdopterName': name.isEmpty ? 'A general user' : name,
+          'willingAdopterType': type,
+        },
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to register interest: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to register interest: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -1195,36 +1190,21 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   Future<void> _markArrivedAtTreatment() async {
     setState(() => _isMarkingArrival = true);
     try {
-      await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .update({
-            'adopterArrivedAtTreatment': true,
-            'statusHistory': FieldValue.arrayUnion([
-              {
-                'status':
-                    'Interested adopter reported arrival at the treatment location.',
-                'timestamp': Timestamp.now(),
-              },
-            ]),
-          });
+      await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+        caseId: widget.caseId,
+        action: 'adopter_arrived_at_treatment',
+        statusLine: 'Interested adopter reported arrival at the treatment location.',
+        fields: {'adopterArrivedAtTreatment': true},
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Thanks! Let the transporter know you\'re there in person.',
-            ),
-            backgroundColor: AppColors.greenrspwn,
-          ),
+          appSnackBar('Thanks! Let the transporter know you\'re there in person.', kind: AppMessageKind.success),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+          appSnackBar('Failed to update: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -1423,16 +1403,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                               _isMarkingArrival)
                           ? null
                           : _markArrivedAtTreatment,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        disabledBackgroundColor: AppColors.slaterspwn,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
+                      style: AppButtons.primary,
                       child: _isMarkingArrival
                           ? const SizedBox(
                               height: 16,
@@ -1484,14 +1455,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                     onPressed: _isSubmitting
                         ? null
                         : () => _registerInterest('adopt'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textPrimary),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
+                    style: AppButtons.outline,
                     child: _isSubmitting
                         ? const SizedBox(
                             height: 16,
@@ -1692,7 +1656,7 @@ class _RejectionDetailsSection extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFE05353).withValues(alpha: 0.08),
+        color: AppColors.error.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1700,14 +1664,14 @@ class _RejectionDetailsSection extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.block, size: 16, color: Color(0xFFE05353)),
+              const Icon(Icons.block, size: 16, color: AppColors.error),
               const SizedBox(width: 6),
               Text(
                 'Report Rejected',
                 style: GoogleFonts.zain(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: const Color(0xFFE05353),
+                  color: AppColors.error,
                 ),
               ),
             ],

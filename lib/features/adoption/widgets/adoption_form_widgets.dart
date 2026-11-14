@@ -93,11 +93,11 @@ class AdoptionFormField extends StatelessWidget {
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Colors.redAccent, width: 1.2),
+              borderSide: const BorderSide(color: AppColors.error, width: 1.2),
             ),
             focusedErrorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
+              borderSide: const BorderSide(color: AppColors.error, width: 1.5),
             ),
           ),
         ),

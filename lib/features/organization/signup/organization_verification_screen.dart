@@ -9,6 +9,7 @@ import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Step 2 of the Organization signup flow (spec §4) — reuses the same
 /// image_picker + Firebase Storage stack the pet-transporter verification
@@ -86,7 +87,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     } catch (e) {
       if (mounted) {
         setState(() => _uploadingGroup = null);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Upload failed: $e', kind: AppMessageKind.error));
       }
     }
   }
@@ -105,13 +106,16 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     if (_submitting || _uploadingGroup != null) return;
     if (_hasAnyPending) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Upload your selected files before submitting.'), backgroundColor: Colors.redAccent),
+        appSnackBar('Upload your selected files before submitting.', kind: AppMessageKind.error),
       );
       return;
     }
     if (!_hasAllGroups) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registration document(s), permit, and shelter photos are all required.'), backgroundColor: Colors.redAccent),
+        appSnackBar(
+          'Registration document(s), permit, and shelter photos are all required.',
+          kind: AppMessageKind.error,
+        ),
       );
       return;
     }
@@ -132,7 +136,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
       await _repo.submitVerification(widget.organizationId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Organization set up. Verification documents submitted for review.')),
+          appSnackBar('Organization set up. Verification documents submitted for review.'),
         );
         Navigator.pushAndRemoveUntil(
           context,
@@ -143,7 +147,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     } catch (e) {
       if (mounted) {
         setState(() => _submitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not submit: $e'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not submit: $e', kind: AppMessageKind.error));
       }
     }
   }
@@ -177,13 +181,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _submitting ? null : _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      foregroundColor: AppColors.textPrimary,
-                      disabledBackgroundColor: AppColors.slaterspwn,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    ),
+                    style: AppButtons.primary,
                     child: _submitting
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                         : Text('Submit for Verification', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),

@@ -106,14 +106,7 @@ void showScanOptionsSheet(
                   },
                   icon: const Icon(Icons.qr_code),
                   label: Text('Scan QR', style: GoogleFonts.zain(fontSize: 14)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.outline,
                 ),
               ),
               const SizedBox(width: 12),
@@ -128,14 +121,7 @@ void showScanOptionsSheet(
                     'Scan NFC',
                     style: GoogleFonts.zain(fontSize: 14),
                   ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary,
-                    side: const BorderSide(color: AppColors.textPrimary),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: AppButtons.outline,
                 ),
               ),
             ],

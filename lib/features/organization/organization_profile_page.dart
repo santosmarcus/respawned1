@@ -10,6 +10,7 @@ import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/features/volunteerevent/event_detail_page.dart';
 
 import 'organization_model.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class OrganizationProfilePage extends StatefulWidget {
   final String organizationId;
@@ -178,7 +179,7 @@ class _OrganizationProfilePageState extends State<OrganizationProfilePage>
                 child: Icon(
                   org.favorited ? Icons.favorite : Icons.favorite_border,
                   color: org.favorited
-                      ? const Color(0xFFE05C5C)
+                      ? AppColors.error
                       : AppColors.textPrimary,
                 ),
               ),
@@ -541,7 +542,7 @@ class _OrgAnimalCard extends StatelessWidget {
               animal.favorited ? Icons.favorite : Icons.favorite_border,
               size: 22,
               color: animal.favorited
-                  ? const Color(0xFFE05C5C)
+                  ? AppColors.error
                   : AppColors.textPrimary,
             ),
           ),
@@ -788,7 +789,7 @@ class _OrgDonationCard extends StatelessWidget {
                   donation.favorited ? Icons.favorite : Icons.favorite_border,
                   size: 22,
                   color: donation.favorited
-                      ? const Color(0xFFE05C5C)
+                      ? AppColors.error
                       : AppColors.textPrimary,
                 ),
               ),
@@ -1017,7 +1018,7 @@ class _OrgEventCard extends StatelessWidget {
                   event.favorited ? Icons.favorite : Icons.favorite_border,
                   size: 22,
                   color: event.favorited
-                      ? const Color(0xFFE05C5C)
+                      ? AppColors.error
                       : AppColors.textPrimary,
                 ),
               ),
@@ -1218,14 +1219,7 @@ class _ReviewsTab extends StatelessWidget {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
+                      style: AppButtons.primary,
                       onPressed: () async {
                         Navigator.pop(context);
                         await _submitReview(
@@ -1308,14 +1302,7 @@ class _ReviewsTab extends StatelessWidget {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.yellowrspwn,
-                    foregroundColor: AppColors.textPrimary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                  ),
+                  style: AppButtons.primary,
                   onPressed: () => _openAddReviewSheet(context),
                   child: Text('Add Review',
                       style: GoogleFonts.zain(
@@ -1355,8 +1342,7 @@ class _AboutTab extends StatelessWidget {
             onTap: () {
               if (organization.bookVisitUrl == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('No booking link available yet.')),
+                  appSnackBar('No booking link available yet.'),
                 );
                 return;
               }

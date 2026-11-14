@@ -101,14 +101,7 @@ class CollarIdTagIntroScreen extends StatelessWidget {
                         MaterialPageRoute(
                             builder: (_) => const CollarTagFormScreen()),
                       ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.yellowrspwn,
-                        foregroundColor: AppColors.textPrimary,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        elevation: 0,
-                      ),
+                      style: AppButtons.primary,
                       child: Text(
                         'Create Now!',
                         style: GoogleFonts.tiltWarp(

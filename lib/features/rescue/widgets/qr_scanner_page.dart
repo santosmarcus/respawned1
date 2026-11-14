@@ -115,14 +115,7 @@ void showScanInfo(BuildContext context) {
           width: double.infinity,
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn,
-              foregroundColor: AppColors.textPrimary,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
-            ),
+            style: AppButtons.primary,
             child: Text(
               'OK',
               style: GoogleFonts.zain(

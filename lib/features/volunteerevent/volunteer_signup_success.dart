@@ -74,14 +74,7 @@ class VolunteerSignUpSuccessPage extends StatelessWidget {
                     ),
                   );
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  foregroundColor: AppColors.textPrimary,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                ),
+                style: AppButtons.primary,
                 child: Text('View E-Ticket',
                     style: GoogleFonts.tiltWarp(
                         fontSize: 16, color: AppColors.textPrimary)),

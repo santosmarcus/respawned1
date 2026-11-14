@@ -8,6 +8,7 @@ import 'donation_payment_service.dart';
 import 'donation_review.dart';
 import 'donation_review_inkind.dart';
 import 'models.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 
 //Donation Detail Page
 class DonationDetail extends StatefulWidget {
@@ -72,7 +73,7 @@ class _DonationDetailPageState extends State<DonationDetail> {
             onPressed: () => SharePlus.instance.share(ShareParams(text: donation.shareText)),
           ),
           IconButton(
-            icon: Icon(donation.favorited ? Icons.favorite : Icons.favorite_border, color: donation.favorited ? const Color(0xFFE05C5C) : AppColors.textPrimary),
+            icon: Icon(donation.favorited ? Icons.favorite : Icons.favorite_border, color: donation.favorited ? AppColors.error : AppColors.textPrimary),
             onPressed: () {
               widget.onFavorite();
               setState(() {});
@@ -207,7 +208,7 @@ class _DonationDetailPageState extends State<DonationDetail> {
               children: [
                 const Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.textPrimary),
                 const SizedBox(width: 4),
-                Text(donation.endDate != null ? DateFormat('MMMM dd, yyyy').format(donation.endDate!) : 'N/A',
+                Text(donation.endDate != null ? formatDate(donation.endDate!) : 'N/A',
                     style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
               ],
             ),
@@ -330,12 +331,7 @@ class _DonationDetailPageState extends State<DonationDetail> {
         Expanded(
           child: ElevatedButton(
             onPressed: donation.donated ? null : () => _openReviewSheet(context, donation),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary,
-              disabledBackgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.5),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              padding: const EdgeInsets.symmetric(vertical: 16), elevation: 0,
-            ),
+            style: AppButtons.primary,
             child: Text(donation.donated ? 'Donated ✓' : 'Donate', style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
           ),
         ),
@@ -580,7 +576,7 @@ class _DonationReviewSheetState extends State<DonationReviewSheet> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _selectedPayment == null ? null : _submit,
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary, disabledBackgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), padding: const EdgeInsets.symmetric(vertical: 16), elevation: 0),
+                style: AppButtons.primary,
                 child: Text('Continue', style: GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
               ),
             ),
@@ -692,7 +688,7 @@ class _InKindDonationReviewSheetState extends State<InKindDonationReviewSheet> {
                         nav.pop(); // Dismiss sheet
                         nav.push(MaterialPageRoute(builder: (context) => DonationReviewInKindScreen(params: InKindDonationReviewParams(fundraiserId: donation.id, organizationName: donation.organizer, category: _selectedCategory!, clarification: _clarificationController.text, isAnonymous: _isAnonymous, address: donation.address))));
                       },
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary, disabledBackgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), padding: const EdgeInsets.symmetric(vertical: 16), elevation: 0),
+                style: AppButtons.primary,
                 child: Text('Continue', style: GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
               ),
             ),

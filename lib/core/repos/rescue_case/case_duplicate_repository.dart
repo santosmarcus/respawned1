@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/species_summary.dart'
@@ -228,39 +227,30 @@ class CaseDuplicateRepository {
       final sharedUpdateText =
           'This report was merged with another matching report for the same rescue.';
 
-      tx.update(duplicateRef, {
-        'status': RescueStatus.merged.firestoreValue,
-        'mergedIntoCaseId': primaryCaseId,
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': sharedUpdateText, 'timestamp': Timestamp.now()},
-        ]),
-      });
-
-      tx.update(primaryRef, {
-        'mergedCaseIds': FieldValue.arrayUnion([duplicateCaseId]),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'A duplicate report for this case was merged in.',
-            'timestamp': Timestamp.now(),
-          },
-        ]),
-      });
-
-      final logBase = ActivityLogEntry(
-        id: '',
-        caseId: '',
+      _store.recordActionIn(
+        tx,
+        caseId: duplicateCaseId,
         action: 'merged',
+        statusLine: sharedUpdateText,
         actorUid: actorUid,
         actorName: actorName,
+        details: {'mergedIntoCaseId': primaryCaseId, 'role': 'duplicate'},
+        fields: {
+          'status': RescueStatus.merged.firestoreValue,
+          'mergedIntoCaseId': primaryCaseId,
+        },
       );
-      tx.set(_store.activityLogsOf(primaryCaseId).doc(), {
-        ...logBase.toFirestore(),
-        'details': {'duplicateCaseId': duplicateCaseId, 'role': 'primary'},
-      });
-      tx.set(_store.activityLogsOf(duplicateCaseId).doc(), {
-        ...logBase.toFirestore(),
-        'details': {'mergedIntoCaseId': primaryCaseId, 'role': 'duplicate'},
-      });
+
+      _store.recordActionIn(
+        tx,
+        caseId: primaryCaseId,
+        action: 'merged',
+        statusLine: 'A duplicate report for this case was merged in.',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {'duplicateCaseId': duplicateCaseId, 'role': 'primary'},
+        fields: {'mergedCaseIds': FieldValue.arrayUnion([duplicateCaseId])},
+      );
     });
   }
 }

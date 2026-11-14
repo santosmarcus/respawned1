@@ -151,7 +151,7 @@ class StrayReportFields extends StatelessWidget {
             const Text(
               '*',
               style: TextStyle(
-                color: Colors.red,
+                color: AppColors.error,
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
               ),
@@ -308,7 +308,7 @@ class StrayReportFields extends StatelessWidget {
             const Text(
               '*',
               style: TextStyle(
-                color: Colors.red,
+                color: AppColors.error,
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
               ),
@@ -410,7 +410,7 @@ class StrayReportFields extends StatelessWidget {
               const Text(
                 '*',
                 style: TextStyle(
-                  color: Colors.red,
+                  color: AppColors.error,
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
                 ),

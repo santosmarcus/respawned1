@@ -276,7 +276,7 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
                     _favorited ? Icons.favorite : Icons.favorite_border,
                     size: 26,
                     color: _favorited
-                        ? const Color(0xFFE05C5C)
+                        ? AppColors.error
                         : AppColors.textPrimary,
                   ),
                 ),
@@ -525,12 +525,7 @@ class _AdoptOrViewStatusButton extends StatelessWidget {
     height: 52,
     child: ElevatedButton(
       onPressed: onTap,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: AppColors.yellowrspwn,
-        foregroundColor: AppColors.textPrimary,
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
+      style: AppButtons.primary,
       child: Text(label, style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
     ),
   );

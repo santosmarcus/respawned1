@@ -333,7 +333,7 @@ class _EventCard extends StatelessWidget {
                         : Icons.favorite_border,
                     size: 22,
                     color: event.favorited
-                        ? const Color(0xFFE05C5C)
+                        ? AppColors.error
                         : AppColors.textPrimary,
                   ),
                 ),
@@ -363,7 +363,7 @@ class _EventCard extends StatelessWidget {
                             style: GoogleFonts.zain(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.redAccent))
+                                color: AppColors.error))
                       else if (event.isFull && !event.joined)
                         Text('Full',
                             style: GoogleFonts.zain(
