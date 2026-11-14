@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
+import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/features/volunteerevent/event_detail_page.dart';
 
 import 'organization_model.dart';
@@ -623,18 +624,14 @@ class _OrgDonation {
   int get percentage =>
       target == 0 ? 0 : ((collected / target) * 100).clamp(0, 100).round();
 
-  factory _OrgDonation.fromFirestore(
-      QueryDocumentSnapshot<Map<String, dynamic>> doc,
-      bool favorited,
-      ) {
-    final data = doc.data();
+  factory _OrgDonation.fromListing(DonationListing listing, bool favorited) {
     return _OrgDonation(
-      id: doc.id,
-      title: data['title'] as String? ?? '',
-      target: (data['target'] as num?)?.toInt() ?? 0,
-      collected: (data['collected'] as num?)?.toInt() ?? 0,
-      dateleft: (data['dateleft'] as num?)?.toInt() ?? 0,
-      imageUrl: data['imageUrl'] as String?,
+      id: listing.id,
+      title: listing.title,
+      target: listing.target.round(),
+      collected: listing.collected.round(),
+      dateleft: listing.daysRemaining,
+      imageUrl: listing.imageUrl,
       favorited: favorited,
     );
   }
@@ -708,8 +705,11 @@ class _DonationsTabState extends State<_DonationsTab> {
     }
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      // The organization's campaigns. This used to query `donations`, which
+      // holds individual donor records (names, notes, receipts) and is now
+      // readable only by the donor and staff.
       stream: FirebaseFirestore.instance
-          .collection('donations')
+          .collection('campaigns')
           .where('organizationId', isEqualTo: widget.organizationId)
           .snapshots(),
       builder: (context, snapshot) {
@@ -717,7 +717,10 @@ class _DonationsTabState extends State<_DonationsTab> {
           return const Center(
               child: CircularProgressIndicator(color: AppColors.greenrspwn));
         }
-        final docs = snapshot.data!.docs;
+        final docs = snapshot.data!.docs
+            .map(DonationListing.fromFirestore)
+            .where((l) => l.status == 'active' && !l.isEnded)
+            .toList();
         if (docs.isEmpty) {
           return Center(
             child: Text('No active donation drives.',
@@ -726,8 +729,7 @@ class _DonationsTabState extends State<_DonationsTab> {
         }
 
         final donations = docs
-            .map((d) =>
-            _OrgDonation.fromFirestore(d, _favoriteIds.contains(d.id)))
+            .map((l) => _OrgDonation.fromListing(l, _favoriteIds.contains(l.id)))
             .toList();
 
         return ListView.separated(

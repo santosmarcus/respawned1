@@ -16,6 +16,7 @@ import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_create.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
@@ -1404,7 +1405,7 @@ class _VerticalActionButton extends StatelessWidget {
   }
 }
 
-class _CostTrackingSection extends StatelessWidget {
+class _CostTrackingSection extends ConsumerWidget {
   final String caseId;
   final RescueCase rescueCase;
   final List<Expense> allExpenses;
@@ -1426,7 +1427,9 @@ class _CostTrackingSection extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Recording expenses is for financial administrators (firestore.rules).
+    final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
     // Total/Funded/Outstanding always reflect the whole case (never
     // filtered by animal — Close Case's own financial summary and every
     // other reader of these totals expects the case-wide figure). The
@@ -1505,38 +1508,39 @@ class _CostTrackingSection extends StatelessWidget {
                   ),
                 ),
               ),
-              ElevatedButton(
-                onPressed: () => showAddEditExpenseSheet(
-                  context,
-                  caseId: caseId,
-                  animalOptions: animalOptions,
-                  initialAnimalIndexes: selectedAnimalIndex != null
-                      ? {selectedAnimalIndex!}
-                      : const {},
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.yellowrspwn,
-                  // Explicit foreground — without it this falls back to the
-                  // theme's ColorScheme.onPrimary, which (since the app
-                  // theme overrides `primary` to yellowrspwn without
-                  // recomputing onPrimary to match) is too close to the
-                  // yellow background to read. Same fix as the other
-                  // primary yellow buttons in this file.
-                  foregroundColor: AppColors.textPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+              if (canFinance)
+                ElevatedButton(
+                  onPressed: () => showAddEditExpenseSheet(
+                    context,
+                    caseId: caseId,
+                    animalOptions: animalOptions,
+                    initialAnimalIndexes: selectedAnimalIndex != null
+                        ? {selectedAnimalIndex!}
+                        : const {},
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.yellowrspwn,
+                    // Explicit foreground — without it this falls back to the
+                    // theme's ColorScheme.onPrimary, which (since the app
+                    // theme overrides `primary` to yellowrspwn without
+                    // recomputing onPrimary to match) is too close to the
+                    // yellow background to read. Same fix as the other
+                    // primary yellow buttons in this file.
+                    foregroundColor: AppColors.textPrimary,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  child: Text(
+                    'Add Expense',
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
-                child: Text(
-                  'Add Expense',
-                  style: GoogleFonts.zain(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
               OutlinedButton(
                 onPressed: outstandingBalance <= 0
                     ? null

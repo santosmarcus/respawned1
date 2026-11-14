@@ -105,6 +105,13 @@ These commits landed before the `dev` merge and are in this branch's history. Th
 **Checklist for these:** add a single care record and a batch of past records, then check the badges and history. Mark an animal in active treatment as adoptable (should be blocked), then one that's discharged (should ask for confirmations).
 
 ### Known gaps
+- **Access-control pass (not deployed yet, needs the same coordinated release):**
+  - Animal medical subcollections (`medications`, `medicationDoses`, `vaccinations`, `careRecords`, `careUpdates`, `medicalEpisodes`) are readable only by the owning org's staff, its carers and platform staff. The animal doc itself stays readable.
+  - `donations` is readable only by the donor and staff. The public donor count now reads `campaigns/{id}.numdonors`, and the organization profile's Donations tab now lists the org's campaigns (it was listing raw donation records).
+  - Case `expenses` are written only by financial admins of the owning org (or a platform `admin`). Other staff see them read-only; transporters and reporters can't read them.
+  - Audit Rescue/Records tabs query by `organizationId`. The new `stampCaseLogOrganization` / `stampAnimalLogOrganization` functions (`functions/audit_logs.js`) stamp each new log from its parent.
+  - Release order: deploy functions and `firestore:indexes`, run `node scripts/backfill_log_organization_ids.js --project=respawnd1-45021` (dry run, then `--apply`), ship the app build, then deploy `firestore:rules`. Older app builds lose the public donor count, the org profile Donations tab and the two Audit tabs once the rules are live.
+  - Still open: dashboard collection-group reads (`vaccinations`, `careRecords`, `medications`, `medicationDoses`, `expenses`) are staff-wide across organizations, and medical photos in Storage (`animalRecords/{id}/careUpdates`, `doseMedia`) are still readable by any signed-in user who knows or lists the path.
 - **Rules not deployed yet (needs a coordinated release):** the adoptions read lock and readiness gate in `firestore.rules`. The `hasBlockingAdoption` callable (`functions/adoptions.js`) is deployed. App builds from before this change query adoptions without an organization filter and check availability client-side, so they break once the lock is live. Next: ship the new app build, then `firebase deploy --only firestore:rules`.
 - Adoption applications with no `organizationId` (from animals that had none) are readable only by their adopter and platform staff after the lock.
 - `users` and `cases` are still readable by any signed-in user (public case map, profiles). Admin-only case actions are enforced in the app only.
@@ -112,7 +119,7 @@ These commits landed before the `dev` merge and are in this branch's history. Th
 - Missed medication doses show on the animal's Medical tab, not in the dashboard alerts (would need a collection-group index on dose dates).
 - NFC tags for animals are not implemented. QR tags are.
 - Volunteer referral is a stub ("coming soon"), kept as is.
-- Rules tests: `cd rules-tests && npm test` (60 passing; needs Java 21, Android Studio's `jbr` works as `JAVA_HOME`).
+- Rules tests: `cd rules-tests && npm test` (92 passing; needs Java 21, Android Studio's `jbr` works as `JAVA_HOME`).
 - Function deploys need `functions/.env` with `PAYMENT_RETURN_BASE_URL=https://respawnd1-45021.web.app` (gitignored) and the `FB_APP_ID`/`FB_APP_SECRET` secrets (set).
 
 ### Done since the interview plan

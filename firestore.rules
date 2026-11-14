@@ -469,8 +469,14 @@ service cloud.firestore {
     }
 
     match /donations/{donationId} {
-      // donation_detail.dart counts donors for any campaign.
-      allow read: if signedIn();
+      // Donor records (names, notes, addresses, receipts): the donor and
+      // organization staff (not carers). Public donor counts come from
+      // campaigns/{id}.numdonors. Direct field access so the donor's own
+      // queries (where userId == uid) can be proven.
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgStaff()
+      );
       // Monetary records are only ever created by the backend.
       allow create: if signedIn() && inKindCreate(request.auth.uid);
       allow update: if signedIn()
@@ -649,6 +655,17 @@ service cloud.firestore {
         (isTransporterRole() && (isAssignedTransporter(data) || isOfferedTransporter(caseId, data)));
     }
 
+    // Mirrors loadActor({finance: true}) plus assertSameOrg in
+    // functions/campaigns.js: a platform 'admin', or an Admin member of the
+    // approved organization that owns the record.
+    function canFinanceCase(data) {
+      let orgId = data.get('organizationId', '');
+      return isFinanceAdmin() && (
+        myRole() == 'admin' ||
+        (orgId is string && orgId != '' && orgId == myOrgId() && isApprovedStaffOf(orgId))
+      );
+    }
+
     function canWorkCase(caseId) {
       let data = get(casePath(caseId)).data;
       return canStaffCase(data) ||
@@ -771,19 +788,30 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      // Treatment logs, expenses, referrals and anything else: case staff
-      // and the transporter working it.
+      // Case expenses are finance: the case's staff read them (treatment
+      // cost totals), and only financial administrators of the owning
+      // organization (or a platform 'admin') record, edit or delete them.
+      match /expenses/{expenseId} {
+        allow read: if canStaffCase(get(casePath(caseId)).data);
+        allow write: if canFinanceCase(get(casePath(caseId)).data);
+      }
+
+      // Treatment logs, referrals and anything else: case staff and the
+      // transporter working it.
       match /{sub}/{docId=**} {
-        allow read: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments']) &&
+        allow read: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments', 'expenses']) &&
           isCaseParticipant(caseId);
-        allow write: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments']) &&
+        allow write: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments', 'expenses']) &&
           canWorkCase(caseId);
       }
     }
 
     // ---- Animal records ----------------------------------------------------
     //
-    // Public profiles read them, so reads stay open to signed-in users.
+    // Public profiles read the animal document, so it stays readable to
+    // signed-in users. Its medical subcollections (medicalSubs) are read
+    // only by the owning organization's staff and its carers; the public
+    // profile and adopters see only the summary fields on the animal doc.
     // Only the owning organization's staff create and edit records and
     // their subcollections (vaccinations, managementLogs, ...).
 
@@ -793,6 +821,15 @@ service cloud.firestore {
 
     function canStaffAnimal(data) {
       return canStaffRecordOf(data.get('organizationId', ''));
+    }
+
+    function canReadAnimalMedical(animalId) {
+      let data = get(animalPath(animalId)).data;
+      return canStaffAnimal(data) || isCarerOf(data.get('organizationId', ''));
+    }
+
+    function medicalSubs() {
+      return ['medications', 'medicationDoses', 'vaccinations', 'careRecords', 'careUpdates', 'medicalEpisodes'];
     }
 
     // Adoption readiness gate: an animal only becomes adoptable with the
@@ -819,7 +856,7 @@ service cloud.firestore {
       // Dose records: carers of the owning org record the doses they give
       // (givenBy must be themselves); staff can record any dose.
       match /medicationDoses/{doseId} {
-        allow read: if signedIn();
+        allow read: if canReadAnimalMedical(animalId);
         allow create: if canStaffAnimal(get(animalPath(animalId)).data) || (
           isCarerOf(get(animalPath(animalId)).data.get('organizationId', '')) &&
           request.resource.data.get('givenBy', '') == request.auth.uid
@@ -836,7 +873,7 @@ service cloud.firestore {
       // Care updates: carers of the owning org and staff add their own
       // (authorId must be themselves, stamped now); nobody rewrites one.
       match /careUpdates/{updateId} {
-        allow read: if signedIn();
+        allow read: if canReadAnimalMedical(animalId);
         allow create: if signedIn() &&
           request.resource.data.get('authorId', '') == request.auth.uid &&
           request.resource.data.get('createdAt', null) == request.time &&
@@ -849,7 +886,8 @@ service cloud.firestore {
       }
 
       match /{sub}/{docId=**} {
-        allow read: if signedIn();
+        allow read: if (!(sub in medicalSubs()) && signedIn()) ||
+          (sub in medicalSubs() && canReadAnimalMedical(animalId));
         allow write: if sub != 'careUpdates' && canStaffAnimal(get(animalPath(animalId)).data);
       }
     }
@@ -1006,12 +1044,22 @@ service cloud.firestore {
       allow read: if isOrgStaff();
     }
 
+    // Audit page, Records and Rescue tabs. stampAnimalLogOrganization /
+    // stampCaseLogOrganization (functions/audit_logs.js) copy the parent's
+    // organizationId onto each log; staff see only their own
+    // organization's, through a query that filters on it.
+    function canReadOrgLog() {
+      return isPlatformStaff() ||
+        (resource.data.get('organizationId', '') != '' &&
+          isApprovedStaffOf(resource.data.get('organizationId', '')));
+    }
+
     match /{path=**}/managementLogs/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgLog();
     }
 
     match /{path=**}/activityLogs/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgLog();
     }
 
     match /{path=**}/followUps/{docId} {

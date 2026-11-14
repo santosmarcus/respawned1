@@ -25,10 +25,13 @@ final auditCategoryLogsProvider =
   (ref, key) => ref.watch(auditLogRepositoryProvider).streamCategory(key.category, organizationId: key.organizationId),
 );
 
-final animalRecordAuditProvider = StreamProvider<List<AuditDisplayRow>>(
-  (ref) => ref.watch(auditLogRepositoryProvider).streamAnimalRecordChanges(),
+// Keyed by organizationId for the same reason as auditCategoryLogsProvider.
+final animalRecordAuditProvider = StreamProvider.family<List<AuditDisplayRow>, String?>(
+  (ref, organizationId) =>
+      ref.watch(auditLogRepositoryProvider).streamAnimalRecordChanges(organizationId: organizationId),
 );
 
-final rescueCaseAuditProvider = StreamProvider<List<AuditDisplayRow>>(
-  (ref) => ref.watch(auditLogRepositoryProvider).streamRescueCaseChanges(),
+final rescueCaseAuditProvider = StreamProvider.family<List<AuditDisplayRow>, String?>(
+  (ref, organizationId) =>
+      ref.watch(auditLogRepositoryProvider).streamRescueCaseChanges(organizationId: organizationId),
 );

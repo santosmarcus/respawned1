@@ -132,19 +132,19 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
   @override
   Widget build(BuildContext context) {
     if (widget.category == AuditCategory.animalRecords) {
-      final rowsAsync = ref.watch(animalRecordAuditProvider);
+      final rowsAsync = ref.watch(animalRecordAuditProvider(widget.organizationId));
       return _buildAuditSection(
         rows: rowsAsync.value,
         hasError: rowsAsync.hasError,
-        onRetry: () => ref.invalidate(animalRecordAuditProvider),
+        onRetry: () => ref.invalidate(animalRecordAuditProvider(widget.organizationId)),
       );
     }
     if (widget.category == AuditCategory.rescueCases) {
-      final rowsAsync = ref.watch(rescueCaseAuditProvider);
+      final rowsAsync = ref.watch(rescueCaseAuditProvider(widget.organizationId));
       return _buildAuditSection(
         rows: rowsAsync.value,
         hasError: rowsAsync.hasError,
-        onRetry: () => ref.invalidate(rescueCaseAuditProvider),
+        onRetry: () => ref.invalidate(rescueCaseAuditProvider(widget.organizationId)),
       );
     }
     final key = (category: widget.category, organizationId: widget.organizationId);

@@ -211,26 +211,15 @@ class _DonationDetailPageState extends State<DonationDetail> {
                     style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
               ],
             ),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('donations')
-                  .where('campaignId', isEqualTo: donation.id)
-                  .snapshots(),
+            // Donation records are private to donors and staff
+            // (firestore.rules), so the count comes from the campaign's
+            // numdonors, which the backend and in-kind pledges keep current.
+            StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance.collection('campaigns').doc(donation.id).snapshots(),
               builder: (context, snapshot) {
-                int uniqueDonors = 0;
-                if (snapshot.hasData) {
-                  final eligibleDocs = snapshot.data!.docs.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final type = data['type'] as String?;
-                    final status = data['status'] as String?;
-                    if (type == 'inkind') {
-                      return status == 'complete';
-                    }
-                    return true; // Monetary donations always count
-                  });
-                  uniqueDonors = eligibleDocs.map((doc) => (doc.data() as Map<String, dynamic>)['userId'] ?? doc.id).toSet().length;
-                }
-                return Text('$uniqueDonors people have donated', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary));
+                final count = (snapshot.data?.data()?['numdonors'] as num?)?.toInt() ?? donation.numdonated;
+                return Text('$count ${count == 1 ? 'person has' : 'people have'} donated',
+                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary));
               },
             ),
           ],

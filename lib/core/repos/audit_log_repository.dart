@@ -92,10 +92,15 @@ class AuditLogRepository {
 
   /// Animal Record Changes — reuses the existing per-animal
   /// `managementLogs` subcollections via a `collectionGroup` query across
-  /// every animal at once, rather than a parallel write path.
-  Stream<List<AuditDisplayRow>> streamAnimalRecordChanges({int limit = 30}) {
+  /// every animal at once, rather than a parallel write path. Each log is
+  /// stamped with its animal's organizationId by the stampLogOrganization
+  /// Cloud Function; firestore.rules only lets staff read their own
+  /// organization's logs, and only through a query that filters on it.
+  Stream<List<AuditDisplayRow>> streamAnimalRecordChanges({String? organizationId, int limit = 30}) {
+    if (organizationId == null || organizationId.isEmpty) return Stream.value(const []);
     return _db
         .collectionGroup('managementLogs')
+        .where('organizationId', isEqualTo: organizationId)
         .orderBy('timestamp', descending: true)
         .limit(limit)
         .snapshots()
@@ -103,10 +108,12 @@ class AuditLogRepository {
   }
 
   /// Rescue and Case Changes — reuses the existing per-case
-  /// `activityLogs` subcollections the same way.
-  Stream<List<AuditDisplayRow>> streamRescueCaseChanges({int limit = 30}) {
+  /// `activityLogs` subcollections the same way, scoped the same way.
+  Stream<List<AuditDisplayRow>> streamRescueCaseChanges({String? organizationId, int limit = 30}) {
+    if (organizationId == null || organizationId.isEmpty) return Stream.value(const []);
     return _db
         .collectionGroup('activityLogs')
+        .where('organizationId', isEqualTo: organizationId)
         .orderBy('timestamp', descending: true)
         .limit(limit)
         .snapshots()

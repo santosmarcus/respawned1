@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
@@ -77,6 +78,9 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
   @override
   Widget build(BuildContext context) {
     final expensesAsync = ref.watch(expensesProvider(widget.caseId));
+    // Only financial administrators add, edit or delete expenses
+    // (firestore.rules); other staff see the list read-only.
+    final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -88,16 +92,18 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
         ),
         title: Text('Expenses', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppColors.yellowrspwn,
-        onPressed: () => showAddEditExpenseSheet(
-          context,
-          caseId: widget.caseId,
-          animalOptions: widget.animalOptions,
-          initialAnimalIndexes: _selectedAnimalIndex != null ? {_selectedAnimalIndex!} : const {},
-        ),
-        child: const Icon(Icons.add, color: AppColors.textPrimary),
-      ),
+      floatingActionButton: !canFinance
+          ? null
+          : FloatingActionButton(
+              backgroundColor: AppColors.yellowrspwn,
+              onPressed: () => showAddEditExpenseSheet(
+                context,
+                caseId: widget.caseId,
+                animalOptions: widget.animalOptions,
+                initialAnimalIndexes: _selectedAnimalIndex != null ? {_selectedAnimalIndex!} : const {},
+              ),
+              child: const Icon(Icons.add, color: AppColors.textPrimary),
+            ),
       body: Column(
         children: [
           if (widget.animalOptions.length > 1)
@@ -199,25 +205,27 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
                         Text(formatPeso(e.amount),
                             style: GoogleFonts.zain(
                                 fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            GestureDetector(
-                              onTap: () => showAddEditExpenseSheet(
-                                context,
-                                caseId: widget.caseId,
-                                existing: e,
-                                animalOptions: widget.animalOptions,
+                        if (canFinance) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              GestureDetector(
+                                onTap: () => showAddEditExpenseSheet(
+                                  context,
+                                  caseId: widget.caseId,
+                                  existing: e,
+                                  animalOptions: widget.animalOptions,
+                                ),
+                                child: const Icon(Icons.edit_outlined, size: 18, color: AppColors.textPrimary),
                               ),
-                              child: const Icon(Icons.edit_outlined, size: 18, color: AppColors.textPrimary),
-                            ),
-                            const SizedBox(width: 10),
-                            GestureDetector(
-                              onTap: () => _delete(context, ref, e),
-                              child: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
-                            ),
-                          ],
-                        ),
+                              const SizedBox(width: 10),
+                              GestureDetector(
+                                onTap: () => _delete(context, ref, e),
+                                child: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ],

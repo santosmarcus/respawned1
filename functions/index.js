@@ -1100,3 +1100,5 @@ Object.assign(exports, require('./campaigns'));
 
 // Cross-applicant adoption checks (reads the client can't do) — see functions/adoptions.js.
 Object.assign(exports, require('./adoptions'));
+// Organization stamp on case/animal logs for the Audit page — see functions/audit_logs.js.
+Object.assign(exports, require('./audit_logs'));
