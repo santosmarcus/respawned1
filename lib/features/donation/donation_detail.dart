@@ -46,7 +46,7 @@ class _DonationDetailPageState extends State<DonationDetail> {
 
   Future<void> _loadLinkedAnimal() async {
     try {
-      final doc = await FirebaseFirestore.instance.collection('animals').doc(widget.donation.animalId).get();
+      final doc = await FirebaseFirestore.instance.collection('publicAnimals').doc(widget.donation.animalId).get();
       if (doc.exists && mounted) {
         setState(() => _linkedAnimal = SponsorPet.fromFirestore(doc));
       }

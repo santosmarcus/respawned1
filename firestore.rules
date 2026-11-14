@@ -617,6 +617,7 @@ service cloud.firestore {
     //     fields);
     //   - pet transporters / rescue volunteers: the one assigned or offered
     //     the case, an open-pool claim of a pending case, or a decline;
+    //   - the rider sent to verify a report, for the result of that visit;
     //   - any user registering interest to adopt/foster, the interested
     //     adopter reporting arrival, and community adoption claims.
 
@@ -699,9 +700,13 @@ service cloud.firestore {
           );
       }
 
+      // The reporter answers a live-proof request (liveProof) but never
+      // writes the request, the evidence recorded with the report, or the
+      // verification result.
       function reporterUpdate() {
         return resource.data.get('reporterId', '') == request.auth.uid &&
-          !changedAny(['reporterId', 'organizationId', 'riderId', 'assignedVolunteerId']) &&
+          !changedAny(['reporterId', 'organizationId', 'riderId', 'assignedVolunteerId',
+            'verification', 'liveProofRequest', 'reportEvidence']) &&
           (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data));
       }
 
@@ -733,6 +738,23 @@ service cloud.firestore {
           changedOnly(['currentAssignmentId']);
       }
 
+      // CaseVerificationRepository.recordRiderOutcome: the rider staff sent
+      // to check the location records what they found on that visit. Only
+      // the result keys under `verification`, and the case may go from
+      // verifying back to review.
+      function verifierUpdate() {
+        let before = resource.data.get('verification', {});
+        let after = request.resource.data.get('verification', {});
+        return before.get('riderId', '') == request.auth.uid &&
+          changedOnly(['verification', 'statusHistory', 'status']) &&
+          after.diff(before).affectedKeys().hasOnly([
+            'riderOutcome', 'riderNote', 'riderMediaUrls', 'riderMediaTypes',
+            'riderRecordedAt', 'riderRecordedBy', 'riderRecordedByName', 'riderLat', 'riderLng'
+          ]) &&
+          (!changedAny(['status']) ||
+            (resource.data.get('status', '') == 'verifying' && request.resource.data.status == 'pending'));
+      }
+
       allow read: if signedIn();
       // Reporters file unowned reports only; an organization claims a case
       // through its staff, never by stamping it at creation.
@@ -747,7 +769,8 @@ service cloud.firestore {
         transporterUpdate() ||
         willingAdopterUpdate() ||
         communityClaimUpdate() ||
-        clearOfferPointer()
+        clearOfferPointer() ||
+        verifierUpdate()
       );
       allow delete: if isPlatformStaff();
 
@@ -847,8 +870,29 @@ service cloud.firestore {
         request.resource.data.get('adoptionReadiness', null) is map;
     }
 
+    // The full animal record: the owning organization's staff and carers,
+    // platform staff, and the user it is reserved for or adopted by. Staff
+    // list queries filter on organizationId (AnimalRecordRepository's
+    // scoped queries) so the rule can be proven for every result. Everyone
+    // else reads publicAnimals.
+    //
+    // organizationId is read without a default on purpose: in a list query
+    // that doesn't filter on it, data.get('organizationId', '') evaluates
+    // to '' ("not owned yet"), which every organization's staff may read,
+    // and the query would return other organizations' animals. Read
+    // directly, an unfiltered query is denied. Records missing the field
+    // are readable by platform staff only (scripts/backfill_organization_ids.js).
+    function canReadAnimal(data) {
+      return signedIn() && (
+        isPlatformStaff() ||
+        data.get('reservedForUserId', '') == request.auth.uid ||
+        data.get('adoptedByUserId', '') == request.auth.uid ||
+        canStaffRecordOf(data.organizationId) ||
+        isCarerOf(data.organizationId));
+    }
+
     match /animals/{animalId} {
-      allow read: if signedIn();
+      allow read: if canReadAnimal(resource.data);
       allow create: if canStaffRecordOf(request.resource.data.get('organizationId', '')) && readinessOnCreateOk();
       allow update: if canStaffAnimal(resource.data) && orgStampOk() && readinessOnUpdateOk();
       allow delete: if isPlatformStaff();
@@ -890,6 +934,15 @@ service cloud.firestore {
           (sub in medicalSubs() && canReadAnimalMedical(animalId));
         allow write: if sub != 'careUpdates' && canStaffAnimal(get(animalPath(animalId)).data);
       }
+    }
+
+    // Public profile of an animal, written only by the syncPublicAnimal
+    // function (functions/public_animals.js): the fields meant for the
+    // public and a yes/no health summary. Exists while the animal is not
+    // archived, hidden or deceased.
+    match /publicAnimals/{animalId} {
+      allow read: if signedIn();
+      allow write: if false;
     }
 
     // ---- Adoption applications ---------------------------------------------
@@ -1157,7 +1210,7 @@ service cloud.firestore {
         'facebookConnectRequests', 'facebookShares',
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
-        'users', 'cases', 'animals', 'adoptions', 'volunteerApplications',
+        'users', 'cases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
         'transporterApplications', 'auditLogs', 'orgExpenses'
       ]);
     }

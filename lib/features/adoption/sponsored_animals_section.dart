@@ -81,7 +81,7 @@ class _SponsoredAnimalTile extends StatelessWidget {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: sponsorship.animalRecordId.isEmpty
           ? null
-          : FirebaseFirestore.instance.collection('animals').doc(sponsorship.animalRecordId).snapshots(),
+          : FirebaseFirestore.instance.collection('publicAnimals').doc(sponsorship.animalRecordId).snapshots(),
       builder: (context, snap) {
         final data = snap.data?.data();
         final record = data == null ? null : AnimalRecord.fromMap(sponsorship.animalRecordId, data);

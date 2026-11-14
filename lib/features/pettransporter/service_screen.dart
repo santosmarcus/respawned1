@@ -8,6 +8,7 @@ import 'package:respawnd1/features/pettransporter/rescue_request.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
+import 'package:respawnd1/features/pettransporter/verification_visit_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
@@ -183,9 +184,17 @@ class _ServiceScreenState extends State<ServiceScreen> {
     );
   }
 
+  /// Location checks staff assigned to this rider by name, shown whether
+  /// they are online or not.
+  Widget _verificationVisits() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return uid == null ? const SizedBox.shrink() : VerificationVisitsBanner(riderUid: uid);
+  }
+
   Widget _buildOfflineView() {
     return Column(
       children: [
+        _verificationVisits(),
         Expanded(
           child: Container(
             margin: const EdgeInsets.all(16),
@@ -301,6 +310,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
     return Column(
       children: [
+        _verificationVisits(),
         Expanded(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),

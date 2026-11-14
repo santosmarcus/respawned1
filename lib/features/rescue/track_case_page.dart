@@ -13,6 +13,7 @@ import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
+import 'package:respawnd1/features/rescue/widgets/live_proof_request_card.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
@@ -873,6 +874,8 @@ class _TrackingTabState extends State<_TrackingTab> {
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       children: [
+        // The rescue team is waiting on a fresh photo from the reporter.
+        if (widget.isReporter) LiveProofRequestCard(caseId: widget.caseId, data: widget.data),
         _collapsibleHeader(
           title: 'Tracking Progress',
           expanded: _trackingExpanded,

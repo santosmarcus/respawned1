@@ -97,12 +97,19 @@ service firebase.storage {
           caseData().get('assignedVolunteerId', '') == request.auth.uid;
       }
 
+      // The rider staff sent to check the location before acceptance
+      // (cases/{id}.verification.riderId).
+      function isVerifyingRider() {
+        return caseData().get('verification', {}).get('riderId', '') == request.auth.uid;
+      }
+
       // rescue_report_service.dart (media_N), transit_case_service.dart
-      // (pickup/clinic/shelter verification photos).
+      // (pickup/clinic/shelter verification photos), the reporter's live
+      // proof (proof_N) and the verification visit photos (verify_N).
       match /{file} {
         allow read: if signedIn();
         allow write: if signedIn() && mediaUpload() &&
-          (isReporter() || isAssignedTransporter() || isStaff());
+          (isReporter() || isAssignedTransporter() || isVerifyingRider() || isStaff());
       }
 
       // community_report_section.dart — anyone can attach a sighting photo.

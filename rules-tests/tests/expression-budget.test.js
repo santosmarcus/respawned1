@@ -45,3 +45,13 @@ test("another organization's staff claiming a community adoption fits the budget
 test('clearing a stale offer pointer from a viewer fits the budget', async () => {
   await assertSucceeds(as('stranger').doc('cases/offered').update({ currentAssignmentId: FieldValue.delete() }));
 });
+
+test("a rider's verification result fits the budget", async () => {
+  // The last branch of the update rule: every other writer is ruled out first.
+  await assertSucceeds(as('rider').doc('cases/verifying1').update({
+    'verification.riderOutcome': 'notFound', 'verification.riderNote': 'nothing here',
+    'verification.riderRecordedBy': 'rider', 'verification.riderRecordedAt': FieldValue.serverTimestamp(),
+    status: 'pending',
+    statusHistory: FieldValue.arrayUnion({ status: 'not found' }),
+  }));
+});

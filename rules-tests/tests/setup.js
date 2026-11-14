@@ -65,6 +65,11 @@ export async function seed(env) {
     await db.doc('cases/assigned').set({
       reporterId: 'reporter', status: 'assigned', organizationId: 'orgA', riderId: 'rider', assignedVolunteerId: 'rider',
     });
+    // Unowned report with a rider sent to check the location.
+    await db.doc('cases/verifying1').set({
+      reporterId: 'reporter', status: 'verifying', verifyingOrganizationId: 'orgA',
+      verification: { deskOutcome: 'needsRider', deskBy: 'staffA', riderId: 'rider', riderName: 'Rider One' },
+    });
 
     await db.doc('animals/animalA').set({ name: 'Mochi', organizationId: 'orgA', adoptionStatus: 'adoptable' });
     await db.doc('adoptions/appA').set({

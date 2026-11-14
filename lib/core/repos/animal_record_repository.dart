@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
@@ -24,6 +26,7 @@ class AnimalRecordRepository {
   final RescueCaseRepository _caseRepo;
 
   CollectionReference<Map<String, dynamic>> get _animals => _db.collection('animals');
+  CollectionReference<Map<String, dynamic>> get _publicAnimals => _db.collection('publicAnimals');
   DocumentReference<Map<String, dynamic>> _animalDoc(String animalId) => _animals.doc(animalId);
   CollectionReference<Map<String, dynamic>> _episodesOf(String animalId) =>
       _animalDoc(animalId).collection('medicalEpisodes');
@@ -40,12 +43,106 @@ class AnimalRecordRepository {
     return _animalDoc(animalId).snapshots().map((doc) => doc.exists ? AnimalRecord.fromFirestore(doc) : null);
   }
 
-  /// Every animal record — the list page applies search/filter/sort
-  /// entirely client-side on top of this (same pattern
-  /// OrganizationDirectoryRepository.search already uses), since Firestore
-  /// can't combine free-text search across this many fields with the full
-  /// range of sort options in one query. Fine at shelter-record scale.
-  ///
+  /// Public profiles (`publicAnimals/{id}`), the copy of each animal that
+  /// isn't archived, hidden or deceased, written by the syncPublicAnimal
+  /// function. What every non-staff screen reads: the adoption list, an
+  /// animal's public page, a sponsor's or donor's view, a scanned QR tag.
+  /// Parsed with [AnimalRecord.fromFirestore]; fields that aren't public
+  /// (health details, reservation, rescue case, ...) come back empty.
+  Stream<List<AnimalRecord>> streamPublicAnimals({String? organizationId}) {
+    final Query<Map<String, dynamic>> q = organizationId == null
+        ? _publicAnimals
+        : _publicAnimals.where('organizationId', isEqualTo: organizationId);
+    return q.snapshots().map(_parseAll);
+  }
+
+  Stream<AnimalRecord?> streamPublicAnimal(String animalId) {
+    return _publicAnimals.doc(animalId).snapshots().map((doc) => doc.exists ? AnimalRecord.fromFirestore(doc) : null);
+  }
+
+  /// Every animal record the signed-in account may list — the list page
+  /// applies search/filter/sort entirely client-side on top of this (same
+  /// pattern OrganizationDirectoryRepository.search already uses), since
+  /// Firestore can't combine free-text search across this many fields with
+  /// the full range of sort options in one query. Fine at shelter-record
+  /// scale. Platform staff get every animal, organization staff their own
+  /// organization's (see [_listScope]).
+  Stream<List<AnimalRecord>> streamAllAnimalRecords() => _scopedRecords((q) => q);
+
+  /// Every record created from one source rescue/intake case, ordered by
+  /// [AnimalRecord.sourceAnimalIndex] — powers "View Animal Record(s)" from
+  /// Intake Details (see AnimalRecordsFlowPage).
+  Stream<List<AnimalRecord>> streamRecordsForCase(String caseId) {
+    return _scopedRecords((q) => q.where('linkedCaseId', isEqualTo: caseId)).map((records) {
+      records.sort((a, b) => (a.sourceAnimalIndex ?? 0).compareTo(b.sourceAnimalIndex ?? 0));
+      return records;
+    });
+  }
+
+  /// One-shot version of the scoped list queries, for save-time checks.
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> queryScoped(
+    Query<Map<String, dynamic>> Function(Query<Map<String, dynamic>> q) refine,
+  ) async {
+    final scope = await _listScope();
+    if (scope == null) return (await refine(_animals).get()).docs;
+    final docs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+    for (final org in scope) {
+      try {
+        docs.addAll((await refine(_animals.where('organizationId', isEqualTo: org)).get()).docs);
+      } on FirebaseException {
+        // Legacy records with no organization are readable only by
+        // organization staff; a carer is denied them.
+        if (org.isNotEmpty) rethrow;
+      }
+    }
+    return docs;
+  }
+
+  /// The organizations whose animals the signed-in account may list, or
+  /// null for every animal (platform staff). firestore.rules'
+  /// canReadAnimal can only prove a list query that filters on
+  /// organizationId, so staff read their own organization plus legacy
+  /// records that have none.
+  Future<List<String>?> _listScope() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const [];
+    final user = (await _db.collection('users').doc(uid).get()).data() ?? const <String, dynamic>{};
+    if (const ['admin', 'ngo_staff'].contains(user['role'])) return null;
+    final orgId = (user['organizationId'] as String?) ?? '';
+    return orgId.isEmpty ? const [] : [orgId, ''];
+  }
+
+  Stream<List<AnimalRecord>> _scopedRecords(
+    Query<Map<String, dynamic>> Function(Query<Map<String, dynamic>> q) refine,
+  ) async* {
+    final scope = await _listScope();
+    if (scope == null) {
+      yield* refine(_animals).snapshots().map(_parseAll);
+      return;
+    }
+    if (scope.isEmpty) {
+      yield const [];
+      return;
+    }
+    final streams = [
+      for (final org in scope)
+        refine(_animals.where('organizationId', isEqualTo: org))
+            .snapshots()
+            .map(_parseAll)
+            .transform(StreamTransformer<List<AnimalRecord>, List<AnimalRecord>>.fromHandlers(
+              handleError: (error, stack, sink) {
+                // See queryScoped: a carer is denied legacy records.
+                if (org.isEmpty) {
+                  sink.add(const []);
+                } else {
+                  sink.addError(error, stack);
+                }
+              },
+            )),
+    ];
+    yield* _combineLatest(streams).map((lists) => [for (final l in lists) ...l]);
+  }
+
   /// Parses each document individually inside its own try/catch —
   /// AnimalRecord.fromFirestore already has its own internal fallback for a
   /// field-level parse failure, but this is the outer safety net for
@@ -53,37 +150,16 @@ class AnimalRecordRepository {
   /// future field this model doesn't know about yet, ...): one bad
   /// document is logged and skipped, it never takes the whole list down
   /// with a single throw the way a bare `.map()` would.
-  Stream<List<AnimalRecord>> streamAllAnimalRecords() {
-    return _animals.snapshots().map((snap) {
-      final records = <AnimalRecord>[];
-      for (final doc in snap.docs) {
-        try {
-          records.add(AnimalRecord.fromFirestore(doc));
-        } catch (e) {
-          debugPrint('[AnimalRecordRepository] Skipping unparseable animal record ${doc.id}: $e');
-        }
+  static List<AnimalRecord> _parseAll(QuerySnapshot<Map<String, dynamic>> snap) {
+    final records = <AnimalRecord>[];
+    for (final doc in snap.docs) {
+      try {
+        records.add(AnimalRecord.fromFirestore(doc));
+      } catch (e) {
+        debugPrint('[AnimalRecordRepository] Skipping unparseable animal record ${doc.id}: $e');
       }
-      return records;
-    });
-  }
-
-  /// Every record created from one source rescue/intake case, ordered by
-  /// [AnimalRecord.sourceAnimalIndex] — powers "View Animal Record(s)" from
-  /// Intake Details (see AnimalRecordsFlowPage). Same per-doc isolation as
-  /// [streamAllAnimalRecords].
-  Stream<List<AnimalRecord>> streamRecordsForCase(String caseId) {
-    return _animals.where('linkedCaseId', isEqualTo: caseId).snapshots().map((snap) {
-      final records = <AnimalRecord>[];
-      for (final doc in snap.docs) {
-        try {
-          records.add(AnimalRecord.fromFirestore(doc));
-        } catch (e) {
-          debugPrint('[AnimalRecordRepository] Skipping unparseable animal record ${doc.id}: $e');
-        }
-      }
-      records.sort((a, b) => (a.sourceAnimalIndex ?? 0).compareTo(b.sourceAnimalIndex ?? 0));
-      return records;
-    });
+    }
+    return records;
   }
 
   Stream<List<MedicalEpisode>> streamMedicalEpisodes(String animalId) {
@@ -609,4 +685,33 @@ class AnimalRecordRepository {
       newValues: {'transferTargetType': targetType, 'transferTargetName': targetName},
     );
   }
+}
+
+/// Emits the latest value of every stream once each has emitted, then again
+/// whenever any of them does.
+Stream<List<T>> _combineLatest<T>(List<Stream<T>> streams) {
+  final subs = <StreamSubscription<T>>[];
+  final values = List<T?>.filled(streams.length, null);
+  final seen = List<bool>.filled(streams.length, false);
+  late final StreamController<List<T>> controller;
+  controller = StreamController<List<T>>(
+    onListen: () {
+      for (var i = 0; i < streams.length; i++) {
+        subs.add(streams[i].listen(
+          (v) {
+            values[i] = v;
+            seen[i] = true;
+            if (seen.every((s) => s)) controller.add(List<T>.from(values));
+          },
+          onError: controller.addError,
+        ));
+      }
+    },
+    onCancel: () async {
+      for (final s in subs) {
+        await s.cancel();
+      }
+    },
+  );
+  return controller.stream;
 }

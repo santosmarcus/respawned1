@@ -406,8 +406,9 @@ class _AdoptionsTabState extends State<_AdoptionsTab> {
     }
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      // Public profiles only: hidden, archived and deceased animals have none.
       stream: FirebaseFirestore.instance
-          .collection('animals')
+          .collection('publicAnimals')
           .where('organizationId', isEqualTo: widget.organizationId)
           .snapshots(),
       builder: (context, snapshot) {

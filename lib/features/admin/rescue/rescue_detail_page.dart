@@ -30,6 +30,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/possible_duplicate_sheet
 import 'package:respawnd1/features/admin/rescue/widgets/refer_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/referral_history_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rejection_reason_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/report_verification_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
@@ -71,28 +72,6 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   }
 
   String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
-
-  /// Sends a rider to confirm the location before acceptance (P1-7).
-  Future<void> _markVerifying(RescueCase c) async {
-    setState(() => _isLoading = true);
-    try {
-      final organizationId = await ref.read(currentOrganizationIdProvider.future);
-      await ref.read(rescueCaseRepositoryProvider).markVerifying(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-            organizationId: organizationId,
-          );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Could not update case: $e', kind: AppMessageKind.error),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
 
   Future<void> _acceptCase(RescueCase c) async {
     final result = await showAcceptCaseSheet(context);
@@ -891,21 +870,18 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             const SizedBox(height: 12),
             ReferralHistorySection(caseId: c.id),
 
+            // Desk check before accepting: evidence, live proof from the
+            // reporter, and the recorded result (including a rider visit).
+            ReportVerificationSection(
+              key: ValueKey('verification-${c.id}'),
+              rescueCase: c,
+              actorUid: _actorUid,
+              actorName: _actorName,
+            ),
+
             const SizedBox(height: 24),
 
             if (c.status == RescueStatus.pendingReview || c.status == RescueStatus.verifying) ...[
-              if (c.status == RescueStatus.pendingReview) ...[
-                OutlinedButton.icon(
-                  onPressed: _isLoading ? null : () => _markVerifying(c),
-                  icon: const Icon(Icons.search, size: 18),
-                  label: Text(
-                    'Send rider to verify',
-                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
-                  ),
-                  style: AppButtons.outline,
-                ),
-                const SizedBox(height: 12),
-              ],
               Row(
                 children: [
                   Expanded(

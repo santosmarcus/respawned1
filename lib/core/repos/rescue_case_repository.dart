@@ -20,6 +20,7 @@ import 'package:respawnd1/core/repos/rescue_case/case_expense_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/case_intake_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/case_referral_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/case_status_repository.dart';
+import 'package:respawnd1/core/repos/rescue_case/case_verification_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/clinic_assignment_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_query_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
@@ -56,7 +57,8 @@ class RescueCaseRepository {
       referrals = CaseReferralRepository(store),
       clinics = ClinicAssignmentRepository(store),
       treatment = TreatmentLogRepository(store),
-      expenses = CaseExpenseRepository(store);
+      expenses = CaseExpenseRepository(store),
+      verification = CaseVerificationRepository(store);
 
   final RescueCaseStore _store;
   final RescueCaseQueryRepository queries;
@@ -68,6 +70,7 @@ class RescueCaseRepository {
   final TransportAssignmentRepository transport;
   final TreatmentLogRepository treatment;
   final CaseExpenseRepository expenses;
+  final CaseVerificationRepository verification;
 
   /// Delegates to [RescueCaseQueryRepository.streamCasesByStatuses].
   Stream<List<RescueCase>> streamCasesByStatuses(List<RescueStatus> statuses) =>
@@ -240,19 +243,6 @@ class RescueCaseRepository {
   /// Delegates to [CaseDuplicateRepository.distanceKmBetween].
   double distanceKmBetween(RescueCase a, RescueCase b) =>
       duplicates.distanceKmBetween(a, b);
-
-  /// Delegates to [CaseStatusRepository.markVerifying].
-  Future<void> markVerifying({
-    required String caseId,
-    required String actorUid,
-    required String actorName,
-    String? organizationId,
-  }) => status.markVerifying(
-    caseId: caseId,
-    actorUid: actorUid,
-    actorName: actorName,
-    organizationId: organizationId,
-  );
 
   /// Delegates to [CaseStatusRepository.acceptCase].
   Future<void> acceptCase({

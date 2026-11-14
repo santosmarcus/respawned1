@@ -799,6 +799,54 @@ exports.notifyTransporterAssignment = onDocumentCreated(
   },
 );
 
+// ---- Report verification ------------------------------------------------
+//
+// Before a report is accepted, staff may ask the reporter for a fresh photo
+// (cases/{id}.liveProofRequest) or send a rider to check the location
+// (cases/{id}.verification.riderId). Each gets one push when it happens.
+function millisOf(ts) {
+  return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
+}
+
+exports.notifyCaseVerificationEvents = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after) return;
+    const caseId = event.params.caseId;
+
+    const askedBefore = millisOf((before.liveProofRequest || {}).requestedAt);
+    const askedAfter = millisOf((after.liveProofRequest || {}).requestedAt);
+    if (askedAfter && askedAfter !== askedBefore) {
+      await safeNotifyUser({
+        uid: after.reporterId,
+        title: 'A new photo is needed',
+        body: 'The rescue team asked for a new photo or video of the animal you reported. '
+          + 'Open the case to send one.',
+        data: {type: 'case_live_proof_requested', caseId},
+      });
+    }
+
+    const vBefore = before.verification || {};
+    const vAfter = after.verification || {};
+    const newVisit = vAfter.riderId && !vAfter.riderOutcome && (
+      vAfter.riderId !== vBefore.riderId ||
+      millisOf(vAfter.riderAssignedAt) !== millisOf(vBefore.riderAssignedAt)
+    );
+    if (newVisit) {
+      await safeNotifyUser({
+        uid: vAfter.riderId,
+        title: 'Location check requested',
+        body: after.address
+          ? `Please check whether the reported animal is at ${after.address}.`
+          : 'An organization asked you to check a reported location.',
+        data: {type: 'verification_visit', caseId},
+      });
+    }
+  },
+);
+
 function clinicAddressOf(c) {
   return (c.dropoffAddress || c.vetClinicAddress || '').trim();
 }
@@ -1102,3 +1150,5 @@ Object.assign(exports, require('./campaigns'));
 Object.assign(exports, require('./adoptions'));
 // Organization stamp on case/animal logs for the Audit page — see functions/audit_logs.js.
 Object.assign(exports, require('./audit_logs'));
+// Public copy of each animal for non-staff readers — see functions/public_animals.js.
+exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;

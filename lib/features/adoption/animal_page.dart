@@ -9,7 +9,7 @@ import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
 import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart' show genderIconFor;
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/animals/widgets/animal_medical_tab.dart' show MedicalProfileSection, SpecialNeedsSection, VaccineSection;
+import 'package:respawnd1/features/admin/animals/widgets/animal_medical_tab.dart' show PublicHealthSummarySection, SpecialNeedsSection;
 import 'adoption_page.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/features/adoption/adoption_process.dart';
@@ -473,10 +473,9 @@ class _ProfileTabContent extends StatelessWidget {
   }
 }
 
-/// Medical tab (spec section 8) — Medical Profile (read-only) + Vaccines +
-/// Special Needs (only when meaningful). No admin Edit affordances. Needs
-/// the real `animals/{id}` AnimalRecord (not just the lighter `Animal`
-/// display model this page otherwise uses) for health/vaccination data —
+/// Medical tab (spec section 8): the yes/no health summary from the
+/// animal's public profile (`publicAnimals/{id}`), plus special needs when
+/// there's something to show. Full medical details are staff-only.
 /// `animal.animalRecordId` is the reliable join key (see AdoptionApplication
 /// / animalRecordToCard's own doc comments on why the legacy `animal.id`
 /// int hash can't be used to look this up).
@@ -490,7 +489,7 @@ class _MedicalTabContent extends ConsumerWidget {
       return Text('Medical information is unavailable for this record.',
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
     }
-    final recordAsync = ref.watch(animalRecordProvider(animalRecordId));
+    final recordAsync = ref.watch(publicAnimalRecordProvider(animalRecordId));
     final record = recordAsync.asData?.value;
     if (recordAsync.isLoading && record == null) {
       return const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()));
@@ -502,9 +501,7 @@ class _MedicalTabContent extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MedicalProfileSection(animal: record, readOnly: true),
-        const SizedBox(height: 20),
-        VaccineSection(animal: record, readOnly: true),
+        PublicHealthSummarySection(animal: record),
         if (record.hasMeaningfulSpecialNeedsInfo) ...[
           const SizedBox(height: 20),
           SpecialNeedsSection(animal: record),

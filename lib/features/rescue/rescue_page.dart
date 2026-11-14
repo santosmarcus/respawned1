@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
+import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 import 'package:respawnd1/features/rescue/services/rescue_geocoding_service.dart';
@@ -74,6 +75,11 @@ class _RescuePageState extends State<RescuePage> {
   String _pinnedAddress = 'Fetching location…';
   bool _loadingLocation = true;
 
+  // Evidence saved with the report (see ReportEvidence): where the phone
+  // itself was, and how the pin got to where it is.
+  Position? _deviceFix;
+  PinSource _pinSource = PinSource.gps;
+
   @override
   void initState() {
     super.initState();
@@ -105,6 +111,7 @@ class _RescuePageState extends State<RescuePage> {
     }
 
     if (lastKnown != null) {
+      _deviceFix = lastKnown;
       await _updatePin(LatLng(lastKnown.latitude, lastKnown.longitude));
       return;
     }
@@ -124,6 +131,7 @@ class _RescuePageState extends State<RescuePage> {
       try {
         final cached = await Geolocator.getLastKnownPosition();
         if (cached != null && mounted) {
+          _deviceFix = cached;
           await _updatePin(LatLng(cached.latitude, cached.longitude));
         }
       } catch (_) {}
@@ -184,6 +192,7 @@ class _RescuePageState extends State<RescuePage> {
               );
 
       if (pos != null) {
+        _deviceFix = pos;
         await _updatePin(LatLng(pos.latitude, pos.longitude));
       } else {
         await _fallbackToLastKnownOrDefault(
@@ -197,10 +206,11 @@ class _RescuePageState extends State<RescuePage> {
     }
   }
 
-  Future<void> _updatePin(LatLng pos) async {
+  Future<void> _updatePin(LatLng pos, {PinSource source = PinSource.gps}) async {
     // Reached after awaits (GPS / geocoding); the page may be gone by then.
     if (!mounted) return;
     setState(() {
+      _pinSource = source;
       _pinnedLocation = pos;
       _hasResolvedLocation = true;
       _pinnedAddress = 'Resolving address…';
@@ -236,7 +246,7 @@ class _RescuePageState extends State<RescuePage> {
       if (!mounted) return;
       if (result != null) {
         _form.addressController.text = result.formattedAddress;
-        await _updatePin(result.latLng);
+        await _updatePin(result.latLng, source: PinSource.search);
       } else {
         setState(() => _loadingLocation = false);
         if (mounted) {
@@ -325,6 +335,7 @@ class _RescuePageState extends State<RescuePage> {
         () => _form.mediaFiles[index] = RescueMediaItem(
           file: file!,
           isVideo: isVideo,
+          fromCamera: action == 'photo_camera' || action == 'video_camera',
         ),
       );
     }
@@ -555,7 +566,7 @@ class _RescuePageState extends State<RescuePage> {
               loadingLocation: _loadingLocation,
               addressController: _form.addressController,
               onMapCreated: (ctrl) => _mapController = ctrl,
-              onMapTap: _updatePin,
+              onMapTap: (pos) => _updatePin(pos, source: PinSource.map),
               onLocateMe: _fetchCurrentLocation,
               onSearch: _geocodeAddress,
             ),
@@ -732,6 +743,23 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
+  /// What staff see when they check this report: how many photos were
+  /// taken here versus picked from the gallery, and where the phone was.
+  ReportEvidence _reportEvidence() {
+    final media = _form.mediaFiles.whereType<RescueMediaItem>().toList();
+    final camera = media.where((m) => m.fromCamera).length;
+    final fix = _deviceFix;
+    return ReportEvidence(
+      cameraMediaCount: camera,
+      galleryMediaCount: media.length - camera,
+      pinSource: _pinSource,
+      deviceLat: fix?.latitude,
+      deviceLng: fix?.longitude,
+      deviceAccuracyM: fix?.accuracy,
+      deviceFixAt: fix?.timestamp,
+    );
+  }
+
   void _onUploadProgress(int slot, double? progress) {
     if (!mounted) return;
     setState(() => _form.uploadProgress[slot] = progress);
@@ -795,6 +823,7 @@ class _RescuePageState extends State<RescuePage> {
         form: _form,
         location: _pinnedLocation,
         pinnedAddress: _pinnedAddress,
+        evidence: _reportEvidence(),
         onProgress: _onUploadProgress,
       );
 

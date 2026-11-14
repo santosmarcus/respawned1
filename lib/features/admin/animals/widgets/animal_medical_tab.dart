@@ -147,6 +147,35 @@ class MedicalProfileSection extends StatelessWidget {
   }
 }
 
+/// The user-facing Medical tab: the yes/no health summary the public
+/// profile (`publicAnimals/{id}`) carries. Details stay with staff.
+class PublicHealthSummarySection extends StatelessWidget {
+  final AnimalRecord animal;
+  const PublicHealthSummarySection({super.key, required this.animal});
+
+  @override
+  Widget build(BuildContext context) {
+    String label(bool? v) => medicalProfileBoolLabel(v, userFacing: true);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Health', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+          _HealthRow('Vaccinated', label(animal.vaccinated)),
+          _HealthRow('Spayed/Neutered', label(animal.health.sterilized)),
+          _HealthRow('Dewormed', label(animal.health.dewormed)),
+          _HealthRow('Special needs', animal.hasSpecialNeeds ? 'Yes' : 'No'),
+          const SizedBox(height: 10),
+          Text('Ask the shelter for vaccine dates and other medical details when you apply.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
 class _HealthRow extends StatelessWidget {
   final String label;
   final String value;

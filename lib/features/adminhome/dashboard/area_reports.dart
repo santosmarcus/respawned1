@@ -19,7 +19,7 @@ import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 // ─── Reports by area ────────────────────────────────────────────────────
 //
 // The Rescue / Adoptions / Donations analytics from the `dev` admin
-// dashboard (analytics_dashboard.dart's AdminAnalyticsSection), carried
+// dashboard (the old AdminAnalyticsSection, since removed), carried
 // into the Analytics tab with the same metrics, charts, filters and notes.
 // Changes from that version, all for data honesty:
 //  - an empty data set shows "—" / "No data yet", never 0% or 0.0 hrs;

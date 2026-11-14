@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 
 /// Per-slot upload progress callback: [progress] is 0..1 while uploading
@@ -76,6 +77,7 @@ class RescueReportService {
     required RescueFormController form,
     required LatLng location,
     required String pinnedAddress,
+    ReportEvidence? evidence,
     required MediaUploadProgress onProgress,
   }) async {
     final condition = form.conditionController.text.trim();
@@ -184,6 +186,8 @@ class RescueReportService {
         },
       ],
       'photoUrls': [],
+      // How the report was made, for the staff's desk check.
+      'reportEvidence': ?evidence?.toMap(),
       'createdAt': Timestamp.now(),
       'serverCreatedAt': FieldValue.serverTimestamp(),
     });

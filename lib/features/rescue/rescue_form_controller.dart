@@ -10,7 +10,11 @@ class RescueMediaItem {
   final XFile file;
   final bool isVideo;
 
-  RescueMediaItem({required this.file, required this.isVideo});
+  /// Taken with the camera inside the report form, rather than picked from
+  /// the gallery. Saved with the report as evidence for staff.
+  final bool fromCamera;
+
+  RescueMediaItem({required this.file, required this.isVideo, this.fromCamera = false});
 }
 
 /// One animal in a (possibly multi-animal) report.

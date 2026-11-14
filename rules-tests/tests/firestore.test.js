@@ -180,6 +180,66 @@ describe('cases', () => {
   });
 });
 
+describe('report verification', () => {
+  test('a report can carry its evidence, which the reporter cannot rewrite', async () => {
+    await assertSucceeds(as('reporter').collection('cases').add({
+      reporterId: 'reporter', status: 'pending', reportEvidence: { cameraMediaCount: 2, galleryMediaCount: 0 },
+    }));
+    await assertFails(as('reporter').doc('cases/pending1').update({ reportEvidence: { cameraMediaCount: 4 } }));
+  });
+
+  test('staff ask for live proof and record the desk result on an unowned report', async () => {
+    await assertSucceeds(as('staffA').doc('cases/pending1').update({
+      liveProofRequest: { requestedBy: 'staffA', requestedAt: FieldValue.serverTimestamp() },
+      statusHistory: FieldValue.arrayUnion({ status: 'asked' }),
+    }));
+    await assertSucceeds(as('staffA').doc('cases/pending1').update({
+      'verification.deskOutcome': 'needsRider', 'verification.deskBy': 'staffA',
+      'verification.riderId': 'rider', 'verification.riderName': 'Rider One',
+      status: 'verifying', verifyingOrganizationId: 'orgA',
+    }));
+    await assertFails(as('stranger').doc('cases/pending1').update({ 'verification.deskOutcome': 'confirmedRemotely' }));
+    await assertFails(as('draftOwner').doc('cases/pending1').update({ 'verification.deskOutcome': 'confirmedRemotely' }));
+  });
+
+  test('the reporter sends live proof but cannot write the request or the result', async () => {
+    await assertSucceeds(as('reporter').doc('cases/pending1').update({
+      liveProof: { mediaUrls: ['u'], mediaTypes: ['image'], submittedAt: FieldValue.serverTimestamp(), lat: 14.5, lng: 121 },
+      statusHistory: FieldValue.arrayUnion({ status: 'sent' }),
+    }));
+    await assertFails(as('stranger').doc('cases/pending1').update({ liveProof: { mediaUrls: ['u'] } }));
+    await assertFails(as('reporter').doc('cases/pending1').update({ liveProofRequest: { requestedBy: 'reporter' } }));
+    await assertFails(as('reporter').doc('cases/pending1').update({ verification: { deskOutcome: 'confirmedRemotely' } }));
+    await assertFails(as('reporter').doc('cases/verifying1').update({ 'verification.riderOutcome': 'found' }));
+  });
+
+  test('the rider sent to verify records the result of their own visit only', async () => {
+    const result = (uid) => as(uid).doc('cases/verifying1').update({
+      'verification.riderOutcome': 'found', 'verification.riderNote': 'under the bridge',
+      'verification.riderMediaUrls': ['u'], 'verification.riderMediaTypes': ['image'],
+      'verification.riderRecordedAt': FieldValue.serverTimestamp(),
+      'verification.riderRecordedBy': uid, 'verification.riderRecordedByName': uid,
+      'verification.riderLat': 14.5, 'verification.riderLng': 121,
+      status: 'pending',
+      statusHistory: FieldValue.arrayUnion({ status: 'found' }),
+    });
+    await assertFails(result('rider2'));
+    await assertFails(result('stranger'));
+    // Not the desk decision, not who was sent, not acceptance.
+    await assertFails(as('rider').doc('cases/verifying1').update({ 'verification.deskOutcome': 'confirmedRemotely' }));
+    await assertFails(as('rider').doc('cases/verifying1').update({ 'verification.riderId': 'rider2' }));
+    await assertFails(as('rider').doc('cases/verifying1').update({
+      'verification.riderOutcome': 'found', status: 'accepted_pending_clinic', organizationId: 'orgA',
+    }));
+    await assertFails(as('rider').doc('cases/verifying1').update({
+      'verification.riderOutcome': 'found', status: 'accepted_pending_clinic',
+    }));
+    await assertSucceeds(result('rider'));
+    // Staff can record it for a rider who phoned it in.
+    await assertSucceeds(as('staffA').doc('cases/verifying1').update({ 'verification.riderOutcome': 'notFound' }));
+  });
+});
+
 describe('animals', () => {
   test("only the owning organization's staff manage records", async () => {
     await assertSucceeds(as('staffA').collection('animals').add({ name: 'Kiko', organizationId: 'orgA' }));
@@ -188,6 +248,52 @@ describe('animals', () => {
     await assertFails(as('staffB').doc('animals/animalA').update({ adoptionStatus: 'adopted' }));
     await assertFails(as('staffB').doc('animals/animalA/vaccinations/v1').set({ name: 'Rabies' }));
     await assertSucceeds(as('staffA').doc('animals/animalA/vaccinations/v1').set({ name: 'Rabies' }));
+  });
+});
+
+describe('animal records and public profiles', () => {
+  test('the full record is readable only by its staff, carers, platform staff and its adopter', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('animals/reservedA').set({ organizationId: 'orgA', adoptionStatus: 'reserved', reservedForUserId: 'adopter' });
+      await db.doc('animals/adoptedA').set({ organizationId: 'orgA', adoptionStatus: 'adopted', adoptedByUserId: 'adopter' });
+    });
+    await assertSucceeds(as('staffA').doc('animals/animalA').get());
+    await assertSucceeds(as('carerA').doc('animals/animalA').get());
+    await assertSucceeds(as('admin').doc('animals/animalA').get());
+    await assertFails(as('staffB').doc('animals/animalA').get());
+    await assertFails(as('stranger').doc('animals/animalA').get());
+    await assertFails(as('adopter').doc('animals/animalA').get());
+    await assertSucceeds(as('adopter').doc('animals/reservedA').get());
+    await assertSucceeds(as('adopter').doc('animals/adoptedA').get());
+    await assertFails(as('stranger').doc('animals/reservedA').get());
+  });
+
+  test('staff list queries must filter on their organization', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('animals/animalB').set({ name: 'B', organizationId: 'orgB' });
+      await db.doc('animals/legacy').set({ name: 'L', organizationId: '' });
+    });
+    // Records with no organization yet: any organization's staff, not carers.
+    await assertSucceeds(as('staffA').collection('animals').where('organizationId', '==', '').get());
+    await assertFails(as('carerA').collection('animals').where('organizationId', '==', '').get());
+    await assertSucceeds(as('staffA').collection('animals').where('organizationId', '==', 'orgA').get());
+    await assertSucceeds(as('carerA').collection('animals').where('organizationId', '==', 'orgA').get());
+    await assertSucceeds(as('admin').collection('animals').get());
+    await assertFails(as('staffA').collection('animals').get());
+    await assertFails(as('staffB').collection('animals').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('stranger').collection('animals').where('adoptionStatus', '==', 'adoptable').get());
+  });
+
+  test('public profiles are readable by any signed-in user and written by no client', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('publicAnimals/animalA').set({ name: 'Mochi', organizationId: 'orgA', adoptionStatus: 'adoptable' }));
+    await assertSucceeds(as('stranger').doc('publicAnimals/animalA').get());
+    await assertSucceeds(as('stranger').collection('publicAnimals').where('organizationId', '==', 'orgA').get());
+    await assertFails(env.unauthenticatedContext().firestore().doc('publicAnimals/animalA').get());
+    await assertFails(as('staffA').doc('publicAnimals/animalA').update({ name: 'Renamed' }));
+    await assertFails(as('admin').doc('publicAnimals/new').set({ name: 'X' }));
   });
 });
 

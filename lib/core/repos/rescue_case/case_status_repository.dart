@@ -25,29 +25,6 @@ class CaseStatusRepository {
   /// [organizationId] is the accepting organization — it becomes the case's
   /// owner (`cases/{id}.organizationId`). A referred case re-stamps it when
   /// the receiving organization accepts.
-  /// Sends a rider to confirm the reported location before acceptance.
-  /// Accept and reject remain available from the verifying state.
-  Future<void> markVerifying({
-    required String caseId,
-    required String actorUid,
-    required String actorName,
-    String? organizationId,
-  }) async {
-    await _store.recordAction(
-      caseId: caseId,
-      statusLine: 'Rider sent to verify the location.',
-      fields: {
-        'status': RescueStatus.verifying.firestoreValue,
-        // Which organization sent the rider. Not ownership: the case is still
-        // unowned until someone accepts it.
-        'verifyingOrganizationId': ?organizationId,
-      },
-      action: 'verifying',
-      actorUid: actorUid,
-      actorName: actorName,
-    );
-  }
-
   Future<void> acceptCase({
     required String caseId,
     required String actorUid,

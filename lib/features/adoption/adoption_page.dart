@@ -365,7 +365,7 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
 
   @override
   Widget build(BuildContext context) {
-    final recordsAsync = ref.watch(allAnimalRecordsProvider);
+    final recordsAsync = ref.watch(publicAnimalRecordsProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -548,7 +548,7 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
             child: recordsAsync.when(
               loading: () => const _LoadingState(),
               error: (error, _) => _ErrorState(
-                onRetry: () => ref.invalidate(allAnimalRecordsProvider),
+                onRetry: () => ref.invalidate(publicAnimalRecordsProvider),
               ),
               data: (records) {
                 final visible = records.where(isPubliclyVisible).toList();

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/repos/animal_record_repository.dart';
 
 /// The ONE canonical "is this animal currently housed" classifier — shared
 /// by the dashboard Capacity card (admin_dashboard_home_widgets.dart) and
@@ -19,8 +20,8 @@ bool isCurrentlyHoused(AnimalRecord a) =>
 /// uses the streamed `allAnimalRecordsProvider` instead; this is for
 /// screens that aren't already watching that provider.
 Future<int> currentShelterOccupancy() async {
-  final snap = await FirebaseFirestore.instance.collection('animals').get();
-  return snap.docs.map(AnimalRecord.fromFirestore).where(isCurrentlyHoused).length;
+  final docs = await AnimalRecordRepository().queryScoped((q) => q);
+  return docs.map(AnimalRecord.fromFirestore).where(isCurrentlyHoused).length;
 }
 
 /// The default Animal Records list wants "will this animal remain relevant

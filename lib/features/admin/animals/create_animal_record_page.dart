@@ -816,13 +816,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       if (!widget.isEditing &&
           widget.linkedCaseId != null &&
           widget.sourceAnimalIndex != null) {
-        final existing = await FirebaseFirestore.instance
-            .collection('animals')
+        final existing = await AnimalRecordRepository().queryScoped((q) => q
             .where('linkedCaseId', isEqualTo: widget.linkedCaseId)
             .where('sourceAnimalIndex', isEqualTo: widget.sourceAnimalIndex)
-            .limit(1)
-            .get();
-        if (existing.docs.isNotEmpty) {
+            .limit(1));
+        if (existing.isNotEmpty) {
           if (mounted) {
             setState(() => _isLoading = false);
             Navigator.pop(context); // already created — just return to the flow

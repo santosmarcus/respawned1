@@ -20,6 +20,13 @@ describe('storage', () => {
     await assertFails(upload('stranger', 'cases/ownedA/expenseReceipts/1.jpg'));
   });
 
+  test("verification photos: the reporter's live proof and the rider sent to check", async () => {
+    await assertSucceeds(upload('reporter', 'cases/pending1/proof_1.jpg'));
+    await assertSucceeds(upload('rider', 'cases/verifying1/verify_1_0.jpg'));
+    await assertFails(upload('rider2', 'cases/verifying1/verify_1_0.jpg'));
+    await assertSucceeds(upload('staffA', 'cases/verifying1/verify_2_0.jpg'));
+  });
+
   test('anyone can attach a sighting photo', async () => {
     await assertSucceeds(upload('stranger', 'cases/ownedA/communityReports/r1.jpg'));
   });

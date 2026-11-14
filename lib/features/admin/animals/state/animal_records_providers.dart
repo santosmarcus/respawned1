@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
@@ -12,8 +13,25 @@ final animalRecordProvider = StreamProvider.family<AnimalRecord?, String>((ref, 
   return ref.watch(animalRecordRepositoryProvider).streamAnimalRecord(animalId);
 });
 
+/// Staff only — every animal the signed-in staff account may list. Public
+/// screens use [publicAnimalRecordsProvider].
 final allAnimalRecordsProvider = StreamProvider<List<AnimalRecord>>((ref) {
+  // Which animals may be listed depends on who is signed in.
+  ref.watch(_signedInUidProvider);
   return ref.watch(animalRecordRepositoryProvider).streamAllAnimalRecords();
+});
+
+final _signedInUidProvider = StreamProvider<String?>((ref) {
+  return FirebaseAuth.instance.authStateChanges().map((u) => u?.uid).distinct();
+});
+
+/// Public profiles for the adoption list and other non-staff screens.
+final publicAnimalRecordsProvider = StreamProvider<List<AnimalRecord>>((ref) {
+  return ref.watch(animalRecordRepositoryProvider).streamPublicAnimals();
+});
+
+final publicAnimalRecordProvider = StreamProvider.family<AnimalRecord?, String>((ref, animalId) {
+  return ref.watch(animalRecordRepositoryProvider).streamPublicAnimal(animalId);
 });
 
 final recordsForCaseProvider = StreamProvider.family<List<AnimalRecord>, String>((ref, caseId) {

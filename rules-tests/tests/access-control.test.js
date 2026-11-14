@@ -40,8 +40,10 @@ describe('animal medical records', () => {
     }
   });
 
-  test('the profile and non-medical subcollections stay readable', async () => {
-    await assertSucceeds(as('stranger').doc('animals/hiddenA').get());
+  test('the full record is staff-only; non-medical subcollections stay readable', async () => {
+    // Everyone else reads publicAnimals (see firestore.test.js).
+    await assertFails(as('stranger').doc('animals/hiddenA').get());
+    await assertSucceeds(as('staffA').doc('animals/hiddenA').get());
     await assertSucceeds(as('stranger').doc('animals/hiddenA/gallery/g1').get());
   });
 });

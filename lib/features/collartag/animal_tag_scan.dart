@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
@@ -29,20 +30,29 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
   if (tag == null) return false;
 
   final messenger = ScaffoldMessenger.of(context);
-  final snap = await FirebaseFirestore.instance
-      .collection('animals')
-      .where('qrTagId', isEqualTo: tag)
-      .limit(1)
-      .get();
+  // Staff find their own organization's animals, hidden ones included;
+  // everyone else (and staff scanning another organization's tag) finds
+  // the public profile.
+  QueryDocumentSnapshot<Map<String, dynamic>>? found;
+  try {
+    final own = await AnimalRecordRepository().queryScoped((q) => q.where('qrTagId', isEqualTo: tag).limit(1));
+    if (own.isNotEmpty) found = own.first;
+  } on FirebaseException {
+    // Not staff of any organization.
+  }
+  final doc = found ??
+      (await FirebaseFirestore.instance.collection('publicAnimals').where('qrTagId', isEqualTo: tag).limit(1).get())
+          .docs
+          .firstOrNull;
   if (!context.mounted) return true;
-  if (snap.docs.isEmpty) {
+  if (doc == null) {
     messenger.showSnackBar(appSnackBar('No animal record uses this QR tag.'));
     return true;
   }
 
-  final doc = snap.docs.first;
   final record = AnimalRecord.fromFirestore(doc);
-  final isStaff = await _isStaffOf(doc.data()['organizationId'] as String?);
+  final isStaff =
+      doc.reference.parent.id == 'animals' && await _isStaffOf(doc.data()['organizationId'] as String?);
   if (!context.mounted) return true;
 
   Navigator.push(
