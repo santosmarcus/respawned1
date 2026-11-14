@@ -9,6 +9,7 @@ import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/media_attachments.dart';
 
 String _fmt(DateTime d) => formatDate(d);
 
@@ -62,6 +63,7 @@ class _AddCareRecordBodyState extends ConsumerState<_AddCareRecordBody> {
   final _productController = TextEditingController();
   final _providerController = TextEditingController();
   final _notesController = TextEditingController();
+  List<PickedMedia> _attachments = const [];
   bool _saving = false;
   String? _error;
 
@@ -88,6 +90,11 @@ class _AddCareRecordBodyState extends ConsumerState<_AddCareRecordBody> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       String? text(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
+      final attachments = await uploadAllMedia(
+        _attachments,
+        folder: 'animalRecords/${widget.animal.id}/medicalDocs',
+        prefix: 'care_${DateTime.now().millisecondsSinceEpoch}',
+      );
       await ref.read(animalRecordRepositoryProvider).addCareRecord(
             animalId: widget.animal.id,
             record: CareRecord(
@@ -100,6 +107,7 @@ class _AddCareRecordBodyState extends ConsumerState<_AddCareRecordBody> {
               provider: text(_providerController),
               notes: text(_notesController),
               createdBy: _actorName(),
+              attachments: attachments,
             ),
             actorId: user?.uid,
             actorEmail: user?.email,
@@ -190,6 +198,13 @@ class _AddCareRecordBodyState extends ConsumerState<_AddCareRecordBody> {
               decoration: InputDecoration(
                   hintText: isCheckup ? 'Findings / instructions (optional)' : 'Notes (optional)', isDense: true),
               style: GoogleFonts.zain(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            AttachmentPicker(
+              items: _attachments,
+              enabled: !_saving,
+              label: isCheckup ? 'Attach vet notes' : 'Attach a photo',
+              onChanged: (v) => setState(() => _attachments = v),
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),

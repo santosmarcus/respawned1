@@ -12,9 +12,10 @@ import 'package:respawnd1/features/admin/animals/widgets/animal_logs_section.dar
 import 'package:respawnd1/features/admin/animals/widgets/animal_record_export_sheet.dart';
 import 'package:respawnd1/features/admin/animals/widgets/transfer_animal_record_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/reason_picker.dart';
 
 /// Organization-management actions — deliberately separate from the
 /// Medical tab's clinical content. Only enabled when they make sense for
@@ -67,11 +68,7 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     });
     final code = tag;
     if (code == null || !mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('QR tag for ${animal.name.isEmpty ? 'this animal' : animal.name}'),
-        content: Column(
+    await showInfoDialog(context, title: 'QR tag for ${animal.name.isEmpty ? 'this animal' : animal.name}', content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             QrImageView(data: 'RESPAWND-ANIMAL:$code', size: 220),
@@ -82,10 +79,7 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
                 textAlign: TextAlign.center,
                 style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
           ],
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-      ),
-    );
+        ));
   }
 
   Future<void> _togglePublicProfile() async {
@@ -93,6 +87,30 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     await _run(() => ref.read(animalRecordRepositoryProvider).setPublicProfileHidden(
           animalId: animal.id,
           hidden: !animal.publicProfileHidden,
+          actorId: _actorId,
+          actorName: _actorName,
+          actorEmail: _actorEmail,
+        ));
+  }
+
+  Future<void> _setCareStatus() async {
+    final animal = widget.animal;
+    final result = await showReasonPicker<CareStatus>(
+      context,
+      title: 'Shelter status',
+      subtitle: 'How ${animal.name.isEmpty ? 'this animal' : animal.name} is being cared for right now.',
+      options: [for (final s in CareStatus.values) ReasonOption(s, '${s.label} · ${s.help}')],
+      initial: animal.careStatus,
+      confirmLabel: 'Save status',
+      destructive: false,
+      noteLabel: 'Note',
+    );
+    if (result == null) return;
+    await _run(() => ref.read(animalRecordRepositoryProvider).setCareStatus(
+          animalId: animal.id,
+          status: result.value,
+          previous: animal.careStatus,
+          note: result.note,
           actorId: _actorId,
           actorName: _actorName,
           actorEmail: _actorEmail,
@@ -175,24 +193,14 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
   Future<void> _publishToFacebook() async {
     final orgId = ref.read(currentOrganizationIdProvider).asData?.value;
     if (orgId == null) return;
-    final messageController = TextEditingController(
-      text: 'Meet ${widget.animal.name.isNotEmpty ? widget.animal.name : 'this animal'}, available for adoption!',
-    );
-    final message = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: const Text('Publish to Facebook Page'),
-        content: TextField(controller: messageController, maxLines: 4, decoration: const InputDecoration(labelText: 'Post caption')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, messageController.text.trim()),
-            style: AppButtons.primary,
-            child: const Text('Publish'),
-          ),
-        ],
-      ),
+    final message = await showTextInputDialog(
+      context,
+      title: 'Publish to Facebook Page',
+      label: 'Post caption',
+      initialValue: 'Meet ${widget.animal.name.isNotEmpty ? widget.animal.name : 'this animal'}, available for adoption!',
+      confirmLabel: 'Publish',
+      required: true,
+      maxLines: 4,
     );
     if (message == null || !mounted) return;
     setState(() => _busy = true);
@@ -251,6 +259,13 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _ActionTile(
+            icon: Icons.health_and_safety_outlined,
+            label: 'Shelter Status: ${animal.careStatus?.label ?? 'Not set'}',
+            subtitle: 'In Shelter, Isolation or Recovering',
+            enabled: !_busy && !isTerminal && !animal.archived,
+            onTap: _setCareStatus,
+          ),
           _ActionTile(
             icon: animal.archived ? Icons.unarchive_outlined : Icons.archive_outlined,
             label: animal.archived ? 'Restore Record' : 'Archive',

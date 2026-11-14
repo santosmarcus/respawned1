@@ -384,20 +384,23 @@ class TransportAssignmentRepository {
           'vehicle': riderVehicle,
           'plate': riderPlate,
         });
-        tx.update(caseRef, {
-          'status': 'assigned',
-          'riderId': riderId,
-          'assignedVolunteerId': riderId,
-          'assignedVolunteerName': riderName,
-          'assignedVehicle': riderVehicle,
-          'assignedPlate': riderPlate,
-          'statusHistory': FieldValue.arrayUnion([
-            {
-              'status': 'Pet transporter assigned: $riderName.',
-              'timestamp': now,
-            },
-          ]),
-        });
+        _store.recordActionIn(
+          tx,
+          caseId: caseId,
+          action: 'transporter_accepted',
+          statusLine: 'Pet transporter assigned: $riderName.',
+          actorUid: riderId,
+          actorName: riderName,
+          actorRole: 'transporter',
+          fields: {
+            'status': 'assigned',
+            'riderId': riderId,
+            'assignedVolunteerId': riderId,
+            'assignedVolunteerName': riderName,
+            'assignedVehicle': riderVehicle,
+            'assignedPlate': riderPlate,
+          },
+        );
       });
     } on FirebaseException catch (error, stackTrace) {
       _logAssignmentFailure(
@@ -609,18 +612,11 @@ class TransportAssignmentRepository {
     required String actorUid,
     required String actorName,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'status': RescueStatus.awaitingAssignment.firestoreValue,
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status':
-              'Case returned to Assign after a transporter safety report — a different transporter may now be selected.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine:
+          'Case returned to Assign after a transporter safety report — a different transporter may now be selected.',
+      fields: {'status': RescueStatus.awaitingAssignment.firestoreValue},
       action: 'resumed_after_safety_report',
       actorUid: actorUid,
       actorName: actorName,
@@ -637,16 +633,9 @@ class TransportAssignmentRepository {
     required String actorUid,
     required String actorName,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Instructions provided to transporter: $note',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Instructions provided to transporter: $note',
       action: 'safety_response_instructions',
       actorUid: actorUid,
       actorName: actorName,

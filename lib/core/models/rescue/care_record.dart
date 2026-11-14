@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
+import 'package:respawnd1/core/models/media_ref.dart';
 
 /// Routine, non-vaccine care given to an animal already in the shelter —
 /// recorded straight on the animal record, without opening a treatment
@@ -44,6 +45,9 @@ class CareRecord {
   final DateTime? createdAt;
   final String? createdBy;
 
+  /// Photos of the vet's notes or prescription.
+  final List<MediaRef> attachments;
+
   const CareRecord({
     required this.id,
     required this.animalId,
@@ -55,6 +59,7 @@ class CareRecord {
     this.notes,
     this.createdAt,
     this.createdBy,
+    this.attachments = const [],
   });
 
   VaccineStatus get status => vaccineStatusFor(nextDueDate);
@@ -77,6 +82,7 @@ class CareRecord {
       notes: data['notes'] as String?,
       createdAt: ts('createdAt'),
       createdBy: data['createdBy'] as String?,
+      attachments: attachmentsFrom(data),
     );
   }
 
@@ -89,6 +95,7 @@ class CareRecord {
         if (notes != null && notes!.isNotEmpty) 'notes': notes,
         'createdAt': FieldValue.serverTimestamp(),
         if (createdBy != null) 'createdBy': createdBy,
+        ...attachmentFields(attachments),
       };
 
   /// The most recent record of each type, for the Medical tab summary.

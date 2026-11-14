@@ -142,13 +142,55 @@ function moneyOf(c) {
   return {collected, target, allocated, out, inn, available, eligibleExcess};
 }
 
-function historyEntry(tx, campaignRef, actor, type, details) {
+// How each campaign history type reads in the app's Audit page.
+const AUDIT_ACTIONS = {
+  created: 'Campaign created',
+  edited: 'Campaign edited',
+  extended: 'Campaign deadline extended',
+  relaunched: 'Campaign relaunched',
+  extension_declined: 'Campaign extension declined',
+  converted_to_general: 'Campaign converted to a general fund',
+  offline_donation_recorded: 'Offline donation recorded',
+  goal_completed: 'Campaign goal reached',
+  allocation_recorded: 'Funds allocated',
+  allocation_voided: 'Allocation voided',
+  excess_transferred_out: 'Excess funds transferred out',
+  excess_transferred_in: 'Excess funds received',
+  inkind_received: 'In-kind donation received',
+  inkind_cancelled: 'In-kind donation cancelled',
+};
+
+function auditAction(type) {
+  if (AUDIT_ACTIONS[type]) return AUDIT_ACTIONS[type];
+  const words = String(type).replace(/_/g, ' ');
+  return `Campaign ${words}`;
+}
+
+// Writes the campaign's own history entry and, in the same transaction or
+// batch, the matching auditLogs entry the app's Audit > Donations tab reads.
+// organizationId defaults to the actor's organization.
+function historyEntry(tx, campaignRef, actor, type, details, organizationId) {
   tx.set(campaignRef.collection('history').doc(), {
     type,
     ...details,
     byUid: actor.uid,
     byName: actor.name,
     at: FieldValue.serverTimestamp(),
+  });
+  const newValues = {};
+  for (const [k, v] of Object.entries(details || {})) {
+    if (v !== undefined && v !== null) newValues[k] = v;
+  }
+  tx.set(db.collection('auditLogs').doc(), {
+    category: 'donations',
+    action: auditAction(type),
+    actorId: actor.uid,
+    actorName: actor.name || null,
+    organizationId: organizationId || actor.organizationId || null,
+    targetType: 'Campaign',
+    targetId: campaignRef.id,
+    newValues,
+    createdAt: FieldValue.serverTimestamp(),
   });
 }
 
@@ -367,7 +409,7 @@ exports.saveCampaign = onCall(async (request) => {
   const changed = Object.keys(fields).filter((k) => JSON.stringify(fields[k]) !== JSON.stringify(existing[k]));
   await db.runTransaction(async (tx) => {
     tx.update(ref, update);
-    historyEntry(tx, ref, actor, 'edited', {changedFields: changed});
+    historyEntry(tx, ref, actor, 'edited', {changedFields: changed}, existing.organizationId);
   });
   return {campaignId, status};
 });
@@ -423,7 +465,7 @@ exports.setCampaignStatus = onCall(async (request) => {
       throw new HttpsError('invalid-argument', 'Unknown action.');
     }
     tx.update(ref, {...next, updatedAt: now, updatedBy: actor.uid});
-    historyEntry(tx, ref, actor, action, {from: status, to: next.status, reason: why});
+    historyEntry(tx, ref, actor, action, {from: status, to: next.status, reason: why}, c.organizationId);
     return {status: next.status, type: c.type || 'donation'};
   });
 
@@ -490,7 +532,7 @@ exports.resolveExpiredCampaign = onCall(async (request) => {
       historyEntry(tx, ref, actor, decision === 'extend' ? 'extended' : 'relaunched', {
         previousDeadline, newDeadline, previousStatus: status, reason: why,
         collectedAtDecision: num(c.collectedAmount),
-      });
+      }, c.organizationId);
       tx.set(ref.collection('updates').doc(), {
         type: 'extended',
         title: `Campaign extended to ${formatManilaDate(newDeadline.toDate())}`,
@@ -503,7 +545,7 @@ exports.resolveExpiredCampaign = onCall(async (request) => {
     if (decision === 'close') {
       if (!['goal_not_met', 'goal_met'].includes(status)) throw new HttpsError('failed-precondition', 'This campaign has no pending deadline decision.');
       tx.update(ref, {status: 'closed', isActive: false, needsExtensionDecision: false, closedAt: now, updatedAt: now, updatedBy: actor.uid});
-      historyEntry(tx, ref, actor, 'extension_declined', {previousStatus: status, reason: why});
+      historyEntry(tx, ref, actor, 'extension_declined', {previousStatus: status, reason: why}, c.organizationId);
       return {status: 'closed'};
     }
 
@@ -519,7 +561,7 @@ exports.resolveExpiredCampaign = onCall(async (request) => {
         updatedAt: now,
         updatedBy: actor.uid,
       });
-      historyEntry(tx, ref, actor, 'converted_to_general', {previousDeadline, previousStatus: status, reason: why});
+      historyEntry(tx, ref, actor, 'converted_to_general', {previousDeadline, previousStatus: status, reason: why}, c.organizationId);
       tx.set(ref.collection('updates').doc(), {
         type: 'converted',
         title: 'Now accepting donations as a general fund',
@@ -629,8 +671,8 @@ exports.recordOfflineDonation = onCall(async (request) => {
     const completes = statusOf(c) === 'active' && m.target > 0 && m.collected < m.target && m.collected + centavos(amount) >= m.target;
     if (completes) Object.assign(campaignUpdate, completedCampaignFields());
     tx.update(campaignRef, campaignUpdate);
-    historyEntry(tx, campaignRef, actor, 'offline_donation_recorded', {donationId: donationRef.id, amount, method: d.method, reference});
-    if (completes) historyEntry(tx, campaignRef, actor, 'goal_completed', {to: 'goal_met', donationId: donationRef.id});
+    historyEntry(tx, campaignRef, actor, 'offline_donation_recorded', {donationId: donationRef.id, amount, method: d.method, reference}, c.organizationId);
+    if (completes) historyEntry(tx, campaignRef, actor, 'goal_completed', {to: 'goal_met', donationId: donationRef.id}, c.organizationId);
   });
   return {donationId: donationRef.id};
 });
@@ -662,6 +704,10 @@ exports.recordAllocation = onCall(async (request) => {
     if (!campaignSnap.exists) throw new HttpsError('not-found', 'Listing not found.');
     const c = campaignSnap.data();
     assertSameOrg(actor, c);
+    // Money raised for one rescue case can only pay that case's bills.
+    if (c.restricted === true && c.linkedCaseId && c.linkedCaseId !== linkedCaseId) {
+      throw new HttpsError('failed-precondition', 'This campaign\'s funds are restricted to another rescue case.');
+    }
     const m = moneyOf(c);
     if (centavos(amount) > m.available) {
       throw new HttpsError('failed-precondition', `Only ₱${pesos(m.available).toFixed(2)} is available to allocate.`);
@@ -683,8 +729,38 @@ exports.recordAllocation = onCall(async (request) => {
       createdAt: now,
     });
     tx.update(campaignRef, {allocatedAmount: FieldValue.increment(amount), updatedAt: now});
-    historyEntry(tx, campaignRef, actor, 'allocation_recorded', {allocationId: requestId, amount, category});
+    historyEntry(tx, campaignRef, actor, 'allocation_recorded', {allocationId: requestId, amount, category}, c.organizationId);
     return {allocationId: requestId, duplicate: false};
+  });
+});
+
+// Undoes an expense allocation when the bill it paid is removed or its
+// funding changes (a case or general expense in the app). The allocation is
+// kept, marked voided, so the history still shows it; the amount goes back
+// to the campaign's available balance.
+exports.voidAllocation = onCall(async (request) => {
+  const actor = await loadActor(request, {finance: true});
+  const d = request.data || {};
+  requireCampaignId(d.campaignId);
+  const allocationId = requireRequestId(d.allocationId);
+  const reason = requireString(d.reason, 'Reason', {max: 500, optional: true});
+  const campaignRef = campaignsCol().doc(d.campaignId);
+  const allocRef = campaignRef.collection('allocations').doc(allocationId);
+
+  return db.runTransaction(async (tx) => {
+    const [campaignSnap, allocSnap] = await Promise.all([tx.get(campaignRef), tx.get(allocRef)]);
+    if (!campaignSnap.exists || !allocSnap.exists) throw new HttpsError('not-found', 'Allocation not found.');
+    const c = campaignSnap.data();
+    assertSameOrg(actor, c);
+    const a = allocSnap.data();
+    if (a.kind !== 'expense') throw new HttpsError('failed-precondition', 'Only spending can be voided.');
+    if (a.status === 'voided') return {allocationId, alreadyVoided: true};
+    const amount = num(a.amount);
+    const now = FieldValue.serverTimestamp();
+    tx.update(allocRef, {status: 'voided', voidedAt: now, voidedBy: actor.uid, voidedByName: actor.name, voidReason: reason});
+    tx.update(campaignRef, {allocatedAmount: FieldValue.increment(-amount), updatedAt: now});
+    historyEntry(tx, campaignRef, actor, 'allocation_voided', {allocationId, amount, reason}, c.organizationId);
+    return {allocationId, alreadyVoided: false};
   });
 });
 
@@ -790,8 +866,8 @@ exports.reallocateExcess = onCall(async (request) => {
       transferId: requestId,
       createdAt: now,
     });
-    historyEntry(tx, srcRef, actor, 'excess_transferred_out', {transferId: requestId, amount, destinationCampaignId: destinationId, reason});
-    historyEntry(tx, dstRef, actor, 'excess_transferred_in', {transferId: requestId, amount, sourceCampaignId: sourceId, reason});
+    historyEntry(tx, srcRef, actor, 'excess_transferred_out', {transferId: requestId, amount, destinationCampaignId: destinationId, reason}, src.organizationId);
+    historyEntry(tx, dstRef, actor, 'excess_transferred_in', {transferId: requestId, amount, sourceCampaignId: sourceId, reason}, dst.organizationId);
     return {transferId: requestId, duplicate: false};
   });
 });
@@ -883,7 +959,7 @@ exports.manageInKindDonation = onCall(async (request) => {
       });
     }
     if (campaignRef && campaignSnap && campaignSnap.exists) {
-      historyEntry(tx, campaignRef, actor, action === 'received' ? 'inkind_received' : 'inkind_cancelled', {donationId, quantityReceived: update.quantityReceived || null});
+      historyEntry(tx, campaignRef, actor, action === 'received' ? 'inkind_received' : 'inkind_cancelled', {donationId, quantityReceived: update.quantityReceived || null}, c.organizationId);
     }
     return {status: update.status};
   });

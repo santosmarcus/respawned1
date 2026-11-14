@@ -26,6 +26,8 @@ import 'package:respawnd1/features/admin/rescue/widgets/community_reports_sectio
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
 // Raw case-doc status values written by the pet-transporter app's own
 // transit flow (see transit_progress_page.dart) once it has physically
@@ -106,28 +108,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   /// marks the transport assignment completed.
   Future<void> _changeClinic(RescueCase c) async {
     if (c.vetClinicName == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Change Clinic?'),
-        content: const Text(
-          'Changing the clinic will update the transporter\'s destination and route. Continue?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppButtons.primary,
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
+    final confirmed = await showConfirmActionDialog(context, title: 'Change Clinic?', message: 'Changing the clinic will update the transporter\'s destination and route. Continue?', confirmLabel: 'Continue');
     if (confirmed != true || !mounted) return;
 
     // Never auto-opens anything else once the sheet resolves — the admin
@@ -265,17 +246,17 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         RescueStatus.treatment.firestoreValue; // 'in_treatment'
 
     try {
-      await caseRef.update({
-        'status': expectedStatus,
-        'dateAdmitted': Timestamp.now(),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status':
-                'The animal has reached the clinic. Animal is now in treatment.',
-            'timestamp': Timestamp.now(),
-          },
-        ]),
-      });
+      await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+        caseId: widget.caseId,
+        action: 'treatment_started',
+        statusLine: 'The animal has reached the clinic. Animal is now in treatment.',
+        actorUid: _actorUid,
+        actorName: _actorName,
+        fields: {
+          'status': expectedStatus,
+          'dateAdmitted': Timestamp.now(),
+        },
+      );
 
       // Don't navigate optimistically — re-read the doc and only proceed
       // once the write has actually landed with the expected status. A
@@ -336,16 +317,16 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   // transit_progress_page.dart's own _testSkipToNextStep). Lets staff
   // exercise "Proceed to Treatment" without a live rider in transit.
   Future<void> _fastForwardToClinic() async {
-    await FirebaseFirestore.instance.collection('cases').doc(widget.caseId).update({
-      'status': 'dropoff',
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status':
-              '[TEST] Fast-forwarded — transporter marked as arrived at the clinic.',
-          'timestamp': Timestamp.now(),
+    await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+        caseId: widget.caseId,
+        action: 'test_arrived_at_clinic',
+        statusLine: '[TEST] Fast-forwarded — transporter marked as arrived at the clinic.',
+        actorUid: _actorUid,
+        actorName: _actorName,
+        fields: {
+          'status': 'dropoff',
         },
-      ]),
-    });
+      );
   }
 
   LatLng? _caseLocationFrom(Map<String, dynamic> data) {
@@ -1811,44 +1792,7 @@ class _PendingAssignmentBannerState
   }
 
   Future<void> _cancelOffer() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Cancel this offer?',
-          style: GoogleFonts.tiltWarp(
-            fontSize: 16,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Text(
-          'The pending offer to ${widget.assignment.riderName} will be cancelled, and you can select another transporter.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Keep Waiting',
-              style: GoogleFonts.zain(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppButtons.danger,
-            child: Text(
-              'Cancel Offer',
-              style: GoogleFonts.zain(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
+    final confirmed = await showConfirmActionDialog(context, title: 'Cancel this offer?', message: 'The pending offer to ${widget.assignment.riderName} will be cancelled, and you can select another transporter.', confirmLabel: 'Cancel Offer', cancelLabel: 'Keep Waiting', destructive: true);
     if (confirmed != true || !mounted) return;
     setState(() => _cancelling = true);
     try {

@@ -312,7 +312,10 @@ class _DonationDetailPageState extends State<DonationDetail> {
               if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return Text('No allocations recorded yet.', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary));
               }
-              final entries = snapshot.data!.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+              final entries = snapshot.data!.docs
+                  .map((doc) => doc.data() as Map<String, dynamic>)
+                  .where((e) => e['status'] != 'voided')
+                  .toList();
               return _FundTrackingPanel(entries: entries, totalCollected: donation.collected.toInt());
             },
           ),

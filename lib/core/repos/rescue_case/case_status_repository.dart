@@ -33,17 +33,15 @@ class CaseStatusRepository {
     required String actorName,
     String? organizationId,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'status': RescueStatus.verifying.firestoreValue,
-      // Which organization sent the rider. Not ownership: the case is still
-      // unowned until someone accepts it.
-      'verifyingOrganizationId': ?organizationId,
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Rider sent to verify the location.', 'timestamp': Timestamp.now()},
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Rider sent to verify the location.',
+      fields: {
+        'status': RescueStatus.verifying.firestoreValue,
+        // Which organization sent the rider. Not ownership: the case is still
+        // unowned until someone accepts it.
+        'verifyingOrganizationId': ?organizationId,
+      },
       action: 'verifying',
       actorUid: actorUid,
       actorName: actorName,
@@ -58,27 +56,23 @@ class CaseStatusRepository {
     bool openForTransfer = false,
     Map<String, dynamic>? readinessSnapshot,
   }) async {
-    await _store.caseDoc(caseId).update({
-      if (organizationId != null && organizationId.isNotEmpty) 'organizationId': organizationId,
-      // Readiness factors and the admin's note as seen at acceptance.
-      'readinessSnapshot': ?readinessSnapshot,
-      // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
-      // jumping straight to awaitingAssignment — the case stays visible
-      // under Rescue Review until assignClinic actually saves a clinic and
-      // advances it. See rescue_status.dart's firestoreValue doc comment.
-      'status': RescueStatus.accepted.firestoreValue,
-      'openForTransfer': openForTransfer,
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': openForTransfer
-              ? 'Rescue case has been accepted and marked open for transfer to another organization.'
-              : 'Rescue case has been accepted.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: openForTransfer
+          ? 'Rescue case has been accepted and marked open for transfer to another organization.'
+          : 'Rescue case has been accepted.',
+      fields: {
+        if (organizationId != null && organizationId.isNotEmpty)
+          'organizationId': organizationId,
+        // Readiness factors and the admin's note as seen at acceptance.
+        'readinessSnapshot': ?readinessSnapshot,
+        // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
+        // jumping straight to awaitingAssignment — the case stays visible
+        // under Rescue Review until assignClinic actually saves a clinic and
+        // advances it. See rescue_status.dart's firestoreValue doc comment.
+        'status': RescueStatus.accepted.firestoreValue,
+        'openForTransfer': openForTransfer,
+      },
       action: 'accepted',
       actorUid: actorUid,
       actorName: actorName,
@@ -93,28 +87,20 @@ class CaseStatusRepository {
     required String actorUid,
     required String actorName,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'status': RescueStatus.rejected.firestoreValue,
-      'rejectionReason': reason.name,
-      if (reason == RejectionReason.other && otherText != null)
-        'rejectionReasonOther': otherText,
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status':
-              'Case rejected: ${reason == RejectionReason.other ? (otherText ?? reason.label) : reason.label}.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine:
+          'Case rejected: ${reason == RejectionReason.other ? (otherText ?? reason.label) : reason.label}.',
+      fields: {
+        'status': RescueStatus.rejected.firestoreValue,
+        'rejectionReason': reason.name,
+        if (reason == RejectionReason.other && otherText != null)
+          'rejectionReasonOther': otherText,
+      },
       action: 'rejected',
       actorUid: actorUid,
       actorName: actorName,
-      details: {
-        'reason': reason.name,
-        'otherText': ?otherText,
-      },
+      details: {'reason': reason.name, 'otherText': ?otherText},
     );
   }
 
@@ -141,23 +127,18 @@ class CaseStatusRepository {
     required String actorUid,
     required String actorName,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'ownershipStatus': ownershipStatus,
-      'ownedAnimalCategory': ?ownedAnimalCategory,
-      'ownerName': ?ownerName,
-      'ownerContact': ?ownerContact,
-      'ownershipNotes': ?ownershipNotes,
-      if (ownershipStatus == 'Owner identified')
-        'ownerConfirmedAt': Timestamp.now(),
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Ownership status updated: $ownershipStatus.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Ownership status updated: $ownershipStatus.',
+      fields: {
+        'ownershipStatus': ownershipStatus,
+        'ownedAnimalCategory': ?ownedAnimalCategory,
+        'ownerName': ?ownerName,
+        'ownerContact': ?ownerContact,
+        'ownershipNotes': ?ownershipNotes,
+        if (ownershipStatus == 'Owner identified')
+          'ownerConfirmedAt': Timestamp.now(),
+      },
       action: 'updated_ownership_info',
       actorUid: actorUid,
       actorName: actorName,
@@ -644,14 +625,11 @@ class CaseStatusRepository {
     // rather than the ordinary completed-case tone; 'completed' alone
     // doesn't trigger that. Both values already map to RescueStatus.completed
     // via its _legacyAliases, so nothing about admin-side reads changes.
-    await _store.caseDoc(caseId).update({
-      'status': 'closed',
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Case closed. Animal deceased.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
+    await _store.recordAction(
+      caseId: caseId,
+      action: 'closed_deceased',
+      statusLine: 'Case closed. Animal deceased.',
+      fields: {'status': 'closed'},
+    );
   }
 }

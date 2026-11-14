@@ -9,6 +9,7 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 String _formatReportDateTime(DateTime? d) => formatDateTimeOr(d, '');
 
@@ -153,35 +154,15 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
   }
 
   Future<void> _reject() async {
-    final reasonController = TextEditingController();
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Reject Location Change'),
-        content: TextField(
-          controller: reasonController,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            labelText: 'Reason',
-            hintText: 'Explain why this proposed location is being rejected',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final value = reasonController.text.trim();
-              if (value.isNotEmpty) Navigator.pop(dialogContext, value);
-            },
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
+    final reason = await showTextInputDialog(
+      context,
+      title: 'Reject Location Change',
+      label: 'Reason',
+      hint: 'Explain why this proposed location is being rejected',
+      confirmLabel: 'Reject',
+      required: true,
+      destructive: true,
     );
-    reasonController.dispose();
     if (reason == null || !mounted) return;
     setState(() => _busy = true);
     try {

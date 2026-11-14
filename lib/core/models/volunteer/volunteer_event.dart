@@ -69,6 +69,9 @@ class VolunteerEvent {
 
   bool get isCancelled => status == statusCancelled;
   bool get isPast => endAt.isBefore(DateTime.now());
+
+  /// Attendance can be taken from the moment the event starts.
+  bool get hasStarted => !startAt.isAfter(DateTime.now());
   bool get isFull => capacity != null && goingCount >= capacity!;
   bool get hasPin => lat != null && lng != null;
   bool get hasImage => imageUrl != null && imageUrl!.isNotEmpty;
@@ -129,6 +132,10 @@ class EventRegistration {
   final String participantNumber;
   final DateTime? registeredAt;
 
+  /// Set by organization staff once the event has started: true attended,
+  /// false did not attend, null not marked yet.
+  final bool? attended;
+
   const EventRegistration({
     required this.uid,
     required this.participantName,
@@ -136,6 +143,7 @@ class EventRegistration {
     required this.participantMobileNumber,
     required this.participantNumber,
     this.registeredAt,
+    this.attended,
   });
 
   factory EventRegistration.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -148,6 +156,7 @@ class EventRegistration {
       participantMobileNumber: data['participantMobileNumber'] as String? ?? '',
       participantNumber: data['participantNumber'] as String? ?? '',
       registeredAt: ts is Timestamp ? ts.toDate() : null,
+      attended: data['attended'] as bool?,
     );
   }
 }

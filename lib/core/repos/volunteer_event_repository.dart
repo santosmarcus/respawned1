@@ -175,6 +175,32 @@ class VolunteerEventRepository {
     });
   }
 
+  /// Organization staff mark whether a volunteer came. Written to the
+  /// sign-up and to the volunteer's own copy, which their History tab reads.
+  Future<void> setAttendance({required String eventId, required String uid, required bool attended}) {
+    final fields = {
+      'attended': attended,
+      'attendanceMarkedAt': FieldValue.serverTimestamp(),
+      'attendanceMarkedBy': _auth.currentUser?.uid,
+    };
+    final batch = _db.batch()
+      ..update(_registrationsOf(eventId).doc(uid), fields)
+      ..set(_myRegistrations(uid).doc(eventId), fields, SetOptions(merge: true));
+    return batch.commit();
+  }
+
+  /// The signed-in volunteer's sign-ups, newest event first.
+  Stream<List<Map<String, dynamic>>> streamMyRegistrations() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return Stream.value(const []);
+    return _myRegistrations(uid).snapshots().map((snap) {
+      final list = [for (final d in snap.docs) {'eventId': d.id, ...d.data()}];
+      DateTime at(Map<String, dynamic> m) => (m['registeredAt'] as Timestamp?)?.toDate() ?? DateTime(0);
+      list.sort((a, b) => at(b).compareTo(at(a)));
+      return list;
+    });
+  }
+
   Future<void> setFavorite(VolunteerEvent event, bool favorite) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;

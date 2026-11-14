@@ -8,7 +8,7 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/rescue/widgets/animal_action_selection_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 /// `acted`: false if the admin cancelled/dismissed the flow before any
 /// write happened. `wholeCaseClosed`: only meaningful when `acted` is true

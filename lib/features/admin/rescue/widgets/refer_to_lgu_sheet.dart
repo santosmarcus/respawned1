@@ -5,7 +5,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Refer to LGU/Barangay modal. Suggests a barangay from the report's

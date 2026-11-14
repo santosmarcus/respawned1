@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/reason_picker.dart';
 
 const List<String> kAdoptionRejectionReasons = [
   'Housing not suitable',
@@ -21,124 +20,19 @@ class AdoptionRejectionResult {
   const AdoptionRejectionResult({required this.reasons, this.notes});
 }
 
-/// Checkboxes (multiple reasons allowed) + required notes when "Other" is
-/// checked — matches the supplied Rejection Reason design.
-Future<AdoptionRejectionResult?> showAdoptionRejectionSheet(BuildContext context) {
-  return showModalBottomSheet<AdoptionRejectionResult>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: AppColors.background,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (_) => const _AdoptionRejectionSheetBody(),
+/// Rejection Reason sheet for an adoption application. Several reasons may
+/// be chosen; "Other" needs an explanation, and extra notes are optional.
+/// The explanation and notes are saved together as the rejection notes.
+Future<AdoptionRejectionResult?> showAdoptionRejectionSheet(BuildContext context) async {
+  final result = await showReasonPicker<String>(
+    context,
+    title: 'Rejection Reason',
+    confirmLabel: 'Confirm Rejection',
+    multiple: true,
+    noteLabel: 'Additional notes',
+    options: [for (final r in kAdoptionRejectionReasons) ReasonOption(r, r, isOther: r == 'Other')],
   );
-}
-
-class _AdoptionRejectionSheetBody extends StatefulWidget {
-  const _AdoptionRejectionSheetBody();
-
-  @override
-  State<_AdoptionRejectionSheetBody> createState() => _AdoptionRejectionSheetBodyState();
-}
-
-class _AdoptionRejectionSheetBodyState extends State<_AdoptionRejectionSheetBody> {
-  final Set<String> _selected = {};
-  final _notesController = TextEditingController();
-  String? _error;
-
-  bool get _requiresNotes => _selected.contains('Other');
-
-  @override
-  void dispose() {
-    _notesController.dispose();
-    super.dispose();
-  }
-
-  void _confirm() {
-    if (_selected.isEmpty) {
-      setState(() => _error = 'Select at least one reason.');
-      return;
-    }
-    if (_requiresNotes && _notesController.text.trim().isEmpty) {
-      setState(() => _error = 'Notes are required when "Other" is selected.');
-      return;
-    }
-    Navigator.pop(
-      context,
-      AdoptionRejectionResult(
-        reasons: _selected.toList(),
-        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 20 + MediaQuery.of(context).viewInsets.bottom),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Text('Rejection Reason', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-              const SizedBox(height: 8),
-              for (final reason in kAdoptionRejectionReasons)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(reason, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-                  value: _selected.contains(reason),
-                  onChanged: (v) => setState(() {
-                    if (v == true) {
-                      _selected.add(reason);
-                    } else {
-                      _selected.remove(reason);
-                    }
-                    _error = null;
-                  }),
-                ),
-              if (_requiresNotes) ...[
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _notesController,
-                  maxLines: 3,
-                  decoration: const InputDecoration(hintText: 'Required notes for "Other"', isDense: true),
-                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-                ),
-              ] else ...[
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _notesController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(hintText: 'Additional notes (optional)', isDense: true),
-                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-                ),
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
-              ],
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _confirm,
-                  style: AppButtons.danger,
-                  child: Text('Confirm Rejection', style: GoogleFonts.tiltWarp(fontSize: 15, color: Colors.white)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  if (result == null) return null;
+  final notes = [?result.otherText, ?result.note].join('\n\n');
+  return AdoptionRejectionResult(reasons: result.values, notes: notes.isEmpty ? null : notes);
 }

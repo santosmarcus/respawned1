@@ -13,7 +13,7 @@ import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
 import 'package:respawnd1/core/widgets/date_time_picker_sheet.dart' as picker;
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -65,32 +65,8 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     }
   }
 
-  Future<String?> _promptText({required String title, required String label, bool required = false}) async {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => AlertDialog(
-          backgroundColor: AppColors.background,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(title, style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-          content: TextField(controller: controller, maxLines: 3, autofocus: true, decoration: InputDecoration(labelText: label)),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () {
-                final text = controller.text.trim();
-                if (required && text.isEmpty) return;
-                Navigator.pop(ctx, text);
-              },
-              style: AppButtons.primary,
-              child: const Text('Continue'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Future<String?> _promptText({required String title, required String label, bool required = false}) =>
+      showTextInputDialog(context, title: title, label: label, required: required, confirmLabel: 'Continue');
 
   Future<void> _sendReminder(FollowUpRecord f) async {
     final confirmed = await showConfirmActionDialog(
@@ -126,7 +102,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
       lastDate: DateTime.now().add(const Duration(days: 730)),
     );
     if (result == null) return;
-    final reason = await _promptText(title: 'Reason (optional)', label: 'Why is this being rescheduled?');
+    final reason = await _promptText(title: 'Reschedule Follow-up', label: 'Reason');
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).rescheduleFollowUp(
           applicationId: widget.applicationId,
           followUpId: f.id,
@@ -148,7 +124,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
   }
 
   Future<void> _addNote() async {
-    final text = await _promptText(title: 'Add Note', label: 'Private organization note (never shown to the adopter)', required: true);
+    final text = await _promptText(title: 'Add Note', label: 'Private note (never shown to the adopter)', required: true);
     if (text == null || text.isEmpty) return;
     await _run(() =>
         ref.read(adoptionApplicationRepositoryProvider).addPrivateNote(applicationId: widget.applicationId, text: text, actorUid: _actorUid, actorName: _actorName));

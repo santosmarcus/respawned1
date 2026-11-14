@@ -58,6 +58,43 @@ class AnimalHealthDetails {
   };
 }
 
+/// Where an animal in the shelter stands day to day, set by an admin on the
+/// record's Management tab (`animals/{id}.careStatus`). Separate from
+/// adoption status and from an open medical case: an adoptable animal can
+/// still be in isolation, and an animal in treatment comes back to one of
+/// these afterwards.
+enum CareStatus {
+  inShelter,
+  isolation,
+  recovering;
+
+  String get firestoreValue => switch (this) {
+        CareStatus.inShelter => 'in_shelter',
+        CareStatus.isolation => 'isolation',
+        CareStatus.recovering => 'recovering',
+      };
+
+  String get label => switch (this) {
+        CareStatus.inShelter => 'In Shelter',
+        CareStatus.isolation => 'Isolation',
+        CareStatus.recovering => 'Recovering',
+      };
+
+  /// What it means for the people caring for the animal.
+  String get help => switch (this) {
+        CareStatus.inShelter => 'Settled in the shelter with no special handling.',
+        CareStatus.isolation => 'Kept apart from other animals (new intake, contagious, or under observation).',
+        CareStatus.recovering => 'Back from treatment and still healing.',
+      };
+
+  static CareStatus? fromFirestoreValue(String? v) {
+    for (final s in values) {
+      if (s.firestoreValue == v) return s;
+    }
+    return null;
+  }
+}
+
 /// True for a real Firebase Storage download URL — false for a local
 /// device path, a temporary picker URI, a bare Storage path (`gs://...`),
 /// or an empty string. No writer in this codebase currently saves
@@ -142,6 +179,8 @@ class AnimalRecord {
   final bool publicProfileHidden;
   /// Printed/attached QR tag for this animal (P3-23). Null until assigned.
   final String? qrTagId;
+  /// Day-to-day shelter status set by an admin; null until first set.
+  final CareStatus? careStatus;
   final DateTime? deceasedAt;
   final String? deceasedCause;
   // Reservation/adoption — written by AdoptionApplicationRepository's
@@ -200,6 +239,7 @@ class AnimalRecord {
     required this.archived,
     this.publicProfileHidden = false,
     this.qrTagId,
+    this.careStatus,
     required this.deceasedAt,
     required this.deceasedCause,
     this.reservedForUserId,
@@ -234,14 +274,22 @@ class AnimalRecord {
   /// the Management tab's safety guards, and (via the same underlying
   /// fields) the Animal Records status filter, so no surface invents its
   /// own precedence between archived/deceased/adopted/reserved/etc.
+  ///
+  /// Isolation and Recovering come before Adoptable because they decide how
+  /// the animal is handled today; a returned animal reads Returned until it
+  /// is given another status or listed again.
   String get statusLabel {
     if (archived) return 'Archived';
     if (isDeceased) return 'Deceased';
-    if (isAdopted) return 'Adopted';
+    if (isAdopted && !isReturned) return 'Adopted';
     if (isTransferredOut) return 'Transferred';
     if (isReserved) return 'Reserved';
     if (currentCaseId != null) return 'In Treatment';
+    if (careStatus == CareStatus.isolation) return CareStatus.isolation.label;
+    if (careStatus == CareStatus.recovering) return CareStatus.recovering.label;
     if (isAdoptable) return 'Adoptable';
+    if (isReturned && careStatus == null) return 'Returned';
+    if (careStatus == CareStatus.inShelter) return CareStatus.inShelter.label;
     return 'Not Ready for Adoption';
   }
   /// True only when there's something worth actually showing — a bare
@@ -359,6 +407,7 @@ class AnimalRecord {
       archived: parseBool(data['archived']),
       publicProfileHidden: parseBool(data['publicProfileHidden']),
       qrTagId: parseOptionalString(data['qrTagId']),
+      careStatus: CareStatus.fromFirestoreValue(parseOptionalString(data['careStatus'])),
       deceasedAt: deceasedAtRaw is Timestamp ? deceasedAtRaw.toDate() : null,
       deceasedCause: parseOptionalString(data['deceasedCause']),
       reservedForUserId: parseOptionalString(data['reservedForUserId']),

@@ -131,16 +131,6 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
 
   @override
   Widget build(BuildContext context) {
-    // Donations has no real write path anywhere in this codebase (no
-    // Donation model/repository, nothing ever writes a `donations` doc —
-    // confirmed by inspection) — shown as an honest empty state rather
-    // than fabricated entries, same convention admin_adoption_page.dart
-    // already uses for the same reason.
-    if (widget.category == AuditCategory.donations) {
-      return const AdminListMessage(
-        'No donation events recorded yet. Donations does not have a data-writing workflow in this build.',
-      );
-    }
     if (widget.category == AuditCategory.animalRecords) {
       final rowsAsync = ref.watch(animalRecordAuditProvider);
       return _buildAuditSection(

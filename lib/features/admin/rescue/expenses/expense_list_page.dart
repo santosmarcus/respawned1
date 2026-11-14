@@ -7,9 +7,10 @@ import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/services/expense_funding_service.dart';
 
 /// Every expense entry for one case — editing or deleting here always
 /// updates the calculated Total/Funded/Outstanding totals automatically,
@@ -43,12 +44,14 @@ class _ExpenseListPageState extends ConsumerState<ExpenseListPage> {
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Delete Expense?',
-      message: '"${expense.title}" (${formatPeso(expense.amount)}) will be removed and the totals will update.',
+      message: '"${expense.title}" (${formatPeso(expense.amount)}) will be removed and the totals will update.'
+          '${expense.fundings.any((f) => f.allocationId != null) ? ' Any amount paid from a campaign goes back to that campaign.' : ''}',
       confirmLabel: 'Delete',
       destructive: true,
     );
     if (!confirmed) return;
     try {
+      await ExpenseFundingService().voidRemovedLinks(before: expense.fundings, reason: 'Expense deleted');
       await ref.read(rescueCaseRepositoryProvider).deleteExpense(caseId: widget.caseId, expenseId: expense.id);
     } catch (e) {
       if (context.mounted) {

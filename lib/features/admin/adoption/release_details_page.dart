@@ -9,12 +9,11 @@ import 'package:respawnd1/core/models/adoption/follow_up_schedule.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/core/services/adoption_agreement_service.dart';
-import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/schedule_rule_editor.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -311,7 +310,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                     _row('Animal', app.animalName),
                     _row('Adopter', app.adopterName),
                     _row('Application', '#${app.id.substring(0, app.id.length > 6 ? 6 : app.id.length)}'),
-                    _row('Adoption fee', app.feeStatus.label + (app.paymentAmount != null ? ' · ${formatPeso(app.paymentAmount!)}' : '')),
+                    _row('Cost to adopter', 'Free · delivery covered by the organization'),
                     const SizedBox(height: 4),
                     // Printed for both parties to sign at handover.
                     OutlinedButton.icon(

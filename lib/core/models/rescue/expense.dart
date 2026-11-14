@@ -9,6 +9,11 @@ enum ExpenseCategory {
   confinement,
   transport,
   foodAndSupplies,
+  // Organization running costs (general expenses, not tied to a case).
+  utilities,
+  rent,
+  staffCompensation,
+  administrative,
   other;
 
   String get label => switch (this) {
@@ -20,6 +25,52 @@ enum ExpenseCategory {
         ExpenseCategory.confinement => 'Confinement',
         ExpenseCategory.transport => 'Transport',
         ExpenseCategory.foodAndSupplies => 'Food and Supplies',
+        ExpenseCategory.utilities => 'Bills and Utilities',
+        ExpenseCategory.rent => 'Rent',
+        ExpenseCategory.staffCompensation => 'Staff Compensation',
+        ExpenseCategory.administrative => 'Administrative',
+        ExpenseCategory.other => 'Other',
+      };
+
+  /// Categories offered for a rescue case's bills.
+  static const List<ExpenseCategory> forCase = [
+    consultation,
+    medication,
+    procedure,
+    laboratory,
+    vaccination,
+    confinement,
+    transport,
+    foodAndSupplies,
+    other,
+  ];
+
+  /// Categories offered for the organization's general running costs.
+  static const List<ExpenseCategory> forGeneral = [
+    foodAndSupplies,
+    medication,
+    utilities,
+    rent,
+    staffCompensation,
+    transport,
+    administrative,
+    other,
+  ];
+
+  /// The matching category on a campaign's spending record
+  /// (ALLOCATION_CATEGORIES in functions/campaigns.js).
+  String get allocationCategory => switch (this) {
+        ExpenseCategory.consultation ||
+        ExpenseCategory.medication ||
+        ExpenseCategory.procedure ||
+        ExpenseCategory.laboratory ||
+        ExpenseCategory.vaccination =>
+          'Medicine and Treatment',
+        ExpenseCategory.confinement || ExpenseCategory.rent => 'Shelter',
+        ExpenseCategory.transport => 'Transport',
+        ExpenseCategory.foodAndSupplies => 'Food',
+        ExpenseCategory.utilities => 'Bills and Utilities',
+        ExpenseCategory.staffCompensation || ExpenseCategory.administrative => 'Administrative',
         ExpenseCategory.other => 'Other',
       };
 
@@ -59,17 +110,53 @@ enum FundingSource {
 class ExpenseFunding {
   final FundingSource source;
   final double amount;
-  const ExpenseFunding({required this.source, required this.amount});
+
+  /// The campaign this money came out of, when the line is linked to one.
+  /// A linked line is also recorded as spending on that campaign
+  /// ([allocationId]), so donors' Fund Tracking shows the bill it paid.
+  final String? campaignId;
+  final String? campaignTitle;
+  final String? allocationId;
+
+  const ExpenseFunding({
+    required this.source,
+    required this.amount,
+    this.campaignId,
+    this.campaignTitle,
+    this.allocationId,
+  });
+
+  bool get isLinked => campaignId != null && campaignId!.isNotEmpty;
+
+  ExpenseFunding withAllocation(String id) => ExpenseFunding(
+        source: source,
+        amount: amount,
+        campaignId: campaignId,
+        campaignTitle: campaignTitle,
+        allocationId: id,
+      );
 
   static ExpenseFunding? fromMap(Object? raw) {
     if (raw is! Map) return null;
     final source = FundingSource.fromLabel(raw['source'] as String?);
     final amount = (raw['amount'] as num?)?.toDouble() ?? 0;
     if (source == FundingSource.unfunded || amount <= 0) return null;
-    return ExpenseFunding(source: source, amount: amount);
+    return ExpenseFunding(
+      source: source,
+      amount: amount,
+      campaignId: raw['campaignId'] as String?,
+      campaignTitle: raw['campaignTitle'] as String?,
+      allocationId: raw['allocationId'] as String?,
+    );
   }
 
-  Map<String, dynamic> toMap() => {'source': source.label, 'amount': amount};
+  Map<String, dynamic> toMap() => {
+        'source': source.label,
+        'amount': amount,
+        'campaignId': ?campaignId,
+        'campaignTitle': ?campaignTitle,
+        'allocationId': ?allocationId,
+      };
 }
 
 /// A single doc under `cases/{caseId}/expenses/{expenseId}` — the ledger
@@ -131,9 +218,10 @@ class Expense {
   bool get isUnfunded => fundedAmount <= 0;
 
   /// e.g. "Unfunded", "Donation Fund", "Organization Budget + Fundraiser".
+  /// A line linked to a campaign shows the campaign's name.
   String get fundingLabel => fundings.isEmpty
       ? FundingSource.unfunded.label
-      : fundings.map((f) => f.source.label).toSet().join(' + ');
+      : fundings.map((f) => f.isLinked ? (f.campaignTitle ?? f.source.label) : f.source.label).toSet().join(' + ');
 
   bool get isSharedCaseExpense => animalIndexes == null || animalIndexes!.isEmpty;
 

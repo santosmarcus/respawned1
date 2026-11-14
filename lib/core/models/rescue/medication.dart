@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/media_ref.dart';
 
 /// A standing medication order for an animal in the shelter, stored at
 /// `animals/{animalId}/medications/{planId}`. Admins create and end plans;
@@ -14,6 +15,9 @@ class MedicationPlan {
   final bool active;
   final String? createdBy;
 
+  /// Photos of the prescription.
+  final List<MediaRef> attachments;
+
   const MedicationPlan({
     required this.id,
     required this.animalId,
@@ -24,6 +28,7 @@ class MedicationPlan {
     this.endDate,
     this.active = true,
     this.createdBy,
+    this.attachments = const [],
   });
 
   /// Whether a dose is expected on [day] (calendar date, time ignored).
@@ -43,6 +48,7 @@ class MedicationPlan {
         if (endDate != null) 'endDate': Timestamp.fromDate(dayOnly(endDate!)),
         'active': active,
         if (createdBy != null) 'createdBy': createdBy,
+        ...attachmentFields(attachments),
         'createdAt': FieldValue.serverTimestamp(),
       };
 
@@ -56,6 +62,7 @@ class MedicationPlan {
         endDate: (data['endDate'] as Timestamp?)?.toDate(),
         active: data['active'] as bool? ?? true,
         createdBy: data['createdBy'] as String?,
+        attachments: attachmentsFrom(data),
       );
 }
 
@@ -72,6 +79,9 @@ class MedicationDose {
   final String? givenByName;
   final DateTime? givenAt;
   final List<String> mediaUrls;
+
+  /// 'video' or 'image' per [mediaUrls] entry; older doses have none.
+  final List<String> mediaTypes;
   final String? note;
 
   const MedicationDose({
@@ -84,6 +94,7 @@ class MedicationDose {
     this.givenByName,
     this.givenAt,
     this.mediaUrls = const [],
+    this.mediaTypes = const [],
     this.note,
   });
 
@@ -97,6 +108,7 @@ class MedicationDose {
         givenByName: data['givenByName'] as String?,
         givenAt: (data['givenAt'] as Timestamp?)?.toDate(),
         mediaUrls: List<String>.from(data['mediaUrls'] as List? ?? const []),
+        mediaTypes: List<String>.from(data['mediaTypes'] as List? ?? const []),
         note: data['note'] as String?,
       );
 }

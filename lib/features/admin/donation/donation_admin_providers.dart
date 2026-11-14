@@ -89,7 +89,8 @@ final campaignDonationsProvider = StreamProvider.autoDispose.family<List<Donatio
 
 final campaignAllocationsProvider = StreamProvider.autoDispose.family<List<AllocationEntry>, String>((ref, id) {
   return _db.collection('campaigns').doc(id).collection('allocations').snapshots().map((s) {
-    final list = s.docs.map(AllocationEntry.fromFirestore).toList();
+    // Voided spending (its bill was removed) is kept for history only.
+    final list = s.docs.where((d) => d.data()['status'] != 'voided').map(AllocationEntry.fromFirestore).toList();
     final epoch = DateTime.fromMillisecondsSinceEpoch(0);
     list.sort((a, b) => (b.createdAt ?? epoch).compareTo(a.createdAt ?? epoch));
     return list;

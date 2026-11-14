@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/adoption/community_adoption.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
 /// Writes for the lightweight Community Adoption path — see
 /// community_adoption.dart's doc comment for how this differs from the
@@ -13,6 +14,7 @@ class CommunityAdoptionRepository {
   final _adoptions = FirebaseFirestore.instance.collection('communityAdoptions');
   final _cases = FirebaseFirestore.instance.collection('cases');
   final _db = FirebaseFirestore.instance;
+  final _store = RescueCaseStore(FirebaseFirestore.instance);
 
   /// How many animals a case actually covers — the `animals[]` array
   /// length, or 1 for a legacy single-animal case with no such array.
@@ -116,14 +118,17 @@ class CommunityAdoptionRepository {
           ? '$adopterName adopted $names through Community Adoption (${claimedNow.length} of $total animals now placed).'
           : '$adopterName adopted $names through Community Adoption.';
 
-      tx.update(caseRef, {
-        'communityAdoptionIds': FieldValue.arrayUnion(newIds),
-        'claimedAnimalIndexes': claimedNow.toList(),
-        if (allClaimed) 'status': 'closed',
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': message, 'timestamp': Timestamp.now()}
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseRef.id,
+        action: 'community_adoption_claimed',
+        statusLine: message,
+        fields: {
+          'communityAdoptionIds': FieldValue.arrayUnion(newIds),
+          'claimedAnimalIndexes': claimedNow.toList(),
+          if (allClaimed) 'status': 'closed',
+        },
+      );
     });
 
     return createdIds;

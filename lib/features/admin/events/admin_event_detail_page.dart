@@ -11,6 +11,7 @@ import 'package:respawnd1/features/admin/events/admin_events_page.dart';
 import 'package:respawnd1/features/admin/events/event_form_page.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 /// One event's details, Edit/Cancel actions, and its sign-up list.
 class AdminEventDetailPage extends ConsumerWidget {
@@ -19,12 +20,7 @@ class AdminEventDetailPage extends ConsumerWidget {
 
   Future<void> _cancel(BuildContext context, WidgetRef ref, VolunteerEvent event) async {
     final reasonController = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: const Text('Cancel this event?'),
-        content: Column(
+    final confirmed = await showConfirmActionDialog(context, title: 'Cancel this event?', content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -39,17 +35,7 @@ class AdminEventDetailPage extends ConsumerWidget {
               decoration: const InputDecoration(labelText: 'Reason (optional)'),
             ),
           ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Event')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppButtons.danger,
-            child: const Text('Cancel Event'),
-          ),
-        ],
-      ),
-    );
+        ), confirmLabel: 'Cancel Event', cancelLabel: 'Keep Event', destructive: true);
     final reason = reasonController.text.trim();
     reasonController.dispose();
     if (confirmed != true || !context.mounted) return;
@@ -143,7 +129,7 @@ class AdminEventDetailPage extends ConsumerWidget {
               const SizedBox(height: 16),
               Text('Sign-ups', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
               const SizedBox(height: 8),
-              _RegistrationsList(eventId: event.id),
+              _RegistrationsList(event: event),
             ],
           );
         },
@@ -169,12 +155,22 @@ class AdminEventDetailPage extends ConsumerWidget {
 }
 
 class _RegistrationsList extends ConsumerWidget {
-  final String eventId;
-  const _RegistrationsList({required this.eventId});
+  final VolunteerEvent event;
+  const _RegistrationsList({required this.event});
+
+  Future<void> _mark(BuildContext context, WidgetRef ref, EventRegistration r, bool attended) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(volunteerEventRepositoryProvider).setAttendance(eventId: event.id, uid: r.uid, attended: attended);
+    } catch (e) {
+      messenger.showSnackBar(appSnackBar('Could not save attendance: $e', kind: AppMessageKind.error));
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final regsAsync = ref.watch(eventRegistrationsProvider(eventId));
+    final regsAsync = ref.watch(eventRegistrationsProvider(event.id));
+    final canMark = event.hasStarted && !event.isCancelled;
     return regsAsync.when(
       loading: () => const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
@@ -187,8 +183,19 @@ class _RegistrationsList extends ConsumerWidget {
           return Text('No one has signed up yet.',
               style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
         }
+        final attendedCount = regs.where((r) => r.attended == true).length;
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                canMark
+                    ? '$attendedCount of ${regs.length} marked as attended. Tap Came or Didn\'t come for each volunteer.'
+                    : 'Attendance can be taken once the event starts.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ),
             for (final r in regs)
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -212,11 +219,32 @@ class _RegistrationsList extends ConsumerWidget {
                             ].join(' · '),
                             style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                           ),
+                          if (canMark) ...[
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Came'),
+                                  selected: r.attended == true,
+                                  selectedColor: AppColors.success.withValues(alpha: 0.25),
+                                  onSelected: (_) => _mark(context, ref, r, true),
+                                ),
+                                ChoiceChip(
+                                  label: const Text("Didn't come"),
+                                  selected: r.attended == false,
+                                  selectedColor: AppColors.error.withValues(alpha: 0.2),
+                                  onSelected: (_) => _mark(context, ref, r, false),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
                     if (r.participantMobileNumber.isNotEmpty)
                       IconButton(
+                        tooltip: 'Call',
                         icon: const Icon(Icons.call_outlined, color: AppColors.textPrimary),
                         onPressed: () async {
                           final uri = Uri(scheme: 'tel', path: r.participantMobileNumber);

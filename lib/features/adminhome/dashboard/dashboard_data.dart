@@ -186,11 +186,14 @@ final shelterOccupancyProvider = Provider.autoDispose<AsyncValue<ShelterOccupanc
   final atVetRecordsOutsideCases = inCare
       .where((a) => hasOpenMedicalCase(a) && !treatmentIds.contains(a.currentCaseId))
       .length;
-  final inShelter = inCare.where((a) => !hasOpenMedicalCase(a)).length;
+  // Animals an admin put in isolation use an isolation space, not a general one.
+  bool isolated(AnimalRecord a) => a.careStatus == CareStatus.isolation;
+  final inShelter = inCare.where((a) => !hasOpenMedicalCase(a) && !isolated(a)).length;
+  final isolatedRecords = inCare.where((a) => !hasOpenMedicalCase(a) && isolated(a)).length;
 
   final quarantined = [...snap.of(RescueStage.intake), ...treatment].where((c) => c.isQuarantineActive);
   final quarantineIds = quarantined.map((c) => c.id).toSet();
-  final isolation = quarantined.fold<int>(0, (s, c) => s + c.animalCount);
+  final isolation = quarantined.fold<int>(0, (s, c) => s + c.animalCount) + isolatedRecords;
   final intakeArriving = snap
       .of(RescueStage.intake)
       .where((c) => !quarantineIds.contains(c.id))

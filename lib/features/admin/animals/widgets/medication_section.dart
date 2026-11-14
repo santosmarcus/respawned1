@@ -1,11 +1,8 @@
-import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
@@ -13,10 +10,13 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/medication.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/animal_medication_repository.dart';
-import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/models/rescue/care_update.dart';
+import 'package:respawnd1/core/utils/stream_merge.dart';
+import 'package:respawnd1/core/widgets/media_attachments.dart';
 
 // ---- Providers ---------------------------------------------------------------
 
@@ -30,6 +30,33 @@ final medicationPlansProvider = StreamProvider.autoDispose.family<List<Medicatio
 
 final medicationDosesProvider = StreamProvider.autoDispose.family<Map<String, MedicationDose>, String>((ref, animalId) {
   return ref.watch(animalMedicationRepositoryProvider).watchDoses(animalId);
+});
+
+final careUpdatesProvider = StreamProvider.autoDispose.family<List<CareUpdate>, String>((ref, animalId) {
+  return ref.watch(animalMedicationRepositoryProvider).watchCareUpdates(animalId);
+});
+
+/// Missed doses over the past week (yesterday back), for every animal still
+/// in care, as {animal id: missed count}. Feeds the dashboard alert.
+final missedDosesByAnimalProvider = StreamProvider.autoDispose<Map<String, int>>((ref) async* {
+  final repo = ref.watch(animalMedicationRepositoryProvider);
+  Map<String, List<MedicationPlan>>? plans;
+  Map<String, MedicationDose>? doses;
+  Map<String, int> compute() {
+    final now = DateTime.now();
+    final yesterday = dayOnly(now).subtract(const Duration(days: 1));
+    final from = yesterday.subtract(const Duration(days: 6));
+    return {
+      for (final e in plans!.entries)
+        e.key: countMissedDoses(plans: e.value, doses: doses!, from: from, to: yesterday, now: now),
+    }..removeWhere((_, n) => n == 0);
+  }
+
+  await for (final event in StreamGroupLite.merge2(repo.watchActivePlansByAnimal(), repo.watchRecentDosesEverywhere())) {
+    if (event.$1 != null) plans = event.$1;
+    if (event.$2 != null) doses = event.$2;
+    if (plans != null && doses != null) yield compute();
+  }
 });
 
 /// Carers record doses only. Staff (and platform admins with an org) plan
@@ -164,6 +191,10 @@ class _PlanTasks extends ConsumerWidget {
           Text('${plan.timesPerDay}× a day · from ${_fmt(plan.startDate)}'
               '${plan.endDate == null ? '' : ' to ${_fmt(plan.endDate!)}'}',
               style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+          if (plan.attachments.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            MediaThumbStrip(media: plan.attachments, size: 44),
+          ],
           const SizedBox(height: 4),
           if (!scheduledToday)
             Text('Not scheduled today.',
@@ -189,19 +220,9 @@ class _PlanTasks extends ConsumerWidget {
   }
 
   Future<void> _confirmEnd(BuildContext context, WidgetRef ref) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('End this order?'),
-        content: Text('${plan.drug} stops today. Dose history is kept.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('End')),
-        ],
-      ),
-    );
+    final ok = await showConfirmActionDialog(context, title: 'End this order?', message: '${plan.drug} stops today. Dose history is kept.', confirmLabel: 'End');
     if (ok != true) return;
-    await ref.read(animalMedicationRepositoryProvider).endPlan(animalId: animal.id, planId: plan.id);
+    await ref.read(animalMedicationRepositoryProvider).endPlan(animalId: animal.id, planId: plan.id, drug: plan.drug);
   }
 }
 
@@ -233,33 +254,37 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Record dose ${widget.slot} of ${widget.plan.drug}?'),
-        content: const Text('Add a photo as proof, or record it without one.'),
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Record dose ${widget.slot} of ${widget.plan.drug}?',
+            style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+        content: Text('Add a photo or video as proof, or record it without one.',
+            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'plain'), child: const Text('Without photo')),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'photo'), child: const Text('Add photo')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'plain'), child: const Text('Without proof')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, 'media'),
+            style: AppButtons.primary,
+            child: const Text('Add photo or video'),
+          ),
         ],
       ),
     );
     if (choice == null || !mounted) return;
+    PickedMedia? picked;
+    if (choice == 'media') {
+      picked = await pickPhotoOrVideo(context, title: 'Proof of dose');
+      // Asked for proof, then backed out of the picker: record nothing.
+      if (picked == null || !mounted) return;
+    }
     setState(() => _saving = true);
     try {
       final today = dayOnly(DateTime.now());
       final doseId = doseIdFor(widget.plan.id, today, widget.slot);
-
-      final XFile? picked = choice == 'photo'
-          ? await pickImageWithSource(context, ImagePicker(), imageQuality: 85)
-          : null;
-      // Asked for a photo, then backed out of the picker: record nothing.
-      if (choice == 'photo' && picked == null) return;
-      final mediaUrls = <String>[];
-      if (picked != null) {
-        final storageRef = FirebaseStorage.instance
-            .ref('animalRecords/${widget.animal.id}/doseMedia/$doseId.${_ext(picked.path)}');
-        await storageRef.putFile(File(picked.path));
-        mediaUrls.add(await storageRef.getDownloadURL());
-      }
+      final media = picked == null
+          ? null
+          : await uploadMedia(picked, folder: 'animalRecords/${widget.animal.id}/doseMedia', name: doseId);
 
       final user = FirebaseAuth.instance.currentUser;
       await ref.read(animalMedicationRepositoryProvider).logDose(
@@ -269,7 +294,8 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
             slot: widget.slot,
             givenBy: user?.uid ?? '',
             givenByName: user?.displayName ?? user?.email,
-            mediaUrls: mediaUrls,
+            mediaUrls: [?media?.url],
+            mediaTypes: [if (media != null) media.isVideo ? 'video' : 'image'],
           );
     } catch (e) {
       if (mounted) {
@@ -282,10 +308,6 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
     }
   }
 
-  String _ext(String path) {
-    final dot = path.lastIndexOf('.');
-    return dot == -1 ? 'jpg' : path.substring(dot + 1).toLowerCase();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -308,7 +330,7 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
           Expanded(
             child: Text(
               status == DoseStatus.given && dose != null
-                  ? 'Given by ${dose.givenByName ?? 'carer'}${dose.mediaUrls.isEmpty ? '' : ' · with photo'}'
+                  ? 'Given by ${dose.givenByName ?? 'carer'}${dose.mediaUrls.isEmpty ? '' : (dose.mediaTypes.contains('video') ? ' · with video' : ' · with photo')}'
                   : status.label,
               style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: color),
             ),
@@ -340,6 +362,7 @@ Future<void> _showAddPlanSheet(BuildContext context, WidgetRef ref, AnimalRecord
   var start = dayOnly(DateTime.now());
   DateTime? end;
   var saving = false;
+  var attachments = <PickedMedia>[];
 
   await showModalBottomSheet<void>(
     context: context,
@@ -416,6 +439,13 @@ Future<void> _showAddPlanSheet(BuildContext context, WidgetRef ref, AnimalRecord
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            AttachmentPicker(
+              items: attachments,
+              enabled: !saving,
+              label: 'Attach prescription photo',
+              onChanged: (v) => setSheet(() => attachments = v),
+            ),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -428,6 +458,11 @@ Future<void> _showAddPlanSheet(BuildContext context, WidgetRef ref, AnimalRecord
                         final dose = doseCtrl.text.trim();
                         if (drug.isEmpty || dose.isEmpty) return;
                         setSheet(() => saving = true);
+                        final uploaded = await uploadAllMedia(
+                          attachments,
+                          folder: 'animalRecords/${animal.id}/medicalDocs',
+                          prefix: 'prescription_${DateTime.now().millisecondsSinceEpoch}',
+                        );
                         await ref.read(animalMedicationRepositoryProvider).addPlan(
                               animalId: animal.id,
                               drug: drug,
@@ -436,6 +471,7 @@ Future<void> _showAddPlanSheet(BuildContext context, WidgetRef ref, AnimalRecord
                               startDate: start,
                               endDate: end,
                               createdBy: FirebaseAuth.instance.currentUser?.uid,
+                              attachments: uploaded,
                             );
                         if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                       },

@@ -1,6 +1,7 @@
 // Split out of rescue_case_repository.dart (behavior-preserving refactor).
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -55,6 +56,8 @@ class RescueCaseStore {
   CollectionReference<Map<String, dynamic>> get animals =>
       db.collection('animals');
 
+  /// Prefer [recordAction], which also writes the reporter's status line.
+  /// This is for actions with nothing to tell the reporter.
   Future<void> addActivityLog({
     required String caseId,
     required String action,
@@ -64,16 +67,99 @@ class RescueCaseStore {
     Map<String, dynamic>? details,
   }) async {
     await activityLogsOf(caseId).add(
-      ActivityLogEntry(
-        id: '',
-        caseId: caseId,
-        action: action,
-        actorUid: actorUid,
-        actorName: actorName,
-        actorRole: actorRole,
-        details: details,
-      ).toFirestore(),
+      _logEntry(caseId, action, actorUid, actorName, actorRole, details),
     );
+  }
+
+  // ---- The case timeline ---------------------------------------------------
+  //
+  // Every case action is recorded in two places: the `statusHistory` line
+  // the reporter sees on their tracking page, and the `activityLogs` entry
+  // staff (and the Audit page) see, which keeps who did it. [recordAction]
+  // and [recordActionIn] write both together, with the case update, so
+  // neither can be left out.
+
+  /// One `statusHistory` item.
+  static Map<String, dynamic> statusLineEntry(String text, [Timestamp? at]) =>
+      {'status': text, 'timestamp': at ?? Timestamp.now()};
+
+  /// Applies [fields] to the case, adds [statusLine] (when given) to what the
+  /// reporter sees, and logs [action] for staff, in one atomic write. With no
+  /// [actorUid], the signed-in user is recorded.
+  Future<void> recordAction({
+    required String caseId,
+    required String action,
+    String? statusLine,
+    Map<String, dynamic> fields = const {},
+    String? actorUid,
+    String? actorName,
+    String? actorRole,
+    Map<String, dynamic>? details,
+  }) {
+    final batch = db.batch();
+    final update = _withStatusLine(fields, statusLine);
+    if (update.isNotEmpty) batch.update(caseDoc(caseId), update);
+    batch.set(activityLogsOf(caseId).doc(), _logEntry(caseId, action, actorUid, actorName, actorRole, details));
+    return batch.commit();
+  }
+
+  /// [recordAction] inside a running transaction.
+  void recordActionIn(
+    Transaction tx, {
+    required String caseId,
+    required String action,
+    String? statusLine,
+    Map<String, dynamic> fields = const {},
+    String? actorUid,
+    String? actorName,
+    String? actorRole,
+    Map<String, dynamic>? details,
+  }) {
+    final update = _withStatusLine(fields, statusLine);
+    if (update.isNotEmpty) tx.update(caseDoc(caseId), update);
+    tx.set(activityLogsOf(caseId).doc(), _logEntry(caseId, action, actorUid, actorName, actorRole, details));
+  }
+
+  /// [recordAction] as part of a [WriteBatch] the caller commits.
+  void recordActionInBatch(
+    WriteBatch batch, {
+    required String caseId,
+    required String action,
+    String? statusLine,
+    Map<String, dynamic> fields = const {},
+    String? actorUid,
+    String? actorName,
+    String? actorRole,
+    Map<String, dynamic>? details,
+  }) {
+    final update = _withStatusLine(fields, statusLine);
+    if (update.isNotEmpty) batch.update(caseDoc(caseId), update);
+    batch.set(activityLogsOf(caseId).doc(), _logEntry(caseId, action, actorUid, actorName, actorRole, details));
+  }
+
+  static Map<String, dynamic> _withStatusLine(Map<String, dynamic> fields, String? statusLine) => {
+        ...fields,
+        if (statusLine != null) 'statusHistory': FieldValue.arrayUnion([statusLineEntry(statusLine)]),
+      };
+
+  static Map<String, dynamic> _logEntry(
+    String caseId,
+    String action,
+    String? actorUid,
+    String? actorName,
+    String? actorRole,
+    Map<String, dynamic>? details,
+  ) {
+    final user = actorUid == null ? FirebaseAuth.instance.currentUser : null;
+    return ActivityLogEntry(
+      id: '',
+      caseId: caseId,
+      action: action,
+      actorUid: actorUid ?? user?.uid,
+      actorName: actorName ?? user?.displayName ?? user?.email,
+      actorRole: actorRole,
+      details: details,
+    ).toFirestore();
   }
 
   /// Recomputes `activeAnimalStages`/`animalStageCounts` (spec §7) from a

@@ -7,7 +7,6 @@ import 'package:printing/printing.dart';
 
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
-import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/adoption/widgets/adoption_terms_page.dart';
 
 /// The formal Adoption Agreement the terms page promises ("reviewed and
@@ -61,11 +60,6 @@ class AdoptionAgreementService {
     final animalName = (animal?.name.isNotEmpty ?? false) ? animal!.name : app.animalName;
     final address = app.raw['personal'] is Map ? (app.raw['personal'] as Map)['homeAddress'] as String? : null;
     final disclosures = careDisclosures(animal);
-    final fee = app.paymentAmount != null && app.paymentAmount! > 0
-        // The PDF's built-in Helvetica has no peso sign.
-        ? '${formatPeso(app.paymentAmount!).replaceFirst('₱', 'PHP ')} (${app.feeStatus.label.toLowerCase()})'
-        : 'None';
-
     const body = pw.TextStyle(fontSize: 10, lineSpacing: 2);
     pw.Widget heading(String text) => pw.Padding(
           padding: const pw.EdgeInsets.only(top: 14, bottom: 6),
@@ -148,7 +142,6 @@ class AdoptionAgreementService {
           field('Spayed/neutered',
               animal == null ? '—' : ((animal.health.sterilized ?? animal.spayedNeutered) ? 'Yes' : 'No')),
           field('Vaccinated', animal == null ? '—' : (animal.vaccinated ? 'Yes' : 'No')),
-          field('Adoption fee', fee),
 
           heading('Continuing care'),
           if (disclosures.isEmpty)
@@ -165,6 +158,7 @@ class AdoptionAgreementService {
 
           heading("Organization's commitments"),
           numbered([
+            'The adoption is free of charge. The Adopter pays no adoption fee.',
             'The Organization has disclosed all health, behavior and care information it holds about the animal.',
             'The Organization will deliver the animal to the Adopter and cover the transportation cost.',
             'The Organization will conduct the agreed post-adoption follow-ups and remain available for advice.',

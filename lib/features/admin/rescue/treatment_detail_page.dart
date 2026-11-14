@@ -22,7 +22,7 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/rescue/widgets/animal_action_selection_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/release_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transfer_animal_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.dart';

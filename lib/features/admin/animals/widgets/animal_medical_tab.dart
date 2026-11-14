@@ -25,6 +25,9 @@ import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart
 import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.dart';
 import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/admin/animals/widgets/care_updates_section.dart';
+import 'package:respawnd1/core/widgets/media_attachments.dart';
 
 const String _kNA = 'Not provided';
 
@@ -55,6 +58,8 @@ class AnimalMedicalTab extends ConsumerWidget {
           PreventiveCareSection(animal: animal),
           const SizedBox(height: 20),
           MedicationSection(animal: animal),
+          const SizedBox(height: 20),
+          CareUpdatesSection(animal: animal),
           const SizedBox(height: 8),
           // Backfill for animals whose paper health list is out of date.
           Align(
@@ -280,13 +285,7 @@ class _VaccineTile extends StatelessWidget {
       };
 
   void _showHistory(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('${record.vaccineName} History', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: SizedBox(
+    showInfoDialog(context, title: '${record.vaccineName} History', content: SizedBox(
           width: 320,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -303,17 +302,16 @@ class _VaccineTile extends StatelessWidget {
                           style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                       if ((r.clinicOrProvider ?? '').isNotEmpty)
                         Text(r.clinicOrProvider!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      if (r.attachments.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        MediaThumbStrip(media: r.attachments, size: 44),
+                      ],
                     ],
                   ),
                 ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-        ],
-      ),
-    );
+        ));
   }
 
   @override
@@ -415,12 +413,7 @@ class _CareTile extends StatelessWidget {
       };
 
   void _showHistory(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: Text('${type.label} History', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: SizedBox(
+    showInfoDialog(context, title: '${type.label} History', content: SizedBox(
           width: 320,
           child: SingleChildScrollView(
             child: Column(
@@ -430,23 +423,29 @@ class _CareTile extends StatelessWidget {
                 for (final r in history)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      [
-                        _d(r.dateGiven),
-                        if ((r.product ?? '').isNotEmpty) r.product!,
-                        if ((r.provider ?? '').isNotEmpty) r.provider!,
-                        if ((r.notes ?? '').isNotEmpty) r.notes!,
-                      ].join(' · '),
-                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          [
+                            _d(r.dateGiven),
+                            if ((r.product ?? '').isNotEmpty) r.product!,
+                            if ((r.provider ?? '').isNotEmpty) r.provider!,
+                            if ((r.notes ?? '').isNotEmpty) r.notes!,
+                          ].join(' · '),
+                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                        ),
+                        if (r.attachments.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          MediaThumbStrip(media: r.attachments, size: 44),
+                        ],
+                      ],
                     ),
                   ),
               ],
             ),
           ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-      ),
-    );
+        ));
   }
 
   @override

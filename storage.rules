@@ -130,6 +130,26 @@ service firebase.storage {
 
     // Dose photos and videos (carer confirms a dose given). A carer may add
     // media only for an animal in their own approved organization.
+    // Photos and videos on carer updates: same people as dose proof.
+    match /animalRecords/{animalId}/careUpdates/{file} {
+      function animalOrgId() {
+        return firestore.get(/databases/(default)/documents/animals/$(animalId)).data.get('organizationId', '');
+      }
+      function isCarerForAnimal() {
+        return userData().get('organizationId', '') != '' &&
+          userData().get('organizationId', '') == animalOrgId() &&
+          firestore.exists(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)) &&
+          firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)).data
+            .get('role', '') == 'carer' &&
+          !(firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)).data
+            .get('status', 'active') in ['inactive', 'removed', 'disabled']) &&
+          firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())).data
+            .get('verificationStatus', 'approved') == 'approved';
+      }
+      allow read: if signedIn();
+      allow write: if signedIn() && mediaUpload() && (isStaff() || isCarerForAnimal());
+    }
+
     match /animalRecords/{animalId}/doseMedia/{file} {
       function animalOrgId() {
         return firestore.get(/databases/(default)/documents/animals/$(animalId)).data.get('organizationId', '');
@@ -191,6 +211,13 @@ service firebase.storage {
       // organization_verification_screen.dart — registration papers and
       // permits.
       match /verification/{file=**} {
+        allow read: if isOrgStaff();
+        allow write: if isOrgStaff() && mediaUpload();
+      }
+
+      // Receipts for general expenses (general_expenses_page.dart). The
+      // expense records themselves are financial-admin only in Firestore.
+      match /expenseReceipts/{file} {
         allow read: if isOrgStaff();
         allow write: if isOrgStaff() && mediaUpload();
       }

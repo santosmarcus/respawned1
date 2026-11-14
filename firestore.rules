@@ -381,7 +381,15 @@ service cloud.firestore {
           getAfter(/databases/$(database)/documents/events/$(eventId)).data.goingCount ==
             eventBefore().get('goingCount', 0) + 1;
 
-        allow update, delete: if false;
+        // Attendance, marked by the organization's staff once the event has
+        // started (VolunteerEventRepository.setAttendance).
+        allow update: if managesEventOrg(eventBefore().organizationId) &&
+          changedOnly(['attended', 'attendanceMarkedAt', 'attendanceMarkedBy']) &&
+          request.resource.data.attended is bool &&
+          request.resource.data.attendanceMarkedBy == request.auth.uid &&
+          eventBefore().startAt <= request.time;
+
+        allow delete: if false;
       }
     }
 
@@ -825,9 +833,24 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Care updates: carers of the owning org and staff add their own
+      // (authorId must be themselves, stamped now); nobody rewrites one.
+      match /careUpdates/{updateId} {
+        allow read: if signedIn();
+        allow create: if signedIn() &&
+          request.resource.data.get('authorId', '') == request.auth.uid &&
+          request.resource.data.get('createdAt', null) == request.time &&
+          request.resource.data.get('note', '') is string &&
+          request.resource.data.get('note', '').size() > 0 &&
+          (canStaffAnimal(get(animalPath(animalId)).data) ||
+            isCarerOf(get(animalPath(animalId)).data.get('organizationId', '')));
+        allow update: if false;
+        allow delete: if canStaffAnimal(get(animalPath(animalId)).data);
+      }
+
       match /{sub}/{docId=**} {
         allow read: if signedIn();
-        allow write: if canStaffAnimal(get(animalPath(animalId)).data);
+        allow write: if sub != 'careUpdates' && canStaffAnimal(get(animalPath(animalId)).data);
       }
     }
 
@@ -970,6 +993,15 @@ service cloud.firestore {
       allow read: if isOrgStaff();
     }
 
+    // Dashboard: missed medication doses across every animal in care.
+    match /{path=**}/medications/{docId} {
+      allow read: if isOrgStaff();
+    }
+
+    match /{path=**}/medicationDoses/{docId} {
+      allow read: if isOrgStaff();
+    }
+
     match /{path=**}/expenses/{docId} {
       allow read: if isOrgStaff();
     }
@@ -984,6 +1016,50 @@ service cloud.firestore {
 
     match /{path=**}/followUps/{docId} {
       allow read: if isOrgStaff();
+    }
+
+    // ---- General expenses ----------------------------------------------------
+    //
+    // orgExpenses: the organization's running costs (utilities, rent, staff
+    // pay). Only its financial admins read or write them, and only for their
+    // own organization; queries filter on organizationId.
+    match /orgExpenses/{expenseId} {
+      function financeOf(orgId) {
+        return isFinanceAdmin() && (myRole() == 'admin' || (orgId is string && orgId == myOrgId()));
+      }
+      allow read, delete: if financeOf(resource.data.get('organizationId', ''));
+      allow create: if financeOf(request.resource.data.get('organizationId', '')) &&
+        request.resource.data.get('amount', 0) is number &&
+        request.resource.data.get('amount', 0) > 0;
+      allow update: if financeOf(resource.data.get('organizationId', '')) &&
+        !changedAny(['organizationId']) &&
+        request.resource.data.get('amount', 0) is number &&
+        request.resource.data.get('amount', 0) > 0;
+    }
+
+    // ---- Audit log ---------------------------------------------------------
+    //
+    // auditLogs: append-only. Anyone signed in may add an entry about their
+    // own action (AuditLogRepository: logins, adoptions, staff changes,
+    // expenses); the backend adds donation entries. Only the organization's
+    // staff (not carers) and platform staff read them; the Audit page always
+    // filters on organizationId, which is what lets this rule be proven.
+    // Nobody edits or deletes an entry.
+    match /auditLogs/{entryId} {
+      allow read: if isPlatformStaff() ||
+        (resource.data.get('organizationId', '') != '' &&
+          isApprovedStaffOf(resource.data.get('organizationId', '')));
+      allow create: if signedIn() &&
+        request.resource.data.get('actorId', request.auth.uid) == request.auth.uid &&
+        request.resource.data.get('category', null) is string &&
+        request.resource.data.get('action', null) is string &&
+        request.resource.data.get('createdAt', null) == request.time &&
+        request.resource.data.keys().hasOnly([
+          'category', 'action', 'actorId', 'actorEmail', 'actorName', 'actorRole',
+          'organizationId', 'targetType', 'targetId', 'oldValues', 'newValues',
+          'metadata', 'createdAt'
+        ]);
+      allow update, delete: if false;
     }
 
     // ---- Collar tags / rescue sessions -------------------------------------
@@ -1034,7 +1110,7 @@ service cloud.firestore {
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
         'users', 'cases', 'animals', 'adoptions', 'volunteerApplications',
-        'transporterApplications'
+        'transporterApplications', 'auditLogs', 'orgExpenses'
       ]);
     }
   }

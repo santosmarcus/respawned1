@@ -23,6 +23,7 @@ import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 // ---- Demo transporters ---------------------------------------------------
 // Two fixed, clearly-marked (isDemo: true) test transporters so the whole
@@ -218,31 +219,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   }
 
   Future<void> _cancelExistingOffer(TransportAssignment assignment) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Cancel this offer?',
-            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: Text(
-          'The pending offer to ${assignment.riderName} will be cancelled, and you can select another transporter.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Keep Waiting',
-                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppButtons.danger,
-            child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
-    );
+    final confirmed = await showConfirmActionDialog(context, title: 'Cancel this offer?', message: 'The pending offer to ${assignment.riderName} will be cancelled, and you can select another transporter.', confirmLabel: 'Cancel Offer', cancelLabel: 'Keep Waiting', destructive: true);
     if (confirmed != true || !mounted) return;
     setState(() => _cancellingOffer = true);
     try {
@@ -1500,31 +1477,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   /// behind a nondismissible modal for a real transporter with no
   /// accept/reject UI of their own yet. See RescueCaseRepository.cancelAssignment.
   Future<void> _back() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Stop waiting for this transporter?',
-            style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: Text(
-          'The pending offer will be cancelled, and you can select another transporter.',
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Keep Waiting',
-                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppButtons.danger,
-            child: Text('Stop and Cancel', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
-    );
+    final confirmed = await showConfirmActionDialog(context, title: 'Stop waiting for this transporter?', message: 'The pending offer will be cancelled, and you can select another transporter.', confirmLabel: 'Stop and Cancel', cancelLabel: 'Keep Waiting', destructive: true);
     if (confirmed != true || !mounted || _assignmentId == null) return;
 
     _elapsedTimer?.cancel();

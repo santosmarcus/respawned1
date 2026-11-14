@@ -10,7 +10,6 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/adoption_fit_assessment.dart';
 import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
 import 'package:respawnd1/core/services/adoption_fit_assessment_service.dart';
-import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/core/widgets/photo_thumbnail_strip.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/adoption_rejection_sheet.dart';
@@ -19,7 +18,7 @@ import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dar
 import 'package:respawnd1/features/admin/adoption/release_details_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
@@ -298,9 +297,6 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                     onCompleteInterview: () => _completeInterview(app),
                     onReschedule: () => _reschedule(app),
                   ),
-
-                  const SizedBox(height: 12),
-                  _AdoptionFeeCard(app: app),
 
                   const SizedBox(height: 12),
                   _NotesSection(app: app, controller: _noteController, busy: _busy, onSave: () => _saveNote(app)),
@@ -794,14 +790,7 @@ class _DocumentRow extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.download_outlined, size: 18),
               tooltip: 'Open file URL to download',
-              onPressed: () => showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: const Text('Download'),
-                  content: SelectableText(urls.join('\n')),
-                  actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-                ),
-              ),
+              onPressed: () => showInfoDialog(context, title: 'Download', content: SelectableText(urls.join('\n'))),
             ),
           ],
         ],
@@ -903,32 +892,6 @@ class _AppointmentSection extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-// ---- Adoption fee -------------------------------------------------------
-
-class _AdoptionFeeCard extends StatelessWidget {
-  final AdoptionApplication app;
-  const _AdoptionFeeCard({required this.app});
-
-  @override
-  Widget build(BuildContext context) {
-    final hasPaymentRecord = app.raw['payment'] != null;
-    return SectionCard(
-      title: 'Adoption Fee',
-      child: !hasPaymentRecord
-          ? Text('Payment tracking is not configured yet.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
-          : Row(
-              children: [
-                Text(app.feeStatus.label, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                if (app.paymentAmount != null) ...[
-                  const SizedBox(width: 6),
-                  Text('· ${formatPeso(app.paymentAmount!)}', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                ],
-              ],
-            ),
     );
   }
 }

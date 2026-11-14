@@ -15,6 +15,7 @@ import 'package:respawnd1/features/donation/donation_summary_inkind.dart' as ik;
 import 'package:respawnd1/features/generalhome/history_provider.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
+import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -684,61 +685,66 @@ class _VolunteerHistoryTab extends StatelessWidget {
       );
     }
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('volunteerSignups')
-          .where('volunteerId', isEqualTo: uid)
-          .snapshots(),
+    // users/{uid}/volunteerRegistrations: one copy of each event sign-up,
+    // with attendance once the organization has taken it.
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: VolunteerEventRepository().streamMyRegistrations(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: CircularProgressIndicator(color: AppColors.greenrspwn));
+          return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
         }
         if (snap.hasError) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text(
-                'Could not load volunteer history — this page assumes a '
-                    '"volunteerSignups" collection with a "volunteerId" '
-                    'field; update it if your schema is named differently.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-              ),
+              child: Text('Could not load your volunteer history. Pull down or reopen this tab to try again.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
             ),
           );
         }
 
-        final docs = List.of(snap.data?.docs ?? const []);
-        docs.sort((a, b) {
-          final ta = a.data()['createdAt'] as Timestamp?;
-          final tb = b.data()['createdAt'] as Timestamp?;
-          return (tb ?? Timestamp(0, 0)).compareTo(ta ?? Timestamp(0, 0));
-        });
-
-        if (docs.isEmpty) {
+        final regs = snap.data ?? const <Map<String, dynamic>>[];
+        if (regs.isEmpty) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text('No volunteer activity yet.',
+              child: Text('No volunteer activity yet. Events you sign up for will show here.',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
             ),
           );
         }
 
+        final attended = regs.where((r) => r['attended'] == true).length;
         return ListView.separated(
           padding: const EdgeInsets.all(16),
-          itemCount: docs.length,
+          itemCount: regs.length + 1,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
-            final data = docs[i].data();
-            final ts = data['createdAt'] as Timestamp?;
+            if (i == 0) {
+              return Text(
+                attended == 0
+                    ? '${regs.length} event sign-up${regs.length == 1 ? '' : 's'}'
+                    : 'You attended $attended event${attended == 1 ? '' : 's'}. Thank you for helping!',
+                style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+              );
+            }
+            final data = regs[i - 1];
+            final came = data['attended'] as bool?;
+            final organizer = (data['organizer'] as String?) ?? '';
             return _SimpleHistoryCard(
-              title: (data['eventName'] as String?) ?? 'Volunteer Activity',
-              dateLabel: _formatTimestamp(ts),
-              statusLabel: (data['status'] as String?) ?? 'Participated',
-              icon: Icons.groups_outlined,
+              title: (data['title'] as String?) ?? 'Volunteer event',
+              dateLabel: [
+                if ((data['date'] as String?)?.isNotEmpty ?? false) data['date'] as String,
+                if (organizer.isNotEmpty) organizer,
+              ].join(' · '),
+              statusLabel: switch (came) {
+                true => 'Attended',
+                false => 'Did not attend',
+                null => 'Signed up',
+              },
+              icon: came == true ? Icons.verified_outlined : Icons.groups_outlined,
             );
           },
         );

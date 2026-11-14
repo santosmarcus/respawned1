@@ -114,12 +114,26 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   // 'Closed' dropped — it never corresponded to any real AnimalRecord field
   // value (adoptionStatus is only not_ready/adoptable/reserved/adopted/
   // deceased).
-  static const List<String> _statusFilters = ['All', 'Adoptable', 'In Treatment', 'Adopted', 'Deceased'];
+  static const List<String> _statusFilters = [
+    'All',
+    'In Shelter',
+    'Isolation',
+    'Recovering',
+    'In Treatment',
+    'Adoptable',
+    'Returned',
+    'Adopted',
+    'Deceased',
+  ];
 
   Color _statusColor(String status) {
     switch (status) {
       case 'Adoptable':     return AppColors.yellowrspwn;
       case 'In Treatment':  return AppColors.pinkrspwn;
+      case 'Isolation':     return AppColors.warning;
+      case 'Recovering':    return AppColors.tearspwn;
+      case 'In Shelter':    return AppColors.greenrspwn;
+      case 'Returned':      return AppColors.bgres;
       case 'Adopted':       return AppColors.lavenderrspwn;
       case 'Deceased':      return AppColors.slaterspwn;
       default:              return AppColors.slaterspwn;
@@ -168,10 +182,16 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
     // approved-but-not-yet-released (that stays 'reserved').
     if (_statusFilter != 'All') {
       final want = _statusFilter.toLowerCase().replaceAll(' ', '_');
-      if (want == 'in_treatment') {
-        if (a.currentCaseId == null) return false;
-      } else if (a.adoptionStatus != want) {
-        return false;
+      switch (want) {
+        case 'in_treatment':
+          if (a.currentCaseId == null) return false;
+        case 'returned':
+          if (!a.isReturned) return false;
+        case 'in_shelter' || 'isolation' || 'recovering':
+          // Same field the label reads, so the filter and the label agree.
+          if (a.careStatus?.firestoreValue != want) return false;
+        default:
+          if (a.adoptionStatus != want) return false;
       }
     }
     if (_adoptableOnly == true && !a.isAdoptable) return false;

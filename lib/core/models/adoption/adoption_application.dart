@@ -80,24 +80,6 @@ enum FitAssessmentValue {
       values.firstWhere((v) => v.name == name, orElse: () => FitAssessmentValue.notReviewed);
 }
 
-enum AdoptionFeeStatus {
-  notRequired,
-  unpaid,
-  pendingVerification,
-  paid,
-  refunded,
-  failed;
-
-  String get label => switch (this) {
-        AdoptionFeeStatus.notRequired => 'Not required',
-        AdoptionFeeStatus.unpaid => 'Unpaid',
-        AdoptionFeeStatus.pendingVerification => 'Pending verification',
-        AdoptionFeeStatus.paid => 'Paid',
-        AdoptionFeeStatus.refunded => 'Refunded',
-        AdoptionFeeStatus.failed => 'Failed',
-      };
-}
-
 /// One `adoptions/{id}` doc — parses the SAME nested structure the
 /// user-side form (adoption_process.dart) already writes
 /// (personal/household/petExperience/lifestyle/uploads/agreement), plus the
@@ -185,13 +167,6 @@ class AdoptionApplication {
   final DateTime? withdrawnAt;
   final String? withdrawalReason;
 
-  // Payment — written by the existing adoption-fee payment sheet
-  // (adoption_process.dart's _ReviewPaymentSheet). Source of truth for
-  // AdoptionFeeStatus; never inferred from a bare boolean.
-  final String? paymentStatus;
-  final double? paymentAmount;
-  final String? paymentMethod;
-  final DateTime? paidAt;
 
   const AdoptionApplication({
     required this.id,
@@ -239,20 +214,7 @@ class AdoptionApplication {
     this.lastDeliveryAttemptBy,
     this.withdrawnAt,
     this.withdrawalReason,
-    this.paymentStatus,
-    this.paymentAmount,
-    this.paymentMethod,
-    this.paidAt,
   });
-
-  AdoptionFeeStatus get feeStatus => switch (paymentStatus) {
-        'paid' => AdoptionFeeStatus.paid,
-        'pending' => AdoptionFeeStatus.pendingVerification,
-        'refunded' => AdoptionFeeStatus.refunded,
-        'failed' => AdoptionFeeStatus.failed,
-        null => AdoptionFeeStatus.unpaid,
-        _ => AdoptionFeeStatus.unpaid,
-      };
 
   bool get isOpen => status != AdoptionStatus.rejected && status != AdoptionStatus.withdrawn && status != AdoptionStatus.adopted;
 
@@ -273,7 +235,6 @@ class AdoptionApplication {
   factory AdoptionApplication.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     final personal = (data['personal'] as Map?) ?? const {};
-    final payment = (data['payment'] as Map?) ?? const {};
     final fitAssessmentMap = (data['fitAssessment'] as Map?) ?? const {};
 
     DateTime? ts(dynamic v) => v is Timestamp ? v.toDate() : null;
@@ -328,10 +289,6 @@ class AdoptionApplication {
       lastDeliveryAttemptBy: data['lastDeliveryAttemptBy'] as String?,
       withdrawnAt: ts(data['withdrawnAt']),
       withdrawalReason: data['withdrawalReason'] as String?,
-      paymentStatus: payment['status'] as String?,
-      paymentAmount: (payment['amount'] as num?)?.toDouble(),
-      paymentMethod: payment['method'] as String?,
-      paidAt: ts(payment['paidAt']),
     );
   }
 }

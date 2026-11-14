@@ -8,6 +8,7 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/media_attachments.dart';
 
 Future<void> showAddVaccineRecordSheet(BuildContext context, {required AnimalRecord animal}) {
   return showModalBottomSheet(
@@ -38,6 +39,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
   final _batchController = TextEditingController();
   final _notesController = TextEditingController();
   bool _saving = false;
+  List<PickedMedia> _attachments = const [];
   String? _error;
 
   String get _vaccineName => _selectedTemplate?.name ?? _customNameController.text.trim();
@@ -96,6 +98,11 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
     try {
       final user = FirebaseAuth.instance.currentUser;
       final actorName = (user?.displayName?.trim().isNotEmpty ?? false) ? user!.displayName!.trim() : 'Admin Staff';
+      final attachments = await uploadAllMedia(
+        _attachments,
+        folder: 'animalRecords/${widget.animal.id}/medicalDocs',
+        prefix: 'vaccine_${DateTime.now().millisecondsSinceEpoch}',
+      );
       final record = VaccinationRecord(
         id: '',
         animalId: widget.animal.id,
@@ -108,6 +115,7 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
         batchOrLotNumber: _batchController.text.trim().isEmpty ? null : _batchController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         createdBy: actorName,
+        attachments: attachments,
       );
       await ref.read(animalRecordRepositoryProvider).addVaccination(
             animalId: widget.animal.id,
@@ -295,6 +303,13 @@ class _AddVaccineRecordSheetBodyState extends ConsumerState<_AddVaccineRecordShe
               maxLines: 2,
               decoration: const InputDecoration(hintText: 'Notes (optional)', isDense: true),
               style: GoogleFonts.zain(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            AttachmentPicker(
+              items: _attachments,
+              enabled: !_saving,
+              label: 'Attach vaccine card photo',
+              onChanged: (v) => setState(() => _attachments = v),
             ),
 
             if (_error != null) ...[

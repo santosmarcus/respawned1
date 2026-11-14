@@ -64,7 +64,8 @@ class _FundTrackingSectionState extends State<FundTrackingSection> {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const LinearProgressIndicator(color: AppColors.greenrspwn);
               }
-              final docs = [...?snapshot.data?.docs]..sort((a, b) {
+              // Voided spending (its bill was removed) is kept for history only.
+              final docs = [...?snapshot.data?.docs.where((d) => d.data()['status'] != 'voided')]..sort((a, b) {
                 final ta = a.data()['createdAt'], tb = b.data()['createdAt'];
                 if (ta is Timestamp && tb is Timestamp) return tb.compareTo(ta);
                 return 0;

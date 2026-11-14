@@ -396,3 +396,114 @@ describe('collection-group queries', () => {
     await assertFails(as('stranger').collectionGroup('expenses').get());
   });
 });
+
+describe('audit log', () => {
+  const entry = (actorId, extra = {}) => ({
+    category: 'expenses', action: 'Expense added', actorId, organizationId: 'orgA',
+    createdAt: FieldValue.serverTimestamp(), ...extra,
+  });
+
+  test('anyone signed in adds an entry about their own action only', async () => {
+    await assertSucceeds(as('staffA').collection('auditLogs').add(entry('staffA')));
+    await assertSucceeds(as('adopter').collection('auditLogs').add(entry('adopter', { category: 'adoptions' })));
+    await assertFails(as('staffA').collection('auditLogs').add(entry('ownerA')));
+    await assertFails(as('staffA').collection('auditLogs').add(entry('staffA', { createdAt: new Date(2020, 0, 1) })));
+    await assertFails(as('staffA').collection('auditLogs').add(entry('staffA', { unexpected: true })));
+  });
+
+  test('entries cannot be edited or deleted, even by staff', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('auditLogs/a1').set(entry('staffA')));
+    await assertFails(as('staffA').doc('auditLogs/a1').update({ action: 'Nothing happened' }));
+    await assertFails(as('ownerA').doc('auditLogs/a1').delete());
+    await assertFails(as('admin').doc('auditLogs/a1').delete());
+  });
+
+  test("only the organization's staff read its entries", async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('auditLogs/a2').set(entry('staffA')));
+    await assertSucceeds(as('staffA').doc('auditLogs/a2').get());
+    await assertSucceeds(as('admin').doc('auditLogs/a2').get());
+    await assertFails(as('staffB').doc('auditLogs/a2').get());
+    await assertFails(as('carerA').doc('auditLogs/a2').get());
+    await assertFails(as('stranger').doc('auditLogs/a2').get());
+    await assertSucceeds(as('staffA').collection('auditLogs').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('staffA').collection('auditLogs').get());
+  });
+});
+
+describe('care updates', () => {
+  const update = (authorId, extra = {}) => ({
+    type: 'observation', note: 'Eating well', authorId, mediaUrls: [], mediaTypes: [],
+    createdAt: FieldValue.serverTimestamp(), ...extra,
+  });
+
+  test("carers and staff of the animal's org add their own updates", async () => {
+    await assertSucceeds(as('carerA').collection('animals/animalA/careUpdates').add(update('carerA')));
+    await assertSucceeds(as('staffA').collection('animals/animalA/careUpdates').add(update('staffA')));
+    await assertFails(as('carerA').collection('animals/animalA/careUpdates').add(update('staffA')));
+    await assertFails(as('carerA').collection('animals/animalA/careUpdates').add(update('carerA', { note: '' })));
+    await assertFails(as('staffB').collection('animals/animalA/careUpdates').add(update('staffB')));
+    await assertFails(as('stranger').collection('animals/animalA/careUpdates').add(update('stranger')));
+  });
+
+  test('nobody rewrites an update; staff may remove one', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('animals/animalA/careUpdates/u1').set(update('carerA')));
+    await assertFails(as('carerA').doc('animals/animalA/careUpdates/u1').update({ note: 'Changed' }));
+    await assertFails(as('staffA').doc('animals/animalA/careUpdates/u1').update({ note: 'Changed' }));
+    await assertFails(as('carerA').doc('animals/animalA/careUpdates/u1').delete());
+    await assertSucceeds(as('staffA').doc('animals/animalA/careUpdates/u1').delete());
+  });
+
+  test('staff read medication orders and doses across animals for missed-dose alerts', async () => {
+    await assertSucceeds(as('staffA').collectionGroup('medications').where('active', '==', true).get());
+    await assertSucceeds(as('staffA').collectionGroup('medicationDoses').get());
+    await assertFails(as('stranger').collectionGroup('medicationDoses').get());
+    await assertFails(as('carerA').collectionGroup('medications').get());
+  });
+});
+
+describe('general expenses', () => {
+  const expense = (orgId, extra = {}) => ({
+    organizationId: orgId, title: 'Electricity', category: 'Bills and Utilities', amount: 1500, fundings: [], ...extra,
+  });
+
+  test("only the organization's financial admins add and read them", async () => {
+    await assertSucceeds(as('ownerA').collection('orgExpenses').add(expense('orgA')));
+    await assertFails(as('staffA').collection('orgExpenses').add(expense('orgA')));
+    await assertFails(as('carerA').collection('orgExpenses').add(expense('orgA')));
+    await assertFails(as('ownerA').collection('orgExpenses').add(expense('orgB')));
+    await assertFails(as('ownerA').collection('orgExpenses').add(expense('orgA', { amount: 0 })));
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('orgExpenses/x1').set(expense('orgA')));
+    await assertSucceeds(as('ownerA').doc('orgExpenses/x1').get());
+    await assertFails(as('staffA').doc('orgExpenses/x1').get());
+    await assertFails(as('staffB').doc('orgExpenses/x1').get());
+  });
+
+  test('an expense cannot be moved to another organization', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('orgExpenses/x2').set(expense('orgA')));
+    await assertSucceeds(as('ownerA').doc('orgExpenses/x2').update({ amount: 1800 }));
+    await assertFails(as('ownerA').doc('orgExpenses/x2').update({ organizationId: 'orgB' }));
+  });
+});
+
+describe('event attendance', () => {
+  const seedEvent = (startAt) => env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.doc('events/ev1').set({ organizationId: 'orgA', status: 'published', goingCount: 1, startAt });
+    await db.doc('events/ev1/registrations/stranger').set({ uid: 'stranger', eventId: 'ev1', participantName: 'S' });
+  });
+  const mark = (by) => ({ attended: true, attendanceMarkedAt: FieldValue.serverTimestamp(), attendanceMarkedBy: by });
+
+  test('organization staff mark attendance once the event has started', async () => {
+    await seedEvent(new Date(Date.now() - 3600 * 1000));
+    await assertSucceeds(as('staffA').doc('events/ev1/registrations/stranger').update(mark('staffA')));
+    await assertFails(as('staffA').doc('events/ev1/registrations/stranger').update(mark('ownerA')));
+    await assertFails(as('stranger').doc('events/ev1/registrations/stranger').update(mark('stranger')));
+    await assertFails(as('staffB').doc('events/ev1/registrations/stranger').update(mark('staffB')));
+    await assertFails(as('staffA').doc('events/ev1/registrations/stranger').update({ participantName: 'Changed' }));
+  });
+
+  test('attendance cannot be taken before the event starts', async () => {
+    await seedEvent(new Date(Date.now() + 24 * 3600 * 1000));
+    await assertFails(as('staffA').doc('events/ev1/registrations/stranger').update(mark('staffA')));
+  });
+});

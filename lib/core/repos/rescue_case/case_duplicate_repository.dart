@@ -132,18 +132,13 @@ class CaseDuplicateRepository {
     required String actorUid,
     required String actorName,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'status': RescueStatus.possibleDuplicate.firestoreValue,
-      'possibleDuplicateOfCaseId': duplicateOfCaseId,
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Flagged as a possible duplicate report.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Flagged as a possible duplicate report.',
+      fields: {
+        'status': RescueStatus.possibleDuplicate.firestoreValue,
+        'possibleDuplicateOfCaseId': duplicateOfCaseId,
+      },
       action: 'flagged_possible_duplicate',
       actorUid: actorUid,
       actorName: actorName,
@@ -164,22 +159,17 @@ class CaseDuplicateRepository {
     required String actorName,
     List<String> dismissedCandidateIds = const [],
   }) async {
-    await _store.caseDoc(caseId).update({
-      'status': RescueStatus.pendingReview.firestoreValue,
-      'possibleDuplicateOfCaseId': FieldValue.delete(),
-      if (dismissedCandidateIds.isNotEmpty)
-        'dismissedDuplicateCaseIds': FieldValue.arrayUnion(
-          dismissedCandidateIds,
-        ),
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Confirmed as a separate, unrelated report.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Confirmed as a separate, unrelated report.',
+      fields: {
+        'status': RescueStatus.pendingReview.firestoreValue,
+        'possibleDuplicateOfCaseId': FieldValue.delete(),
+        if (dismissedCandidateIds.isNotEmpty)
+          'dismissedDuplicateCaseIds': FieldValue.arrayUnion(
+            dismissedCandidateIds,
+          ),
+      },
       action: 'kept_separate',
       actorUid: actorUid,
       actorName: actorName,

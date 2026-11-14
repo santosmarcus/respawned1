@@ -38,41 +38,36 @@ class ClinicAssignmentRepository {
     String? availabilityStatus,
     bool closedWarningAcknowledged = false,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'vetClinicName': clinicName,
-      'vetClinicAddress': clinicAddress,
-      'vetClinicPlaceId': clinicPlaceId,
-      'vetClinicLat': clinicLat,
-      'vetClinicLng': clinicLng,
-      'vetClinicPhone': clinicPhone,
-      'vetClinicSelectedAt': Timestamp.now(),
-      if (availabilityStatus != null) ...{
-        'clinicAvailabilityStatus': availabilityStatus,
-        'clinicAvailabilityCheckedAt': Timestamp.now(),
-      },
-      if (closedWarningAcknowledged) ...{
-        'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
-        'clinicClosedWarningAcknowledgedBy': actorUid,
-      },
-      // assignClinic is only ever called for a case's FIRST clinic (see
-      // select_clinic_sheet.dart's assignClinic-vs-changeClinic branch on
-      // previousClinicName), so the case is always still at
-      // RescueStatus.accepted (from Rescue Review) or already at
-      // RescueStatus.awaitingAssignment (animal-record admissions, which
-      // start there directly — see createAdmissionCase) when this runs.
-      // Writing awaitingAssignment here is a no-op for the latter and is
-      // exactly the "clinic saved -> ready to assign" transition for the
-      // former.
-      'status': RescueStatus.awaitingAssignment.firestoreValue,
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Assigned to clinic: $clinicName.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Assigned to clinic: $clinicName.',
+      fields: {
+        'vetClinicName': clinicName,
+        'vetClinicAddress': clinicAddress,
+        'vetClinicPlaceId': clinicPlaceId,
+        'vetClinicLat': clinicLat,
+        'vetClinicLng': clinicLng,
+        'vetClinicPhone': clinicPhone,
+        'vetClinicSelectedAt': Timestamp.now(),
+        if (availabilityStatus != null) ...{
+          'clinicAvailabilityStatus': availabilityStatus,
+          'clinicAvailabilityCheckedAt': Timestamp.now(),
+        },
+        if (closedWarningAcknowledged) ...{
+          'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
+          'clinicClosedWarningAcknowledgedBy': actorUid,
+        },
+        // assignClinic is only ever called for a case's FIRST clinic (see
+        // select_clinic_sheet.dart's assignClinic-vs-changeClinic branch on
+        // previousClinicName), so the case is always still at
+        // RescueStatus.accepted (from Rescue Review) or already at
+        // RescueStatus.awaitingAssignment (animal-record admissions, which
+        // start there directly — see createAdmissionCase) when this runs.
+        // Writing awaitingAssignment here is a no-op for the latter and is
+        // exactly the "clinic saved -> ready to assign" transition for the
+        // former.
+        'status': RescueStatus.awaitingAssignment.firestoreValue,
+      },
       action: 'assigned_clinic',
       actorUid: actorUid,
       actorName: actorName,
@@ -102,37 +97,32 @@ class ClinicAssignmentRepository {
     String? availabilityStatus,
     bool closedWarningAcknowledged = false,
   }) async {
-    await _store.caseDoc(caseId).update({
-      'vetClinicName': clinicName,
-      'vetClinicAddress': clinicAddress,
-      'vetClinicPlaceId': clinicPlaceId,
-      'vetClinicLat': clinicLat,
-      'vetClinicLng': clinicLng,
-      'vetClinicPhone': clinicPhone,
-      'vetClinicSelectedAt': Timestamp.now(),
-      if (availabilityStatus != null) ...{
-        'clinicAvailabilityStatus': availabilityStatus,
-        'clinicAvailabilityCheckedAt': Timestamp.now(),
-      },
-      if (closedWarningAcknowledged) ...{
-        'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
-        'clinicClosedWarningAcknowledgedBy': actorUid,
-      },
-      // Clears any stale route/ETA computed for the old clinic — the
-      // tracking map recalculates (or falls back to a straight line) once
-      // it sees a new vetClinicLat/Lng with no matching cached route.
-      'cachedRoutePolyline': FieldValue.delete(),
-      'cachedRouteDistanceKm': FieldValue.delete(),
-      'cachedRouteEtaMinutes': FieldValue.delete(),
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Clinic changed from $previousClinicName to $clinicName.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Clinic changed from $previousClinicName to $clinicName.',
+      fields: {
+        'vetClinicName': clinicName,
+        'vetClinicAddress': clinicAddress,
+        'vetClinicPlaceId': clinicPlaceId,
+        'vetClinicLat': clinicLat,
+        'vetClinicLng': clinicLng,
+        'vetClinicPhone': clinicPhone,
+        'vetClinicSelectedAt': Timestamp.now(),
+        if (availabilityStatus != null) ...{
+          'clinicAvailabilityStatus': availabilityStatus,
+          'clinicAvailabilityCheckedAt': Timestamp.now(),
+        },
+        if (closedWarningAcknowledged) ...{
+          'clinicClosedWarningAcknowledgedAt': Timestamp.now(),
+          'clinicClosedWarningAcknowledgedBy': actorUid,
+        },
+        // Clears any stale route/ETA computed for the old clinic — the
+        // tracking map recalculates (or falls back to a straight line) once
+        // it sees a new vetClinicLat/Lng with no matching cached route.
+        'cachedRoutePolyline': FieldValue.delete(),
+        'cachedRouteDistanceKm': FieldValue.delete(),
+        'cachedRouteEtaMinutes': FieldValue.delete(),
+      },
       action: 'changed_clinic',
       actorUid: actorUid,
       actorName: actorName,

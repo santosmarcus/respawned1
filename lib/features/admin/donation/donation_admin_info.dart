@@ -12,6 +12,7 @@ import 'donation_admin_records.dart';
 import 'donation_admin_service.dart';
 import 'donation_admin_sheets.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 class DonationAdminInfoPage extends ConsumerWidget {
   final String campaignId;
@@ -483,12 +484,7 @@ class _AllocationRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.background,
-          title: Text(a.label, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-          content: Column(
+      onTap: () => showInfoDialog(context, title: a.label, content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -501,10 +497,7 @@ class _AllocationRow extends StatelessWidget {
                 ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(a.receiptUrl!, height: 180, fit: BoxFit.cover)),
               ],
             ],
-          ),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-        ),
-      ),
+          )),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(

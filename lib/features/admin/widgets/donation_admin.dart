@@ -8,6 +8,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 class DonationAdminHeader extends StatelessWidget {
   final String title;
@@ -39,20 +40,7 @@ class DonationAdminHeader extends StatelessWidget {
                   IconButton(
                     tooltip: 'Help',
                     icon: const Icon(Icons.lightbulb_outline, color: AppColors.background),
-                    onPressed: () => showDialog<void>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        backgroundColor: AppColors.background,
-                        title: Text(title, style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
-                        content: Text(helpText, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: Text('Got it', style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-                          ),
-                        ],
-                      ),
-                    ),
+                    onPressed: () => showInfoDialog(context, title: title, message: helpText, closeLabel: 'Got it'),
                   ),
                 ],
               ),
@@ -548,26 +536,7 @@ Future<bool> confirmAction(
       required String confirmLabel,
       bool destructive = false,
     }) async {
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: AppColors.background,
-      title: Text(title, style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
-      content: Text(message, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: Text('Cancel', style: GoogleFonts.zain(fontSize: 16, color: AppColors.textSecondary)),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: Text(confirmLabel,
-              style: GoogleFonts.zain(
-                  fontSize: 16, fontWeight: FontWeight.w800, color: destructive ? AppColors.error : AppColors.textPrimary)),
-        ),
-      ],
-    ),
-  );
+  final ok = await showConfirmActionDialog(context, title: title, message: message, confirmLabel: confirmLabel, destructive: destructive);
   return ok == true;
 }
 

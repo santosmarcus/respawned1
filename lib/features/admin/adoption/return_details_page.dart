@@ -13,7 +13,7 @@ import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart'
 import 'package:respawnd1/features/admin/adoption/widgets/retrieval_schedule_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -65,7 +65,7 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
   }
 
   Future<void> _decline() async {
-    final reason = await _promptText(title: 'Decline Return', label: 'Reason (required)', required: true);
+    final reason = await _promptText(title: 'Decline Return', label: 'Reason', required: true);
     if (reason == null || reason.isEmpty) return;
     await _run(() =>
         ref.read(adoptionApplicationRepositoryProvider).declineReturn(applicationId: widget.applicationId, actorName: _actorName, reason: reason));
@@ -146,30 +146,8 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
     });
   }
 
-  Future<String?> _promptText({required String title, required String label, bool required = false}) async {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(title, style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        content: TextField(controller: controller, maxLines: 3, autofocus: true, decoration: InputDecoration(labelText: label)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (required && text.isEmpty) return;
-              Navigator.pop(ctx, text);
-            },
-            style: AppButtons.primary,
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<String?> _promptText({required String title, required String label, bool required = false}) =>
+      showTextInputDialog(context, title: title, label: label, required: required, confirmLabel: 'Continue');
 
   @override
   Widget build(BuildContext context) {

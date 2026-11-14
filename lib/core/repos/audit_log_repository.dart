@@ -69,11 +69,14 @@ class AuditLogRepository {
     String? organizationId,
     int limit = 30,
   }) {
-    Query<Map<String, dynamic>> q = _logs.where('category', isEqualTo: category.name);
-    if (organizationId != null) {
-      q = q.where('organizationId', isEqualTo: organizationId);
-    }
-    q = q.orderBy('createdAt', descending: true).limit(limit);
+    // firestore.rules only lets staff read their own organization's entries,
+    // and only through a query that filters on it.
+    if (organizationId == null || organizationId.isEmpty) return Stream.value(const []);
+    final q = _logs
+        .where('category', isEqualTo: category.name)
+        .where('organizationId', isEqualTo: organizationId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit);
     return q.snapshots().map((snap) {
       final entries = <AuditLogEntry>[];
       for (final doc in snap.docs) {

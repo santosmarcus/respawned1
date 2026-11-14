@@ -10,6 +10,7 @@ import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
+import 'package:respawnd1/core/widgets/reason_picker.dart';
 
 class RescueRequest extends StatefulWidget {
   final String caseId;
@@ -234,155 +235,13 @@ class _RescueRequestState extends State<RescueRequest> {
   ];
 
   Future<void> _showDeclineReasonSheet() async {
-    String? selectedReason;
-    final otherController = TextEditingController();
-    String? errorText;
-
-    final result = await showModalBottomSheet<List<String>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 12,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: AppColors.slaterspwn,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Decline Reason',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    RadioGroup<String>(
-                      groupValue: selectedReason,
-                      onChanged: (v) =>
-                          setModalState(() => selectedReason = v),
-                      child: Column(
-                        children: [
-                          for (final reason in _declineReasonOptions)
-                            RadioListTile<String>(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              value: reason,
-                              activeColor: AppColors.textPrimary,
-                              title: Text(reason,
-                                  style: GoogleFonts.zain(
-                                      fontSize: 14,
-                                      color: AppColors.textPrimary)),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (selectedReason == 'Other')
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 4),
-                        child: TextField(
-                          controller: otherController,
-                          style: GoogleFonts.zain(fontSize: 13),
-                          decoration: InputDecoration(
-                            hintText: 'Please specify',
-                            hintStyle: GoogleFonts.zain(
-                                fontSize: 13, color: AppColors.textSecondary),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
-                            filled: true,
-                            fillColor: Colors.white,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: const BorderSide(
-                                  color: AppColors.slaterspwn),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (errorText != null) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(errorText!,
-                            style: GoogleFonts.zain(
-                                fontSize: 12, color: Colors.redAccent)),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: AppColors.background,
-                          side: BorderSide(
-                              color: AppColors.slaterspwn, width: 1),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                        ),
-                        onPressed: () {
-                          if (selectedReason == null) {
-                            setModalState(() => errorText =
-                            'Please select a reason.');
-                            return;
-                          }
-                          if (selectedReason == 'Other' &&
-                              otherController.text.trim().isEmpty) {
-                            setModalState(() => errorText =
-                            'Please specify a reason.');
-                            return;
-                          }
-                          final finalReason = selectedReason == 'Other'
-                              ? 'Other: ${otherController.text.trim()}'
-                              : selectedReason!;
-                          Navigator.pop(ctx, [finalReason]);
-                        },
-                        child: Text(
-                          'Confirm',
-                          style: GoogleFonts.tiltWarp(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.red),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+    final result = await showReasonPicker<String>(
+      context,
+      title: 'Decline Reason',
+      options: [for (final r in _declineReasonOptions) ReasonOption(r, r, isOther: r == 'Other')],
     );
-
-    otherController.dispose();
-
-    if (result != null && result.isNotEmpty) {
-      _decline(result);
-    }
+    if (result == null || !mounted) return;
+    _decline([result.otherText != null ? 'Other: ${result.otherText}' : result.value]);
   }
 
   @override

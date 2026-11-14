@@ -17,6 +17,7 @@ import 'package:respawnd1/features/adminhome/admin_dashboard_home_widgets.dart' 
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
+import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart' show missedDosesByAnimalProvider;
 
 /// Which module an alert belongs to — drives the Priority actions filter.
 enum AlertArea {
@@ -101,6 +102,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   final records = ref.watch(allAnimalRecordsProvider);
   final vaccinations = ref.watch(vaccinationsByAnimalProvider);
   final careRecords = ref.watch(careRecordsByAnimalProvider);
+  final missedDoses = ref.watch(missedDosesByAnimalProvider);
 
   final alerts = <DashAlert>[];
   final failed = <String>[];
@@ -122,6 +124,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   track(volunteerApps, 'volunteer applications');
   track(transporterApps, 'transporter applications');
   track(careRecords, 'preventive care records');
+  track(missedDoses, 'medication doses');
   if (needsDecision != null) track(needsDecision, 'campaign decisions');
 
   String caseSubject(RescueCase c) => [
@@ -532,6 +535,32 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
           area: AlertArea.care,
           open: (context, _) =>
               animals.length == 1 ? openAnimalRecord(context, first.animal) : openAnimalRecords(context),
+        ),
+      );
+    }
+  }
+
+  // ── Care: medication doses nobody recorded (past 7 days) ──────────────
+  final missed = missedDoses.asData?.value;
+  if (missed != null && missed.isNotEmpty) {
+    final byId = {for (final a in inCare) a.id: a};
+    final animals = [for (final id in missed.keys) ?byId[id]];
+    if (animals.isNotEmpty) {
+      final total = animals.fold<int>(0, (n, a) => n + missed[a.id]!);
+      final first = animals.first;
+      alerts.add(
+        DashAlert(
+          severity: DashSeverity.critical,
+          icon: Icons.medication_outlined,
+          title: animals.length == 1
+              ? plural(total, 'missed dose')
+              : '${plural(total, 'missed dose')} across ${plural(animals.length, 'animal')}',
+          status: 'No dose recorded for a scheduled slot',
+          subject: animals.length == 1 ? (first.name.isEmpty ? first.species : first.name) : null,
+          timing: 'In the past 7 days',
+          action: 'Check with the carer, then record the dose or adjust the order',
+          area: AlertArea.care,
+          open: (context, _) => animals.length == 1 ? openAnimalRecord(context, first) : openAnimalRecords(context),
         ),
       );
     }

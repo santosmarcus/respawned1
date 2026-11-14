@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/media_ref.dart';
 
 /// Derived, never stored — recomputed from [VaccinationRecord.nextDueDate]
 /// every time it's displayed, so changing [kDueSoonWindow] instantly
@@ -89,6 +90,9 @@ class VaccinationRecord {
   final DateTime? createdAt;
   final String? createdBy;
 
+  /// Photos of the vaccine card or certificate.
+  final List<MediaRef> attachments;
+
   const VaccinationRecord({
     required this.id,
     required this.animalId,
@@ -102,6 +106,7 @@ class VaccinationRecord {
     this.notes,
     this.createdAt,
     this.createdBy,
+    this.attachments = const [],
   });
 
   VaccineStatus get status => vaccineStatusFor(nextDueDate);
@@ -127,6 +132,7 @@ class VaccinationRecord {
       notes: data['notes'] as String?,
       createdAt: createdAt is Timestamp ? createdAt.toDate() : null,
       createdBy: data['createdBy'] as String?,
+      attachments: attachmentsFrom(data),
     );
   }
 
@@ -141,5 +147,6 @@ class VaccinationRecord {
         if (notes != null && notes!.isNotEmpty) 'notes': notes,
         'createdAt': FieldValue.serverTimestamp(),
         if (createdBy != null) 'createdBy': createdBy,
+        ...attachmentFields(attachments),
       };
 }

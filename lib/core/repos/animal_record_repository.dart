@@ -418,6 +418,35 @@ class AnimalRecordRepository {
     );
   }
 
+  /// Sets the day-to-day shelter status. A returned animal given a new
+  /// status stops reading "Returned" (its return history is kept).
+  Future<void> setCareStatus({
+    required String animalId,
+    required CareStatus status,
+    CareStatus? previous,
+    String? note,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
+    await _animalDoc(animalId).update({
+      'careStatus': status.firestoreValue,
+      'careStatusUpdatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'careStatus',
+      action: 'Status set to ${status.label}',
+      details: note,
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      previousValues: {'careStatus': previous?.label ?? 'Not set'},
+      newValues: {'careStatus': status.label},
+    );
+  }
+
   Future<void> setArchived({
     required String animalId,
     required bool archived,

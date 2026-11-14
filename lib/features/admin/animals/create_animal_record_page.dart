@@ -15,6 +15,7 @@ import 'package:respawnd1/features/admin/animals/widgets/adoption_readiness_dial
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
 /// The existing animal-record form — reused as-is by both a standalone
 /// "Create Record" entry point and, with [prefillData]/[linkedCaseId]/
@@ -399,11 +400,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       final message =
           '$displayName is now ready for adoption! Reach out through the app to start the process.';
 
-      await FirebaseFirestore.instance.collection('cases').doc(caseId).update({
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': message, 'timestamp': Timestamp.now()},
-        ]),
-      });
+      await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+        caseId: caseId,
+        action: 'adopter_notified',
+        statusLine: message,
+        fields: {
+        },
+      );
     } catch (_) {
       // Never block the record save on a notification failure.
     }

@@ -16,6 +16,8 @@ import 'donation_admin_providers.dart';
 import 'donation_admin_records.dart';
 import 'donation_admin_search.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/admin/donation/general_expenses_page.dart';
 
 /// Listings shown per section before "Show more".
 const _homeListLimit = 3;
@@ -83,20 +85,7 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
         MaterialPageRoute(builder: (_) => DonationAdminCreatePage(initialType: _tab.type)),
       );
 
-  void _showHelp() => showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.background,
-          title: Text('Donations & Sponsorships', style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
-          content: Text(_helpText, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Got it', style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-            ),
-          ],
-        ),
-      );
+  void _showHelp() => showInfoDialog(context, title: 'Donations & Sponsorships', message: _helpText, closeLabel: 'Got it');
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +102,12 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
       appBar: AdminAppBar(
         title: 'Donations & Sponsorships',
         menuActions: [
+          if (ref.watch(canManageFinancesProvider).asData?.value ?? false)
+            AdminMenuAction(
+              label: 'General Expenses',
+              icon: Icons.receipt_long_outlined,
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GeneralExpensesPage())),
+            ),
           AdminMenuAction(label: 'Help', icon: Icons.lightbulb_outline, onTap: _showHelp),
         ],
         bottom: AdminTabBar(

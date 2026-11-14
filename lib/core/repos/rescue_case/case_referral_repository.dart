@@ -44,17 +44,10 @@ class CaseReferralRepository {
       'targetOrgId': targetOrgId,
       'targetOrgName': targetOrgName,
     });
-    await _store.caseDoc(caseId).update({
-      'status': RescueStatus.referred.firestoreValue,
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Referred to $targetOrgName for review.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Referred to $targetOrgName for review.',
+      fields: {'status': RescueStatus.referred.firestoreValue},
       action: 'referred_to_organization',
       actorUid: actorUid,
       actorName: actorName,
@@ -89,17 +82,10 @@ class CaseReferralRepository {
       'lguExplanation': explanation,
       'attachedMediaUrls': mediaUrls,
     });
-    await _store.caseDoc(caseId).update({
-      'status': RescueStatus.referred.firestoreValue,
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Referred to the $barangay LGU/barangay: ${reason.label}.',
-          'timestamp': Timestamp.now(),
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Referred to the $barangay LGU/barangay: ${reason.label}.',
+      fields: {'status': RescueStatus.referred.firestoreValue},
       action: 'referred_to_lgu',
       actorUid: actorUid,
       actorName: actorName,

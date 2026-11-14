@@ -13,7 +13,7 @@ import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -179,19 +179,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
     if (transporterUid == null) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Confirm Intake',
-          style: GoogleFonts.tiltWarp(
-            fontSize: 17,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Column(
+    final confirmed = await showConfirmActionDialog(context, title: 'Confirm Intake', content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -210,29 +198,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                   : 'Not on file',
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.zain(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppButtons.primary,
-            child: Text(
-              'Confirm',
-              style: GoogleFonts.zain(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
+        ), confirmLabel: 'Confirm');
     if (confirmed != true || !mounted) return;
 
     setState(() => _isConfirmingIntake = true);

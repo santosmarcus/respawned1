@@ -22,7 +22,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/accept_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_messages_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/confirm_action_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/export_transfer_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/merge_history_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/ownership_status_sheet.dart';
@@ -201,25 +201,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   void _contactOwner(RescueCase c) {
     final name = c.raw['ownerName'] as String?;
     final contact = c.raw['ownerContact'] as String?;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Owner Contact'),
-        content: Text(
-          (contact == null || contact.isEmpty)
+    showInfoDialog(context, title: 'Owner Contact', message: (contact == null || contact.isEmpty)
               ? 'No owner contact information has been recorded yet. Use Update Ownership Info to add it.'
-              : '${name != null && name.isNotEmpty ? '$name\n' : ''}$contact',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+              : '${name != null && name.isNotEmpty ? '$name\n' : ''}$contact');
   }
 
   /// "Retry with a different transporter" after a safety report (spec
@@ -228,30 +212,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   /// Transporter screen exactly as normal (no transporter is auto-picked).
   Future<void> _retryWithDifferentTransporter(RescueCase c) async {
     final notes = c.raw['endReasonNotes'] as String?;
-    final acknowledged = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Acknowledge Safety Warning'),
-        content: Text(
-          'A previous transporter reported that this animal may be aggressive.'
+    final acknowledged = await showConfirmActionDialog(context, title: 'Acknowledge Safety Warning', message: 'A previous transporter reported that this animal may be aggressive.'
           '${notes != null && notes.isNotEmpty ? '\n\n"$notes"' : ''}'
-          '\n\nDo you acknowledge this before selecting another transporter?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: AppButtons.primary,
-            child: const Text('I Acknowledge'),
-          ),
-        ],
-      ),
-    );
+          '\n\nDo you acknowledge this before selecting another transporter?', confirmLabel: 'I Acknowledge');
     if (acknowledged != true || !mounted) return;
 
     setState(() => _isLoading = true);
@@ -283,34 +246,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   }
 
   Future<void> _keepTransporterWithInstructions(RescueCase c) async {
-    final controller = TextEditingController();
-    final note = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Instructions for Transporter'),
-        content: TextField(
-          controller: controller,
-          maxLines: 3,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText:
-                'e.g. use a carrier, approach from the left, wait for backup',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            style: AppButtons.primary,
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+    final note = await showTextInputDialog(
+      context,
+      title: 'Instructions for Transporter',
+      label: 'Instructions',
+      hint: 'e.g. use a carrier, approach from the left, wait for backup',
+      required: true,
     );
     if (note == null || note.isEmpty || !mounted) return;
     try {

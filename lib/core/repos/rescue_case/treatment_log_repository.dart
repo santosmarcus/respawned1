@@ -204,28 +204,31 @@ class TreatmentLogRepository {
       }
     }
 
-    await _store.caseDoc(caseId).update({
-      if (entry.condition != null) 'currentCondition': entry.condition,
-      'latestTreatmentUpdateType': entry.type,
-      'treatmentUpdatedAt': now,
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': '${entry.type}: $summary', 'timestamp': now},
-      ]),
-      if (animals.isNotEmpty && (isDischarge || isDeath)) 'animals': animals,
-      if (animals.isNotEmpty && (isDischarge || isDeath))
-        ...RescueCaseStore.stageSummaryUpdate(animals),
-      // Legacy case-wide fields — kept exactly as before for a case with no
-      // `animals[]` array, and also kept (informationally) alongside the
-      // new per-animal fields above so any older reader that only looks at
-      // these flat fields (e.g. IntakeDetailPage's discharge-date display)
-      // keeps working: they reflect the FIRST discharge/death recorded,
-      // never re-gate anything by themselves anymore.
-      if (isDischarge) 'readyForDischarge': true,
-      if (isDischarge) 'dischargedAt': now,
-      if (isDeath) 'deceasedAt': now,
-      if (isDeath) 'animalStatus': 'Deceased',
-      if (isDeath && entry.causeOfDeath != null)
-        'causeOfDeath': entry.causeOfDeath,
-    });
+    await _store.recordAction(
+      caseId: caseId,
+      action: 'treatment_update',
+      statusLine: '${entry.type}: $summary',
+      details: {'type': entry.type},
+      fields: {
+        if (entry.condition != null) 'currentCondition': entry.condition,
+        'latestTreatmentUpdateType': entry.type,
+        'treatmentUpdatedAt': now,
+        if (animals.isNotEmpty && (isDischarge || isDeath)) 'animals': animals,
+        if (animals.isNotEmpty && (isDischarge || isDeath))
+          ...RescueCaseStore.stageSummaryUpdate(animals),
+        // Legacy case-wide fields — kept exactly as before for a case with no
+        // `animals[]` array, and also kept (informationally) alongside the
+        // new per-animal fields above so any older reader that only looks at
+        // these flat fields (e.g. IntakeDetailPage's discharge-date display)
+        // keeps working: they reflect the FIRST discharge/death recorded,
+        // never re-gate anything by themselves anymore.
+        if (isDischarge) 'readyForDischarge': true,
+        if (isDischarge) 'dischargedAt': now,
+        if (isDeath) 'deceasedAt': now,
+        if (isDeath) 'animalStatus': 'Deceased',
+        if (isDeath && entry.causeOfDeath != null)
+          'causeOfDeath': entry.causeOfDeath,
+      },
+    );
   }
 }

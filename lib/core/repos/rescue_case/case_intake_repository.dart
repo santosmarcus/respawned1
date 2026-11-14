@@ -21,7 +21,10 @@ class CaseIntakeRepository {
   /// organization.
   Future<String?> _organizationIdOfAnimal(String animalId) async {
     if (animalId.isEmpty) return null;
-    final snap = await FirebaseFirestore.instance.collection('animals').doc(animalId).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('animals')
+        .doc(animalId)
+        .get();
     final orgId = snap.data()?['organizationId'] as String?;
     return (orgId == null || orgId.isEmpty) ? null : orgId;
   }
@@ -285,49 +288,44 @@ class CaseIntakeRepository {
         };
       }
     }
-    await _store.caseDoc(caseId).update({
-      'status': perAnimal
-          ? (RescueCaseStore.deriveCaseStatusOverride(animals) ??
-                RescueStatus.completed.firestoreValue)
-          : RescueStatus.completed.firestoreValue,
-      'transferType': targetType,
-      'targetName': targetName,
-      // Legacy field names, kept so any existing reader of a
-      // pre-this-round transfer keeps working unmodified. These reflect
-      // the MOST RECENT transfer recorded on the case (this app has no
-      // per-transfer-event subcollection yet); per-animal destination
-      // fields above are the source of truth once several separate
-      // transfers happen for different animals over time.
-      if (targetType == 'organization') 'targetOrganizationName': targetName,
-      if (targetContact != null && targetContact.isNotEmpty)
-        'targetContact': targetContact,
-      if (targetAddress != null && targetAddress.isNotEmpty)
-        'targetAddress': targetAddress,
-      'targetOrganizationId': ?targetOrganizationId,
-      'targetClinicPlaceId': ?targetClinicPlaceId,
-      'targetLat': ?targetLat,
-      'targetLng': ?targetLng,
-      'transferReason': reason,
-      'transferDate': transferDate != null
-          ? Timestamp.fromDate(transferDate)
-          : now,
-      'transferNotes': notes,
-      'transferRequestedAt': now,
-      // TODO(transfer): this is a simplified, one-way record — there is no
-      // receiving-organization/clinic/volunteer acceptance workflow yet.
-      // 'pending' here just means "handed off, not yet acknowledged."
-      'transferStatus': 'pending',
-      if (perAnimal) 'animals': animals,
-      if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Animal transferred to $targetName ($targetType).',
-          'timestamp': now,
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Animal transferred to $targetName ($targetType).',
+      fields: {
+        'status': perAnimal
+            ? (RescueCaseStore.deriveCaseStatusOverride(animals) ??
+                  RescueStatus.completed.firestoreValue)
+            : RescueStatus.completed.firestoreValue,
+        'transferType': targetType,
+        'targetName': targetName,
+        // Legacy field names, kept so any existing reader of a
+        // pre-this-round transfer keeps working unmodified. These reflect
+        // the MOST RECENT transfer recorded on the case (this app has no
+        // per-transfer-event subcollection yet); per-animal destination
+        // fields above are the source of truth once several separate
+        // transfers happen for different animals over time.
+        if (targetType == 'organization') 'targetOrganizationName': targetName,
+        if (targetContact != null && targetContact.isNotEmpty)
+          'targetContact': targetContact,
+        if (targetAddress != null && targetAddress.isNotEmpty)
+          'targetAddress': targetAddress,
+        'targetOrganizationId': ?targetOrganizationId,
+        'targetClinicPlaceId': ?targetClinicPlaceId,
+        'targetLat': ?targetLat,
+        'targetLng': ?targetLng,
+        'transferReason': reason,
+        'transferDate': transferDate != null
+            ? Timestamp.fromDate(transferDate)
+            : now,
+        'transferNotes': notes,
+        'transferRequestedAt': now,
+        // TODO(transfer): this is a simplified, one-way record — there is no
+        // receiving-organization/clinic/volunteer acceptance workflow yet.
+        // 'pending' here just means "handed off, not yet acknowledged."
+        'transferStatus': 'pending',
+        if (perAnimal) 'animals': animals,
+        if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
+      },
       action: 'transferred_animal',
       actorUid: actorUid,
       actorName: actorName,
@@ -367,26 +365,21 @@ class CaseIntakeRepository {
         };
       }
     }
-    await _store.caseDoc(caseId).update({
-      'status': perAnimal
-          ? (RescueCaseStore.deriveCaseStatusOverride(animals) ??
-                RescueStatus.completed.firestoreValue)
-          : RescueStatus.completed.firestoreValue,
-      'releasedToReporterId': reporterId,
-      'releasedToReporterName': reporterName,
-      'releasedAt': now,
-      'releaseNotes': notes,
-      if (perAnimal) 'animals': animals,
-      if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
-      'statusHistory': FieldValue.arrayUnion([
-        {
-          'status': 'Release confirmed — handed off to $reporterName.',
-          'timestamp': now,
-        },
-      ]),
-    });
-    await _store.addActivityLog(
+    await _store.recordAction(
       caseId: caseId,
+      statusLine: 'Release confirmed — handed off to $reporterName.',
+      fields: {
+        'status': perAnimal
+            ? (RescueCaseStore.deriveCaseStatusOverride(animals) ??
+                  RescueStatus.completed.firestoreValue)
+            : RescueStatus.completed.firestoreValue,
+        'releasedToReporterId': reporterId,
+        'releasedToReporterName': reporterName,
+        'releasedAt': now,
+        'releaseNotes': notes,
+        if (perAnimal) 'animals': animals,
+        if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
+      },
       action: 'released_to_reporter',
       actorUid: actorUid,
       actorName: actorName,
@@ -434,17 +427,21 @@ class CaseIntakeRepository {
           'postTreatmentStartedAt': now,
         };
       }
-      tx.update(caseRef, {
-        'animals': animals,
-        ...RescueCaseStore.stageSummaryUpdate(animals),
-        'status':
-            RescueCaseStore.deriveCaseStatusOverride(animals) ??
-            (data['status'] as String? ??
-                RescueStatus.treatment.firestoreValue),
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Selected animal(s) moved to Intake.', 'timestamp': now},
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'intake_assigned',
+        statusLine: 'Selected animal(s) moved to Intake.',
+        details: {'animalIndexes': animalIndexes},
+        fields: {
+          'animals': animals,
+          ...RescueCaseStore.stageSummaryUpdate(animals),
+          'status':
+              RescueCaseStore.deriveCaseStatusOverride(animals) ??
+              (data['status'] as String? ??
+                  RescueStatus.treatment.firestoreValue),
+        },
+      );
     });
   }
 
@@ -486,19 +483,20 @@ class CaseIntakeRepository {
         changed = true;
       }
       if (!changed) return;
-      tx.update(caseRef, {
-        'animals': animals,
-        ...RescueCaseStore.stageSummaryUpdate(animals),
-        'status':
-            RescueCaseStore.deriveCaseStatusOverride(animals) ??
-            (data['status'] as String? ?? RescueStatus.intake.firestoreValue),
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Intake completed for the selected animal(s).',
-            'timestamp': now,
-          },
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'intake_completed',
+        statusLine: 'Intake completed for the selected animal(s).',
+        details: {'animalIndexes': animalIndexes},
+        fields: {
+          'animals': animals,
+          ...RescueCaseStore.stageSummaryUpdate(animals),
+          'status':
+              RescueCaseStore.deriveCaseStatusOverride(animals) ??
+              (data['status'] as String? ?? RescueStatus.intake.firestoreValue),
+        },
+      );
     });
   }
 
@@ -558,27 +556,28 @@ class CaseIntakeRepository {
           RescueStatus.intake.firestoreValue;
 
       final now = Timestamp.now();
-      tx.update(caseRef, {
-        'status': statusOverride,
-        'intakeDestinationName': destinationName,
-        'intakeDestinationAddress': destinationAddress,
-        'intakeDestinationPlaceId': destinationPlaceId,
-        'intakeDestinationLat': destinationLat,
-        'intakeDestinationLng': destinationLng,
-        'intakeConfirmedAt': now,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status':
-                'Intake confirmed — transport to $destinationName arranged.',
-            'timestamp': now,
-          },
-        ]),
-        if (transporterUid != null) 'currentAssignmentId': assignmentRef.id,
-        'assignedVolunteerId': ?transporterUid,
-        if (transporterUid != null) 'assignedVolunteerName': transporterName,
-        if (transporterUid != null) 'assignedVehicle': transporterVehicle,
-        if (transporterUid != null) 'assignedPlate': transporterPlate,
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'intake_confirmed',
+        statusLine:
+            'Intake confirmed — transport to $destinationName arranged.',
+        details: {'destination': destinationName},
+        fields: {
+          'status': statusOverride,
+          'intakeDestinationName': destinationName,
+          'intakeDestinationAddress': destinationAddress,
+          'intakeDestinationPlaceId': destinationPlaceId,
+          'intakeDestinationLat': destinationLat,
+          'intakeDestinationLng': destinationLng,
+          'intakeConfirmedAt': now,
+          if (transporterUid != null) 'currentAssignmentId': assignmentRef.id,
+          'assignedVolunteerId': ?transporterUid,
+          if (transporterUid != null) 'assignedVolunteerName': transporterName,
+          if (transporterUid != null) 'assignedVehicle': transporterVehicle,
+          if (transporterUid != null) 'assignedPlate': transporterPlate,
+        },
+      );
 
       if (transporterUid != null) {
         tx.set(assignmentRef, {
@@ -630,11 +629,7 @@ class CaseIntakeRepository {
       final data = snap.data();
       if (data == null) return;
       final now = Timestamp.now();
-      final update = <String, dynamic>{
-        'statusHistory': FieldValue.arrayUnion([
-          {'status': 'Animal received at the shelter.', 'timestamp': now},
-        ]),
-      };
+      final update = <String, dynamic>{};
       if (data['intakeReceivedAt'] == null) {
         update['intakeReceivedAt'] = now;
       }
@@ -651,7 +646,13 @@ class CaseIntakeRepository {
         }
         update['animals'] = animals;
       }
-      tx.update(caseRef, update);
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'animal_received',
+        statusLine: 'Animal received at the shelter.',
+        fields: update,
+      );
     });
     if (currentAssignmentId != null) {
       await _transport.completeAssignment(
@@ -750,16 +751,16 @@ class CaseIntakeRepository {
       if (data['intakeReceivedAt'] == null) return;
 
       final now = Timestamp.now();
-      tx.update(_store.caseDoc(c.id), {
-        'status': RescueStatus.completed.firestoreValue,
-        'intakeCompletedAt': now,
-        'statusHistory': FieldValue.arrayUnion([
-          {
-            'status': 'Intake completed — all animal records created.',
-            'timestamp': now,
-          },
-        ]),
-      });
+      _store.recordActionIn(
+        tx,
+        caseId: c.id,
+        action: 'intake_completed',
+        statusLine: 'Intake completed — all animal records created.',
+        fields: {
+          'status': RescueStatus.completed.firestoreValue,
+          'intakeCompletedAt': now,
+        },
+      );
     });
   }
 }

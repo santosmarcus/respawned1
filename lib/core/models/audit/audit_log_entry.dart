@@ -23,6 +23,7 @@ enum AuditCategory {
   rescueCases,
   adoptions,
   donations,
+  expenses,
   animalRecords,
   logins,
   organizationStaff;
@@ -36,6 +37,7 @@ enum AuditCategory {
         AuditCategory.adoptions => 'Adoptions',
         AuditCategory.logins => 'Logins',
         AuditCategory.donations => 'Donations',
+        AuditCategory.expenses => 'Expenses',
         AuditCategory.animalRecords => 'Records',
         AuditCategory.rescueCases => 'Rescue',
         AuditCategory.organizationStaff => 'Organization and Staff',

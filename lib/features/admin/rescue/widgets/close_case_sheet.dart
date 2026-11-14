@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
+import 'package:respawnd1/core/widgets/reason_picker.dart';
 
 typedef CloseCaseResult = ({
 ClosureReason reason,
@@ -27,11 +28,8 @@ Future<CloseCaseResult?> showCloseCaseSheet(
       required RescueCase rescueCase,
       ClosureReason? initialReason,
     }) {
-  return showModalBottomSheet<CloseCaseResult>(
-    context: context,
-    backgroundColor: AppColors.background,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+  return showReasonSheet<CloseCaseResult>(
+    context,
     builder: (_) => _CloseCaseSheetBody(rescueCase: rescueCase, initialReason: initialReason),
   );
 }
@@ -49,6 +47,7 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
   late ClosureReason? _reason = widget.initialReason;
   final _detailsController = TextEditingController();
   final _serviceTypeOtherController = TextEditingController();
+  final _unusedOtherController = TextEditingController();
   String? _serviceType;
 
   // Common specialized-transport needs — kept short and concrete so the
@@ -66,6 +65,7 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
   void dispose() {
     _detailsController.dispose();
     _serviceTypeOtherController.dispose();
+    _unusedOtherController.dispose();
     super.dispose();
   }
 
@@ -83,144 +83,80 @@ class _CloseCaseSheetBodyState extends State<_CloseCaseSheetBody> {
     final c = widget.rescueCase;
     final hasActiveAssignment = c.assignedVolunteerName != null || (c.raw['currentAssignmentId'] as String?) != null;
 
-    return Padding(
-      padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 20 + MediaQuery.of(context).viewInsets.bottom),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Close Case', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
-            const SizedBox(height: 12),
-
-            // Pre-close summary.
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _summaryRow('Case ID', c.id),
-                  _summaryRow('Current phase', c.status.label),
-                  _summaryRow('Animals affected', '${c.animalCount}'),
-                  _summaryRow('Active transporter', c.assignedVolunteerName ?? 'None'),
-                  _summaryRow('Selected clinic', c.vetClinicName ?? 'None'),
-                ],
-              ),
-            ),
-            if (hasActiveAssignment) ...[
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: AppColors.warning.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
-                child: Text(
-                  'Closing will cancel the pending/active transporter assignment, current route, and clinic destination.',
-                  style: GoogleFonts.zain(fontSize: 12, color: const Color(0xFF9C6B10)),
+    return ReasonSheetFrame(
+      title: 'Close Case',
+      confirmLabel: 'Close Case',
+      onConfirm: _canConfirm
+          ? () => Navigator.pop(
+                context,
+                (
+                  reason: _reason!,
+                  details: _detailsController.text.trim(),
+                  serviceTypeNeeded: _reason!.needsServiceType
+                      ? (_serviceType == 'Other' ? _serviceTypeOtherController.text.trim() : _serviceType)
+                      : null,
                 ),
-              ),
+              )
+          : null,
+      children: [
+        // Pre-close summary.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _summaryRow('Case ID', c.id),
+              _summaryRow('Current phase', c.status.label),
+              _summaryRow('Animals affected', '${c.animalCount}'),
+              _summaryRow('Active transporter', c.assignedVolunteerName ?? 'None'),
+              _summaryRow('Selected clinic', c.vetClinicName ?? 'None'),
             ],
-
-            const SizedBox(height: 16),
-            Text('Closure Reason', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            const SizedBox(height: 6),
-            RadioGroup<ClosureReason>(
-              groupValue: _reason,
-              onChanged: (v) => setState(() => _reason = v),
-              child: Column(
-                children: [
-                  ...ClosureReason.selectable.map((reason) => RadioListTile<ClosureReason>(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    value: reason,
-                    activeColor: AppColors.textPrimary,
-                    title: Text(reason.label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-                  )),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 8),
-            Text('Detailed Explanation', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            const SizedBox(height: 6),
-            TextField(
-              controller: _detailsController,
-              maxLines: 3,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(hintText: 'What happened, and why the case is being closed'),
-            ),
-
-            if (_reason?.needsServiceType ?? false) ...[
-              const SizedBox(height: 12),
-              Text('What kind of service does this animal need?',
-                  style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-              const SizedBox(height: 4),
-              Text(
-                'Shown on the case so whoever handles it next (or a re-assigned transporter) knows what to arrange.',
-                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 6),
-              RadioGroup<String>(
-                groupValue: _serviceType,
-                onChanged: (v) => setState(() => _serviceType = v),
-                child: Column(
-                  children: [
-                    ..._serviceTypeOptions.map((option) => RadioListTile<String>(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      value: option,
-                      activeColor: AppColors.textPrimary,
-                      title: Text(option, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-                    )),
-                  ],
-                ),
-              ),
-              if (_serviceType == 'Other') ...[
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _serviceTypeOtherController,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(hintText: 'Describe the service needed'),
-                ),
-              ],
-            ],
-
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _canConfirm
-                        ? () => Navigator.pop(
-                      context,
-                      (
-                      reason: _reason!,
-                      details: _detailsController.text.trim(),
-                      serviceTypeNeeded: _reason!.needsServiceType
-                          ? (_serviceType == 'Other'
-                          ? _serviceTypeOtherController.text.trim()
-                          : _serviceType)
-                          : null,
-                      ),
-                    )
-                        : null,
-                    style: AppButtons.danger,
-                    child: const Text('Close Case'),
-                  ),
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
-      ),
+        if (hasActiveAssignment) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: AppColors.warning.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+            child: Text(
+              'Closing will cancel the pending/active transporter assignment, current route, and clinic destination.',
+              style: GoogleFonts.zain(fontSize: 12, color: const Color(0xFF9C6B10)),
+            ),
+          ),
+        ],
+        const ReasonSectionLabel('Closure Reason'),
+        ReasonChoiceList<ClosureReason>(
+          options: [for (final r in ClosureReason.selectable) ReasonOption(r, r.label)],
+          selected: [?_reason],
+          otherController: _unusedOtherController,
+          onChanged: (v) => setState(() => _reason = v.first),
+        ),
+        const SizedBox(height: 8),
+        ReasonTextField(
+          controller: _detailsController,
+          label: 'Detailed explanation',
+          hint: 'What happened, and why the case is being closed',
+          maxLines: 3,
+          onChanged: () => setState(() {}),
+        ),
+        if (_reason?.needsServiceType ?? false) ...[
+          const ReasonSectionLabel(
+            'What kind of service does this animal need?',
+            help: 'Shown on the case so whoever handles it next (or a re-assigned transporter) knows what to arrange.',
+          ),
+          ReasonChoiceList<String>(
+            options: [for (final o in _serviceTypeOptions) ReasonOption(o, o, isOther: o == 'Other')],
+            selected: [?_serviceType],
+            otherController: _serviceTypeOtherController,
+            otherHint: 'Describe the service needed',
+            onChanged: (v) => setState(() => _serviceType = v.first),
+            onOtherChanged: () => setState(() {}),
+          ),
+        ],
+      ],
     );
   }
 
