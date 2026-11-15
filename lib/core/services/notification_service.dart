@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
+import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
 import 'package:respawnd1/features/pettransporter/rescue_request.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
@@ -228,6 +229,12 @@ class NotificationService {
           petName: tag.data()?['name'] as String? ?? 'Your pet',
           isOwner: true,
         );
+
+      // reviewOrganization (functions/index.js): the owner's live status page.
+      case 'organization_review':
+        final organizationId = data['organizationId'] as String?;
+        if (organizationId == null || organizationId.isEmpty) return null;
+        return OrganizationVerificationPendingPage(organizationId: organizationId);
 
       default:
       // e.g. tag_scanned_nearby: informational only, nothing to open.

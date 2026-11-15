@@ -57,8 +57,10 @@ class DonationAdminService {
   static Future<void> postUpdate(String campaignId, {required String title, String? body, String type = 'general'}) =>
       _call('postCampaignUpdate', {'campaignId': campaignId, 'title': title, 'body': body, 'type': type});
 
+  /// [campaignId] null records it to the organization's General fund
+  /// (created on first use by the backend).
   static Future<void> recordOfflineDonation({
-    required String campaignId,
+    required String? campaignId,
     required double amount,
     required String method,
     required String referenceNumber,
@@ -68,7 +70,7 @@ class DonationAdminService {
     String? receiptUrl,
   }) =>
       _call('recordOfflineDonation', {
-        'campaignId': campaignId,
+        if (campaignId == null) 'generalFund': true else 'campaignId': campaignId,
         'amount': amount,
         'method': method,
         'referenceNumber': referenceNumber,

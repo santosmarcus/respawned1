@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/volunteer/volunteer_stats.dart';
+
 /// Typed view over a `users/{uid}` doc for accounts with role
 /// 'pet_transporter' (see onboard_screen.dart / role_screen.dart, the only
 /// two places that ever write that exact role string). Vehicle/plate/photo
@@ -36,6 +38,10 @@ class PetTransporter {
   final double? lastLat;
   final double? lastLng;
 
+  /// Attendance badges (`volunteerStats`, server-written); null until the
+  /// account has attended an event.
+  final VolunteerStats? volunteerStats;
+
   const PetTransporter({
     required this.uid,
     required this.name,
@@ -49,6 +55,7 @@ class PetTransporter {
     this.lastSeenAt,
     this.lastLat,
     this.lastLng,
+    this.volunteerStats,
   });
 
   /// True only when the transporter's own app last wrote `online: true`
@@ -86,6 +93,7 @@ class PetTransporter {
       lastSeenAt: lastSeen is Timestamp ? lastSeen.toDate() : null,
       lastLat: (data['lastLat'] as num?)?.toDouble(),
       lastLng: (data['lastLng'] as num?)?.toDouble(),
+      volunteerStats: VolunteerStats.fromUserData(data),
     );
   }
 }

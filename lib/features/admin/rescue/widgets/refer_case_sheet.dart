@@ -56,6 +56,7 @@ Future<bool> showReferCaseSheet(
           _TypeOption(
             icon: Icons.volunteer_activism_outlined,
             label: ReferralType.rescueVolunteer.label,
+            comingSoon: true,
             onTap: () => Navigator.pop(context, ReferralType.rescueVolunteer),
           ),
           _TypeOption(
@@ -98,14 +99,21 @@ class _TypeOption extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _TypeOption({required this.icon, required this.label, required this.onTap});
+  /// Shown muted with a "Coming soon" note; still tappable so the sheet
+  /// behind it can explain.
+  final bool comingSoon;
+  const _TypeOption({required this.icon, required this.label, required this.onTap, this.comingSoon = false});
 
   @override
   Widget build(BuildContext context) {
+    final color = comingSoon ? AppColors.textSecondary : AppColors.textPrimary;
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: AppColors.textPrimary),
-      title: Text(label, style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
+      leading: Icon(icon, color: color),
+      title: Text(label, style: GoogleFonts.zain(fontSize: 15, color: color)),
+      subtitle: comingSoon
+          ? Text('Coming soon', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+          : null,
       trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
       onTap: onTap,
     );

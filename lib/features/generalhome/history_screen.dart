@@ -16,6 +16,7 @@ import 'package:respawnd1/features/rescue/case_summary_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/volunteer_badges.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -723,11 +724,16 @@ class _VolunteerHistoryTab extends StatelessWidget {
           separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
             if (i == 0) {
-              return Text(
-                attended == 0
-                    ? '${regs.length} event sign-up${regs.length == 1 ? '' : 's'}'
-                    : 'You attended $attended event${attended == 1 ? '' : 's'}. Thank you for helping!',
-                style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+              // Badges once the server has counted attendance; until then
+              // the plain count from this list.
+              return VolunteerBadgesCard(
+                uid: uid,
+                fallback: Text(
+                  attended == 0
+                      ? '${regs.length} event sign-up${regs.length == 1 ? '' : 's'}'
+                      : 'You attended $attended event${attended == 1 ? '' : 's'}. Thank you for helping!',
+                  style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                ),
               );
             }
             final data = regs[i - 1];

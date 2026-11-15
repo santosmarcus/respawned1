@@ -75,6 +75,25 @@ describe('organizations', () => {
     await assertSucceeds(as('draftOwner').doc('organizations/orgD').update({ verificationStatus: 'pending' }));
   });
 
+  test('review decisions go through the callable only, platform staff included', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('organizations/orgD').update({ verificationStatus: 'pending' }));
+    await assertFails(as('admin').doc('organizations/orgD').update({ verificationStatus: 'approved' }));
+    await assertFails(as('admin').doc('organizations/orgD').update({ verificationRejectionReason: 'Blurry permit' }));
+    await assertFails(as('draftOwner').doc('organizations/orgD').update({ verificationReviewedBy: 'draftOwner' }));
+    // Platform staff can still edit other fields.
+    await assertSucceeds(as('admin').doc('organizations/orgD').update({ name: 'Org D (renamed)' }));
+  });
+
+  test('the owner can resubmit after a rejection or a request for changes', async () => {
+    for (const status of ['rejected', 'requiresChanges']) {
+      await env.withSecurityRulesDisabled((ctx) =>
+        ctx.firestore().doc('organizations/orgD').update({ verificationStatus: status, verificationRejectionReason: 'Fix it' }));
+      await assertSucceeds(as('draftOwner').doc('organizations/orgD').update({ verificationStatus: 'pending' }));
+    }
+    await assertFails(as('draftOwner').doc('organizations/orgD').update({ verificationStatus: 'requiresChanges' }));
+  });
+
   test('cannot create a pre-approved organization', async () => {
     await assertFails(as('stranger').doc('organizations/x').set({ ownerId: 'stranger', verificationStatus: 'approved' }));
     await assertFails(as('stranger').doc('organizations/x').set({ ownerId: 'stranger' }));
@@ -497,9 +516,10 @@ describe('collection-group queries', () => {
     await assertFails(as('rider').collectionGroup('transportAssignments').get());
   });
 
-  test('staff dashboards read across cases; others cannot', async () => {
-    await assertSucceeds(as('staffA').collectionGroup('expenses').get());
-    await assertFails(as('stranger').collectionGroup('expenses').get());
+  test("staff dashboards read their organization's records across cases; others cannot", async () => {
+    await assertSucceeds(as('staffA').collectionGroup('expenses').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('staffA').collectionGroup('expenses').get());
+    await assertFails(as('stranger').collectionGroup('expenses').where('organizationId', '==', 'orgA').get());
   });
 });
 
@@ -560,10 +580,12 @@ describe('care updates', () => {
   });
 
   test('staff read medication orders and doses across animals for missed-dose alerts', async () => {
-    await assertSucceeds(as('staffA').collectionGroup('medications').where('active', '==', true).get());
-    await assertSucceeds(as('staffA').collectionGroup('medicationDoses').get());
-    await assertFails(as('stranger').collectionGroup('medicationDoses').get());
-    await assertFails(as('carerA').collectionGroup('medications').get());
+    await assertSucceeds(as('staffA').collectionGroup('medications')
+      .where('organizationId', '==', 'orgA').where('active', '==', true).get());
+    await assertSucceeds(as('staffA').collectionGroup('medicationDoses').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('staffA').collectionGroup('medicationDoses').get());
+    await assertFails(as('stranger').collectionGroup('medicationDoses').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('carerA').collectionGroup('medications').where('organizationId', '==', 'orgB').get());
   });
 });
 
@@ -611,5 +633,66 @@ describe('event attendance', () => {
   test('attendance cannot be taken before the event starts', async () => {
     await seedEvent(new Date(Date.now() + 24 * 3600 * 1000));
     await assertFails(as('staffA').doc('events/ev1/registrations/stranger').update(mark('staffA')));
+  });
+
+  test('a new sign-up cannot arrive already marked attended', async () => {
+    await seedEvent(new Date(Date.now() + 24 * 3600 * 1000));
+    const signUp = (extra) => {
+      const db = as('adopter');
+      return db.batch()
+        .update(db.doc('events/ev1'), { goingCount: 2 })
+        .set(db.doc('events/ev1/registrations/adopter'), { uid: 'adopter', eventId: 'ev1', ...extra })
+        .commit();
+    };
+    await assertFails(signUp({ attended: true }));
+    await assertSucceeds(signUp({}));
+  });
+});
+
+describe('user subcollections', () => {
+  test("a user's own subcollections are theirs alone", async () => {
+    await assertSucceeds(as('adopter').doc('users/adopter/favorites/a1').set({ animalId: 'a1' }));
+    await assertSucceeds(as('adopter').doc('users/adopter/favorites/a1').get());
+    await assertFails(as('stranger').doc('users/adopter/favorites/a1').get());
+    await assertFails(as('stranger').doc('users/adopter/favorites/x').set({ animalId: 'x' }));
+    await assertFails(as('stranger').doc('users/adopter/fcmTokens/t').set({ token: 'x' }));
+  });
+
+  test('notifications come from the backend; the user marks them read', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('users/adopter/notifications/n1').set({ title: 'Hi', isRead: false }));
+    await assertFails(as('stranger').doc('users/adopter/notifications/n2').set({ title: 'Phish' }));
+    await assertFails(as('adopter').doc('users/adopter/notifications/n2').set({ title: 'Self' }));
+    await assertFails(as('stranger').doc('users/adopter/notifications/n1').get());
+    await assertSucceeds(as('adopter').doc('users/adopter/notifications/n1').update({ isRead: true }));
+    await assertFails(as('adopter').doc('users/adopter/notifications/n1').update({ title: 'Changed' }));
+  });
+
+  test("the event's staff mark attendance on the volunteer's copy", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('events/ev2').set({ organizationId: 'orgA', status: 'published', goingCount: 1 });
+      await db.doc('users/adopter/volunteerRegistrations/ev2').set({ uid: 'adopter', title: 'Clean-up' });
+    });
+    const mark = { attended: true, attendanceMarkedAt: FieldValue.serverTimestamp(), attendanceMarkedBy: 'staffA' };
+    await assertSucceeds(as('staffA').doc('users/adopter/volunteerRegistrations/ev2').set(mark, { merge: true }));
+    await assertFails(as('staffB').doc('users/adopter/volunteerRegistrations/ev2').set(mark, { merge: true }));
+    await assertFails(as('staffA').doc('users/adopter/volunteerRegistrations/ev2').update({ title: 'Changed' }));
+    await assertFails(as('stranger').doc('users/adopter/volunteerRegistrations/ev2').get());
+  });
+
+  test('collar tag copies: the owner and staff', async () => {
+    await assertSucceeds(as('adopter').doc('users/adopter/collarTags/t1').set({ status: 'active' }));
+    await assertSucceeds(as('staffA').doc('users/adopter/collarTags/t1').set({ qrEnabled: false }, { merge: true }));
+    await assertFails(as('stranger').doc('users/adopter/collarTags/t1').get());
+  });
+});
+
+describe('volunteer stats', () => {
+  test('only the server writes volunteer badges', async () => {
+    const stats = { attendedCount: 25, badges: ['champion'] };
+    await assertFails(as('stranger').doc('users/stranger').update({ volunteerStats: stats }));
+    await assertFails(as('newbie').doc('users/newbie').set({ role: 'general', volunteerStats: stats }));
+    await assertSucceeds(as('newbie').doc('users/newbie').set({ role: 'general' }));
   });
 });

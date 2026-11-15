@@ -40,11 +40,18 @@ describe('animal medical records', () => {
     }
   });
 
-  test('the full record is staff-only; non-medical subcollections stay readable', async () => {
+  test('the full record and every subcollection are staff-only', async () => {
     // Everyone else reads publicAnimals (see firestore.test.js).
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/hiddenA/managementLogs/l1').set({ action: 'updated', organizationId: 'orgA' }));
     await assertFails(as('stranger').doc('animals/hiddenA').get());
     await assertSucceeds(as('staffA').doc('animals/hiddenA').get());
-    await assertSucceeds(as('stranger').doc('animals/hiddenA/gallery/g1').get());
+    for (const path of ['animals/hiddenA/gallery/g1', 'animals/hiddenA/managementLogs/l1']) {
+      await assertFails(as('stranger').doc(path).get());
+      await assertFails(as('staffB').doc(path).get());
+      await assertSucceeds(as('staffA').doc(path).get());
+      await assertSucceeds(as('carerA').doc(path).get());
+    }
   });
 });
 
@@ -74,10 +81,14 @@ describe('donation records', () => {
     await assertFails(as('carerA').doc('donations/manual').get());
   });
 
-  test('staff read donation records', async () => {
+  test("staff read their own organization's donation records only", async () => {
     await assertSucceeds(as('staffA').doc('donations/manual').get());
-    await assertSucceeds(as('staffA').collection('donations').orderBy('createdAt', 'desc').limit(10).get());
+    await assertSucceeds(as('staffA').collection('donations')
+      .where('organizationId', '==', 'orgA').orderBy('createdAt', 'desc').limit(10).get());
     await assertSucceeds(as('admin').collection('donations').where('campaignId', '==', 'c1').get());
+    await assertFails(as('staffB').doc('donations/manual').get());
+    await assertFails(as('staffA').collection('donations').orderBy('createdAt', 'desc').limit(10).get());
+    await assertFails(as('staffB').collection('donations').where('organizationId', '==', 'orgA').get());
   });
 });
 
@@ -148,5 +159,40 @@ describe('audit Rescue and Records tabs', () => {
 
   test("a case's own activity feed is unchanged", async () => {
     await assertSucceeds(as('reporter').collection('cases/ownedA/activityLogs').get());
+  });
+});
+
+describe('dashboard records across animals and cases', () => {
+  const animalGroups = ['vaccinations', 'careRecords', 'medications', 'medicationDoses'];
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('animals/animalB').set({ name: 'B', organizationId: 'orgB' });
+      for (const g of animalGroups) {
+        await db.doc(`animals/animalA/${g}/a1`).set({ organizationId: 'orgA', active: true });
+        await db.doc(`animals/animalB/${g}/b1`).set({ organizationId: 'orgB', active: true });
+      }
+      await db.doc('cases/ownedA/expenses/x1').set({ organizationId: 'orgA', amount: 100 });
+    });
+  });
+
+  test("staff and carers list their own organization's animal records", async () => {
+    for (const g of animalGroups) {
+      await assertSucceeds(as('staffA').collectionGroup(g).where('organizationId', '==', 'orgA').get());
+      await assertSucceeds(as('carerA').collectionGroup(g).where('organizationId', '==', 'orgA').get());
+      await assertSucceeds(as('admin').collectionGroup(g).get());
+      await assertFails(as('staffA').collectionGroup(g).get());
+      await assertFails(as('staffA').collectionGroup(g).where('organizationId', '==', 'orgB').get());
+      // The collection-group match also covers direct reads.
+      await assertFails(as('staffA').doc(`animals/animalB/${g}/b1`).get());
+    }
+  });
+
+  test('case expenses: own organization staff, not carers', async () => {
+    await assertSucceeds(as('staffA').collectionGroup('expenses').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('carerA').collectionGroup('expenses').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('staffB').collectionGroup('expenses').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('staffA').collectionGroup('expenses').get());
   });
 });

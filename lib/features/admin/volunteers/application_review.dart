@@ -210,11 +210,15 @@ class _ApplicationReviewPageState<A> extends State<ApplicationReviewPage<A>> {
 /// One application. With no callbacks it is read-only (a transporter's
 /// detail page).
 class ApplicationCard extends StatelessWidget {
-  const ApplicationCard({super.key, required this.summary, this.onApprove, this.onReject});
+  const ApplicationCard({super.key, required this.summary, this.onApprove, this.onReject, this.onRequestChanges});
 
   final ApplicationSummary summary;
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
+
+  /// Optional third decision (organization review): send it back to the
+  /// applicant with a note instead of approving or refusing.
+  final VoidCallback? onRequestChanges;
 
   @override
   Widget build(BuildContext context) {
@@ -271,6 +275,11 @@ class ApplicationCard extends StatelessWidget {
                   ),
               ],
             ),
+            if (onRequestChanges != null)
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(onPressed: onRequestChanges, child: const Text('Ask for changes')),
+              ),
           ],
         ],
       ),

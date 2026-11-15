@@ -427,6 +427,9 @@ exports.setCampaignStatus = onCall(async (request) => {
     if (!snap.exists) throw new HttpsError('not-found', 'Listing not found.');
     const c = snap.data();
     assertSameOrg(actor, c);
+    if (c.isPermanentGeneralFund === true && action !== 'reactivate') {
+      throw new HttpsError('failed-precondition', 'The General fund stays open.');
+    }
     const status = statusOf(c);
     const deadlinePassed = c.date instanceof Timestamp && c.date.toMillis() <= Date.now();
     const now = FieldValue.serverTimestamp();
@@ -598,12 +601,77 @@ exports.postCampaignUpdate = onCall(async (request) => {
   return {ok: true};
 });
 
+// Each organization's permanent General fund: a donation listing with no
+// goal and no end date (fundKind 'general') for money that isn't for a
+// particular campaign. Created on first use, at campaigns/general_{orgId},
+// so it works with allocations, expense funding and reports like any other
+// campaign. Not restricted, so its money can pay any of the
+// organization's costs.
+async function ensureGeneralFund(actor) {
+  if (!actor.organizationId) {
+    throw new HttpsError('failed-precondition', 'Your account is not linked to an organization.');
+  }
+  const ref = campaignsCol().doc(`general_${actor.organizationId}`);
+  const organizer = (await organizerNameFor(actor)) || 'Rescue Shelter';
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (snap.exists) return;
+    tx.create(ref, {
+      type: 'donation',
+      fundKind: 'general',
+      isPermanentGeneralFund: true,
+      title: 'General Fund',
+      description: 'Donations that are not for a particular campaign. They pay for day-to-day rescue and shelter costs.',
+      imageUrl: null,
+      purposeTags: ['General Operations'],
+      restricted: false,
+      linkedCaseId: null,
+      animalId: null,
+      animalName: null,
+      targetAmount: 0,
+      acceptInKind: false,
+      inKindItems: [],
+      monthlyAmount: null,
+      intendedUse: null,
+      date: null,
+      startDate: FieldValue.serverTimestamp(),
+      status: 'active',
+      isActive: true,
+      organizer,
+      organizationId: actor.organizationId,
+      collectedAmount: 0,
+      allocatedAmount: 0,
+      transferredOutAmount: 0,
+      transferredInAmount: 0,
+      numdonors: 0,
+      needsExtensionDecision: false,
+      extensionCount: 0,
+      backgroundColor: 0xFFE3E0B9,
+      createdBy: actor.uid,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: actor.uid,
+    });
+    historyEntry(tx, ref, actor, 'created', {status: 'active', generalFund: true}, actor.organizationId);
+  });
+  return ref.id;
+}
+
+// Returns the caller's organization's General fund id, creating it if needed.
+exports.ensureGeneralFund = onCall(async (request) => {
+  const actor = await loadActor(request, {finance: true});
+  return {campaignId: await ensureGeneralFund(actor)};
+});
+
 // Payment received outside PayMongo (bank transfer, cash, ...). Credited to
 // collectedAmount like a verified donation, but marked source 'manual' with
 // who recorded it. Duplicate guard: one record per campaign + method + reference.
+// generalFund: true records it to the organization's General fund instead
+// of a campaign (created on first use).
 exports.recordOfflineDonation = onCall(async (request) => {
   const actor = await loadActor(request, {finance: true});
-  const d = request.data || {};
+  const d = {...(request.data || {})};
+  if (d.generalFund === true) d.campaignId = await ensureGeneralFund(actor);
   requireCampaignId(d.campaignId);
   const amount = requireAmount(d.amount, 'Amount');
   if (!Object.prototype.hasOwnProperty.call(OFFLINE_METHODS, d.method)) throw new HttpsError('invalid-argument', 'Choose how the payment was received.');
@@ -724,6 +792,9 @@ exports.recordAllocation = onCall(async (request) => {
       linkedCaseId,
       inKindDescription,
       status: 'recorded',
+      // Analytics' spending-by-category reads allocations across campaigns,
+      // filtered on the organization.
+      organizationId: c.organizationId || null,
       recordedBy: actor.uid,
       recordedByName: actor.name,
       createdAt: now,
@@ -855,6 +926,7 @@ exports.reallocateExcess = onCall(async (request) => {
       destinationCampaignId: destinationId,
       notes: reason,
       status: 'recorded',
+      organizationId: src.organizationId || null,
       recordedBy: actor.uid,
       recordedByName: actor.name,
       createdAt: now,

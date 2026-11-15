@@ -152,8 +152,9 @@ class _AllocateFundsSheetState extends State<AllocateFundsSheet> {
 // ─── Record offline donation ─────────────────────────────────────────────────
 
 class OfflineDonationSheet extends StatefulWidget {
-  final DonationListing campaign;
-  const OfflineDonationSheet({super.key, required this.campaign});
+  /// Null records the payment to the organization's General fund.
+  final DonationListing? campaign;
+  const OfflineDonationSheet({super.key, this.campaign});
 
   @override
   State<OfflineDonationSheet> createState() => _OfflineDonationSheetState();
@@ -189,7 +190,8 @@ class _OfflineDonationSheetState extends State<OfflineDonationSheet> {
       context,
       title: 'Record offline donation',
       message: 'Add ${formatPesoExact(amount)} (${kOfflineMethods[_method]}, ref ${_reference.text.trim()}) to '
-          '"${widget.campaign.title}"? It will count toward the campaign total and be marked as recorded by you.',
+          '"${widget.campaign?.title ?? 'General Fund'}"? It will count toward '
+          '${widget.campaign == null ? "the General fund" : "the campaign total"} and be marked as recorded by you.',
       confirmLabel: 'Record',
     );
     if (!ok || !mounted) return;
@@ -197,7 +199,7 @@ class _OfflineDonationSheetState extends State<OfflineDonationSheet> {
     try {
       final receiptUrl = _receipt == null ? null : await DonationAdminService.uploadImage(_receipt!, 'receipts');
       await DonationAdminService.recordOfflineDonation(
-        campaignId: widget.campaign.id,
+        campaignId: widget.campaign?.id,
         amount: amount,
         method: _method,
         referenceNumber: _reference.text.trim(),
@@ -223,8 +225,11 @@ class _OfflineDonationSheetState extends State<OfflineDonationSheet> {
       busy: _busy,
       onDone: _submit,
       children: [
-        _infoBox('For payments received outside the app (bank transfer, cash, check). '
-            'Each reference number can be recorded only once per campaign.'),
+        _infoBox(widget.campaign == null
+            ? 'For payments received outside the app that are not for a particular campaign. '
+                'They go to your General fund, which can pay for any of your costs.'
+            : 'For payments received outside the app (bank transfer, cash, check). '
+                'Each reference number can be recorded only once per campaign.'),
         SheetTextField(controller: _amount, hint: 'Amount', prefix: '₱ ', keyboardType: const TextInputType.numberWithOptions(decimal: true)),
         InlineSelectRow(
           label: 'Received via',

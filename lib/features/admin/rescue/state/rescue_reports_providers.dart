@@ -71,6 +71,28 @@ final currentOrganizationCapabilitiesProvider = StreamProvider.autoDispose<Organ
   return ref.watch(orgMembershipServiceProvider).streamCapabilities(uid);
 });
 
+/// Platform staff (users/{uid}.role 'admin' or 'ngo_staff', the same check
+/// as firestore.rules isPlatformStaff): they review organizations. False
+/// while signed out or loading.
+final isPlatformStaffProvider = StreamProvider.autoDispose<bool>((ref) {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return Stream.value(false);
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .map((d) => const ['admin', 'ngo_staff'].contains(d.data()?['role']));
+});
+
+/// Organizations waiting for platform staff's review — the drawer count.
+final pendingOrganizationReviewCountProvider = StreamProvider.autoDispose<int>((ref) {
+  return FirebaseFirestore.instance
+      .collection('organizations')
+      .where('verificationStatus', isEqualTo: 'pending')
+      .snapshots()
+      .map((s) => s.size);
+});
+
 /// Which organization the signed-in account is linked to — reuses
 /// [OrgMembershipService.resolveOrganizationId] (the same "just which org"
 /// lookup admin_dashboard_home_widgets.dart already calls directly) so

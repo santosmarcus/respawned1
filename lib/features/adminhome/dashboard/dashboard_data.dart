@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/utils/org_list_scope.dart';
 import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -221,7 +222,8 @@ final shelterOccupancyProvider = Provider.autoDispose<AsyncValue<ShelterOccupanc
 /// Every preventive-care record (deworming, flea & tick, vet checkup),
 /// grouped by animal id — feeds the dashboard's overdue-care alert.
 final careRecordsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<CareRecord>>>((ref) {
-  return FirebaseFirestore.instance.collectionGroup('careRecords').snapshots().map((snap) {
+  // Own organization only (platform staff: all); see OrgListScope.
+  return OrgListScope.watch(FirebaseFirestore.instance.collectionGroup('careRecords'), empty: const {}, (snap) {
     final out = <String, List<CareRecord>>{};
     for (final d in snap.docs) {
       final animalId = d.reference.parent.parent?.id;
@@ -237,7 +239,7 @@ final careRecordsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<
 });
 
 final vaccinationsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<VaccinationRecord>>>((ref) {
-  return FirebaseFirestore.instance.collectionGroup('vaccinations').snapshots().map((snap) {
+  return OrgListScope.watch(FirebaseFirestore.instance.collectionGroup('vaccinations'), empty: const {}, (snap) {
     final out = <String, List<VaccinationRecord>>{};
     for (final d in snap.docs) {
       final animalId = d.reference.parent.parent?.id;
@@ -285,7 +287,7 @@ DateTime? nextVaccineDue(List<VaccinationRecord>? records) {
 /// All case expenses via one collection-group listener. Only watched by
 /// widgets that are already behind canManageFinancesProvider.
 final allCaseExpensesProvider = StreamProvider.autoDispose<List<Expense>>((ref) {
-  return FirebaseFirestore.instance.collectionGroup('expenses').snapshots().map((snap) {
+  return OrgListScope.watch(FirebaseFirestore.instance.collectionGroup('expenses'), empty: const [], (snap) {
     final out = <Expense>[];
     for (final d in snap.docs) {
       final caseId = d.reference.parent.parent?.id;

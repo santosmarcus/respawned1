@@ -129,21 +129,32 @@ service firebase.storage {
       }
     }
 
-    // create_animal_record_page.dart
-    match /animalRecords/{animalId}/{file=**} {
-      allow read: if signedIn();
-      allow write: if isStaff() && mediaUpload();
-    }
-
-    // Dose photos and videos (carer confirms a dose given). A carer may add
-    // media only for an animal in their own approved organization.
-    // Photos and videos on carer updates: same people as dose proof.
-    match /animalRecords/{animalId}/careUpdates/{file} {
+    // Animal files, by folder:
+    //   images/       profile photos (create_animal_record_page.dart): any
+    //                 signed-in user reads, staff upload — the animal doc may
+    //                 not exist yet while a new record is being created.
+    //   medicalDocs/  care and vaccine records, medication documents
+    //   careUpdates/  photos on carer updates
+    //   doseMedia/    dose proof
+    // Everything but images/ is readable only by the owning organization's
+    // staff and carers and platform staff (firestore.rules canReadAnimalMedical).
+    // careUpdates/ and doseMedia/ also take uploads from the animal's carers.
+    match /animalRecords/{animalId}/{folder}/{file=**} {
       function animalOrgId() {
         return firestore.get(/databases/(default)/documents/animals/$(animalId)).data.get('organizationId', '');
       }
+
+      function isStaffForAnimal() {
+        return signedIn() && (
+          userData().get('role', '') in ['admin', 'ngo_staff'] ||
+          (isApprovedOrgStaff() &&
+            (animalOrgId() == '' || userData().get('organizationId', '') == animalOrgId()))
+        );
+      }
+
       function isCarerForAnimal() {
-        return userData().get('organizationId', '') != '' &&
+        return signedIn() &&
+          userData().get('organizationId', '') != '' &&
           userData().get('organizationId', '') == animalOrgId() &&
           firestore.exists(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)) &&
           firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)).data
@@ -153,29 +164,14 @@ service firebase.storage {
           firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())).data
             .get('verificationStatus', 'approved') == 'approved';
       }
-      allow read: if signedIn();
-      allow write: if signedIn() && mediaUpload() && (isStaff() || isCarerForAnimal());
-    }
 
-    match /animalRecords/{animalId}/doseMedia/{file} {
-      function animalOrgId() {
-        return firestore.get(/databases/(default)/documents/animals/$(animalId)).data.get('organizationId', '');
-      }
-
-      function isCarerForAnimal() {
-        return userData().get('organizationId', '') != '' &&
-          userData().get('organizationId', '') == animalOrgId() &&
-          firestore.exists(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)) &&
-          firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)).data
-            .get('role', '') == 'carer' &&
-          !(firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)).data
-            .get('status', 'active') in ['inactive', 'removed', 'disabled']) &&
-          firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())).data
-            .get('verificationStatus', 'approved') == 'approved';
-      }
-
-      allow read: if signedIn();
-      allow write: if signedIn() && mediaUpload() && (isStaff() || isCarerForAnimal());
+      allow read: if (folder == 'images' && signedIn()) ||
+        (folder != 'images' && (isStaffForAnimal() || isCarerForAnimal()));
+      allow write: if mediaUpload() && (
+        (folder == 'images' && isStaff()) ||
+        (folder in ['careUpdates', 'doseMedia'] && (isStaffForAnimal() || isCarerForAnimal())) ||
+        (!(folder in ['images', 'careUpdates', 'doseMedia']) && isStaffForAnimal())
+      );
     }
 
     // ---- Adoptions -----------------------------------------------------------

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
@@ -50,7 +51,8 @@ class _AcceptCaseSheetBody extends ConsumerStatefulWidget {
 }
 
 class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
-  bool _openForTransfer = false;
+  // Always off until transfers exist; see the "Coming soon" row below.
+  final bool _openForTransfer = false;
   final _noteController = TextEditingController();
 
   @override
@@ -141,39 +143,47 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
               ),
             ),
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.slaterspwn),
+            // Transfers between organizations aren't built yet: the switch
+            // stays off and tapping explains. Cases flagged before this keep
+            // their saved openForTransfer value.
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                appSnackBar('Transfers to another organization are coming soon.'),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Open for transfer to another organization',
-                            style: GoogleFonts.zain(
-                                fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Optional. Flags this case as available for another org to take on. '
-                          'No transfer listing or matching yet — this only saves the flag for now.',
-                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-                        ),
-                      ],
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.slaterspwn),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Open for transfer to another organization',
+                              style: GoogleFonts.zain(
+                                  fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Coming soon',
+                            style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Switch(
-                    value: _openForTransfer,
-                    activeThumbColor: AppColors.textPrimary,
-                    onChanged: (v) => setState(() => _openForTransfer = v),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Switch(
+                      value: _openForTransfer,
+                      activeThumbColor: AppColors.textPrimary,
+                      onChanged: null,
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 20),

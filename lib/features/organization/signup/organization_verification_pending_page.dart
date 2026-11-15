@@ -9,10 +9,9 @@ import 'package:respawnd1/features/organization/signup/organization_verification
 
 /// Step 3 of the Organization signup flow (spec §5) — a live status view
 /// (StreamBuilder, not a one-time read) over the org doc's
-/// `verificationStatus`. Approval itself happens outside this app (manual
-/// Firestore/console review, per spec §5's own allowance — there is no
-/// verification-admin interface in this codebase yet) — this page only
-/// ever reflects whatever that external decision already wrote, and never
+/// `verificationStatus`. Platform staff decide on OrganizationReviewPage
+/// (the reviewOrganization callable) — this page only ever reflects what
+/// that decision wrote, and never
 /// auto-navigates the instant status changes: even on `approved`, the
 /// admin still presses "Continue" themselves, consistent with this app's
 /// existing rule against reactive auto-navigation from a stream.

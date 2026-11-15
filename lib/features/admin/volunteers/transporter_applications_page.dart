@@ -52,7 +52,7 @@ ApplicationSummary transporterSummary(TransporterApplication app) {
               scrollDirection: Axis.horizontal,
               itemCount: app.documents.length,
               separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, i) => _DocumentThumb(doc: app.documents[i]),
+              itemBuilder: (context, i) => DocumentThumb(doc: app.documents[i]),
             ),
           ),
   );
@@ -68,8 +68,10 @@ class TransporterApplicationCard extends StatelessWidget {
   Widget build(BuildContext context) => ApplicationCard(summary: transporterSummary(app));
 }
 
-class _DocumentThumb extends StatelessWidget {
-  const _DocumentThumb({required this.doc});
+/// A document photo with its label; tap to view it full screen. Shared by
+/// the transporter and organization review pages.
+class DocumentThumb extends StatelessWidget {
+  const DocumentThumb({super.key, required this.doc});
 
   final ({String label, String url}) doc;
 

@@ -11,9 +11,11 @@ import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart' show currentOrganizationIdProvider;
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 
 // ─── Reports by area ────────────────────────────────────────────────────
@@ -29,13 +31,14 @@ import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 //    retrieval/intake, not `releasedAt`;
 //  - donation figures are visible to finance admins only.
 
-enum AreaReport { rescue, adoption, donation }
+enum AreaReport { rescue, adoption, donation, volunteers }
 
 extension AreaReportX on AreaReport {
   String get label => switch (this) {
     AreaReport.rescue => 'Rescue',
     AreaReport.adoption => 'Adoptions',
     AreaReport.donation => 'Donations',
+    AreaReport.volunteers => 'Volunteers',
   };
 }
 
@@ -91,6 +94,7 @@ class AreaReportsCard extends ConsumerWidget {
             AreaReport.rescue => const _RescueReport(),
             AreaReport.adoption => const _AdoptionReport(),
             AreaReport.donation => const _DonationReport(),
+            AreaReport.volunteers => const _VolunteerReport(),
           },
         ],
       ),
@@ -340,7 +344,10 @@ double _pieHeight(Map<String, num> data) =>
 
 class _PieChart extends StatelessWidget implements _DataChart {
   final Map<String, num> data;
-  const _PieChart({required this.data});
+
+  /// Legend value format; counts by default.
+  final String Function(num)? valueLabel;
+  const _PieChart({required this.data, this.valueLabel});
 
   @override
   bool get isEmpty => !data.values.any((v) => v > 0);
@@ -386,7 +393,7 @@ class _PieChart extends StatelessWidget implements _DataChart {
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: LegendText(
                     _chartPalette[i % _chartPalette.length],
-                    '${filtered[i].key} (${filtered[i].value.toInt()})',
+                    '${filtered[i].key} (${valueLabel?.call(filtered[i].value) ?? filtered[i].value.toInt()})',
                     style: dashBody(size: 12),
                   ),
                 ),
@@ -787,16 +794,282 @@ class _DonationReportState extends ConsumerState<_DonationReport> {
             color: AppColors.greenrspwn,
           ),
         ),
-        const _ChartBlock(
-          title: 'Allocation summary',
-          height: 64,
-          child: _EmptyChart('Not tracked yet: needs one expense record shared across campaigns.'),
-        ),
+        const _FundsBreakdown(),
         _ChartBlock(
           title: 'Donor acquisition',
           child: _BarChart(
             data: {for (final m in months) _monthLabel(m): newDonorsByMonth[m] ?? 0},
             color: AppColors.lavenderrspwn,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Where the money went: per campaign (raised, spent, still available),
+/// spending by category, and spending on each sponsored or animal-linked
+/// fund. Built from campaign totals and their allocations.
+class _FundsBreakdown extends ConsumerWidget {
+  const _FundsBreakdown();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final campaignsAsync = ref.watch(orgCampaignsProvider);
+    final allocationsAsync = ref.watch(orgAllocationsProvider);
+    final campaigns = campaignsAsync.asData?.value;
+    final allocations = allocationsAsync.asData?.value;
+    if (campaignsAsync.hasError || allocationsAsync.hasError) {
+      return const _ChartBlock(title: 'Allocation summary', height: 64, child: _EmptyChart('Could not load fund data.'));
+    }
+    if (campaigns == null || allocations == null) {
+      return const _ChartBlock(
+        title: 'Allocation summary',
+        height: 64,
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+
+    final listed = campaigns.where((c) => c.type == 'donation' || c.type == 'sponsorship').where((c) => !c.isDraft).toList()
+      ..sort((a, b) => b.collected.compareTo(a.collected));
+    final known = {for (final c in listed) c.id};
+
+    final byCategory = <String, num>{};
+    final spentByCampaign = <String, double>{};
+    for (final a in allocations) {
+      if (a.entry.isTransfer || !known.contains(a.campaignId)) continue;
+      byCategory[a.entry.category] = (byCategory[a.entry.category] ?? 0) + a.entry.amount;
+      spentByCampaign[a.campaignId] = (spentByCampaign[a.campaignId] ?? 0) + a.entry.amount;
+    }
+
+    final byAnimal = <String, double>{};
+    for (final c in listed) {
+      final name = c.animalName?.trim() ?? '';
+      if (name.isEmpty) continue;
+      byAnimal[name] = (byAnimal[name] ?? 0) + (spentByCampaign[c.id] ?? c.allocatedAmount);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ChartBlock(
+          title: 'Funds by campaign',
+          height: (listed.length.clamp(1, 6) * 46 + 24).toDouble(),
+          child: listed.isEmpty
+              ? const _EmptyChart('No campaigns yet.')
+              : _FundRows(rows: [
+                  for (final c in listed)
+                    (
+                      label: c.title,
+                      raised: c.collected + c.transferredInAmount,
+                      spent: c.allocatedAmount,
+                      available: c.availableBalance,
+                    ),
+                ]),
+        ),
+        _ChartBlock(
+          title: 'Spending by category',
+          height: _pieHeight(byCategory),
+          child: _PieChart(data: byCategory, valueLabel: formatPeso),
+        ),
+        if (byAnimal.isNotEmpty)
+          _ChartBlock(
+            title: 'Spending by animal',
+            height: (byAnimal.length.clamp(1, 6) * 30 + 8).toDouble(),
+            child: _AmountList(data: byAnimal),
+          ),
+        _note('Spending is what was allocated from each campaign, including bills paid from it. '
+            'Money moved to another campaign counts there, not here.'),
+      ],
+    );
+  }
+}
+
+/// One row per campaign: title, then raised / spent / available.
+class _FundRows extends StatelessWidget {
+  final List<({String label, double raised, double spent, double available})> rows;
+  const _FundRows({required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      physics: rows.length > 6 ? const ClampingScrollPhysics() : const NeverScrollableScrollPhysics(),
+      itemCount: rows.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      itemBuilder: (context, i) {
+        final r = rows[i];
+        final spentShare = r.raised <= 0 ? 0.0 : (r.spent / r.raised).clamp(0.0, 1.0);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(r.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: dashBody(size: 12, weight: FontWeight.w700)),
+            const SizedBox(height: 3),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: spentShare,
+                minHeight: 8,
+                backgroundColor: AppColors.greenrspwn.withValues(alpha: 0.35),
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Raised ${formatPeso(r.raised)} · Spent ${formatPeso(r.spent)} · Available ${formatPeso(r.available)}',
+              style: dashMuted(11),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Name and peso amount per line, largest first.
+class _AmountList extends StatelessWidget {
+  final Map<String, double> data;
+  const _AmountList({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = data.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    return ListView.builder(
+      physics: entries.length > 6 ? const ClampingScrollPhysics() : const NeverScrollableScrollPhysics(),
+      itemCount: entries.length,
+      itemBuilder: (context, i) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(child: Text(entries[i].key, maxLines: 1, overflow: TextOverflow.ellipsis, style: dashBody(size: 12))),
+            Text(formatPeso(entries[i].value), style: dashBody(size: 12, weight: FontWeight.w800)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Volunteers ──────────────────────────────────────────────────────────
+
+/// One organization's events and their sign-ups (registrations are readable
+/// only by the event organization's staff), read once.
+typedef _VolunteerData = ({List<VolunteerEvent> events, Map<String, List<Map<String, dynamic>>> registrations});
+
+final _volunteerReportProvider = FutureProvider.autoDispose<_VolunteerData?>((ref) async {
+  final orgId = await ref.watch(currentOrganizationIdProvider.future);
+  if (orgId == null || orgId.isEmpty) return null;
+  final db = FirebaseFirestore.instance;
+  final events = (await db.collection('events').where('organizationId', isEqualTo: orgId).get())
+      .docs
+      .map(VolunteerEvent.fromFirestore)
+      .where((e) => !e.isCancelled)
+      .toList();
+  final regs = await Future.wait([
+    for (final e in events) db.collection('events').doc(e.id).collection('registrations').get(),
+  ]);
+  return (
+    events: events,
+    registrations: {
+      for (var i = 0; i < events.length; i++) events[i].id: [for (final d in regs[i].docs) {'uid': d.id, ...d.data()}],
+    },
+  );
+});
+
+class _VolunteerReport extends ConsumerStatefulWidget {
+  const _VolunteerReport();
+
+  @override
+  ConsumerState<_VolunteerReport> createState() => _VolunteerReportState();
+}
+
+class _VolunteerReportState extends ConsumerState<_VolunteerReport> {
+  String _monthFilter = 'Last 6 months';
+
+  @override
+  Widget build(BuildContext context) {
+    return DashAsync<_VolunteerData?>(
+      value: ref.watch(_volunteerReportProvider),
+      what: 'volunteer events',
+      builder: (data) => data == null
+          ? const RestrictedNotice('Volunteer reports are per organization. Link this account to one to see them.')
+          : _content(data),
+    );
+  }
+
+  Widget _content(_VolunteerData data) {
+    final held = data.events.where((e) => e.isPast).toList();
+    final upcoming = data.events.length - held.length;
+    var signUps = 0;
+    var marked = 0;
+    var attended = 0;
+    final attendedByUid = <String, int>{};
+    final nameOf = <String, String>{};
+    final byMonth = <String, num>{};
+    for (final e in data.events) {
+      final regs = data.registrations[e.id] ?? const [];
+      signUps += regs.length;
+      for (final r in regs) {
+        final uid = r['uid'] as String;
+        final name = (r['participantName'] as String?)?.trim() ?? '';
+        if (name.isNotEmpty) nameOf[uid] = name;
+        final came = r['attended'];
+        if (came is bool) marked++;
+        if (came == true) {
+          attended++;
+          attendedByUid[uid] = (attendedByUid[uid] ?? 0) + 1;
+          final key = _monthKey(e.startAt);
+          byMonth[key] = (byMonth[key] ?? 0) + 1;
+        }
+      }
+    }
+    final volunteers = {for (final regs in data.registrations.values) for (final r in regs) r['uid'] as String}.length;
+    final returning = attendedByUid.values.where((n) => n >= 2).length;
+
+    final n = switch (_monthFilter) {
+      'Last 3 months' => 3,
+      'Last 12 months' => 12,
+      _ => 6,
+    };
+    final now = DateTime.now();
+    final months = [for (int i = n - 1; i >= 0; i--) _monthKey(DateTime(now.year, now.month - i))];
+    final top = (attendedByUid.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).take(10);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        MetricGrid(
+          tiles: [
+            MetricTile(label: 'Events held', value: held.length, caption: upcoming == 0 ? null : '$upcoming upcoming'),
+            MetricTile(label: 'Sign-ups', value: signUps, caption: '$volunteers volunteer${volunteers == 1 ? '' : 's'}'),
+            MetricTile(
+              label: 'Attendance rate',
+              valueText: _pct(attended, marked),
+              caption: marked == 0 ? 'No attendance taken yet' : '$attended of $marked marked',
+            ),
+            MetricTile(
+              label: 'Returning volunteers',
+              value: returning,
+              caption: 'Came to 2+ of your events',
+            ),
+          ],
+        ),
+        _note('Attendance rate counts only sign-ups where staff marked who came. Cancelled events are left out.'),
+        _ChartBlock(
+          title: 'Volunteers who came, by month',
+          filterOptions: const ['Last 3 months', 'Last 6 months', 'Last 12 months'],
+          selectedFilter: _monthFilter,
+          onFilterChanged: (v) => setState(() => _monthFilter = v),
+          child: _BarChart(
+            data: {for (final m in months) _monthLabel(m): byMonth[m] ?? 0},
+            color: AppColors.greenrspwn,
+          ),
+        ),
+        _ChartBlock(
+          title: 'Most events attended',
+          height: (top.length.clamp(1, 5) * 24 + 8).toDouble(),
+          child: _HorizontalBars(
+            data: {for (final e in top) nameOf[e.key] ?? 'Volunteer': e.value},
+            empty: 'No attendance marked yet.',
           ),
         ),
       ],

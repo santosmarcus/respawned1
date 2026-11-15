@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/features/admin/donation/donation_admin_sheets.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
@@ -102,6 +103,14 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
       appBar: AdminAppBar(
         title: 'Donations & Sponsorships',
         menuActions: [
+          // A payment that isn't for a particular campaign goes to the
+          // organization's General fund.
+          if (ref.watch(canManageFinancesProvider).asData?.value ?? false)
+            AdminMenuAction(
+              label: 'Record donation',
+              icon: Icons.add_card_outlined,
+              onTap: () => showAdminSheet(context, const OfflineDonationSheet()),
+            ),
           if (ref.watch(canManageFinancesProvider).asData?.value ?? false)
             AdminMenuAction(
               label: 'General Expenses',

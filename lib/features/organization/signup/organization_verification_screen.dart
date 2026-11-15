@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
-import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
+import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// Step 2 of the Organization signup flow (spec §4) — reuses the same
@@ -121,18 +121,11 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     }
     setState(() => _submitting = true);
     try {
-      // Organization Admin Signup Completion spec §7-9 — no reviewer
-      // interface exists anywhere in this codebase to ever act on
-      // `verificationStatus: pending`, so leaving the admin on a waiting
-      // screen after this write is a dead end, not a real pending state.
-      // `submitVerification` still honestly records `verificationStatus:
-      // pending` (never `approved` — see organization_repository.dart's
-      // own doc comment) so a real manual review, if one is ever added or
-      // done directly via the Firestore console, can still act on this
-      // later; access to the admin interface is simply no longer gated on
-      // that ever happening. `pushAndRemoveUntil` clears the entire
-      // signup stack so Back can never return to this completed form and
-      // risk a second submission.
+      // Platform staff review the submission (OrganizationReviewPage), so
+      // the owner waits on the pending page, which follows the status live
+      // and moves on once approved. `pushAndRemoveUntil` clears the signup
+      // stack so Back can never return to this completed form and risk a
+      // second submission.
       await _repo.submitVerification(widget.organizationId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -140,7 +133,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
         );
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
+          MaterialPageRoute(builder: (_) => OrganizationVerificationPendingPage(organizationId: widget.organizationId)),
           (route) => false,
         );
       }

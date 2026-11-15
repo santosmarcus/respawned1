@@ -88,6 +88,25 @@ describe('storage', () => {
     await assertFails(upload('carerA', 'animalRecords/animalA/doseMedia/d2.mp4'));
   });
 
+  test("animal medical files are for the animal's staff and carers; profile photos stay readable", async () => {
+    const files = ['images/p.jpg', 'medicalDocs/m.pdf', 'careUpdates/c.jpg', 'doseMedia/d.mp4'];
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      for (const f of files) await ctx.storage().ref(`animalRecords/animalA/${f}`).put(bytes);
+    });
+    const read = (uid, f) => env.authenticatedContext(uid).storage().ref(`animalRecords/animalA/${f}`).getMetadata();
+    await assertSucceeds(read('stranger', 'images/p.jpg'));
+    for (const f of files.slice(1)) {
+      await assertFails(read('stranger', f));
+      await assertFails(read('staffB', f));
+      await assertSucceeds(read('staffA', f));
+      await assertSucceeds(read('carerA', f));
+      await assertSucceeds(read('admin', f));
+    }
+    // Another organization's staff can't add medical files either.
+    await assertFails(upload('staffB', 'animalRecords/animalA/medicalDocs/x.pdf'));
+    await assertSucceeds(upload('staffA', 'animalRecords/animalA/medicalDocs/x.pdf'));
+  });
+
   test('unlisted paths are denied', async () => {
     await assertFails(upload('admin', 'anything/else.jpg'));
   });

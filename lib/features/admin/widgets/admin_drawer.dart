@@ -11,6 +11,7 @@ import 'package:respawnd1/features/admin/audit/audit_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 import 'package:respawnd1/features/admin/events/admin_events_page.dart';
+import 'package:respawnd1/features/admin/organizations/organization_review_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
@@ -23,7 +24,7 @@ import 'package:respawnd1/core/widgets/app_messages.dart';
 /// `shelterResources` removed — it was a permanent no-op placeholder with
 /// no destination page at all; shelter-capacity now lives in Organization
 /// Profile. `audit` added for the new Audit module.
-enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit }
+enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit, organizationReview }
 
 /// Pops back to AdminHomeScreen (the app's first/root route) before pushing
 /// the requested module — every drawer module item uses this so switching
@@ -293,6 +294,14 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
               selected: widget.active == AdminModule.audit,
               onTap: () => _openModule(context, (_) => const AuditPage()),
             ),
+            // Platform staff only: organizations waiting for approval.
+            if (ref.watch(isPlatformStaffProvider).asData?.value ?? false)
+              _DrawerItem(
+                label: 'Organization approvals',
+                count: ref.watch(pendingOrganizationReviewCountProvider).asData?.value,
+                selected: widget.active == AdminModule.organizationReview,
+                onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
+              ),
             const Divider(color: Colors.white24),
             _DrawerItem(
               label: 'Organization Profile',
@@ -343,8 +352,10 @@ class _DrawerItem extends StatelessWidget {
   // slow lookup reads as "in progress" instead of "nothing happened",
   // and can't be re-triggered by an impatient repeated tap.
   final bool loading;
+  // Items waiting for action (organizations to review); hidden when 0.
+  final int? count;
 
-  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.loading = false});
+  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.loading = false, this.count});
 
   @override
   Widget build(BuildContext context) {
@@ -360,7 +371,19 @@ class _DrawerItem extends StatelessWidget {
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w500)),
         trailing: loading
             ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
-            : const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if ((count ?? 0) > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                      decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(10)),
+                      child: Text('$count',
+                          style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                    ),
+                  const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+                ],
+              ),
         dense: true,
       ),
     );

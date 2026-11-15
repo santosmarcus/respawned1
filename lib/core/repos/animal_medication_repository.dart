@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'package:respawnd1/core/utils/org_list_scope.dart';
 import 'package:respawnd1/core/models/rescue/medication.dart';
 import 'package:respawnd1/core/models/rescue/care_update.dart';
 import 'package:respawnd1/core/widgets/media_attachments.dart';
@@ -179,7 +180,9 @@ class AnimalMedicationRepository {
 
   /// Every active medication order, keyed by animal id.
   Stream<Map<String, List<MedicationPlan>>> watchActivePlansByAnimal() {
-    return _db.collectionGroup('medications').where('active', isEqualTo: true).snapshots().map((snap) {
+    // Own organization only (platform staff: all); see OrgListScope.
+    return OrgListScope.watch(_db.collectionGroup('medications').where('active', isEqualTo: true), empty: const {},
+        firestore: _db, (snap) {
       final out = <String, List<MedicationPlan>>{};
       for (final d in snap.docs) {
         final animalId = d.reference.parent.parent?.id;
@@ -193,10 +196,11 @@ class AnimalMedicationRepository {
   /// Doses recorded in the last [days] days, keyed by dose id.
   Stream<Map<String, MedicationDose>> watchRecentDosesEverywhere({int days = 7}) {
     final since = dayOnly(DateTime.now()).subtract(Duration(days: days));
-    return _db
-        .collectionGroup('medicationDoses')
-        .where('day', isGreaterThanOrEqualTo: Timestamp.fromDate(since))
-        .snapshots()
-        .map((snap) => {for (final d in snap.docs) d.id: MedicationDose.fromDoc(d.id, d.data())});
+    return OrgListScope.watch(
+      _db.collectionGroup('medicationDoses').where('day', isGreaterThanOrEqualTo: Timestamp.fromDate(since)),
+      empty: const <String, MedicationDose>{},
+      firestore: _db,
+      (snap) => {for (final d in snap.docs) d.id: MedicationDose.fromDoc(d.id, d.data())},
+    );
   }
 }

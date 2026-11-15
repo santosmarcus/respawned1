@@ -41,3 +41,79 @@ exports.stampAnimalLogOrganization = onDocumentCreated(
     'animals/{animalId}/managementLogs/{logId}',
     (event) => stamp(event, 'animals', event.params.animalId),
 );
+
+// ---- Organization stamp on records read across animals and cases --------
+//
+// The dashboard reads vaccinations, care records, medication orders, doses
+// and case expenses with collection-group queries. firestore.rules lets
+// staff read only their own organization's, through a query that filters on
+// organizationId, so each record carries its parent's. Unlike logs (which
+// keep the organization they were written under), these follow the parent:
+// when an animal or case moves to another organization, its records move
+// with it. A client-written organizationId is always corrected.
+//
+// Existing records: scripts/backfill_log_organization_ids.js.
+
+const {onDocumentWritten, onDocumentUpdated} = require('firebase-functions/v2/firestore');
+
+const FOLLOWING_RECORDS = {
+  animals: ['vaccinations', 'careRecords', 'medications', 'medicationDoses'],
+  cases: ['expenses'],
+};
+
+async function stampRecord(event, parentCollection, parentId) {
+  const after = event.data && event.data.after;
+  if (!after || !after.exists) return;
+  const parent = await db.collection(parentCollection).doc(parentId).get();
+  const organizationId = orgOf(parent);
+  if ((after.get('organizationId') || null) === organizationId) return;
+  await after.ref.update({organizationId});
+}
+
+async function restampChildren(event, parentCollection) {
+  const before = orgOf(event.data.before);
+  const after = orgOf(event.data.after);
+  if (before === after) return;
+  const parentRef = event.data.after.ref;
+  for (const sub of FOLLOWING_RECORDS[parentCollection]) {
+    const docs = (await parentRef.collection(sub).get()).docs;
+    for (let i = 0; i < docs.length; i += 400) {
+      const batch = db.batch();
+      for (const d of docs.slice(i, i + 400)) batch.update(d.ref, {organizationId: after});
+      await batch.commit();
+    }
+  }
+}
+
+const capitalize = (s) => s[0].toUpperCase() + s.slice(1);
+
+for (const [parentCollection, subs] of Object.entries(FOLLOWING_RECORDS)) {
+  const parentParam = parentCollection === 'animals' ? 'animalId' : 'caseId';
+  for (const sub of subs) {
+    // e.g. stampAnimalsVaccinationsOrganization
+    exports[`stamp${capitalize(parentCollection)}${capitalize(sub)}Organization`] = onDocumentWritten(
+        `${parentCollection}/{${parentParam}}/${sub}/{docId}`,
+        (event) => stampRecord(event, parentCollection, event.params[parentParam]),
+    );
+  }
+  exports[`restamp${capitalize(parentCollection)}RecordsOrganization`] = onDocumentUpdated(
+      `${parentCollection}/{${parentParam}}`,
+      (event) => restampChildren(event, parentCollection),
+  );
+}
+
+
+// Donations carry their campaign's organizationId so firestore.rules can
+// limit donor records to that organization's staff. Manual donations
+// (recordOfflineDonation) already write it; PayMongo payments and in-kind
+// pledges get it here. Existing records: scripts/backfill_log_organization_ids.js.
+exports.stampDonationOrganization = onDocumentWritten('donations/{donationId}', async (event) => {
+  const after = event.data && event.data.after;
+  if (!after || !after.exists) return;
+  const campaignId = after.get('campaignId');
+  if (typeof campaignId !== 'string' || !campaignId) return;
+  const campaign = await db.collection('campaigns').doc(campaignId).get();
+  const organizationId = orgOf(campaign);
+  if ((after.get('organizationId') || null) === organizationId) return;
+  await after.ref.update({organizationId});
+});

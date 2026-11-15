@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geocoding/geocoding.dart';
@@ -152,6 +153,77 @@ Future<List<ServiceArea>> withCoverageGeofences(List<ServiceArea> areas) async {
   return result;
 }
 
+/// One organization in platform staff's verification review queue.
+class OrganizationReviewItem {
+  const OrganizationReviewItem({
+    required this.id,
+    required this.name,
+    required this.status,
+    this.phone = '',
+    this.email = '',
+    this.location = '',
+    this.submittedAt,
+    this.reviewedAt,
+    this.reviewedByName,
+    this.note,
+    this.documents = const [],
+  });
+
+  final String id;
+  final String name;
+  final OrgVerificationStatus status;
+  final String phone;
+  final String email;
+  final String location;
+  final DateTime? submittedAt;
+  final DateTime? reviewedAt;
+  final String? reviewedByName;
+
+  /// The reason given with a rejection or a request for changes.
+  final String? note;
+
+  /// Uploaded verification photos, labelled by group.
+  final List<({String label, String url})> documents;
+
+  static const _documentGroups = {
+    'registration': 'Registration',
+    'permits': 'Permit',
+    'shelterPhotos': 'Shelter photo',
+  };
+
+  factory OrganizationReviewItem.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data() ?? const <String, dynamic>{};
+    String str(String key) => (d[key] as String?)?.trim() ?? '';
+    DateTime? date(String key) => d[key] is Timestamp ? (d[key] as Timestamp).toDate() : null;
+    final verification = d['verification'] is Map ? d['verification'] as Map : const {};
+    final docs = <({String label, String url})>[];
+    for (final MapEntry(key: group, value: label) in _documentGroups.entries) {
+      final urls = verification[group];
+      if (urls is! List) continue;
+      var i = 0;
+      for (final url in urls.whereType<String>()) {
+        i++;
+        docs.add((label: urls.length > 1 ? '$label $i' : label, url: url));
+      }
+    }
+    final note = str('verificationRejectionReason');
+    final reviewer = str('verificationReviewedByName');
+    return OrganizationReviewItem(
+      id: doc.id,
+      name: str('name'),
+      status: OrgVerificationStatus.fromName(d['verificationStatus'] as String?),
+      phone: str('phone').isNotEmpty ? str('phone') : str('contactNumber'),
+      email: str('email'),
+      location: str('location').isNotEmpty ? str('location') : str('shelterAddress'),
+      submittedAt: date('verificationSubmittedAt'),
+      reviewedAt: date('verificationReviewedAt'),
+      reviewedByName: reviewer.isEmpty ? null : reviewer,
+      note: note.isEmpty ? null : note,
+      documents: docs,
+    );
+  }
+}
+
 class OrganizationRepository {
   OrganizationRepository({FirebaseFirestore? firestore}) : _db = firestore ?? FirebaseFirestore.instance;
 
@@ -289,6 +361,33 @@ class OrganizationRepository {
       'verification': {group: FieldValue.arrayRemove([url])},
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  /// Organizations in one verification state, oldest submission first so
+  /// the longest-waiting is reviewed first. Platform staff's review queue.
+  Stream<List<OrganizationReviewItem>> streamForReview(OrgVerificationStatus status) {
+    return _organizations.where('verificationStatus', isEqualTo: status.name).snapshots().map((snap) {
+      final items = snap.docs.map(OrganizationReviewItem.fromFirestore).toList();
+      final far = DateTime.fromMillisecondsSinceEpoch(0);
+      items.sort((a, b) => (a.submittedAt ?? far).compareTo(b.submittedAt ?? far));
+      return items;
+    });
+  }
+
+  /// Approve, reject or ask for changes on a pending organization. Runs in
+  /// the reviewOrganization callable (functions/index.js): firestore.rules
+  /// lets no client set the decision, and the callable logs it and
+  /// notifies the owner. [note] is required unless approving.
+  Future<void> review({
+    required String organizationId,
+    required OrgVerificationStatus decision,
+    String? note,
+  }) async {
+    await FirebaseFunctions.instance.httpsCallable('reviewOrganization').call(<String, dynamic>{
+      'organizationId': organizationId,
+      'decision': decision.name,
+      'note': ?note,
+    });
   }
 
   Future<void> submitVerification(String organizationId) async {

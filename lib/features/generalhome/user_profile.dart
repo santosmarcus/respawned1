@@ -14,6 +14,7 @@ import 'package:respawnd1/features/generalhome/profile/profile_edit_page.dart';
 import 'package:respawnd1/features/generalhome/profile/location_sharing_page.dart';
 import 'package:respawnd1/features/generalhome/profile/communications_setting_page.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/widgets/volunteer_badges.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -167,6 +168,13 @@ class _UserProfileState extends State<UserProfile> {
               ),
             ),
             const SizedBox(height: 28),
+
+            // Volunteer badges, once the account has attended an event.
+            if (FirebaseAuth.instance.currentUser?.uid case final uid?)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(25, 0, 25, 16),
+                child: VolunteerBadgesCard(uid: uid),
+              ),
 
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 25),

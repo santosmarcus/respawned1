@@ -184,18 +184,31 @@ service cloud.firestore {
     // members subcollection.
     //
     // Verification: a new organization starts as 'draft' and its staff may
-    // only submit it ('pending'). Approval/rejection happens in the console
-    // (or by platform staff); an approved organization's staff get the admin
-    // shell, so this must never be self-service. Only platform staff may
-    // create an organization with no verificationStatus (the bootstrap path
-    // in OrganizationRepository.createBootstrapOrganization).
+    // only submit it ('pending'), or resubmit after a rejection or a request
+    // for changes. Approving, rejecting and asking for changes go through the
+    // reviewOrganization callable (functions/index.js) only, so no client —
+    // platform staff included — may set the decision or reviewer fields. An
+    // approved organization's staff get the admin shell, so this must never
+    // be self-service. Only platform staff may create an organization with
+    // no verificationStatus (the bootstrap path in
+    // OrganizationRepository.createBootstrapOrganization).
     match /organizations/{orgId} {
+      function reviewFields() {
+        return ['verificationRejectionReason', 'verificationReviewedBy',
+          'verificationReviewedByName', 'verificationReviewedAt'];
+      }
+
       function verificationOk() {
-        return !changedAny(['verificationStatus', 'bootstrapped']) || (
-          !changedAny(['bootstrapped']) &&
-          request.resource.data.get('verificationStatus', '') == 'pending' &&
-          resource.data.get('verificationStatus', '') in ['draft', 'rejected']
-        );
+        return !changedAny(reviewFields()) && (
+          !changedAny(['verificationStatus', 'bootstrapped']) || (
+            !changedAny(['bootstrapped']) &&
+            request.resource.data.get('verificationStatus', '') == 'pending' &&
+            resource.data.get('verificationStatus', '') in ['draft', 'rejected', 'requiresChanges']
+          ));
+      }
+
+      function platformStaffUpdateOk() {
+        return isPlatformStaff() && !changedAny(reviewFields().concat(['verificationStatus']));
       }
 
       allow read: if signedIn();
@@ -206,7 +219,7 @@ service cloud.firestore {
           !('bootstrapped' in request.resource.data)
         ));
       allow update: if request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '') &&
-        (isPlatformStaff() || (isStaffOf(orgId) && verificationOk()));
+        (platformStaffUpdateOk() || (isStaffOf(orgId) && verificationOk()));
       allow delete: if false;
     }
 
@@ -375,8 +388,11 @@ service cloud.firestore {
 
         allow read: if isSelf(uid) || managesEventOrg(eventBefore().organizationId);
 
+        // Attendance is staff-only, so a new sign-up can't arrive already
+        // marked (volunteer badges count it).
         allow create: if isSelf(uid) &&
           request.resource.data.uid == uid &&
+          !request.resource.data.keys().hasAny(['attended', 'attendanceMarkedAt', 'attendanceMarkedBy']) &&
           eventBefore().get('status', '') == 'published' &&
           getAfter(/databases/$(database)/documents/events/$(eventId)).data.goingCount ==
             eventBefore().get('goingCount', 0) + 1;
@@ -469,13 +485,17 @@ service cloud.firestore {
     }
 
     match /donations/{donationId} {
-      // Donor records (names, notes, addresses, receipts): the donor and
-      // organization staff (not carers). Public donor counts come from
-      // campaigns/{id}.numdonors. Direct field access so the donor's own
-      // queries (where userId == uid) can be proven.
+      // Donor records (names, notes, addresses, receipts): the donor, and
+      // staff (not carers) of the organization that runs the campaign —
+      // organizationId is copied from the campaign by
+      // stampDonationOrganization (functions/audit_logs.js). Public donor
+      // counts come from campaigns/{id}.numdonors. Direct field access so
+      // the donor's own queries (where userId == uid) and staff queries
+      // (where organizationId == theirs) can be proven.
       allow read: if signedIn() && (
         resource.data.userId == request.auth.uid ||
-        isOrgStaff()
+        isPlatformStaff() ||
+        isApprovedStaffOf(resource.data.organizationId)
       );
       // Monetary records are only ever created by the backend.
       allow create: if signedIn() && inKindCreate(request.auth.uid);
@@ -533,8 +553,11 @@ service cloud.firestore {
         );
       }
 
+      // volunteerStats (attendance counts and badges) is written only by the
+      // syncVolunteerStats function (functions/volunteer_stats.js).
       function selfFieldsOk(data) {
         return data.get('role', '') in selfRoles() &&
+          !('volunteerStats' in data) &&
           data.get('isVerified', false) == false &&
           data.get('transporterVerificationStatus', 'pending') == 'pending' &&
           (!('organizationId' in data) || data.organizationId == null || canLinkSelfTo(data.organizationId));
@@ -543,6 +566,7 @@ service cloud.firestore {
       function selfUpdateOk() {
         let data = request.resource.data;
         return (!changedAny(['role']) || data.get('role', '') in selfRoles()) &&
+          !changedAny(['volunteerStats']) &&
           (!changedAny(['isVerified']) || data.get('isVerified', false) == false) &&
           (!changedAny(['transporterVerificationStatus']) || data.get('transporterVerificationStatus', '') == 'pending') &&
           (!changedAny(['organizationId']) ||
@@ -583,8 +607,43 @@ service cloud.firestore {
         staffTransporterReview();
       allow delete: if false;
 
+      // Subcollections belong to their user (favorites, saved clinics,
+      // dismissed notifications, push tokens, geofence hits, ...), except
+      // the ones with their own block below.
       match /{sub}/{doc=**} {
-        allow read, write: if signedIn() && !(sub in ['history', 'donated', 'cards', 'certificates']);
+        allow read, write: if isSelf(uid) && !(sub in [
+          'history', 'donated', 'cards', 'certificates', 'notifications',
+          'volunteerRegistrations', 'collarTags'
+        ]);
+      }
+      // In-app notices from the backend (reviewOrganization, donations):
+      // the user reads them, marks them read and deletes them.
+      match /notifications/{noticeId} {
+        allow read, delete: if isSelf(uid);
+        allow update: if isSelf(uid) && changedOnly(['isRead']);
+        allow create: if false;
+      }
+      // The volunteer's copy of each event sign-up (History reads it). The
+      // event organization's staff mark attendance on it
+      // (VolunteerEventRepository.setAttendance). Badges never trust this
+      // copy: syncVolunteerStats counts the staff-written registration.
+      match /volunteerRegistrations/{eventId} {
+        function managesThisEvent() {
+          let orgId = get(/databases/$(database)/documents/events/$(eventId)).data.get('organizationId', '');
+          return orgId != '' && (isActiveMember(orgId) || isOrgOwner(orgId));
+        }
+        function attendanceFields() {
+          return ['attended', 'attendanceMarkedAt', 'attendanceMarkedBy'];
+        }
+        allow read, delete: if isSelf(uid);
+        allow create: if isSelf(uid) ||
+          (managesThisEvent() && request.resource.data.keys().hasOnly(attendanceFields()));
+        allow update: if isSelf(uid) || (managesThisEvent() && changedOnly(attendanceFields()));
+      }
+      // The owner's copy of each collar tag; staff toggle QR codes on it
+      // (admin_qr.dart).
+      match /collarTags/{tagId} {
+        allow read, write: if isSelf(uid) || isOrgStaff();
       }
       match /history/{itemId} {
         allow read: if isSelf(uid);
@@ -851,10 +910,6 @@ service cloud.firestore {
       return canStaffAnimal(data) || isCarerOf(data.get('organizationId', ''));
     }
 
-    function medicalSubs() {
-      return ['medications', 'medicationDoses', 'vaccinations', 'careRecords', 'careUpdates', 'medicalEpisodes'];
-    }
-
     // Adoption readiness gate: an animal only becomes adoptable with the
     // confirmed checklist (adoptionReadiness, written by the readiness
     // dialog). Re-saving an already adoptable animal, or releasing a
@@ -929,9 +984,11 @@ service cloud.firestore {
         allow delete: if canStaffAnimal(get(animalPath(animalId)).data);
       }
 
+      // Every subcollection (medical records and the managementLogs audit
+      // trail) is for the owning organization's staff, its carers and
+      // platform staff. The public reads publicAnimals.
       match /{sub}/{docId=**} {
-        allow read: if (!(sub in medicalSubs()) && signedIn()) ||
-          (sub in medicalSubs() && canReadAnimalMedical(animalId));
+        allow read: if canReadAnimalMedical(animalId);
         allow write: if sub != 'careUpdates' && canStaffAnimal(get(animalPath(animalId)).data);
       }
     }
@@ -1075,26 +1132,39 @@ service cloud.firestore {
       allow read: if isOrgStaff() || resource.data.get('riderId', '') == request.auth.uid;
     }
 
+    // Vaccinations, care records, medication orders and doses (animals) and
+    // case expenses carry their parent's organizationId (the
+    // stamp*Organization functions in functions/audit_logs.js). These
+    // collection-group matches also apply to direct reads, so they must be
+    // as narrow as the per-parent rules: the owning organization's staff
+    // (and, for animal records, its carers) and platform staff. Dashboard
+    // queries filter on organizationId so the rule can be proven.
+    function canReadOrgRecord(withCarers) {
+      let orgId = resource.data.get('organizationId', '');
+      return isPlatformStaff() ||
+        (orgId != '' && (isApprovedStaffOf(orgId) || (withCarers && isCarerOf(orgId))));
+    }
+
+    // Dashboard: vaccine status, overdue deworming, flea & tick and vet
+    // checkups, missed medication doses.
     match /{path=**}/vaccinations/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgRecord(true);
     }
 
-    // Dashboard: overdue deworming, flea & tick and vet checkups.
     match /{path=**}/careRecords/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgRecord(true);
     }
 
-    // Dashboard: missed medication doses across every animal in care.
     match /{path=**}/medications/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgRecord(true);
     }
 
     match /{path=**}/medicationDoses/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgRecord(true);
     }
 
     match /{path=**}/expenses/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgRecord(false);
     }
 
     // Audit page, Records and Rescue tabs. stampAnimalLogOrganization /
@@ -1113,6 +1183,12 @@ service cloud.firestore {
 
     match /{path=**}/activityLogs/{docId} {
       allow read: if canReadOrgLog();
+    }
+
+    // Analytics: spending by category across an organization's campaigns.
+    // Allocations are public like the campaign pages that list them.
+    match /{path=**}/allocations/{allocationId} {
+      allow read: if signedIn();
     }
 
     match /{path=**}/followUps/{docId} {

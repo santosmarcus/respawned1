@@ -1,5 +1,6 @@
 // One-off backfill: stamps organizationId on case `activityLogs` and animal
-// `managementLogs` written before the stampCaseLogOrganization /
+// `managementLogs`, and on animal vaccinations / careRecords / medications /
+// medicationDoses and case expenses, written before the stampCaseLogOrganization /
 // stampAnimalLogOrganization functions (functions/audit_logs.js) existed.
 // The admin Audit page's Rescue and Records tabs filter on it, so older logs
 // stay hidden from organization staff until this runs.
@@ -52,10 +53,40 @@ async function collect(parentCollection, logCollection) {
   return updates;
 }
 
+// Donations take their campaign's organizationId.
+async function collectDonations() {
+  const campaigns = await db.collection('campaigns').get();
+  const orgByCampaign = new Map(campaigns.docs.map((d) => [d.id, nonEmpty(d.data().organizationId)]));
+  const donations = await db.collection('donations').get();
+  const updates = [];
+  let skipped = 0;
+  for (const d of donations.docs) {
+    const orgId = orgByCampaign.get(d.data().campaignId) || null;
+    if (!orgId) {
+      skipped++;
+      continue;
+    }
+    if (d.data().organizationId === orgId) continue;
+    updates.push({ref: d.ref, organizationId: orgId});
+  }
+  console.log(`donations: ${donations.size} scanned, ${updates.length} to stamp, ${skipped} with no campaign organization.`);
+  return updates;
+}
+
 async function main() {
   const updates = [
     ...(await collect('cases', 'activityLogs')),
     ...(await collect('animals', 'managementLogs')),
+    // Records the dashboard reads across animals and cases (stamped by the
+    // stamp*Organization triggers in audit_logs.js from now on).
+    ...(await collect('animals', 'vaccinations')),
+    ...(await collect('animals', 'careRecords')),
+    ...(await collect('animals', 'medications')),
+    ...(await collect('animals', 'medicationDoses')),
+    ...(await collect('cases', 'expenses')),
+    ...(await collectDonations()),
+    // Campaign allocations (analytics spending by category).
+    ...(await collect('campaigns', 'allocations')),
   ];
   if (!APPLY) {
     console.log(`\nDry run: ${updates.length} logs would be updated. Re-run with --apply to write.`);

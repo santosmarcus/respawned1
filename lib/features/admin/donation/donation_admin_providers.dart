@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:respawnd1/core/utils/org_list_scope.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/repos/general_expense_repository.dart';
@@ -61,32 +62,64 @@ final campaignsNeedingDecisionProvider = StreamProvider.autoDispose<List<Donatio
       .map((s) => s.docs.map(DonationListing.fromFirestore).toList());
 });
 
+// Donor records are readable by the campaign organization's staff only
+// (firestore.rules), so staff queries filter on it; see OrgListScope.
 final recentDonationsProvider = StreamProvider.autoDispose<List<DonationHistoryRecord>>((ref) {
-  return _db
-      .collection('donations')
-      .orderBy('createdAt', descending: true)
-      .limit(10)
-      .snapshots()
-      .map((s) => s.docs.map(DonationHistoryRecord.fromFirestore).toList());
+  return OrgListScope.watch(
+    _db.collection('donations').orderBy('createdAt', descending: true).limit(10),
+    empty: const <DonationHistoryRecord>[],
+    (s) => s.docs.map(DonationHistoryRecord.fromFirestore).toList(),
+  );
 });
 
 /// All donation records (monetary, sponsorship, in-kind), newest first.
 final allDonationsProvider = StreamProvider.autoDispose<List<DonationHistoryRecord>>((ref) {
-  return _db
-      .collection('donations')
-      .orderBy('createdAt', descending: true)
-      .limit(500)
-      .snapshots()
-      .map((s) => s.docs.map(DonationHistoryRecord.fromFirestore).toList());
+  return OrgListScope.watch(
+    _db.collection('donations').orderBy('createdAt', descending: true).limit(500),
+    empty: const <DonationHistoryRecord>[],
+    (s) => s.docs.map(DonationHistoryRecord.fromFirestore).toList(),
+  );
 });
 
 final campaignDonationsProvider = StreamProvider.autoDispose.family<List<DonationHistoryRecord>, String>((ref, id) {
-  return _db.collection('donations').where('campaignId', isEqualTo: id).snapshots().map((s) {
+  return OrgListScope.watch(_db.collection('donations').where('campaignId', isEqualTo: id),
+      empty: const <DonationHistoryRecord>[], (s) {
     final list = s.docs.map(DonationHistoryRecord.fromFirestore).toList();
     final epoch = DateTime.fromMillisecondsSinceEpoch(0);
     list.sort((a, b) => (b.when ?? epoch).compareTo(a.when ?? epoch));
     return list;
   });
+});
+
+/// The signed-in staff member's organization's listings (platform staff:
+/// every organization's), for the analytics funds breakdown.
+final orgCampaignsProvider = StreamProvider.autoDispose<List<DonationListing>>((ref) {
+  return OrgListScope.watch(_db.collection('campaigns'), empty: const <DonationListing>[], (snap) {
+    final list = <DonationListing>[];
+    for (final doc in snap.docs) {
+      try {
+        list.add(DonationListing.fromFirestore(doc));
+      } catch (_) {
+        // A malformed legacy doc must not hide every other listing.
+      }
+    }
+    return list;
+  });
+});
+
+/// Spending recorded against the organization's campaigns, across all of
+/// them (allocations carry the campaign's organizationId). Voided entries
+/// are left out. Each entry is paired with its campaign id.
+final orgAllocationsProvider = StreamProvider.autoDispose<List<({String campaignId, AllocationEntry entry})>>((ref) {
+  return OrgListScope.watch(
+    _db.collectionGroup('allocations'),
+    empty: const <({String campaignId, AllocationEntry entry})>[],
+    (snap) => [
+      for (final d in snap.docs)
+        if (d.data()['status'] != 'voided' && d.reference.parent.parent?.parent.id == 'campaigns')
+          (campaignId: d.reference.parent.parent!.id, entry: AllocationEntry.fromFirestore(d)),
+    ],
+  );
 });
 
 final campaignAllocationsProvider = StreamProvider.autoDispose.family<List<AllocationEntry>, String>((ref, id) {

@@ -235,6 +235,7 @@ class AuthService {
     NotificationService.markSignedOut();
     await GeofenceService.stop();
     await PushTokenService.unregister();
+
     await firebaseAuth.signOut();
   }
 

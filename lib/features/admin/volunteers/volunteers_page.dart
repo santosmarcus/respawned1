@@ -12,6 +12,8 @@ import 'package:respawnd1/features/admin/volunteers/volunteer_applications_page.
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
+import 'package:respawnd1/core/models/volunteer/volunteer_stats.dart';
+import 'package:respawnd1/core/widgets/volunteer_badges.dart';
 
 /// Sort options for the Volunteers directory. Default is [availability]
 /// (available/online volunteers first) — per explicit product direction,
@@ -272,6 +274,10 @@ class _VolunteerCard extends StatelessWidget {
                     _pill(volunteer.isOnline ? 'Online' : 'Offline',
                         volunteer.isOnline ? AppColors.greenrspwn : AppColors.slaterspwn),
                     if (showVerification) transporterVerificationPill(volunteer),
+                    if ((volunteer.volunteerStats?.attendedCount ?? 0) > 0)
+                      _pill('${volunteer.volunteerStats!.attendedCount} attended', AppColors.textSecondary),
+                    for (final b in volunteer.volunteerStats?.badges ?? const <VolunteerBadge>[])
+                      VolunteerBadgeChip(badge: b, compact: true),
                   ],
                 ),
               ],

@@ -1152,3 +1152,116 @@ Object.assign(exports, require('./adoptions'));
 Object.assign(exports, require('./audit_logs'));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
+
+// ---- Organization verification review ------------------------------------
+//
+// Platform staff (users/{uid}.role 'admin' or 'ngo_staff') approve, reject or
+// ask for changes on an organization that submitted its documents
+// (verificationStatus 'pending'). firestore.rules blocks every client from
+// setting these fields, so each decision goes through here, is logged to
+// auditLogs, and reaches the owner as a push and an in-app notification.
+const ORG_REVIEW_DECISIONS = {
+  approved: {
+    title: 'Organization approved',
+    body: (name) => `${name} is approved. You can now use the admin tools.`,
+  },
+  rejected: {
+    title: 'Organization not approved',
+    body: (name) => `${name} was not approved. Open the app to see why.`,
+  },
+  requiresChanges: {
+    title: 'Changes needed',
+    body: (name) => `${name} needs changes to its documents before it can be approved.`,
+  },
+};
+
+exports.reviewOrganization = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const reviewer = await db.collection('users').doc(uid).get();
+  const reviewerData = reviewer.exists ? reviewer.data() : {};
+  if (!['admin', 'ngo_staff'].includes(reviewerData.role)) {
+    throw new HttpsError('permission-denied', 'Only platform staff can review organizations.');
+  }
+
+  const d = request.data || {};
+  const organizationId = typeof d.organizationId === 'string' ? d.organizationId.trim() : '';
+  if (!organizationId || organizationId.includes('/')) {
+    throw new HttpsError('invalid-argument', 'organizationId is required.');
+  }
+  const decision = d.decision;
+  if (!Object.prototype.hasOwnProperty.call(ORG_REVIEW_DECISIONS, decision)) {
+    throw new HttpsError('invalid-argument', 'Choose approve, reject or ask for changes.');
+  }
+  const note = typeof d.note === 'string' ? d.note.trim() : '';
+  if (decision !== 'approved' && !note) {
+    throw new HttpsError('invalid-argument', 'Say what is wrong or what needs to change.');
+  }
+  if (note.length > 1000) throw new HttpsError('invalid-argument', 'Keep the note under 1,000 characters.');
+
+  const reviewerName = reviewerData.name || reviewerData.fullName || reviewerData.email || 'Platform staff';
+  const orgRef = db.collection('organizations').doc(organizationId);
+  const org = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(orgRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'Organization not found.');
+    const data = snap.data();
+    if (data.verificationStatus !== 'pending') {
+      throw new HttpsError('failed-precondition', 'This organization is not waiting for review.');
+    }
+    tx.update(orgRef, {
+      verificationStatus: decision,
+      verificationRejectionReason: decision === 'approved' ? admin.firestore.FieldValue.delete() : note,
+      verificationReviewedBy: uid,
+      verificationReviewedByName: reviewerName,
+      verificationReviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return data;
+  });
+
+  const name = org.name || 'Your organization';
+  try {
+    await db.collection('auditLogs').add({
+      category: 'organizationVerification',
+      action: `organization_${decision}`,
+      actorId: uid,
+      actorName: reviewerName,
+      organizationId,
+      targetType: 'Organization',
+      targetId: organizationId,
+      previousValues: {verificationStatus: 'pending'},
+      newValues: {verificationStatus: decision, note: note || null},
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.error('[reviewOrganization] audit log write failed', e);
+  }
+
+  const ownerId = org.ownerId;
+  if (ownerId) {
+    const copy = ORG_REVIEW_DECISIONS[decision];
+    const body = copy.body(name);
+    try {
+      await db.collection('users').doc(ownerId).collection('notifications').add({
+        title: copy.title,
+        message: note ? `${body}\n\n${note}` : body,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: false,
+        type: 'organization_review',
+        organizationId,
+      });
+    } catch (e) {
+      console.error('[reviewOrganization] notification write failed', e);
+    }
+    await safeNotifyUser({
+      uid: ownerId,
+      title: copy.title,
+      body,
+      data: {type: 'organization_review', organizationId, decision},
+    });
+  }
+  return {ok: true};
+});
+
+// Volunteer attendance counts and badges on users/{uid}.volunteerStats — see functions/volunteer_stats.js.
+exports.syncVolunteerStats = require('./volunteer_stats').syncVolunteerStats;
