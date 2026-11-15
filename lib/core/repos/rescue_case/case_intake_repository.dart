@@ -59,7 +59,7 @@ class CaseIntakeRepository {
     final batch = _store.db.batch();
     batch.set(ref, {
       'status': RescueStatus.awaitingAssignment.firestoreValue,
-      'organizationId': ?organizationId,
+      'organizationId': organizationId ?? '',
       'sourceType': 'animalRecordAdmission',
       'sourceAnimalRecordId': sourceAnimalRecordId,
       'admissionReason': admissionReason,
@@ -129,7 +129,7 @@ class CaseIntakeRepository {
     final batch = _store.db.batch();
     batch.set(ref, {
       'status': RescueStatus.intake.firestoreValue,
-      'organizationId': ?organizationId,
+      'organizationId': organizationId ?? '',
       'sourceType': 'adoptionReturn',
       'sourceAnimalRecordId': sourceAnimalRecordId,
       'returnRequestId': returnRequestId,

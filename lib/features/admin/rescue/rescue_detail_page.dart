@@ -1844,8 +1844,10 @@ class _AnimalGroupSection extends StatelessWidget {
     }
 
     return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      // The public copy carries the animal details and can be queried by
+      // groupId whoever owns the sibling reports.
       future: FirebaseFirestore.instance
-          .collection('cases')
+          .collection('publicCases')
           .where('groupId', isEqualTo: groupId)
           .get(),
       builder: (context, snapshot) {

@@ -115,6 +115,123 @@ describe('organizations', () => {
   });
 });
 
+describe('who reads full rescue reports', () => {
+  test('the people working a case read it; others read the public copy', async () => {
+    // Reporter, staff, the assigned rider and the offered rider.
+    await assertSucceeds(as('reporter').doc('cases/pending1').get());
+    await assertSucceeds(as('staffA').doc('cases/pending1').get());
+    await assertSucceeds(as('admin').doc('cases/ownedA').get());
+    await assertSucceeds(as('rider').doc('cases/assigned').get());
+    await assertSucceeds(as('rider').doc('cases/offered').get());
+    await assertSucceeds(as('rider').doc('cases/verifying1').get());
+    // Everyone else.
+    await assertFails(as('stranger').doc('cases/pending1').get());
+    await assertFails(as('rider2').doc('cases/assigned').get());
+    await assertFails(as('carerA').doc('cases/ownedA').get());
+    await assertFails(as('stranger').collection('cases').get());
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('publicCases/pending1').set({ status: 'pending', lat: 14.5 }));
+    await assertSucceeds(as('stranger').doc('publicCases/pending1').get());
+    await assertSucceeds(as('stranger').collection('publicCases').get());
+    await assertFails(as('staffA').doc('publicCases/pending1').set({ status: 'closed' }));
+  });
+
+  test('their own lists can be queried', async () => {
+    await assertSucceeds(as('reporter').collection('cases').where('reporterId', '==', 'reporter').get());
+    await assertSucceeds(as('rider').collection('cases').where('assignedVolunteerId', '==', 'rider').get());
+    await assertSucceeds(as('rider').collection('cases').where('verification.riderId', '==', 'rider').get());
+    // Staff: the unowned pool, their own organization's, and referrals.
+    await assertSucceeds(as('staffB').collection('cases').where('organizationId', '==', '').where('status', 'in', ['pending', 'verifying']).get());
+    await assertSucceeds(as('staffA').collection('cases').where('organizationId', '==', 'orgA').where('status', 'in', ['accepted', 'assigned']).get());
+    await assertSucceeds(as('staffB').collection('cases').where('status', '==', 'referred').get());
+    await assertFails(as('staffB').collection('cases').where('status', 'in', ['pending', 'referred']).get());
+    await assertFails(as('staffB').collection('cases').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('reporter').collection('cases').where('status', '==', 'pending').get());
+  });
+
+  test('verified transporters and approved volunteers see the job board', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('users/rider2').update({ isVerified: true, transporterVerificationStatus: 'approved' });
+      await db.doc('users/vol').set({ role: 'rescue_volunteer' });
+      await db.doc('volunteerApplications/vol').set({ uid: 'vol', status: 'approved' });
+      await db.doc('users/vol2').set({ role: 'rescue_volunteer' });
+      await db.doc('volunteerApplications/vol2').set({ uid: 'vol2', status: 'pending' });
+    });
+    await assertSucceeds(as('rider2').collection('cases').where('status', '==', 'pending').get());
+    await assertSucceeds(as('vol').doc('cases/pending1').get());
+    await assertFails(as('vol2').doc('cases/pending1').get());
+  });
+
+  test('a report open to Community Adoption is public, and only those can be claimed', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/adoptable').set({
+      reporterId: 'reporter', status: 'rejected', rejectionReason: 'healthyAnimalLowUrgency', rescueType: 'Stray',
+    }));
+    await assertSucceeds(as('stranger').doc('cases/adoptable').get());
+    const claim = { communityAdoptionIds: FieldValue.arrayUnion('c1'), status: 'closed' };
+    await assertFails(as('stranger').doc('cases/pending1').update(claim));
+    await assertSucceeds(as('stranger').doc('cases/adoptable').update(claim));
+  });
+
+  test("a case's timeline is for the people working it", async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ownedA/activityLogs/t1').set({ action: 'accepted' }));
+    await assertSucceeds(as('reporter').doc('cases/ownedA/activityLogs/t1').get());
+    await assertSucceeds(as('staffA').doc('cases/ownedA/activityLogs/t1').get());
+    await assertFails(as('stranger').doc('cases/ownedA/activityLogs/t1').get());
+  });
+});
+
+describe('staff stay inside their own organization', () => {
+  test("another organization's case, offers and follow-ups are off limits", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('cases/offered/transportAssignments/as1').update({ organizationId: 'orgA' });
+      await db.doc('adoptions/appA/followUps/f1').set({ organizationId: 'orgA', status: 'scheduled' });
+      await db.doc('cases/referredA').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA' });
+    });
+    // Owned case.
+    await assertSucceeds(as('staffA').doc('cases/ownedA').get());
+    await assertFails(as('staffB').doc('cases/ownedA').get());
+    // A referred case is shared.
+    await assertSucceeds(as('staffB').doc('cases/referredA').get());
+    // The unowned pool is shared.
+    await assertSucceeds(as('staffB').doc('cases/pending1').get());
+    // Offers.
+    await assertSucceeds(as('staffA').doc('cases/offered/transportAssignments/as1').get());
+    await assertFails(as('staffB').doc('cases/offered/transportAssignments/as1').get());
+    await assertSucceeds(as('staffA').collectionGroup('transportAssignments').where('organizationId', '==', 'orgA').where('status', '==', 'pending').get());
+    await assertFails(as('staffA').collectionGroup('transportAssignments').where('status', '==', 'pending').get());
+    await assertFails(as('staffB').collectionGroup('transportAssignments').where('organizationId', '==', 'orgA').get());
+    await assertSucceeds(as('rider').collectionGroup('transportAssignments').where('riderId', '==', 'rider').get());
+    // Follow-ups.
+    await assertSucceeds(as('staffA').collectionGroup('followUps').where('organizationId', '==', 'orgA').where('status', 'in', ['scheduled', 'reminderSent']).get());
+    await assertFails(as('staffA').collectionGroup('followUps').where('status', 'in', ['scheduled', 'reminderSent']).get());
+    await assertFails(as('staffB').doc('adoptions/appA/followUps/f1').get());
+    // Platform staff see everything.
+    await assertSucceeds(as('admin').collection('cases').get());
+    await assertSucceeds(as('admin').collectionGroup('transportAssignments').get());
+    await assertSucceeds(as('admin').collectionGroup('followUps').get());
+  });
+
+  test("a rider's availability is kept by the server", async () => {
+    await assertFails(as('rider').doc('users/rider').update({ transportStatus: { status: 'completed' } }));
+    await assertSucceeds(as('staffB').collection('users').where('role', 'in', ['pet_transporter', 'rescue_volunteer']).get());
+  });
+});
+
+describe('who reads user profiles', () => {
+  test('yourself, organization staff, and your own organization', async () => {
+    await assertSucceeds(as('reporter').doc('users/reporter').get());
+    await assertSucceeds(as('staffA').doc('users/reporter').get());
+    await assertSucceeds(as('admin').doc('users/reporter').get());
+    await assertSucceeds(as('carerA').doc('users/staffA').get());
+    await assertSucceeds(as('staffA').collection('users').where('role', '==', 'pet_transporter').get());
+    await assertFails(as('stranger').doc('users/reporter').get());
+    await assertFails(as('rider').doc('users/reporter').get());
+    await assertFails(as('carerA').doc('users/reporter').get());
+    await assertFails(as('stranger').collection('users').where('role', '==', 'pet_transporter').get());
+  });
+});
+
 describe('cases', () => {
   test('reporters file their own reports only', async () => {
     await assertSucceeds(as('reporter').collection('cases').add({ reporterId: 'reporter', status: 'pending' }));

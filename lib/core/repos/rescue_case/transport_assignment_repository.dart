@@ -10,6 +10,7 @@ import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 import 'package:respawnd1/core/repos/rescue_case/transport_assignment_rules.dart';
+import 'package:respawnd1/core/utils/org_list_scope.dart';
 
 /// Pet-transporter roster and the transport-assignment lifecycle: offer,
 /// accept, reject, cancel, reconcile, complete, and safety follow-ups.
@@ -154,20 +155,20 @@ class TransportAssignmentRepository {
   /// create-index link if it's still missing.
   Stream<Map<String, TransportAssignmentStatus>>
   streamActiveAssignmentsByRider() {
+    // Each rider's newest offer may be on another organization's case,
+    // which staff can't read (firestore.rules), so this reads the status
+    // the syncRiderTransportStatus function keeps on the rider's user doc
+    // (`transportStatus`, functions/rider_status.js) instead.
     return _store.db
-        .collectionGroup('transportAssignments')
-        .orderBy('offeredAt', descending: true)
+        .collection('users')
+        .where('role', whereIn: const ['pet_transporter', 'rescue_volunteer'])
         .snapshots()
         .map((snap) {
           final latestByRider = <String, TransportAssignmentStatus>{};
           for (final doc in snap.docs) {
-            final riderId = doc.data()['riderId'] as String?;
-            // Docs arrive newest-first, so the first one seen per rider is
-            // already their most recent — never overwrite after that.
-            if (riderId == null || latestByRider.containsKey(riderId)) continue;
-            latestByRider[riderId] = TransportAssignmentStatus.fromName(
-              doc.data()['status'] as String?,
-            );
+            final status = doc.data()['transportStatus'];
+            if (status is! Map) continue;
+            latestByRider[doc.id] = TransportAssignmentStatus.fromName(status['status'] as String?);
           }
           return latestByRider;
         });
@@ -183,13 +184,17 @@ class TransportAssignmentRepository {
   /// `isStalePending` client-side (Firestore can't compare two fields), so
   /// the read stays bounded to the (normally small) set of open offers
   /// rather than every assignment doc ever created.
+  ///
+  /// Own organization's offers only (platform staff: all); offers carry
+  /// their case's organizationId (functions/audit_logs.js).
   Stream<List<TransportAssignment>> streamStalePendingAssignments() {
-    return _store.db
-        .collectionGroup('transportAssignments')
-        .where('status', isEqualTo: TransportAssignmentStatus.pending.name)
-        .snapshots()
-        .map(
-          (snap) => snap.docs
+    return OrgListScope.watch(
+      _store.db
+          .collectionGroup('transportAssignments')
+          .where('status', isEqualTo: TransportAssignmentStatus.pending.name),
+      empty: const <TransportAssignment>[],
+      firestore: _store.db,
+      (snap) => snap.docs
               .map(
                 (d) => TransportAssignment.fromFirestore(
                   d,

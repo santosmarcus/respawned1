@@ -21,6 +21,8 @@ sealed class OrgListScope {
 
   bool get isNone => this is _NoOrganization;
 
+  bool get isAll => this is _AllOrganizations;
+
   /// Resolves the scope for the signed-in account.
   static Future<OrgListScope> current({FirebaseFirestore? firestore}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;

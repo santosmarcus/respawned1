@@ -83,7 +83,7 @@ Future<void> _handleCaseEnter(
     String caseId,
     GeofencePrefs prefs,
     ) async {
-  final caseDoc = await db.collection('cases').doc(caseId).get().timeout(const Duration(seconds: 10));
+  final caseDoc = await db.collection('publicCases').doc(caseId).get().timeout(const Duration(seconds: 10));
   final c = caseDoc.data();
   final status = (c?['status'] as String? ?? '').toLowerCase();
   if (c == null || GeofenceConfig.inactiveCaseStatuses.contains(status)) {
@@ -264,7 +264,7 @@ class GeofenceService {
     final lngDelta = searchKm / (111 * math.cos(lat * math.pi / 180));
 
     final snap = await FirebaseFirestore.instance
-        .collection('cases')
+        .collection('publicCases')
         .where('lat', isGreaterThanOrEqualTo: lat - latDelta)
         .where('lat', isLessThanOrEqualTo: lat + latDelta)
         .get();

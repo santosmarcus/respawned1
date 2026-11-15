@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
+import 'package:respawnd1/core/utils/org_list_scope.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_schedule.dart';
@@ -663,12 +664,16 @@ class AdoptionApplicationRepository {
   /// then the actual date comparison client-side, so this stays a bounded
   /// read of only-still-open follow-ups rather than the whole collection
   /// group.
+  ///
+  /// Own organization's follow-ups only (platform staff: all); they carry
+  /// their adoption's organizationId (functions/audit_logs.js).
   Stream<List<FollowUpRecord>> streamOverdueFollowUps() {
-    return _db
-        .collectionGroup('followUps')
-        .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name])
-        .snapshots()
-        .map((snap) {
+    return OrgListScope.watch(
+        _db
+            .collectionGroup('followUps')
+            .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name]),
+        empty: const <FollowUpRecord>[],
+        firestore: _db, (snap) {
       final now = DateTime.now();
       return snap.docs
           .map(FollowUpRecord.fromFirestore)
@@ -681,11 +686,13 @@ class AdoptionApplicationRepository {
   /// application, with its application id. Same query as
   /// [streamOverdueFollowUps], so it needs no new index.
   Stream<List<({String applicationId, FollowUpRecord record})>> streamOpenFollowUps() {
-    return _db
-        .collectionGroup('followUps')
-        .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name])
-        .snapshots()
-        .map((snap) => [
+    return OrgListScope.watch(
+        _db
+            .collectionGroup('followUps')
+            .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name]),
+        empty: const <({String applicationId, FollowUpRecord record})>[],
+        firestore: _db,
+        (snap) => [
               for (final d in snap.docs)
                 if (d.reference.parent.parent != null)
                   (applicationId: d.reference.parent.parent!.id, record: FollowUpRecord.fromFirestore(d)),

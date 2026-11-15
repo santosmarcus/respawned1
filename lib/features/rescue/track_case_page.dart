@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
@@ -78,11 +79,10 @@ class _TrackCasePageState extends State<TrackCasePage> {
 
   @override
   Widget build(BuildContext context) {
+    // People not working the case (e.g. opened from Nearby Reports) see
+    // the public copy.
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .snapshots(),
+      stream: watchCaseOrPublic(widget.caseId),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Scaffold(
@@ -1534,7 +1534,7 @@ class _AnimalGroupSection extends StatelessWidget {
 
     return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
       future: FirebaseFirestore.instance
-          .collection('cases')
+          .collection('publicCases')
           .where('groupId', isEqualTo: groupId)
           .get(),
       builder: (context, snapshot) {

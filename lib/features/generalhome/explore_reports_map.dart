@@ -440,7 +440,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
 
   void _listenToReports() {
     _sub = FirebaseFirestore.instance
-        .collection('cases')
+        .collection('publicCases')
         .orderBy('serverCreatedAt', descending: true)
         .limit(150)
         .snapshots()

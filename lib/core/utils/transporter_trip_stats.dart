@@ -34,7 +34,9 @@ bool isCompletedTransit(Map<String, dynamic> data) {
   // Proof the trip itself was finished, whatever the case status is now.
   return data['transitCompletedAt'] != null ||
       data['adopterPickupConfirmedAt'] != null ||
-      (data['shelterVerificationUrls'] as List?)?.isNotEmpty == true;
+      (data['shelterVerificationUrls'] as List?)?.isNotEmpty == true ||
+      // The public copy (publicCases) carries only this flag.
+      data['transitProofRecorded'] == true;
 }
 
 bool isOngoingTransit(Map<String, dynamic> data) =>

@@ -55,7 +55,7 @@ export async function seed(env) {
       status: 'pending', role: 'staff',
     });
 
-    await db.doc('cases/pending1').set({ reporterId: 'reporter', status: 'pending' });
+    await db.doc('cases/pending1').set({ reporterId: 'reporter', status: 'pending', organizationId: '' });
     await db.doc('cases/ownedA').set({ reporterId: 'reporter', status: 'accepted_pending_clinic', organizationId: 'orgA' });
     await db.doc('cases/ownedA/expenses/e1').set({ amount: 500 });
     await db.doc('cases/offered').set({
@@ -67,7 +67,7 @@ export async function seed(env) {
     });
     // Unowned report with a rider sent to check the location.
     await db.doc('cases/verifying1').set({
-      reporterId: 'reporter', status: 'verifying', verifyingOrganizationId: 'orgA',
+      reporterId: 'reporter', status: 'verifying', organizationId: '', verifyingOrganizationId: 'orgA',
       verification: { deskOutcome: 'needsRider', deskBy: 'staffA', riderId: 'rider', riderName: 'Rider One' },
     });
 

@@ -558,6 +558,7 @@ service cloud.firestore {
       function selfFieldsOk(data) {
         return data.get('role', '') in selfRoles() &&
           !('volunteerStats' in data) &&
+          !('transportStatus' in data) &&
           data.get('isVerified', false) == false &&
           data.get('transporterVerificationStatus', 'pending') == 'pending' &&
           (!('organizationId' in data) || data.organizationId == null || canLinkSelfTo(data.organizationId));
@@ -566,7 +567,7 @@ service cloud.firestore {
       function selfUpdateOk() {
         let data = request.resource.data;
         return (!changedAny(['role']) || data.get('role', '') in selfRoles()) &&
-          !changedAny(['volunteerStats']) &&
+          !changedAny(['volunteerStats', 'transportStatus']) &&
           (!changedAny(['isVerified']) || data.get('isVerified', false) == false) &&
           (!changedAny(['transporterVerificationStatus']) || data.get('transporterVerificationStatus', '') == 'pending') &&
           (!changedAny(['organizationId']) ||
@@ -600,7 +601,14 @@ service cloud.firestore {
           );
       }
 
-      allow read: if signedIn();
+      // A profile holds phone, email and last known location: readable by
+      // its owner, approved organization staff and platform staff (rider
+      // and volunteer directories, case reporters, team pages), and members
+      // of the same organization (team pages before approval). The
+      // organization comparison reads the field directly so a query that
+      // doesn't filter on it is denied rather than matched against ''.
+      allow read: if isSelf(uid) || isOrgStaff() ||
+        (signedIn() && myOrgId() != '' && resource.data.organizationId == myOrgId());
       allow create: if isSelf(uid) && selfFieldsOk(request.resource.data);
       allow update: if (isSelf(uid) && selfUpdateOk()) ||
         (signedIn() && orgAdminLinkChange()) ||
@@ -691,6 +699,27 @@ service cloud.firestore {
 
     function isTransporterRole() {
       return signedIn() && myRole() in ['pet_transporter', 'rescue_volunteer'];
+    }
+
+    // A pet transporter staff verified (TransporterApplicationRepository.
+    // review sets isVerified), or a rescue volunteer whose application was
+    // approved. They see full reports on the job board.
+    function isVerifiedResponder() {
+      return isTransporterRole() && (
+        (myRole() == 'pet_transporter' && userDoc().get('isVerified', false) == true) ||
+        (myRole() == 'rescue_volunteer' &&
+          get(/databases/$(database)/documents/volunteerApplications/$(request.auth.uid)).data
+            .get('status', '') == 'approved')
+      );
+    }
+
+    // Rejected as a healthy, low-urgency animal (not a lost pet): open to
+    // Community Adoption, so the public may read it and claim its animals
+    // (community_adoption_eligibility.dart).
+    function isCommunityAdoptable(data) {
+      return data.get('status', '') == 'rejected' &&
+        data.get('rejectionReason', '') == 'healthyAnimalLowUrgency' &&
+        data.get('rescueType', '').lower() != 'lost pet';
     }
 
     // Holds the case through an accepted assignment or a legacy direct claim.
@@ -784,7 +813,8 @@ service cloud.firestore {
       // CommunityAdoptionRepository: claim animals, closing the case once
       // every animal is claimed.
       function communityClaimUpdate() {
-        return changedAny(['communityAdoptionIds']) &&
+        return isCommunityAdoptable(resource.data) &&
+          changedAny(['communityAdoptionIds']) &&
           changedOnly(['communityAdoptionIds', 'claimedAnimalIndexes', 'status', 'statusHistory']) &&
           (!changedAny(['status']) || request.resource.data.status == 'closed');
       }
@@ -814,7 +844,38 @@ service cloud.firestore {
             (resource.data.get('status', '') == 'verifying' && request.resource.data.status == 'pending'));
       }
 
-      allow read: if signedIn();
+      // The full report (reporter's name and phone, verification evidence,
+      // the rider's location, notes, status history): platform staff; staff
+      // of the organization that owns it; any approved organization's staff
+      // while it isn't owned yet (organizationId == '', the review pool) or
+      // is referred (referrals are shared — the target isn't recorded on
+      // the case); the reporter, the willing adopter, the
+      // transporter holding or offered it, the rider sent to verify it,
+      // verified transporters and approved volunteers (the job board), and
+      // anyone for a report open to Community Adoption. Everyone else reads
+      // publicCases (functions/public_cases.js). Every branch either ignores
+      // the document or compares a field to the caller's uid, so queries
+      // that filter on reporterId / assignedVolunteerId / riderId /
+      // verification.riderId / willingAdopterId can be proven.
+      // organizationId and status are read directly (no default) so a staff
+      // query must filter on organizationId == theirs / '' or status ==
+      // 'referred' (RescueCaseQueryRepository.watchScopedCaseDocs).
+      allow read: if signedIn() && (
+        // Document-only checks first, so the lookups below stay inside
+        // Firestore's 1,000-expression budget.
+        resource.data.get('reporterId', '') == request.auth.uid ||
+        resource.data.get('willingAdopterId', '') == request.auth.uid ||
+        isAssignedTransporter(resource.data) ||
+        resource.data.get('verification', {}).get('riderId', '') == request.auth.uid ||
+        isCommunityAdoptable(resource.data) ||
+        (isOrgStaff() && (
+          isPlatformStaff() ||
+          resource.data.status == 'referred' ||
+          canStaffRecordOf(resource.data.organizationId)
+        )) ||
+        isVerifiedResponder() ||
+        isOfferedTransporter(caseId, resource.data)
+      );
       // Reporters file unowned reports only; an organization claims a case
       // through its staff, never by stamping it at creation.
       allow create: if signedIn() && (
@@ -822,13 +883,16 @@ service cloud.firestore {
           request.resource.data.get('organizationId', '') == '') ||
         canStaffRecordOf(request.resource.data.get('organizationId', ''))
       );
+      // The cheap, document-only checks run first so the ones with lookups
+      // stay inside Firestore's 1,000-expression budget
+      // (rules-tests/tests/expression-budget.test.js).
       allow update: if signedIn() && (
+        communityClaimUpdate() ||
+        clearOfferPointer() ||
         (canStaffCase(resource.data) && orgStampOk()) ||
         reporterUpdate() ||
         transporterUpdate() ||
         willingAdopterUpdate() ||
-        communityClaimUpdate() ||
-        clearOfferPointer() ||
         verifierUpdate()
       );
       allow delete: if isPlatformStaff();
@@ -838,8 +902,10 @@ service cloud.firestore {
         allow read, create: if signedIn();
         allow update, delete: if canStaffCase(get(casePath(caseId)).data);
       }
+      // The case timeline (who did what): the people working the case.
       match /activityLogs/{logId} {
-        allow read, create: if signedIn();
+        allow read: if isCaseParticipant(caseId);
+        allow create: if signedIn();
         allow update, delete: if canStaffCase(get(casePath(caseId)).data);
       }
 
@@ -1002,6 +1068,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Public copy of each rescue report, written only by the syncPublicCase
+    // function (functions/public_cases.js): no reporter details, rider
+    // location, notes or status history; surrender reports without the
+    // address and with a rounded location.
+    match /publicCases/{caseId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
     // ---- Adoption applications ---------------------------------------------
     //
     // Reads: the adopter, the owning organization's staff, and platform
@@ -1129,7 +1204,11 @@ service cloud.firestore {
 
     match /{path=**}/transportAssignments/{assignmentId} {
       // Transporters query their own offers (where riderId == uid).
-      allow read: if isOrgStaff() || resource.data.get('riderId', '') == request.auth.uid;
+      // Staff: their own organization's offers (stamped from the case by
+      // functions/audit_logs.js), through a query that filters on it. Each
+      // rider's busy status for every organization is on their user doc
+      // (transportStatus, functions/rider_status.js).
+      allow read: if canReadOrgRecord(false) || resource.data.get('riderId', '') == request.auth.uid;
     }
 
     // Vaccinations, care records, medication orders and doses (animals) and
@@ -1191,8 +1270,11 @@ service cloud.firestore {
       allow read: if signedIn();
     }
 
+    // Staff: their own organization's follow-ups (stamped from the
+    // adoption by functions/audit_logs.js). The adopter reads through the
+    // per-adoption rule.
     match /{path=**}/followUps/{docId} {
-      allow read: if isOrgStaff();
+      allow read: if canReadOrgRecord(false);
     }
 
     // ---- General expenses ----------------------------------------------------
@@ -1286,7 +1368,7 @@ service cloud.firestore {
         'facebookConnectRequests', 'facebookShares',
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
-        'users', 'cases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
+        'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
         'transporterApplications', 'auditLogs', 'orgExpenses'
       ]);
     }

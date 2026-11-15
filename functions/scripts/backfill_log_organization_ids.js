@@ -73,8 +73,20 @@ async function collectDonations() {
   return updates;
 }
 
+// Cases with no organizationId at all get '' (not owned yet), so staff can
+// query the shared review pool.
+async function collectUnstampedCases() {
+  const cases = await db.collection('cases').get();
+  const updates = cases.docs
+      .filter((d) => d.data().organizationId === undefined)
+      .map((d) => ({ref: d.ref, organizationId: ''}));
+  console.log(`cases: ${cases.size} scanned, ${updates.length} with no organizationId field to set to ''.`);
+  return updates;
+}
+
 async function main() {
   const updates = [
+    ...(await collectUnstampedCases()),
     ...(await collect('cases', 'activityLogs')),
     ...(await collect('animals', 'managementLogs')),
     // Records the dashboard reads across animals and cases (stamped by the
@@ -84,6 +96,8 @@ async function main() {
     ...(await collect('animals', 'medications')),
     ...(await collect('animals', 'medicationDoses')),
     ...(await collect('cases', 'expenses')),
+    ...(await collect('cases', 'transportAssignments')),
+    ...(await collect('adoptions', 'followUps')),
     ...(await collectDonations()),
     // Campaign allocations (analytics spending by category).
     ...(await collect('campaigns', 'allocations')),

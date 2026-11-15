@@ -1265,3 +1265,7 @@ exports.reviewOrganization = onCall(async (request) => {
 
 // Volunteer attendance counts and badges on users/{uid}.volunteerStats — see functions/volunteer_stats.js.
 exports.syncVolunteerStats = require('./volunteer_stats').syncVolunteerStats;
+// Public copy of each rescue report for non-participants — see functions/public_cases.js.
+exports.syncPublicCase = require('./public_cases').syncPublicCase;
+// Each rider's newest offer status on their user doc, for staff of every organization — see functions/rider_status.js.
+exports.syncRiderTransportStatus = require('./rider_status').syncRiderTransportStatus;

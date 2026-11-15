@@ -56,10 +56,15 @@ exports.stampAnimalLogOrganization = onDocumentCreated(
 
 const {onDocumentWritten, onDocumentUpdated} = require('firebase-functions/v2/firestore');
 
+// Also transport offers (dashboard stale offers, transporter report) and
+// adoption follow-ups (dashboard overdue follow-ups), so staff see only
+// their own organization's.
 const FOLLOWING_RECORDS = {
   animals: ['vaccinations', 'careRecords', 'medications', 'medicationDoses'],
-  cases: ['expenses'],
+  cases: ['expenses', 'transportAssignments'],
+  adoptions: ['followUps'],
 };
+const PARENT_PARAM = {animals: 'animalId', cases: 'caseId', adoptions: 'adoptionId'};
 
 async function stampRecord(event, parentCollection, parentId) {
   const after = event.data && event.data.after;
@@ -88,7 +93,7 @@ async function restampChildren(event, parentCollection) {
 const capitalize = (s) => s[0].toUpperCase() + s.slice(1);
 
 for (const [parentCollection, subs] of Object.entries(FOLLOWING_RECORDS)) {
-  const parentParam = parentCollection === 'animals' ? 'animalId' : 'caseId';
+  const parentParam = PARENT_PARAM[parentCollection];
   for (const sub of subs) {
     // e.g. stampAnimalsVaccinationsOrganization
     exports[`stamp${capitalize(parentCollection)}${capitalize(sub)}Organization`] = onDocumentWritten(
@@ -116,4 +121,14 @@ exports.stampDonationOrganization = onDocumentWritten('donations/{donationId}', 
   const organizationId = orgOf(campaign);
   if ((after.get('organizationId') || null) === organizationId) return;
   await after.ref.update({organizationId});
+});
+
+// Every case carries organizationId; '' means not owned yet (the shared
+// review pool). New reports from current app builds write '' themselves;
+// this covers older builds. firestore.rules can only let staff query the
+// pool by organizationId == '', and Firestore can't match a missing field.
+exports.stampCaseOrganizationDefault = onDocumentCreated('cases/{caseId}', async (event) => {
+  const snap = event.data;
+  if (!snap || snap.get('organizationId') !== undefined) return;
+  await snap.ref.update({organizationId: ''});
 });

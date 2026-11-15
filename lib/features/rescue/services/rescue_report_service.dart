@@ -130,6 +130,9 @@ class RescueReportService {
         : form.surrenderReason;
 
     final docRef = await casesCollection.add({
+      // Not owned yet: the shared review pool (firestore.rules lets staff
+      // query it by organizationId == '').
+      'organizationId': '',
       'reporterId': uid,
       'reporterName': reporterName,
       'reporterPhone': userData?['phone'] ?? '',
@@ -268,6 +271,7 @@ class RescueReportService {
       // Optional linked rescue case if the finder needs pickup/medical help.
       if (form.finderNeedsRescue) {
         final caseRef = await _db.collection('cases').add({
+          'organizationId': '',
           'reporterId': uid,
           'reporterName': reporterName,
           'reporterPhone': form.finderContactController.text.trim(),

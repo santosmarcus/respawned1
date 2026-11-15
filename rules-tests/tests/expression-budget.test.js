@@ -16,8 +16,15 @@ before(async () => { env = await createEnv(); });
 after(async () => { await env.cleanup(); });
 beforeEach(async () => { await seed(env); });
 
+// A report rejected as healthy / low urgency is open to Community Adoption.
+const seedAdoptable = () => env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/adoptable').set({
+  reporterId: 'reporter', status: 'rejected', rejectionReason: 'healthyAnimalLowUrgency', rescueType: 'Stray',
+  organizationId: 'orgA',
+}));
+
 test('community adoption claim by an outsider fits the budget', async () => {
-  await assertSucceeds(as('stranger').doc('cases/ownedA').update({
+  await seedAdoptable();
+  await assertSucceeds(as('stranger').doc('cases/adoptable').update({
     communityAdoptionIds: FieldValue.arrayUnion('ca1'),
     claimedAnimalIndexes: [0],
     status: 'closed',
@@ -34,8 +41,8 @@ test('a transporter registering adoption interest fits the budget', async () => 
 });
 
 test("another organization's staff claiming a community adoption fits the budget", async () => {
-  // Runs the whole staff branch (membership + approval lookups) first.
-  await assertSucceeds(as('staffB').doc('cases/ownedA').update({
+  await seedAdoptable();
+  await assertSucceeds(as('staffB').doc('cases/adoptable').update({
     communityAdoptionIds: FieldValue.arrayUnion('ca2'),
     claimedAnimalIndexes: [0],
     statusHistory: FieldValue.arrayUnion({ status: 'claimed' }),

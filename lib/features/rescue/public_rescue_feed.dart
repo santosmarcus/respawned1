@@ -129,7 +129,7 @@ class _PublicRescueFeedState extends State<PublicRescueFeed> {
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
-          .collection('cases')
+          .collection('publicCases')
           .orderBy('serverCreatedAt', descending: true)
           .limit(100)
           .snapshots(),

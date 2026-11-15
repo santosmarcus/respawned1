@@ -594,7 +594,7 @@ class _ServiceRequestList extends StatelessWidget {
 
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
-              .collection('cases')
+              .collection('publicCases')
               .where('status', whereIn: ['pending', 'assigned', 'accepted', 'ongoing'])
               .orderBy('createdAt', descending: true)
               .limit(50)

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/utils/org_list_scope.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
@@ -12,6 +13,8 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_query_repository.dart';
+import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
@@ -42,12 +45,14 @@ extension AreaReportX on AreaReport {
   };
 }
 
-/// Every case, read once — the same unscoped query `dev` used
-/// (`cases.organizationId` is not written by any report path yet).
+/// Every case staff may list (own organization, the unowned pool and
+/// referrals; platform staff: all), read once.
 final reportCasesProvider = FutureProvider.autoDispose<List<RescueCase>>((ref) async {
-  final snap = await FirebaseFirestore.instance.collection('cases').get();
+  final docs = await RescueCaseQueryRepository(RescueCaseStore(FirebaseFirestore.instance))
+      .watchScopedCaseDocs((q) => q, includeReferred: true)
+      .first;
   final cases = <RescueCase>[];
-  for (final doc in snap.docs) {
+  for (final doc in docs) {
     try {
       cases.add(RescueCase.fromFirestore(doc));
     } catch (e) {
@@ -58,9 +63,13 @@ final reportCasesProvider = FutureProvider.autoDispose<List<RescueCase>>((ref) a
 });
 
 /// Every transporter offer (`cases/{id}/transportAssignments`), read once.
-final reportAssignmentsProvider = FutureProvider.autoDispose<List<TransportAssignment>>((ref) async {
-  final snap = await FirebaseFirestore.instance.collectionGroup('transportAssignments').get();
-  return snap.docs.map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id)).toList();
+/// Own organization's offers only (platform staff: all).
+final reportAssignmentsProvider = FutureProvider.autoDispose<List<TransportAssignment>>((ref) {
+  return OrgListScope.watch(
+    FirebaseFirestore.instance.collectionGroup('transportAssignments'),
+    empty: const <TransportAssignment>[],
+    (snap) => snap.docs.map((d) => TransportAssignment.fromFirestore(d, d.reference.parent.parent!.id)).toList(),
+  ).first;
 });
 
 class _AreaNotifier extends Notifier<AreaReport> {

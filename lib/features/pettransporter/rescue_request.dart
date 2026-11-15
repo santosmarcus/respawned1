@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
@@ -168,9 +169,9 @@ class _RescueRequestState extends State<RescueRequest> {
       }
 
       final uid = FirebaseAuth.instance.currentUser!.uid;
-      final caseRef =
-      FirebaseFirestore.instance.collection('cases').doc(widget.caseId);
-      final snap = await caseRef.get();
+      // The public copy: a rider who isn't on this case yet can't read the
+      // full report (firestore.rules), and status/assignee are public.
+      final snap = await FirebaseFirestore.instance.collection('publicCases').doc(widget.caseId).get();
       final currentStatus = snap.data()?['status'];
       final wasAssignedToMe =
           snap.data()?['assignedVolunteerId'] == uid;
@@ -247,10 +248,8 @@ class _RescueRequestState extends State<RescueRequest> {
     // widget.data until the stream's first event arrives so there's no
     // blank flash, then always prefers the live doc.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .snapshots(),
+      // Full report once the rider may read it; the public copy before.
+      stream: watchCaseOrPublic(widget.caseId),
       builder: (context, snapshot) {
         final d = snapshot.data?.data() ?? widget.data;
         return _buildScaffold(context, d);
@@ -683,7 +682,7 @@ class _AnimalGroupSection extends StatelessWidget {
 
     return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
       future: FirebaseFirestore.instance
-          .collection('cases')
+          .collection('publicCases')
           .where('groupId', isEqualTo: groupId)
           .get(),
       builder: (context, snapshot) {

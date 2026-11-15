@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/features/pettransporter/rescue_request.dart';
@@ -337,10 +338,7 @@ class _TransporterNotificationsState
     if (assignmentId != null) {
       // Pending offer — nothing accepted yet, so this goes to the
       // Start Now / Decline screen rather than the transit tracker.
-      FirebaseFirestore.instance
-          .collection('cases')
-          .doc(item.caseId)
-          .get()
+      getCaseOrPublic(item.caseId)
           .then((doc) {
         if (!mounted) return;
         final data = doc.data() ?? {};
@@ -362,10 +360,7 @@ class _TransporterNotificationsState
     // reached a final state shouldn't drop the rider back into the transit
     // tracker for a trip that's already over — check first and show a
     // simple heads-up instead.
-    FirebaseFirestore.instance
-        .collection('cases')
-        .doc(item.caseId)
-        .get()
+    getCaseOrPublic(item.caseId)
         .then((doc) {
       if (!mounted) return;
       final status = (doc.data()?['status'] as String? ?? '').toLowerCase();

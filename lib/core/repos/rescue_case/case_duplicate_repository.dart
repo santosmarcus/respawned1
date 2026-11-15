@@ -48,8 +48,11 @@ class CaseDuplicateRepository {
     // need a denormalized queryable field this collection doesn't have yet.
     final seenIds = <String>{};
     final docs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+    // The public copy: a duplicate may be another organization's case,
+    // whose full report this account can't read (firestore.rules).
     for (final species in sourceSpecies) {
-      final snap = await _store.cases
+      final snap = await _store.db
+          .collection('publicCases')
           .where('animalType', isEqualTo: species)
           .where('status', whereIn: activeStatuses)
           .limit(50)
@@ -193,6 +196,23 @@ class CaseDuplicateRepository {
     final duplicateRef = _store.caseDoc(duplicateCaseId);
     final newReportRef = _store.reportsOf(primaryCaseId).doc(duplicateCaseId);
 
+    try {
+      await _merge(primaryRef, duplicateRef, newReportRef, primaryCaseId, duplicateCaseId, actorUid, actorName);
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      throw StateError("One of these reports belongs to another organization, so it can't be merged here.");
+    }
+  }
+
+  Future<void> _merge(
+    DocumentReference<Map<String, dynamic>> primaryRef,
+    DocumentReference<Map<String, dynamic>> duplicateRef,
+    DocumentReference<Map<String, dynamic>> newReportRef,
+    String primaryCaseId,
+    String duplicateCaseId,
+    String actorUid,
+    String actorName,
+  ) async {
     await _store.db.runTransaction((tx) async {
       final primarySnap = await tx.get(primaryRef);
       final duplicateSnap = await tx.get(duplicateRef);

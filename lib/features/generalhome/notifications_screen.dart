@@ -173,7 +173,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final latDelta = _kNearbyRadiusKm / 111;
 
     _nearbyCasesSub = FirebaseFirestore.instance
-        .collection('cases')
+        .collection('publicCases')
         .where('lat', isGreaterThanOrEqualTo: lat - latDelta)
         .where('lat', isLessThanOrEqualTo: lat + latDelta)
         .snapshots()

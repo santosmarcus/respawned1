@@ -10,6 +10,7 @@ import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/medical_episode.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
+import 'package:respawnd1/core/utils/stream_combine.dart';
 
 /// Firestore access for the `animals` collection and its
 /// `medicalEpisodes`/`vaccinations` subcollections — the first dedicated
@@ -140,7 +141,7 @@ class AnimalRecordRepository {
               },
             )),
     ];
-    yield* _combineLatest(streams).map((lists) => [for (final l in lists) ...l]);
+    yield* combineLatest(streams).map((lists) => [for (final l in lists) ...l]);
   }
 
   /// Parses each document individually inside its own try/catch —
@@ -685,33 +686,4 @@ class AnimalRecordRepository {
       newValues: {'transferTargetType': targetType, 'transferTargetName': targetName},
     );
   }
-}
-
-/// Emits the latest value of every stream once each has emitted, then again
-/// whenever any of them does.
-Stream<List<T>> _combineLatest<T>(List<Stream<T>> streams) {
-  final subs = <StreamSubscription<T>>[];
-  final values = List<T?>.filled(streams.length, null);
-  final seen = List<bool>.filled(streams.length, false);
-  late final StreamController<List<T>> controller;
-  controller = StreamController<List<T>>(
-    onListen: () {
-      for (var i = 0; i < streams.length; i++) {
-        subs.add(streams[i].listen(
-          (v) {
-            values[i] = v;
-            seen[i] = true;
-            if (seen.every((s) => s)) controller.add(List<T>.from(values));
-          },
-          onError: controller.addError,
-        ));
-      }
-    },
-    onCancel: () async {
-      for (final s in subs) {
-        await s.cancel();
-      }
-    },
-  );
-  return controller.stream;
 }

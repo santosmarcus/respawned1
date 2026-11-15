@@ -176,7 +176,8 @@ class _TripStats extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection('cases').where('assignedVolunteerId', isEqualTo: uid).snapshots(),
+      // Every organization's trips count, so this reads the public copy.
+      stream: FirebaseFirestore.instance.collection('publicCases').where('assignedVolunteerId', isEqualTo: uid).snapshots(),
       builder: (context, snap) {
         final docs = snap.data?.docs ?? const [];
         final completed = docs.where((d) => isCompletedTransit(d.data())).length;

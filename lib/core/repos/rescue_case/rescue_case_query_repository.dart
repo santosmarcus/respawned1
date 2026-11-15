@@ -1,5 +1,6 @@
 // Split out of rescue_case_repository.dart (behavior-preserving refactor).
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,8 @@ import 'package:respawnd1/core/models/rescue/rescue_report.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
+import 'package:respawnd1/core/utils/org_list_scope.dart';
+import 'package:respawnd1/core/utils/stream_combine.dart';
 
 /// Case-level reads: the Rescue Reports tab streams, a single case, and its
 /// reports / activity log / community reports subcollections.
@@ -23,6 +26,40 @@ class RescueCaseQueryRepository {
   /// filters (urgency/species/date/location/search) are applied on top by
   /// the caller — Firestore can't combine an array-membership status query
   /// with several other equality/range filters efficiently on this schema.
+  /// Case documents staff may list (firestore.rules): platform staff get
+  /// every case; organization staff their own organization's, the unowned
+  /// review pool (organizationId == ''), and — when [includeReferred] —
+  /// every referred case, since referrals are shared. Each is its own
+  /// query, merged and de-duplicated by id.
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> watchScopedCaseDocs(
+    Query<Map<String, dynamic>> Function(Query<Map<String, dynamic>> q) refine, {
+    bool includeReferred = false,
+  }) async* {
+    final scope = await OrgListScope.current(firestore: _store.db);
+    if (scope.isAll) {
+      yield* refine(_store.cases).snapshots().map((s) => s.docs);
+      return;
+    }
+    if (scope.isNone) {
+      yield const [];
+      return;
+    }
+    final streams = [
+      refine(scope.apply(_store.cases)).snapshots().map((s) => s.docs),
+      refine(_store.cases.where('organizationId', isEqualTo: '')).snapshots().map((s) => s.docs),
+      if (includeReferred) _store.cases.where('status', isEqualTo: 'referred').snapshots().map((s) => s.docs),
+    ];
+    yield* combineLatest(streams).map((lists) {
+      final byId = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+      for (final docs in lists) {
+        for (final d in docs) {
+          byId[d.id] = d;
+        }
+      }
+      return byId.values.toList();
+    });
+  }
+
   Stream<List<RescueCase>> streamCasesByStatuses(List<RescueStatus> statuses) {
     final values = statuses.expand((s) => s.queryValues).toSet().toList();
     if (values.isEmpty) return Stream.value(const []);
@@ -63,15 +100,16 @@ class RescueCaseQueryRepository {
     // signal. Sorting is done client-side below instead, after parsing,
     // so a missing/null createdAt only affects where a case SORTS
     // (falls last), never whether it appears at all.
-    return _store.cases.where('status', whereIn: values).snapshots().map((
-      snap,
-    ) {
+    return watchScopedCaseDocs(
+      (q) => q.where('status', whereIn: values),
+      includeReferred: values.contains(RescueStatus.referred.firestoreValue),
+    ).map((docs) {
       debugPrint(
         '[RescueCaseRepository] streamCasesByStatuses(${statuses.map((s) => s.name).join(",")}): '
-        '${snap.docs.length} doc(s) returned, ids=${snap.docs.map((d) => d.id).toList()}',
+        '${docs.length} doc(s) returned, ids=${docs.map((d) => d.id).toList()}',
       );
       final cases = <RescueCase>[];
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         try {
           cases.add(RescueCase.fromFirestore(doc));
         } catch (e, st) {
@@ -186,12 +224,10 @@ class RescueCaseQueryRepository {
   /// case with no `activeAnimalStages` written yet (every case predating
   /// this round) still appears via its scalar `status` exactly as before.
   Stream<List<RescueCase>> streamCasesByActiveStage(String stage) {
-    return _store.cases
-        .where('activeAnimalStages', arrayContains: stage)
-        .snapshots()
-        .map((snap) {
+    return watchScopedCaseDocs((q) => q.where('activeAnimalStages', arrayContains: stage))
+        .map((docs) {
           final cases = <RescueCase>[];
-          for (final doc in snap.docs) {
+          for (final doc in docs) {
             try {
               cases.add(RescueCase.fromFirestore(doc));
             } catch (e, st) {

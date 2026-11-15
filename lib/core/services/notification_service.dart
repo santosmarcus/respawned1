@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
@@ -248,7 +249,7 @@ class NotificationService {
     final db = FirebaseFirestore.instance;
     final uid = FirebaseAuth.instance.currentUser!.uid;
     final results = await Future.wait([
-      db.collection('cases').doc(caseId).get(),
+      getCaseOrPublic(caseId, firestore: db),
       db.collection('users').doc(uid).get(),
     ]);
     final caseData = results[0].data();

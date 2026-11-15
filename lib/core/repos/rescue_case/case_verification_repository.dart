@@ -204,7 +204,9 @@ class CaseVerificationRepository {
 
   /// How this reporter's other reports turned out.
   Future<ReporterTrackRecord> reporterTrackRecord(String reporterId, {String? excludeCaseId}) async {
-    final snap = await _store.cases.where('reporterId', isEqualTo: reporterId).limit(200).get();
+    // The public copy: the reporter's other reports may belong to other
+    // organizations, whose full reports this account can't read.
+    final snap = await _store.db.collection('publicCases').where('reporterId', isEqualTo: reporterId).limit(200).get();
     return ReporterTrackRecord.fromCases([
       for (final doc in snap.docs)
         if (doc.id != excludeCaseId) doc.data(),

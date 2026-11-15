@@ -92,7 +92,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
     double? originalLng;
     try {
       final caseDoc = await FirebaseFirestore.instance
-          .collection('cases')
+          .collection('publicCases')
           .doc(widget.caseId)
           .get();
       originalLat = (caseDoc.data()?['lat'] as num?)?.toDouble();

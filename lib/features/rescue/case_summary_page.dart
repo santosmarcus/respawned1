@@ -474,7 +474,7 @@ class _AnimalGroupSection extends StatelessWidget {
 
     return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
       future: FirebaseFirestore.instance
-          .collection('cases')
+          .collection('publicCases')
           .where('groupId', isEqualTo: groupId)
           .get(),
       builder: (context, snapshot) {
