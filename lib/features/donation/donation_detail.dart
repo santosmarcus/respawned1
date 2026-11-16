@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import 'donation_payment_service.dart';
 import 'donation_review.dart';
 import 'donation_review_inkind.dart';
+import 'fund_tracking_section.dart';
 import 'models.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 
@@ -33,7 +34,6 @@ class DonationDetail extends StatefulWidget {
 }
 
 class _DonationDetailPageState extends State<DonationDetail> {
-  bool _showFundTracking = true;
   SponsorPet? _linkedAnimal;
 
   @override
@@ -280,39 +280,10 @@ class _DonationDetailPageState extends State<DonationDetail> {
     );
   }
 
-  Widget _buildFundTrackingSection(DonationListing donation) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onTap: () => setState(() => _showFundTracking = !_showFundTracking),
-          child: Row(
-            children: [
-              Text('Fund Tracking', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-              const SizedBox(width: 6),
-              Icon(_showFundTracking ? Icons.expand_less : Icons.expand_more, color: AppColors.textPrimary),
-            ],
-          ),
-        ),
-        if (_showFundTracking) ...[
-          const SizedBox(height: 12),
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('campaigns').doc(donation.id).collection('allocations').snapshots(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                return Text('No allocations recorded yet.', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary));
-              }
-              final entries = snapshot.data!.docs
-                  .map((doc) => doc.data() as Map<String, dynamic>)
-                  .where((e) => e['status'] != 'voided')
-                  .toList();
-              return _FundTrackingPanel(entries: entries, totalCollected: donation.collected.toInt());
-            },
-          ),
-        ],
-      ],
-    );
-  }
+  // Same Fund Tracking as sponsorships: received / allocated / not yet
+  // allocated, then every allocation the organization recorded.
+  Widget _buildFundTrackingSection(DonationListing donation) => FundTrackingSection(listing: donation);
+
 
   Widget _buildActionButtons(BuildContext context, DonationListing donation) {
     if (donation.isEnded) {

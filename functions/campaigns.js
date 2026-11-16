@@ -142,55 +142,13 @@ function moneyOf(c) {
   return {collected, target, allocated, out, inn, available, eligibleExcess};
 }
 
-// How each campaign history type reads in the app's Audit page.
-const AUDIT_ACTIONS = {
-  created: 'Campaign created',
-  edited: 'Campaign edited',
-  extended: 'Campaign deadline extended',
-  relaunched: 'Campaign relaunched',
-  extension_declined: 'Campaign extension declined',
-  converted_to_general: 'Campaign converted to a general fund',
-  offline_donation_recorded: 'Offline donation recorded',
-  goal_completed: 'Campaign goal reached',
-  allocation_recorded: 'Funds allocated',
-  allocation_voided: 'Allocation voided',
-  excess_transferred_out: 'Excess funds transferred out',
-  excess_transferred_in: 'Excess funds received',
-  inkind_received: 'In-kind donation received',
-  inkind_cancelled: 'In-kind donation cancelled',
-};
-
-function auditAction(type) {
-  if (AUDIT_ACTIONS[type]) return AUDIT_ACTIONS[type];
-  const words = String(type).replace(/_/g, ' ');
-  return `Campaign ${words}`;
-}
-
-// Writes the campaign's own history entry and, in the same transaction or
-// batch, the matching auditLogs entry the app's Audit > Donations tab reads.
-// organizationId defaults to the actor's organization.
-function historyEntry(tx, campaignRef, actor, type, details, organizationId) {
+function historyEntry(tx, campaignRef, actor, type, details) {
   tx.set(campaignRef.collection('history').doc(), {
     type,
     ...details,
     byUid: actor.uid,
     byName: actor.name,
     at: FieldValue.serverTimestamp(),
-  });
-  const newValues = {};
-  for (const [k, v] of Object.entries(details || {})) {
-    if (v !== undefined && v !== null) newValues[k] = v;
-  }
-  tx.set(db.collection('auditLogs').doc(), {
-    category: 'donations',
-    action: auditAction(type),
-    actorId: actor.uid,
-    actorName: actor.name || null,
-    organizationId: organizationId || actor.organizationId || null,
-    targetType: 'Campaign',
-    targetId: campaignRef.id,
-    newValues,
-    createdAt: FieldValue.serverTimestamp(),
   });
 }
 
@@ -213,11 +171,6 @@ async function loadActor(request, {finance = false} = {}) {
   if (organizationId) {
     const m = await db.collection('organizations').doc(organizationId).collection('members').doc(uid).get();
     memberRole = m.exists ? m.data().role : null;
-  }
-  // Carers give animal care only (firestore.rules isCarerMember): no listings
-  // or finance, whatever their account role says.
-  if (memberRole === 'carer') {
-    throw new HttpsError('permission-denied', 'Carers cannot manage campaigns or donations.');
   }
   const canManageFinances = role === 'admin' || memberRole === 'admin';
   if (finance && !canManageFinances) {
@@ -269,6 +222,21 @@ function parseInKindItems(raw) {
   });
 }
 
+// A sponsorship listing that is still taking (or about to take) sponsors.
+const OPEN_SPONSORSHIP_STATUSES = ['draft', 'active', 'paused'];
+
+// Why an animals/{id} doc can't get a new sponsorship listing, or null when
+// it is ready. Mirrors sponsorshipReadiness() in
+// lib/features/admin/donation/sponsorable_animals.dart.
+function sponsorshipBlocker(a) {
+  if (!a) return 'does not exist.';
+  if (a.archived === true) return 'is archived.';
+  if (a.status === 'deceased' || a.adoptionStatus === 'deceased') return 'is deceased.';
+  if (a.adoptionStatus === 'adopted' || a.status === 'adopted') return 'has already been adopted.';
+  if (a.transferStatus === 'pending') return 'is being transferred to another organization.';
+  return null;
+}
+
 // Validates the editable listing fields. `existing` is the stored doc on edit.
 async function buildListingFields(data, existing) {
   const type = existing ? (existing.type || 'donation') : data.type;
@@ -297,6 +265,16 @@ async function buildListingFields(data, existing) {
     const animal = await db.collection('animals').doc(animalId).get();
     if (!animal.exists) throw new HttpsError('not-found', 'That animal record does not exist.');
     const a = animal.data();
+    // Choosing (or changing) the animal on a sponsorship: it must be ready to
+    // be sponsored and not already have an open sponsorship listing.
+    if (type === 'sponsorship' && (!existing || existing.animalId !== animalId)) {
+      const notReady = sponsorshipBlocker(a);
+      if (notReady) throw new HttpsError('failed-precondition', `${a.name || 'This animal'} ${notReady}`);
+      const open = await campaignsCol().where('animalId', '==', animalId).where('type', '==', 'sponsorship').get();
+      if (open.docs.some((d) => OPEN_SPONSORSHIP_STATUSES.includes(statusOf(d.data())))) {
+        throw new HttpsError('already-exists', `${a.name || 'This animal'} already has an open sponsorship listing.`);
+      }
+    }
     fields.animalId = animalId;
     fields.animalName = typeof a.name === 'string' ? a.name : '';
     fields.isDog = String(a.species || '').toLowerCase() === 'dog';
@@ -409,7 +387,7 @@ exports.saveCampaign = onCall(async (request) => {
   const changed = Object.keys(fields).filter((k) => JSON.stringify(fields[k]) !== JSON.stringify(existing[k]));
   await db.runTransaction(async (tx) => {
     tx.update(ref, update);
-    historyEntry(tx, ref, actor, 'edited', {changedFields: changed}, existing.organizationId);
+    historyEntry(tx, ref, actor, 'edited', {changedFields: changed});
   });
   return {campaignId, status};
 });
@@ -427,9 +405,6 @@ exports.setCampaignStatus = onCall(async (request) => {
     if (!snap.exists) throw new HttpsError('not-found', 'Listing not found.');
     const c = snap.data();
     assertSameOrg(actor, c);
-    if (c.isPermanentGeneralFund === true && action !== 'reactivate') {
-      throw new HttpsError('failed-precondition', 'The General fund stays open.');
-    }
     const status = statusOf(c);
     const deadlinePassed = c.date instanceof Timestamp && c.date.toMillis() <= Date.now();
     const now = FieldValue.serverTimestamp();
@@ -468,7 +443,7 @@ exports.setCampaignStatus = onCall(async (request) => {
       throw new HttpsError('invalid-argument', 'Unknown action.');
     }
     tx.update(ref, {...next, updatedAt: now, updatedBy: actor.uid});
-    historyEntry(tx, ref, actor, action, {from: status, to: next.status, reason: why}, c.organizationId);
+    historyEntry(tx, ref, actor, action, {from: status, to: next.status, reason: why});
     return {status: next.status, type: c.type || 'donation'};
   });
 
@@ -535,7 +510,7 @@ exports.resolveExpiredCampaign = onCall(async (request) => {
       historyEntry(tx, ref, actor, decision === 'extend' ? 'extended' : 'relaunched', {
         previousDeadline, newDeadline, previousStatus: status, reason: why,
         collectedAtDecision: num(c.collectedAmount),
-      }, c.organizationId);
+      });
       tx.set(ref.collection('updates').doc(), {
         type: 'extended',
         title: `Campaign extended to ${formatManilaDate(newDeadline.toDate())}`,
@@ -548,7 +523,7 @@ exports.resolveExpiredCampaign = onCall(async (request) => {
     if (decision === 'close') {
       if (!['goal_not_met', 'goal_met'].includes(status)) throw new HttpsError('failed-precondition', 'This campaign has no pending deadline decision.');
       tx.update(ref, {status: 'closed', isActive: false, needsExtensionDecision: false, closedAt: now, updatedAt: now, updatedBy: actor.uid});
-      historyEntry(tx, ref, actor, 'extension_declined', {previousStatus: status, reason: why}, c.organizationId);
+      historyEntry(tx, ref, actor, 'extension_declined', {previousStatus: status, reason: why});
       return {status: 'closed'};
     }
 
@@ -564,7 +539,7 @@ exports.resolveExpiredCampaign = onCall(async (request) => {
         updatedAt: now,
         updatedBy: actor.uid,
       });
-      historyEntry(tx, ref, actor, 'converted_to_general', {previousDeadline, previousStatus: status, reason: why}, c.organizationId);
+      historyEntry(tx, ref, actor, 'converted_to_general', {previousDeadline, previousStatus: status, reason: why});
       tx.set(ref.collection('updates').doc(), {
         type: 'converted',
         title: 'Now accepting donations as a general fund',
@@ -601,77 +576,12 @@ exports.postCampaignUpdate = onCall(async (request) => {
   return {ok: true};
 });
 
-// Each organization's permanent General fund: a donation listing with no
-// goal and no end date (fundKind 'general') for money that isn't for a
-// particular campaign. Created on first use, at campaigns/general_{orgId},
-// so it works with allocations, expense funding and reports like any other
-// campaign. Not restricted, so its money can pay any of the
-// organization's costs.
-async function ensureGeneralFund(actor) {
-  if (!actor.organizationId) {
-    throw new HttpsError('failed-precondition', 'Your account is not linked to an organization.');
-  }
-  const ref = campaignsCol().doc(`general_${actor.organizationId}`);
-  const organizer = (await organizerNameFor(actor)) || 'Rescue Shelter';
-  await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (snap.exists) return;
-    tx.create(ref, {
-      type: 'donation',
-      fundKind: 'general',
-      isPermanentGeneralFund: true,
-      title: 'General Fund',
-      description: 'Donations that are not for a particular campaign. They pay for day-to-day rescue and shelter costs.',
-      imageUrl: null,
-      purposeTags: ['General Operations'],
-      restricted: false,
-      linkedCaseId: null,
-      animalId: null,
-      animalName: null,
-      targetAmount: 0,
-      acceptInKind: false,
-      inKindItems: [],
-      monthlyAmount: null,
-      intendedUse: null,
-      date: null,
-      startDate: FieldValue.serverTimestamp(),
-      status: 'active',
-      isActive: true,
-      organizer,
-      organizationId: actor.organizationId,
-      collectedAmount: 0,
-      allocatedAmount: 0,
-      transferredOutAmount: 0,
-      transferredInAmount: 0,
-      numdonors: 0,
-      needsExtensionDecision: false,
-      extensionCount: 0,
-      backgroundColor: 0xFFE3E0B9,
-      createdBy: actor.uid,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedBy: actor.uid,
-    });
-    historyEntry(tx, ref, actor, 'created', {status: 'active', generalFund: true}, actor.organizationId);
-  });
-  return ref.id;
-}
-
-// Returns the caller's organization's General fund id, creating it if needed.
-exports.ensureGeneralFund = onCall(async (request) => {
-  const actor = await loadActor(request, {finance: true});
-  return {campaignId: await ensureGeneralFund(actor)};
-});
-
 // Payment received outside PayMongo (bank transfer, cash, ...). Credited to
 // collectedAmount like a verified donation, but marked source 'manual' with
 // who recorded it. Duplicate guard: one record per campaign + method + reference.
-// generalFund: true records it to the organization's General fund instead
-// of a campaign (created on first use).
 exports.recordOfflineDonation = onCall(async (request) => {
   const actor = await loadActor(request, {finance: true});
-  const d = {...(request.data || {})};
-  if (d.generalFund === true) d.campaignId = await ensureGeneralFund(actor);
+  const d = request.data || {};
   requireCampaignId(d.campaignId);
   const amount = requireAmount(d.amount, 'Amount');
   if (!Object.prototype.hasOwnProperty.call(OFFLINE_METHODS, d.method)) throw new HttpsError('invalid-argument', 'Choose how the payment was received.');
@@ -739,8 +649,8 @@ exports.recordOfflineDonation = onCall(async (request) => {
     const completes = statusOf(c) === 'active' && m.target > 0 && m.collected < m.target && m.collected + centavos(amount) >= m.target;
     if (completes) Object.assign(campaignUpdate, completedCampaignFields());
     tx.update(campaignRef, campaignUpdate);
-    historyEntry(tx, campaignRef, actor, 'offline_donation_recorded', {donationId: donationRef.id, amount, method: d.method, reference}, c.organizationId);
-    if (completes) historyEntry(tx, campaignRef, actor, 'goal_completed', {to: 'goal_met', donationId: donationRef.id}, c.organizationId);
+    historyEntry(tx, campaignRef, actor, 'offline_donation_recorded', {donationId: donationRef.id, amount, method: d.method, reference});
+    if (completes) historyEntry(tx, campaignRef, actor, 'goal_completed', {to: 'goal_met', donationId: donationRef.id});
   });
   return {donationId: donationRef.id};
 });
@@ -772,10 +682,6 @@ exports.recordAllocation = onCall(async (request) => {
     if (!campaignSnap.exists) throw new HttpsError('not-found', 'Listing not found.');
     const c = campaignSnap.data();
     assertSameOrg(actor, c);
-    // Money raised for one rescue case can only pay that case's bills.
-    if (c.restricted === true && c.linkedCaseId && c.linkedCaseId !== linkedCaseId) {
-      throw new HttpsError('failed-precondition', 'This campaign\'s funds are restricted to another rescue case.');
-    }
     const m = moneyOf(c);
     if (centavos(amount) > m.available) {
       throw new HttpsError('failed-precondition', `Only ₱${pesos(m.available).toFixed(2)} is available to allocate.`);
@@ -792,46 +698,13 @@ exports.recordAllocation = onCall(async (request) => {
       linkedCaseId,
       inKindDescription,
       status: 'recorded',
-      // Analytics' spending-by-category reads allocations across campaigns,
-      // filtered on the organization.
-      organizationId: c.organizationId || null,
       recordedBy: actor.uid,
       recordedByName: actor.name,
       createdAt: now,
     });
     tx.update(campaignRef, {allocatedAmount: FieldValue.increment(amount), updatedAt: now});
-    historyEntry(tx, campaignRef, actor, 'allocation_recorded', {allocationId: requestId, amount, category}, c.organizationId);
+    historyEntry(tx, campaignRef, actor, 'allocation_recorded', {allocationId: requestId, amount, category});
     return {allocationId: requestId, duplicate: false};
-  });
-});
-
-// Undoes an expense allocation when the bill it paid is removed or its
-// funding changes (a case or general expense in the app). The allocation is
-// kept, marked voided, so the history still shows it; the amount goes back
-// to the campaign's available balance.
-exports.voidAllocation = onCall(async (request) => {
-  const actor = await loadActor(request, {finance: true});
-  const d = request.data || {};
-  requireCampaignId(d.campaignId);
-  const allocationId = requireRequestId(d.allocationId);
-  const reason = requireString(d.reason, 'Reason', {max: 500, optional: true});
-  const campaignRef = campaignsCol().doc(d.campaignId);
-  const allocRef = campaignRef.collection('allocations').doc(allocationId);
-
-  return db.runTransaction(async (tx) => {
-    const [campaignSnap, allocSnap] = await Promise.all([tx.get(campaignRef), tx.get(allocRef)]);
-    if (!campaignSnap.exists || !allocSnap.exists) throw new HttpsError('not-found', 'Allocation not found.');
-    const c = campaignSnap.data();
-    assertSameOrg(actor, c);
-    const a = allocSnap.data();
-    if (a.kind !== 'expense') throw new HttpsError('failed-precondition', 'Only spending can be voided.');
-    if (a.status === 'voided') return {allocationId, alreadyVoided: true};
-    const amount = num(a.amount);
-    const now = FieldValue.serverTimestamp();
-    tx.update(allocRef, {status: 'voided', voidedAt: now, voidedBy: actor.uid, voidedByName: actor.name, voidReason: reason});
-    tx.update(campaignRef, {allocatedAmount: FieldValue.increment(-amount), updatedAt: now});
-    historyEntry(tx, campaignRef, actor, 'allocation_voided', {allocationId, amount, reason}, c.organizationId);
-    return {allocationId, alreadyVoided: false};
   });
 });
 
@@ -926,7 +799,6 @@ exports.reallocateExcess = onCall(async (request) => {
       destinationCampaignId: destinationId,
       notes: reason,
       status: 'recorded',
-      organizationId: src.organizationId || null,
       recordedBy: actor.uid,
       recordedByName: actor.name,
       createdAt: now,
@@ -938,8 +810,8 @@ exports.reallocateExcess = onCall(async (request) => {
       transferId: requestId,
       createdAt: now,
     });
-    historyEntry(tx, srcRef, actor, 'excess_transferred_out', {transferId: requestId, amount, destinationCampaignId: destinationId, reason}, src.organizationId);
-    historyEntry(tx, dstRef, actor, 'excess_transferred_in', {transferId: requestId, amount, sourceCampaignId: sourceId, reason}, dst.organizationId);
+    historyEntry(tx, srcRef, actor, 'excess_transferred_out', {transferId: requestId, amount, destinationCampaignId: destinationId, reason});
+    historyEntry(tx, dstRef, actor, 'excess_transferred_in', {transferId: requestId, amount, sourceCampaignId: sourceId, reason});
     return {transferId: requestId, duplicate: false};
   });
 });
@@ -1010,17 +882,44 @@ exports.manageInKindDonation = onCall(async (request) => {
       }
     }
     tx.update(donationRef, update);
-    if (typeof p.userId === 'string') {
+    const c = campaignSnap && campaignSnap.exists ? campaignSnap.data() : {};
+    const campaignTitle = c.title || p.campaignName || 'our campaign';
+    const orgName = c.organizer || p.organizer || p.organizationName || 'The organization';
+    const items = [p.category, p.clarification].filter((s) => typeof s === 'string' && s.trim()).join(': ');
+    const hasDonor = typeof p.userId === 'string' && p.userId.length > 0;
+    if (hasDonor) {
       tx.set(db.collection('users').doc(p.userId).collection('history').doc(donationId), {status: update.status}, {merge: true});
     }
+    if (hasDonor && action === 'cancel') {
+      tx.set(db.collection('users').doc(p.userId).collection('notifications').doc(`inkind_cancelled_${donationId}`), {
+        title: 'In-Kind Pledge Cancelled',
+        message: `${orgName} marked your in-kind pledge${items ? ` (${items})` : ''} for ${campaignTitle} as cancelled.` +
+          (note ? ` Note: ${note}` : ''),
+        timestamp: now,
+        isRead: false,
+        type: 'inkind_cancelled',
+        donationId,
+        campaignId: p.campaignId || null,
+      });
+    }
     if (donorSnap) {
-      const c = campaignSnap && campaignSnap.exists ? campaignSnap.data() : {};
-      const items = [p.category, p.clarification].filter((s) => typeof s === 'string' && s.trim()).join(': ');
       const qty = update.quantityReceived ? `${update.quantityReceived} × ` : '';
       issueCertificate(tx, {
-        uid: p.userId,
-        id: donationId,
-        type: 'inkind',
+        notification: {
+          type: 'inkind_received',
+          title: 'In-Kind Donation Received',
+          message: `${orgName} confirmed they received your in-kind donation (${qty}${items || 'in-kind goods'}) ` +
+            `for ${campaignTitle}. Thank you! Your certificate is in Profile → Certificates.`,
+        },
+                details: {
+                  inKindCategory: typeof p.category === 'string' && p.category.trim() ? p.category.trim() : null,
+                  inKindItems: typeof p.clarification === 'string' && p.clarification.trim() ?
+                    p.clarification.trim().slice(0, 500) : null,
+                  quantityReceived: update.quantityReceived || null,
+                },
+                uid: p.userId,
+                id: donationId,
+                type: 'inkind',
         recipientName: displayName(donorSnap.data()) === 'Admin' ? 'Our Supporter' : displayName(donorSnap.data()),
         organizationName: c.organizer || p.organizer || p.organizationName,
         contribution: `${qty}${items || 'in-kind goods'}`.slice(0, 200),
@@ -1031,9 +930,14 @@ exports.manageInKindDonation = onCall(async (request) => {
       });
     }
     if (campaignRef && campaignSnap && campaignSnap.exists) {
-      historyEntry(tx, campaignRef, actor, action === 'received' ? 'inkind_received' : 'inkind_cancelled', {donationId, quantityReceived: update.quantityReceived || null}, c.organizationId);
+      historyEntry(tx, campaignRef, actor, action === 'received' ? 'inkind_received' : 'inkind_cancelled', {donationId, quantityReceived: update.quantityReceived || null});
     }
-    return {status: update.status};
+    // donorNotified tells the admin UI whether a donor account was told.
+    return {
+      status: update.status,
+      donorNotified: hasDonor,
+      donorName: p.isAnonymous === true ? 'Anonymous' : (p.donorName || null),
+    };
   });
 });
 

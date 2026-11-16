@@ -1434,12 +1434,12 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
       final name =
       '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
           .trim();
-      final label = type == 'adopt';
+
 
       await RescueCaseStore(FirebaseFirestore.instance).recordAction(
         caseId: widget.caseId,
         action: 'adoption_interest_registered',
-        statusLine: '${name.isEmpty ? 'A general user' : name} expressed interest to $label.',
+        statusLine: '${name.isEmpty ? 'A general user' : name} expressed interest to adopt the animal you reported.',
         details: {'type': type},
         fields: {
           'willingAdopterId': uid,

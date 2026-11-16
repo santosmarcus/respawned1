@@ -39,6 +39,12 @@ function certificateBenefit(c, fallbackTitle) {
 // Certificate of Donation at users/{uid}/certificates/{id} (id = payment or
 // donation id, so a retry rewrites the same doc), announced in the donor's
 // notifications. Server-written only. Must run inside a transaction `tx`.
+// cert.details holds what was given, for the certificate's wording
+// (certificate_view.dart): in-kind {inKindCategory, inKindItems,
+// quantityReceived}; sponsorship {animalName, sponsoredUntil}.
+// cert.notification ({title, message, type}) overrides the generic
+// "Certificate of Donation" notification so the donor learns what happened
+// (payment confirmed, items received, ...) from that one notification.
 function issueCertificate(tx, cert) {
   if (typeof cert.uid !== 'string' || !cert.uid) return;
   const db = admin.firestore();
@@ -52,16 +58,20 @@ function issueCertificate(tx, cert) {
     campaignId: cert.campaignId || null,
     campaignTitle: cert.campaignTitle || null,
     refNumber: cert.refNumber || null,
+    ...(cert.details || {}),
     dateText: formatManilaDate(new Date()),
     issuedAt: FieldValue.serverTimestamp(),
   });
+  const n = cert.notification || {};
   tx.set(userRef.collection('notifications').doc(`certificate_${cert.id}`), {
-    title: 'Certificate of Donation',
-    message: `Thank you for supporting ${cert.benefit}! Your certificate is in Profile → Certificates.`,
+    title: n.title || 'Certificate of Donation',
+    message: n.message || `Thank you for supporting ${cert.benefit}! Your certificate is in Profile → Certificates.`,
     timestamp: FieldValue.serverTimestamp(),
     isRead: false,
-    type: 'certificate',
+    type: n.type || 'certificate',
+    certificateType: cert.type,
     certificateId: cert.id,
+    campaignId: cert.campaignId || null,
   });
 }
 

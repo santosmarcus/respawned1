@@ -175,7 +175,13 @@ class _CertificateTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                    Text('$label · ${cert.contribution}',
+                    Text(
+                        switch (cert.type) {
+                          'sponsorship' => 'Sponsorship of ${cert.sponsoredAnimal}'
+                              '${cert.contribution.isNotEmpty ? ' · ${cert.contribution}' : ''}',
+                          'inkind' => '$label · ${cert.inKindItems ?? cert.inKindCategory ?? cert.contribution}',
+                          _ => '$label · ${cert.contribution}',
+                        },
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),

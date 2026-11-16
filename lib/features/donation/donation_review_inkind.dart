@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 import '../../app_theme.dart';
 import 'models.dart';
 import 'donation_summary_inkind.dart';
-import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class DonationReviewInKindScreen extends ConsumerStatefulWidget {
   final InKindDonationReviewParams params;
@@ -23,7 +22,7 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
 
   Future<void> _submit() async {
     setState(() => _isProcessing = true);
-    
+
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) throw Exception("User not authenticated");
@@ -81,6 +80,23 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
           .doc(docRef.id)
           .set(donationData);
 
+      // Shown in Notifications; the organization's confirmation follows later.
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('notifications')
+          .doc('inkind_pledged_${docRef.id}')
+          .set({
+        'title': 'In-Kind Pledge Recorded',
+        'message': 'Your pledge of ${widget.params.category} to ${widget.params.organizationName} was recorded. '
+            'You will be notified once they confirm receiving the items.',
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'type': 'inkind_pledged',
+        'donationId': docRef.id,
+        'campaignId': widget.params.fundraiserId,
+      }).catchError((_) {});
+
       // Update campaign donor count and user donated status
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         final campaignRef = FirebaseFirestore.instance.collection('campaigns').doc(widget.params.fundraiserId);
@@ -120,7 +136,7 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(appSnackBar("Error: $e"));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
       }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -192,10 +208,14 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: _isProcessing ? null : _submit,
-                      style: AppButtons.primary,
-                      child: _isProcessing 
-                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                        : Text('Confirm Donation', style: GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30.0)),
+                        backgroundColor: AppColors.yellowrspwn, foregroundColor: AppColors.textPrimary, elevation: 0,
+                      ),
+                      child: _isProcessing
+                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                          : Text('Confirm Donation', style: GoogleFonts.tiltWarp(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],

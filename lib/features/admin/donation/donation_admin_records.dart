@@ -53,7 +53,7 @@ class _DonationRecordsPageState extends ConsumerState<DonationRecordsPage> {
     final async = ref.watch(allDonationsProvider);
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
-      error: (e, _) => Center(child: Text('Could not load donations: $e', style: GoogleFonts.zain(color: AppColors.error))),
+      error: (e, _) => Center(child: Text('Could not load donations: $e', style: GoogleFonts.zain(color: Colors.redAccent))),
       data: (all) {
         final items = all.where((d) {
           final matchesTab = switch (_tab) {
@@ -251,40 +251,92 @@ class _DonationRecordSheetState extends ConsumerState<DonationRecordSheet> {
     super.dispose();
   }
 
+  String? _error;
+
   Future<void> _run(String action) async {
     final r = widget.record;
+    setState(() => _error = null);
     int? qty;
     if (action == 'received' && _qty.text.trim().isNotEmpty) {
       qty = int.tryParse(_qty.text.trim());
       if (qty == null || qty <= 0) {
-        showAdminSnack(context, 'Quantity received must be a whole number.', error: true);
+        setState(() => _error = 'Quantity received must be a whole number.');
         return;
       }
     }
-    if (action == 'cancel' &&
-        !await confirmAction(context,
-            title: 'Cancel pledge',
-            message: 'Mark this in-kind pledge as cancelled? The record is kept for history.',
-            confirmLabel: 'Cancel pledge',
-            destructive: true)) {
-      return;
-    }
+    final donor = r.displayName;
+    final hasAccount = r.userId != null;
+    final (title, message, label) = switch (action) {
+      'received' => (
+      'Confirm items received',
+      'Mark ${qty != null ? '$qty × ' : ''}${r.clarification.isNotEmpty ? r.clarification : r.category} '
+          'from $donor as received?\n\n'
+          '${hasAccount ? 'The donor will be notified and receive a Certificate of Donation.' : 'This pledge has no donor account, so nobody will be notified.'}',
+      'Mark received',
+      ),
+      'cancel' => (
+      'Cancel pledge',
+      'Mark this in-kind pledge as cancelled? The record is kept for history'
+          '${hasAccount ? ' and the donor will be notified' : ''}.',
+      'Cancel pledge',
+      ),
+      _ => (
+      'Send follow-up',
+      'Send $donor a notification asking about the status of this in-kind donation?',
+      'Send',
+      ),
+    };
+    final confirmed = await confirmAction(context,
+        title: title, message: message, confirmLabel: label, destructive: action == 'cancel');
+    if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     try {
-      await DonationAdminService.manageInKind(r.id, action, itemIndex: qty != null ? _itemIndex : null, quantityReceived: qty, notes: _notes.text.trim());
+      final res = await DonationAdminService.manageInKind(r.id, action,
+          itemIndex: qty != null ? _itemIndex : null, quantityReceived: qty, notes: _notes.text.trim());
       if (!mounted) return;
-      showAdminSnack(context, switch (action) {
-        'received' => 'Marked as received.',
-        'cancel' => 'Pledge cancelled.',
-        _ => 'Follow-up sent to the donor.',
-      });
-      Navigator.pop(context);
+      final notified = res['donorNotified'] == true || (action == 'follow_up' && hasAccount);
+      await _showResult(
+        title: switch (action) {
+          'received' => 'Items received',
+          'cancel' => 'Pledge cancelled',
+          _ => 'Follow-up sent',
+        },
+        message: switch (action) {
+          'received' => notified
+              ? '$donor has been notified that their in-kind donation was received, and their Certificate of '
+              'Donation is now in their profile.'
+              : 'The in-kind donation was marked as received. It has no donor account, so nobody was notified.',
+          'cancel' => notified
+              ? 'The pledge was cancelled and $donor has been notified.'
+              : 'The pledge was cancelled. It has no donor account, so nobody was notified.',
+          _ => '$donor has been sent a follow-up notification.',
+        },
+      );
+      if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) showAdminSnack(context, DonationAdminService.errorMessage(e), error: true);
+      // Shown in the sheet: a SnackBar would sit behind this bottom sheet.
+      if (mounted) setState(() => _error = DonationAdminService.errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Future<void> _showResult({required String title, required String message}) => showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppColors.background,
+      icon: const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 40),
+      title: Text(title, style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
+      content: Text(message, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: Text('OK',
+              style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -352,6 +404,17 @@ class _DonationRecordSheetState extends ConsumerState<DonationRecordSheet> {
                 ],
                 SheetTextField(controller: _qty, hint: 'Quantity received', keyboardType: TextInputType.number),
                 SheetTextField(controller: _notes, hint: 'Notes (optional)'),
+                if (r.userId != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('The donor is notified when you confirm or cancel.',
+                        style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                  ),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(_error!, style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
+                  ),
                 const SizedBox(height: 14),
                 Row(
                   children: [
@@ -368,7 +431,7 @@ class _DonationRecordSheetState extends ConsumerState<DonationRecordSheet> {
                     ),
                     TextButton(
                       onPressed: _busy ? null : () => _run('cancel'),
-                      child: Text('Cancel pledge', style: GoogleFonts.zain(fontSize: 15, color: AppColors.error)),
+                      child: Text('Cancel pledge', style: GoogleFonts.zain(fontSize: 15, color: Colors.redAccent)),
                     ),
                   ],
                 ),
@@ -392,7 +455,7 @@ class _PaymentAttemptsList extends ConsumerWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text('Payment attempts are not readable with the current Firestore rules ($e).',
-              textAlign: TextAlign.center, style: GoogleFonts.zain(color: AppColors.error)),
+              textAlign: TextAlign.center, style: GoogleFonts.zain(color: Colors.redAccent)),
         ),
       ),
       data: (items) => items.isEmpty

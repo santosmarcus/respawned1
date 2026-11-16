@@ -12,12 +12,6 @@ import 'package:respawnd1/features/adoption/animal_page.dart';
 
 /// Home screen "Sponsored Animals" — the animals the SIGNED-IN user is
 /// currently (actively) sponsoring, shown right under Post Adoption.
-/// Mirrors PostAdoption's own plain-StreamBuilder row-list pattern in this
-/// same file's sibling widget, rather than the Activity carousel's
-/// PageView pattern — the two existing Home sections don't share a single
-/// visual pattern, and this is a simple list of a few sponsorships, not a
-/// swipeable feed. No new sponsorship collection: reads the existing
-/// `sponsors` collection via [SponsorshipRepository].
 class SponsoredAnimalsSection extends StatelessWidget {
   const SponsoredAnimalsSection({super.key});
 
@@ -130,7 +124,7 @@ class _SponsoredAnimalTile extends StatelessWidget {
                         Text('Since ${_fmtDate(sponsorship.startDate!)}', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                       if (sponsorship.nextContributionDate != null)
                         Text(
-                          'Next contribution: ${_fmtDate(sponsorship.nextContributionDate!)}${sponsorship.cycle != null ? ' (${sponsorship.cycle})' : ''}',
+                          'Sponsored until: ${_fmtDate(sponsorship.nextContributionDate!)}',
                           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                         ),
                     ],

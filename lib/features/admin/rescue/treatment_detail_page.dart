@@ -30,6 +30,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.da
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
+
 const List<String> _conditions = [
   'Critical',
   'Stable',

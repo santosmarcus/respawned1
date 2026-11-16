@@ -34,9 +34,9 @@ class DonationAdminService {
     bool publish = false,
   }) async {
     final res = await _call('saveCampaign', {
-      'campaignId': ?campaignId,
-      'data': data,
-      'publish': publish,
+    'campaignId': ?campaignId,
+    'data': data,
+    'publish': publish,
     });
     return res['campaignId'] as String? ?? campaignId ?? '';
   }
@@ -57,8 +57,6 @@ class DonationAdminService {
   static Future<void> postUpdate(String campaignId, {required String title, String? body, String type = 'general'}) =>
       _call('postCampaignUpdate', {'campaignId': campaignId, 'title': title, 'body': body, 'type': type});
 
-  /// [campaignId] null records it to the organization's General fund
-  /// (created on first use by the backend).
   static Future<void> recordOfflineDonation({
     required String? campaignId,
     required double amount,
@@ -116,14 +114,15 @@ class DonationAdminService {
         'reason': reason,
       });
 
-  /// action: received | cancel | follow_up
-  static Future<void> manageInKind(String donationId, String action, {int? itemIndex, int? quantityReceived, String? notes}) =>
+  /// action: received | cancel | follow_up. Returns {status, donorNotified, donorName}.
+  static Future<Map<String, dynamic>> manageInKind(String donationId, String action,
+      {int? itemIndex, int? quantityReceived, String? notes}) =>
       _call('manageInKindDonation', {
-        'donationId': donationId,
-        'action': action,
-        'itemIndex': ?itemIndex,
-        'quantityReceived': ?quantityReceived,
-        if (notes != null && notes.isNotEmpty) 'notes': notes,
+      'donationId': donationId,
+      'action': action,
+      'itemIndex': ?itemIndex,
+      'quantityReceived': ?quantityReceived,
+      if (notes != null && notes.isNotEmpty) 'notes': notes,
       });
 
   static String errorMessage(Object error) {

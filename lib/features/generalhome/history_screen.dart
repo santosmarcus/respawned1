@@ -15,18 +15,20 @@ import 'package:respawnd1/features/generalhome/history_provider.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
-import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/core/widgets/volunteer_badges.dart';
 
 class HistoryPage extends StatefulWidget {
-  const HistoryPage({super.key});
+  /// 0 Rescue, 1 Adoption, 2 Donation, 3 Volunteer.
+  final int initialTab;
+  const HistoryPage({super.key, this.initialTab = 0});
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
 }
 
 class _HistoryPageState extends State<HistoryPage> {
-  int _tabIndex = 0;
+  late int _tabIndex = widget.initialTab;
   static const _tabs = ['Rescue', 'Adoption', 'Donation', 'Volunteer'];
 
   @override
@@ -143,10 +145,10 @@ class _RescueHistoryCard extends StatelessWidget {
   }
 
   bool get _communityAdoptionEligible => isCommunityAdoptionEligible(
-        status: data['status'] as String?,
-        rejectionReason: data['rejectionReason'] as String?,
-        rescueType: data['rescueType'] as String?,
-      );
+    status: data['status'] as String?,
+    rejectionReason: data['rejectionReason'] as String?,
+    rescueType: data['rescueType'] as String?,
+  );
 
   String get _rejectionReasonLabel {
     final reason = RejectionReason.fromName(data['rejectionReason'] as String?);
@@ -193,15 +195,15 @@ class _RescueHistoryCard extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-              builder: (_) => _isRejected && _communityAdoptionEligible
-                  ? CommunityAdoptionTrackPage(caseId: caseId)
-                  : (_isFinal || _isRejected)
-                    ? CaseSummaryPage(
-                        caseId: caseId,
-                        caseData: data,
-                        fromCompletionFlow: false,
-                      )
-                    : TrackCasePage(caseId: caseId),
+            builder: (_) => _isRejected && _communityAdoptionEligible
+                ? CommunityAdoptionTrackPage(caseId: caseId)
+                : (_isFinal || _isRejected)
+                ? CaseSummaryPage(
+              caseId: caseId,
+              caseData: data,
+              fromCompletionFlow: false,
+            )
+                : TrackCasePage(caseId: caseId),
           ),
         );
       },
@@ -443,10 +445,10 @@ class _DonationHistoryTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(historyProvider);
-    final donationHistory = history.where((item) => 
-      item.type == HistoryType.donation || 
-      item.type == HistoryType.inKindDonation || 
-      item.type == HistoryType.sponsorship
+    final donationHistory = history.where((item) =>
+    item.type == HistoryType.donation ||
+        item.type == HistoryType.inKindDonation ||
+        item.type == HistoryType.sponsorship
     ).toList();
 
     if (donationHistory.isEmpty) {
@@ -485,7 +487,7 @@ class _DonationHistoryCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     String title = '';
     String subTitle = '';
-    
+
     switch (item.type) {
       case HistoryType.donation:
         title = 'Donation';
@@ -504,7 +506,7 @@ class _DonationHistoryCard extends ConsumerWidget {
     return GestureDetector(
       onTap: () {
         if (item.type == HistoryType.sponsorship) {
-           Navigator.push(
+          Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => ss.DonationSummaryScreen(
@@ -549,8 +551,8 @@ class _DonationHistoryCard extends ConsumerWidget {
                   charityName: item.organizer,
                   donationMethod: item.donationMethod ?? 'Monetary',
                   item: DonationItem(
-                    description: item.itemDescription ?? 'Donation', 
-                    amount: item.amount ?? 0
+                      description: item.itemDescription ?? 'Donation',
+                      amount: item.amount ?? 0
                   ),
                   referenceNumber: item.refNumber,
                   timestamp: item.dateTime,
@@ -561,114 +563,126 @@ class _DonationHistoryCard extends ConsumerWidget {
           );
         }
       },
+      // Same card as the Rescue and Adoption tabs (_SimpleHistoryCard).
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFFFDFCF4), // Light off-white from image
-          borderRadius: BorderRadius.circular(16),
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
+              color: AppColors.slaterspwn,
+              blurRadius: 1,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
         padding: const EdgeInsets.all(12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.tearspwn,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(_icon, size: 20, color: AppColors.textPrimary),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    formatDateTime(item.dateTime),
-                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                  ),
-                  Text(
-                    title,
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF4A4512), // Dark olive from image
+                  Text(subTitle.isEmpty ? title : subTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    const Icon(Icons.access_time,
+                        size: 14, color: AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(_formatTimestamp(Timestamp.fromDate(item.dateTime)),
+                          style: GoogleFonts.zain(
+                              fontSize: 12, color: AppColors.textSecondary)),
                     ),
-                  ),
-                  Text(
-                    subTitle,
-                    style: GoogleFonts.zain(
-                      fontSize: 16,
-                      color: const Color(0xFF4A4512).withValues(alpha: 0.8),
+                  ]),
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    const Icon(Icons.volunteer_activism_outlined,
+                        size: 14, color: AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(_detail(title),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(
+                              fontSize: 12, color: AppColors.textPrimary)),
                     ),
-                  ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    const Icon(Icons.info_outline,
+                        size: 14, color: AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Text(_statusLabel,
+                        style: GoogleFonts.zain(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _isNegativeStatus ? AppColors.error : AppColors.textPrimary)),
+                  ]),
                 ],
               ),
             ),
-            _buildStatusBadge(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatusBadge() {
-    if (item.type == HistoryType.inKindDonation && item.status != null) {
-      Color bgColor;
-      String label;
-      switch (item.status!) {
-        case InKindStatus.complete:
-          bgColor = AppColors.success;
-          label = 'Complete';
-          break;
-        case InKindStatus.inProgress:
-          bgColor = AppColors.warning;
-          label = 'In Progress';
-          break;
-        case InKindStatus.cancelled:
-          bgColor = AppColors.error;
-          label = 'Cancelled';
-          break;
-      }
-      return _badge(label, bgColor);
-    } else if (item.type == HistoryType.sponsorship && item.sponsorshipStatus != null) {
-      Color bgColor;
-      String label;
-      switch (item.sponsorshipStatus!) {
-        case 'active':
-          bgColor = AppColors.success;
-          label = 'Active';
-          break;
-        case 'cancelled':
-          bgColor = AppColors.warning;
-          label = 'Cancelled';
-          break;
-        case 'inactive':
-          bgColor = AppColors.error;
-          label = 'Inactive';
-          break;
-        default:
-          return const SizedBox.shrink();
-      }
-      return _badge(label, bgColor);
-    }
-    return const SizedBox.shrink();
+  IconData get _icon => switch (item.type) {
+    HistoryType.donation => Icons.volunteer_activism_outlined,
+    HistoryType.inKindDonation => Icons.inventory_2_outlined,
+    HistoryType.sponsorship => Icons.pets,
+  };
+
+  /// "Donation · ₱500", "In-Kind Donation · Food & Water", "Sponsorship · ₱300".
+  String _detail(String typeLabel) {
+    final extra = item.type == HistoryType.inKindDonation
+        ? (item.category ?? '')
+        : ((item.amount ?? 0) > 0 ? formatPeso(item.amount!) : '');
+    return extra.isEmpty ? typeLabel : '$typeLabel · $extra';
   }
 
-  Widget _badge(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.tiltWarp(
-          fontSize: 12,
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
+  String get _statusLabel {
+    switch (item.type) {
+      case HistoryType.inKindDonation:
+        return switch (item.status) {
+          InKindStatus.complete => 'Received',
+          InKindStatus.cancelled => 'Cancelled',
+          _ => 'In Progress',
+        };
+      case HistoryType.sponsorship:
+        return switch (item.sponsorshipStatus) {
+          'active' => 'Active',
+          'renewed' => 'Renewed',
+          'cancelled' => 'Cancelled',
+          'inactive' => 'Ended',
+          _ => 'Completed',
+        };
+      case HistoryType.donation:
+        return 'Completed';
+    }
   }
+
+  bool get _isNegativeStatus =>
+      item.status == InKindStatus.cancelled ||
+          (item.type == HistoryType.sponsorship && item.sponsorshipStatus == 'cancelled');
 }
 
 

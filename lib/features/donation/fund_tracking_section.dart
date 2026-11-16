@@ -10,6 +10,10 @@ import 'models.dart';
 ///
 /// For a sponsorship the listing *is* the animal's, so these are exactly the
 /// funds allocated for the sponsored animal.
+///
+/// Used by both donation_detail.dart and sponsorship_detail.dart. The totals
+/// follow the campaign doc live (allocatedAmount is kept by the backend's
+/// recordAllocation), so they show even if the list itself can't be read.
 class FundTrackingSection extends StatefulWidget {
   final DonationListing listing;
   final bool initiallyExpanded;
@@ -21,11 +25,10 @@ class FundTrackingSection extends StatefulWidget {
 
 class _FundTrackingSectionState extends State<FundTrackingSection> {
   late bool _expanded = widget.initiallyExpanded;
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream = FirebaseFirestore.instance
-      .collection('campaigns')
-      .doc(widget.listing.id)
-      .collection('allocations')
-      .snapshots();
+  late final DocumentReference<Map<String, dynamic>> _campaignRef =
+  FirebaseFirestore.instance.collection('campaigns').doc(widget.listing.id);
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _campaignStream = _campaignRef.snapshots();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream = _campaignRef.collection('allocations').snapshots();
 
   static double _amount(Object? raw) {
     if (raw is num) return raw.toDouble();
@@ -42,7 +45,17 @@ class _FundTrackingSectionState extends State<FundTrackingSection> {
 
   @override
   Widget build(BuildContext context) {
-    final l = widget.listing;
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _campaignStream,
+      builder: (context, campaignSnap) {
+        final doc = campaignSnap.data;
+        final live = doc != null && doc.exists ? DonationListing.fromFirestore(doc) : widget.listing;
+        return _buildFor(live);
+      },
+    );
+  }
+
+  Widget _buildFor(DonationListing l) {
     final title = l.type == 'sponsorship' ? 'Fund Tracking for ${l.animalName ?? 'this pet'}' : 'Fund Tracking';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -61,7 +74,7 @@ class _FundTrackingSectionState extends State<FundTrackingSection> {
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _stream,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
                 return const LinearProgressIndicator(color: AppColors.greenrspwn);
               }
               // Voided spending (its bill was removed) is kept for history only.
@@ -70,7 +83,12 @@ class _FundTrackingSectionState extends State<FundTrackingSection> {
                 if (ta is Timestamp && tb is Timestamp) return tb.compareTo(ta);
                 return 0;
               });
-              final allocated = docs.fold<double>(0, (s, d) => s + _amount(d.data()['amount']));
+              // The campaign's own running total (spending + excess moved out)
+              // is authoritative; the list sum covers listings that predate it.
+              final listed = docs.fold<double>(0, (s, d) => s + _amount(d.data()['amount']));
+              final fromCampaign = l.allocatedAmount + l.transferredOutAmount;
+              final allocated = fromCampaign > listed ? fromCampaign : listed;
+              final loadError = snapshot.error;
               final remaining = l.availableBalance > 0 ? l.availableBalance : 0;
               return Container(
                 width: double.infinity,
@@ -94,7 +112,14 @@ class _FundTrackingSectionState extends State<FundTrackingSection> {
                             style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                       ),
                     const Divider(height: 22),
-                    if (docs.isEmpty)
+                    if (loadError != null)
+                      Text(
+                        loadError is FirebaseException && loadError.code == 'permission-denied'
+                            ? 'The spending details for this listing could not be loaded (access was denied).'
+                            : 'The spending details for this listing could not be loaded. Please try again later.',
+                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                      )
+                    else if (docs.isEmpty)
                       Text('No allocations recorded yet.', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary))
                     else
                       for (final d in docs) _AllocationRow(data: d.data(), amount: _peso(_amount(d.data()['amount']))),

@@ -7,6 +7,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/features/donation/models.dart';
+import 'package:respawnd1/features/donation/sponsorship_detail.dart';
+import 'package:respawnd1/features/generalhome/certificates_page.dart';
+import 'package:respawnd1/features/generalhome/history_screen.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
@@ -25,7 +31,32 @@ const List<String> _kDismissedCaseStatuses = [
   'rejected',
 ];
 
-enum _NotifKind { rescue, adoption }
+// donation: users/{uid}/notifications written by the backend (donation /
+// sponsorship confirmations, in-kind received / cancelled / follow-up, goal
+// reached, sponsorship ended).
+enum _NotifKind { rescue, adoption, donation }
+
+/// users/{uid}/notifications `type` → the label shown before the title.
+const Map<String, String> _kDonationNotifLabels = {
+  'donation_confirmed': 'Donation',
+  'goal_reached': 'Donation',
+  'sponsorship_confirmed': 'Sponsorship',
+  'sponsorship_lapsed': 'Sponsorship',
+  'sponsorship_renewal': 'Sponsorship',
+  'inkind_pledged': 'In-Kind Donation',
+  'inkind_received': 'In-Kind Donation',
+  'inkind_cancelled': 'In-Kind Donation',
+  'inkind_followup': 'In-Kind Donation',
+  'certificate': 'Certificate',
+};
+
+/// Notification types whose tap opens Profile → Certificates.
+const Set<String> _kCertificateNotifTypes = {
+  'certificate',
+  'donation_confirmed',
+  'sponsorship_confirmed',
+  'inkind_received',
+};
 
 class _NotifItem {
   final String refLabel;
@@ -34,6 +65,10 @@ class _NotifItem {
   final DateTime timestamp;
   final _NotifKind kind;
   final String docId;
+  /// users/{uid}/notifications `type`, for [_NotifKind.donation] items.
+  final String? sourceType;
+  /// The notification document, for [_NotifKind.donation] items.
+  final Map<String, dynamic>? data;
 
   const _NotifItem({
     required this.refLabel,
@@ -42,6 +77,8 @@ class _NotifItem {
     required this.timestamp,
     required this.kind,
     required this.docId,
+    this.sourceType,
+    this.data,
   });
 
   String get id =>
@@ -61,6 +98,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   StreamSubscription<QuerySnapshot>? _casesSub;
   StreamSubscription<QuerySnapshot>? _willingAdopterCasesSub;
   StreamSubscription<QuerySnapshot>? _adoptionsSub;
+  StreamSubscription<QuerySnapshot>? _donationNotifsSub;
   final Map<String, StreamSubscription<QuerySnapshot>> _messageSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _communityReportSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _checkinSubs = {};
@@ -78,6 +116,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<_NotifItem> _caseStatusItems = [];
   List<_NotifItem> _willingAdopterCaseItems = [];
   List<_NotifItem> _adoptionStatusItems = [];
+  List<_NotifItem> _donationItems = [];
   final Map<String, List<_NotifItem>> _messageItemsByCase = {};
   final Map<String, List<_NotifItem>> _communityReportItemsByCase = {};
   final Map<String, List<_NotifItem>> _checkinItemsByAdoption = {};
@@ -135,6 +174,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         .where('personal.adopterId', isEqualTo: uid)
         .snapshots()
         .listen(_onAdoptionsUpdate);
+
+    _donationNotifsSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .orderBy('timestamp', descending: true)
+        .limit(100)
+        .snapshots()
+        .listen(_onDonationNotificationsUpdate, onError: (_) {});
 
     _listenUserLocation(uid);
 
@@ -404,9 +452,37 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (mounted) setState(() => _messageItemsByCase[caseId] = items);
   }
 
+  void _onDonationNotificationsUpdate(QuerySnapshot snap) {
+    final items = <_NotifItem>[];
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final ts = data['timestamp'];
+      if (ts is! Timestamp) continue;
+      final sourceType = data['type'] as String? ?? '';
+      final title = data['title'] as String? ?? 'Update';
+      items.add(_NotifItem(
+        refLabel: _kDonationNotifLabels[sourceType] ?? 'Donation',
+        type: title,
+        message: data['message'] as String? ?? '',
+        timestamp: ts.toDate(),
+        kind: _NotifKind.donation,
+        docId: doc.id,
+        sourceType: sourceType,
+        data: data,
+      ));
+    }
+    if (mounted) setState(() => _donationItems = items);
+  }
+
   // Exact-match messages (fixed text, no variable content).
   static const Map<String, String> _notifiableAdoptionMessages = {
+    'Form submitted.': 'Application Submitted',
     'Appointment booked.': 'Application Review',
+    'Interview confirmed by organization.': 'Interview Confirmed',
+    'Interview rescheduled by organization.': 'Interview Rescheduled',
+    'Animal reserved for this applicant.': 'Animal Reserved',
+    'Reservation cleared.': 'Reservation Cleared',
+    'Animal retrieved from adopter.': 'Return Completed',
     'Application approved. Appointment confirmed.': 'Time to Meet',
     'Adoption Completed!': 'Adoption Day',
     'Animal released — adoption completed.': 'Adoption Day',
@@ -420,6 +496,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   // actor name, ...) — checked in order after the exact-match map misses.
   static const Map<String, String> _notifiableAdoptionMessagePrefixes = {
     'Return declined': 'Return Declined',
+    // Messages below end with an actor name / reason, so they match by prefix.
+    'Application approved': 'Application Approved',
+    'Application rejected': 'Application Not Approved',
+    'Interview completed': 'Interview Completed',
+    'Applicant marked as no-show': 'Missed Interview',
+    // Written as 'Return initiated by organization (<name>).'
+    'Return initiated by organization': 'Return Initiated',
+    'Admin recorded an unsuccessful delivery attempt': 'Delivery Update',
+    'Follow-up submission confirmed': 'Post-Adoption',
+    'Warning marked resolved': 'Post-Adoption',
     'Follow-up reminder sent': 'Post-Adoption Reminder',
     'A follow-up was rescheduled': 'Post-Adoption',
     // AdoptionApplicationRepository.sendWarning writes 'Warning sent:
@@ -552,6 +638,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     _casesSub?.cancel();
     _willingAdopterCasesSub?.cancel();
     _adoptionsSub?.cancel();
+    _donationNotifsSub?.cancel();
     _userDocSub?.cancel();
     _nearbyCasesSub?.cancel();
     for (final s in _messageSubs.values) {
@@ -574,16 +661,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   List<_NotifItem> get _allItems {
     final all = <_NotifItem>[
-      ..._caseStatusItems,
-      ..._willingAdopterCaseItems,
-      ..._adoptionStatusItems,
-      ..._nearbyCaseItems,
-      for (final list in _messageItemsByCase.values) ...list,
-      for (final list in _communityReportItemsByCase.values) ...list,
-      for (final list in _nearbyCommunityReportItemsByCase.values) ...list,
-      for (final list in _checkinItemsByAdoption.values) ...list,
-      for (final item in _dueItemsByAdoption.values)
-        ?item,
+    ..._caseStatusItems,
+    ..._willingAdopterCaseItems,
+    ..._adoptionStatusItems,
+    ..._donationItems,
+    ..._nearbyCaseItems,
+    for (final list in _messageItemsByCase.values) ...list,
+    for (final list in _communityReportItemsByCase.values) ...list,
+    for (final list in _nearbyCommunityReportItemsByCase.values) ...list,
+    for (final list in _checkinItemsByAdoption.values) ...list,
+    for (final item in _dueItemsByAdoption.values)
+    ?item,
     ];
     all.removeWhere((item) => _dismissedIds.contains(item.id));
     final deduped = <String, _NotifItem>{for (final item in all) item.id: item};
@@ -629,8 +717,156 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } catch (_) {}
   }
 
-  Future<void> _openItem(_NotifItem item) async {
+  /// "Renew your sponsorship?" — sponsorships are one-time 30-day payments,
+  /// so the sponsor chooses: pay for another 30 days (the backend starts the
+  /// new period when the current one ends), stop, or decide later.
+  Future<void> _askToRenewSponsorship(_NotifItem item) async {
+    final uid = _uid;
+    final data = item.data ?? const <String, dynamic>{};
+    final donationId = data['donationId'] as String?;
+    final campaignId = data['campaignId'] as String?;
+    if (uid == null || donationId == null || campaignId == null) return;
+
+    final db = FirebaseFirestore.instance;
+    final DocumentSnapshot<Map<String, dynamic>> donationSnap;
+    final DocumentSnapshot<Map<String, dynamic>> campaignSnap;
+    try {
+      donationSnap = await db.collection('donations').doc(donationId).get();
+      campaignSnap = await db.collection('campaigns').doc(campaignId).get();
+    } catch (_) {
+      if (mounted) _showInfo('Could not load this sponsorship', 'Please check your connection and try again.');
+      return;
+    }
+    if (!mounted) return;
+
+    final donation = donationSnap.data();
+    final status = donation?['sponsorshipStatus'] as String?;
+    final endsAt = (donation?['nextChargeDate'] as Timestamp?)?.toDate();
+    if (donation == null || status != 'active') {
+      _dismiss(item);
+      _showInfo('Sponsorship', switch (status) {
+        'renewed' => 'You already renewed this sponsorship. Thank you!',
+        'cancelled' => 'You stopped this sponsorship. You can sponsor again anytime from Donations.',
+        _ => 'This sponsorship has ended. You can sponsor again anytime from Donations.',
+      });
+      return;
+    }
+    if (!campaignSnap.exists) {
+      _showInfo('Sponsorship', 'This sponsorship listing is no longer available.');
+      return;
+    }
+
+    final listing = DonationListing.fromFirestore(campaignSnap);
+    final name = (listing.animalName ?? '').isNotEmpty ? listing.animalName! : listing.title;
+    final amount = (data['amount'] as num?)?.toDouble() ??
+        (donation['nextChargeAmount'] as num?)?.toDouble() ??
+        (donation['amount'] as num?)?.toDouble() ??
+        0;
+    final endText = endsAt == null ? 'soon' : 'on ${formatDate(endsAt)}';
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: Text('Continue sponsoring $name?', style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
+        content: Text(
+          'Your current sponsorship ends $endText. Continue for another 30 days'
+              '${amount > 0 ? ' for ${formatPeso(amount)}' : ''}? The new period starts when the current one ends.',
+          style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'later'),
+            child: Text('Not now', style: GoogleFonts.zain(fontSize: 16, color: AppColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'stop'),
+            child: Text('Stop sponsoring', style: GoogleFonts.zain(fontSize: 16, color: AppColors.error)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'continue'),
+            child: Text('Continue',
+                style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null || choice == 'later') return;
     _dismiss(item);
+
+    if (choice == 'stop') {
+      try {
+        const update = {'sponsorshipStatus': 'cancelled'};
+        await Future.wait([
+          db.collection('donations').doc(donationId).update(update),
+          db.collection('users').doc(uid).collection('history').doc(donationId).update(update),
+        ]);
+        if (mounted) {
+          _showInfo('Sponsorship stopped',
+              'Your sponsorship of $name will not be renewed. Your support until it ends $endText still counts — thank you!');
+        }
+      } catch (_) {
+        if (mounted) _showInfo('Could not stop the sponsorship', 'Please try again.');
+      }
+      return;
+    }
+
+    if (listing.status != 'active' || amount <= 0) {
+      _showInfo('Sponsorship', 'This sponsorship is not accepting new payments right now.');
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SponsorshipReviewSheet(sponsorship: listing, amount: amount),
+    );
+  }
+
+  void _showInfo(String title, String message) => showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppColors.background,
+      title: Text(title, style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
+      content: Text(message, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: Text('OK', style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _openItem(_NotifItem item) async {
+    // A renewal question stays listed until it is answered.
+    if (item.sourceType != 'sponsorship_renewal') _dismiss(item);
+
+    if (item.kind == _NotifKind.donation) {
+      final uid = _uid;
+      if (uid != null) {
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('notifications')
+            .doc(item.docId)
+            .update({'isRead': true})
+            .catchError((_) {});
+      }
+      if (item.sourceType == 'sponsorship_renewal') {
+        await _askToRenewSponsorship(item);
+        return;
+      }
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _kCertificateNotifTypes.contains(item.sourceType)
+              ? const CertificatesPage()
+              : const HistoryPage(initialTab: 2),
+        ),
+      );
+      return;
+    }
 
     if (item.kind == _NotifKind.rescue) {
       Navigator.push(

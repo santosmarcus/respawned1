@@ -159,6 +159,16 @@ async function finalizePaidDonation(paymentRef, session) {
     const campaignRef = db.collection('campaigns').doc(p.campaignId);
     const userRef = db.collection('users').doc(p.donorId);
     const [campaignSnap, userSnap] = await Promise.all([tx.get(campaignRef), tx.get(userRef)]);
+    // A sponsorship paid while the donor's previous one for this animal is
+    // still running is a renewal: it continues from where that one ends.
+    const previousSponsorships = p.campaignType === 'sponsorship' ?
+      (await tx.get(db.collection('donations')
+          .where('userId', '==', p.donorId)
+          .where('campaignId', '==', p.campaignId))).docs
+          .filter((d) => d.id !== paymentRef.id && d.data().type === 'sponsorship' &&
+            d.data().sponsorshipStatus === 'active' && d.data().nextChargeDate instanceof Timestamp &&
+            d.data().nextChargeDate.toMillis() > Date.now()) :
+      [];
 
     const now = FieldValue.serverTimestamp();
     const paidAmount = paid.attributes.amount;
@@ -205,7 +215,9 @@ async function finalizePaidDonation(paymentRef, session) {
     };
     if (isSponsorship) {
       record.lastPaymentTime = Timestamp.now();
-      record.nextChargeDate = Timestamp.fromMillis(Date.now() + SPONSORSHIP_PERIOD_DAYS * 86400000);
+      const periodStart = Math.max(Date.now(), ...previousSponsorships.map((d) => d.data().nextChargeDate.toMillis()));
+      record.nextChargeDate = Timestamp.fromMillis(periodStart + SPONSORSHIP_PERIOD_DAYS * 86400000);
+      if (previousSponsorships.length) record.renewalOf = previousSponsorships.map((d) => d.id);
       record.status = 'active';
       record.sponsorshipStatus = 'active';
       record.nextChargeAmount = p.amount;
@@ -225,6 +237,11 @@ async function finalizePaidDonation(paymentRef, session) {
     // and this history doc merge in historyProvider instead of duplicating.
     tx.set(db.collection('donations').doc(paymentRef.id), record);
     tx.set(userRef.collection('history').doc(paymentRef.id), record);
+    for (const prev of previousSponsorships) {
+      const renewed = {sponsorshipStatus: 'renewed', status: 'renewed', renewedBy: paymentRef.id};
+      tx.update(prev.ref, renewed);
+      tx.set(userRef.collection('history').doc(prev.id), renewed, {merge: true});
+    }
     tx.set(userRef.collection('donated').doc(p.campaignId), {
       donationId: p.campaignId,
       donatedAt: now,
@@ -257,14 +274,30 @@ async function finalizePaidDonation(paymentRef, session) {
       }
       tx.update(campaignRef, campaignUpdate);
     }
+    const benefit = certificateBenefit(c, p.campaignName);
     issueCertificate(tx, {
-      uid: p.donorId,
-      id: paymentRef.id,
-      type: isSponsorship ? 'sponsorship' : 'donation',
+      notification: isSponsorship ? {
+        type: 'sponsorship_confirmed',
+        title: 'Sponsorship Confirmed',
+        message: `Your ${formatPeso(p.amount)} sponsorship for ${benefit} was received. Thank you! ` +
+          'Your certificate is in Profile → Certificates.',
+      } : {
+        type: 'donation_confirmed',
+        title: 'Donation Confirmed',
+        message: `Your ${formatPeso(p.amount)} donation to ${p.campaignName || benefit} was received. Thank you! ` +
+          'Your certificate is in Profile → Certificates.',
+      },
+            details: isSponsorship ? {
+              animalName: c.animalName || null,
+              sponsoredUntil: record.nextChargeDate,
+            } : {},
+            uid: p.donorId,
+            id: paymentRef.id,
+            type: isSponsorship ? 'sponsorship' : 'donation',
       recipientName: donorDisplayName(userSnap.data()),
       organizationName: p.organizer,
       contribution: formatPeso(p.amount),
-      benefit: certificateBenefit(c, p.campaignName),
+      benefit,
       campaignId: p.campaignId,
       campaignTitle: p.campaignName,
       refNumber,
@@ -291,6 +324,8 @@ async function notifyGoalReached(campaignId, title) {
         message: `A campaign you donated to, ${title}, has reached its goal. Thank you for your contribution!`,
         timestamp: FieldValue.serverTimestamp(),
         isRead: false,
+        type: 'goal_reached',
+        campaignId,
       });
     }
     await batch.commit();
@@ -640,7 +675,47 @@ exports.expireStaleDonationCheckouts = onSchedule(
     },
 );
 
-// OPTIONAL. Sponsorships are one-time 30-day payments (no automatic renewal):
+// Sponsorships are one-time 30-day payments (no automatic charge), so the
+// sponsor is asked RENEWAL_NOTICE_DAYS before the period ends whether to
+// continue (notifications_screen.dart offers Continue / Stop). Sent once per
+// period: renewalReminderFor records the nextChargeDate it was sent for.
+// Index: donations (type, sponsorshipStatus, nextChargeDate).
+const RENEWAL_NOTICE_DAYS = 3;
+exports.remindSponsorshipRenewals = onSchedule('every 24 hours', async () => {
+  const now = Date.now();
+  const due = await db.collection('donations')
+      .where('type', '==', 'sponsorship')
+      .where('sponsorshipStatus', '==', 'active')
+      .where('nextChargeDate', '>', Timestamp.fromMillis(now))
+      .where('nextChargeDate', '<=', Timestamp.fromMillis(now + RENEWAL_NOTICE_DAYS * 86400000))
+      .limit(300)
+      .get();
+  for (const doc of due.docs) {
+    const d = doc.data();
+    const dueMs = d.nextChargeDate.toMillis();
+    if (typeof d.userId !== 'string' || !d.userId || d.renewalReminderFor === dueMs) continue;
+    const name = d.campaignName || 'your sponsored animal';
+    const amount = typeof d.nextChargeAmount === 'number' ? d.nextChargeAmount : d.amount;
+    const days = Math.max(1, Math.ceil((dueMs - now) / 86400000));
+    const batch = db.batch();
+    batch.set(db.collection('users').doc(d.userId).collection('notifications').doc(`sponsorship_renewal_${doc.id}_${dueMs}`), {
+      title: 'Renew your sponsorship?',
+      message: `Your sponsorship of ${name} ends in ${days} day${days === 1 ? '' : 's'} ` +
+        `(${formatManilaDate(d.nextChargeDate.toDate())}). Tap to continue for another 30 days` +
+        `${typeof amount === 'number' ? ` (${formatPeso(amount)})` : ''} or stop your sponsorship.`,
+      timestamp: FieldValue.serverTimestamp(),
+      isRead: false,
+      type: 'sponsorship_renewal',
+      donationId: doc.id,
+      campaignId: d.campaignId || null,
+      amount: typeof amount === 'number' ? amount : null,
+    });
+    batch.update(doc.ref, {renewalReminderFor: dueMs});
+    await batch.commit();
+  }
+});
+
+// Sponsorships are one-time 30-day payments (no automatic renewal):
 // once nextChargeDate passes, mark them inactive so donation_page.dart stops
 // showing them as active. Index: donations (type, sponsorshipStatus, nextChargeDate).
 exports.lapseExpiredSponsorships = onSchedule('every 24 hours', async () => {
@@ -657,6 +732,16 @@ exports.lapseExpiredSponsorships = onSchedule('every 24 hours', async () => {
     const uid = doc.data().userId;
     if (typeof uid === 'string') {
       batch.set(db.collection('users').doc(uid).collection('history').doc(doc.id), update, {merge: true});
+      const name = doc.data().campaignName || 'your sponsored animal';
+      batch.set(db.collection('users').doc(uid).collection('notifications').doc(`sponsorship_lapsed_${doc.id}`), {
+        title: 'Sponsorship Ended',
+        message: `Your 30-day sponsorship of ${name} has ended. Sponsor again from Donations to keep supporting them.`,
+        timestamp: FieldValue.serverTimestamp(),
+        isRead: false,
+        type: 'sponsorship_lapsed',
+        donationId: doc.id,
+        campaignId: doc.data().campaignId || null,
+      });
     }
     await batch.commit();
   }

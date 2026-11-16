@@ -15,6 +15,8 @@ import 'package:respawnd1/core/widgets/app_messages.dart';
 /// A Certificate of Donation, stored by the backend at
 /// `users/{uid}/certificates/{id}` (id = payment id, or donation id for
 /// in-kind). Issued after a verified payment / confirmed in-kind receipt.
+/// The in-kind and sponsorship detail fields exist only on certificates
+/// issued after they were added; older ones fall back to [contribution].
 class DonationCertificate {
   final String id;
   final String type; // 'donation' | 'sponsorship' | 'inkind'
@@ -26,6 +28,13 @@ class DonationCertificate {
   final String? campaignTitle;
   final String? refNumber;
   final DateTime? issuedAt;
+  // In-kind: what was received.
+  final String? inKindCategory;
+  final String? inKindItems;
+  final int? quantityReceived;
+  // Sponsorship: who was sponsored, and until when.
+  final String? animalName;
+  final DateTime? sponsoredUntil;
 
   const DonationCertificate({
     required this.id,
@@ -38,10 +47,32 @@ class DonationCertificate {
     this.campaignTitle,
     this.refNumber,
     this.issuedAt,
+    this.inKindCategory,
+    this.inKindItems,
+    this.quantityReceived,
+    this.animalName,
+    this.sponsoredUntil,
   });
+
+  bool get isSponsorship => type == 'sponsorship';
+  bool get isInKind => type == 'inkind';
+
+  /// "Monetary Donation", "Animal Sponsorship", "In-Kind Donation".
+  String get kindLabel => switch (type) {
+    'sponsorship' => 'Animal Sponsorship',
+    'inkind' => 'In-Kind Donation',
+    _ => 'Monetary Donation',
+  };
+
+  /// The sponsored animal's name (older certificates stored it as [benefit]).
+  String get sponsoredAnimal => (animalName ?? '').trim().isNotEmpty ? animalName!.trim() : benefit;
 
   factory DonationCertificate.fromFirestore(DocumentSnapshot doc) {
     final d = (doc.data() as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    String? text(String key) {
+      final v = d[key];
+      return v is String && v.trim().isNotEmpty ? v.trim() : null;
+    }
     return DonationCertificate(
       id: doc.id,
       type: d['type'] as String? ?? 'donation',
@@ -53,6 +84,11 @@ class DonationCertificate {
       campaignTitle: d['campaignTitle'] as String?,
       refNumber: d['refNumber'] as String?,
       issuedAt: d['issuedAt'] is Timestamp ? (d['issuedAt'] as Timestamp).toDate() : null,
+      inKindCategory: text('inKindCategory'),
+      inKindItems: text('inKindItems'),
+      quantityReceived: (d['quantityReceived'] as num?)?.toInt(),
+      animalName: text('animalName'),
+      sponsoredUntil: d['sponsoredUntil'] is Timestamp ? (d['sponsoredUntil'] as Timestamp).toDate() : null,
     );
   }
 
@@ -63,7 +99,15 @@ class DonationCertificate {
   }
 }
 
-/// The certificate artwork (Figma "Certificate of Donation").
+const _certMonths = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+String _certDate(DateTime d) => '${_certMonths[d.month - 1]} ${d.day}, ${d.year}';
+
+/// The certificate artwork (Figma "Certificate of Donation"), worded for
+/// the kind of support given: a monetary donation, a sponsorship of an
+/// animal, or in-kind items.
 class CertificateCard extends StatelessWidget {
   final DonationCertificate certificate;
   const CertificateCard({super.key, required this.certificate});
@@ -74,6 +118,66 @@ class CertificateCard extends StatelessWidget {
     TextStyle body({double size = 16, FontWeight weight = FontWeight.w700}) =>
         GoogleFonts.zain(fontSize: size, fontWeight: weight, height: 1.15, color: AppColors.textPrimary);
     Widget line() => const Divider(height: 1, thickness: 1, color: AppColors.slaterspwn);
+    Widget detail(String label, String value) => Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text.rich(
+        TextSpan(children: [
+          TextSpan(text: '$label: ', style: body(size: 15, weight: FontWeight.w400)),
+          TextSpan(text: value, style: body(size: 15)),
+        ]),
+        textAlign: TextAlign.center,
+      ),
+    );
+
+    final title = switch (c.type) {
+      'sponsorship' => 'CERTIFICATE OF\nSPONSORSHIP',
+      'inkind' => 'CERTIFICATE OF\nIN-KIND DONATION',
+      _ => 'CERTIFICATE OF\nDONATION',
+    };
+
+    // What was given — the middle of the certificate.
+    final List<Widget> given;
+    if (c.isSponsorship) {
+      given = [
+        Text('For generously sponsoring', textAlign: TextAlign.center, style: body()),
+        const SizedBox(height: 22),
+        Text(c.sponsoredAnimal, textAlign: TextAlign.center, style: body(size: 22)),
+        const SizedBox(height: 10),
+        line(),
+        if (c.contribution.isNotEmpty) detail('Sponsorship', c.contribution),
+        if (c.sponsoredUntil != null) detail('Sponsored until', _certDate(c.sponsoredUntil!)),
+        if (c.campaignTitle != null && c.campaignTitle != c.sponsoredAnimal) detail('Listing', c.campaignTitle!),
+      ];
+    } else if (c.isInKind) {
+      final hasDetails = c.inKindCategory != null || c.inKindItems != null;
+      given = [
+        Text('For the generous in-kind donation of', textAlign: TextAlign.center, style: body()),
+        const SizedBox(height: 22),
+        if (hasDetails) ...[
+          Text(c.inKindItems ?? c.inKindCategory!, textAlign: TextAlign.center, style: body(size: 18)),
+          const SizedBox(height: 10),
+          line(),
+          if (c.inKindCategory != null && c.inKindItems != null) detail('Category', c.inKindCategory!),
+          if (c.quantityReceived != null) detail('Quantity received', '${c.quantityReceived}'),
+        ] else ...[
+          Text(c.contribution, textAlign: TextAlign.center, style: body(size: 18)),
+          const SizedBox(height: 10),
+          line(),
+        ],
+        const SizedBox(height: 16),
+        Text('For the benefit of ${c.benefit}', textAlign: TextAlign.center, style: body()),
+      ];
+    } else {
+      given = [
+        Text('For the generous donation of', textAlign: TextAlign.center, style: body()),
+        const SizedBox(height: 22),
+        Text(c.contribution, textAlign: TextAlign.center, style: body(size: 18)),
+        const SizedBox(height: 10),
+        line(),
+        const SizedBox(height: 22),
+        Text('For the benefit of ${c.benefit}', textAlign: TextAlign.center, style: body()),
+      ];
+    }
 
     return Container(
       color: AppColors.background,
@@ -81,9 +185,13 @@ class CertificateCard extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('CERTIFICATE OF\nDONATION',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.tiltWarp(fontSize: 30, height: 1.1, color: AppColors.textPrimary)),
+          Text(title, textAlign: TextAlign.center, style: GoogleFonts.tiltWarp(fontSize: 30, height: 1.1, color: AppColors.textPrimary)),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(20)),
+            child: Text(c.kindLabel, style: body(size: 14)),
+          ),
           const SizedBox(height: 20),
           Text('${c.organizationName} expresses our gratitude to', textAlign: TextAlign.center, style: body()),
           const SizedBox(height: 22),
@@ -91,16 +199,13 @@ class CertificateCard extends StatelessWidget {
           const SizedBox(height: 10),
           line(),
           const SizedBox(height: 22),
-          Text('For the generous donation of', textAlign: TextAlign.center, style: body()),
-          const SizedBox(height: 22),
-          Text(c.contribution, textAlign: TextAlign.center, style: body(size: 18)),
-          const SizedBox(height: 10),
-          line(),
-          const SizedBox(height: 22),
-          Text('For the benefit of ${c.benefit}', textAlign: TextAlign.center, style: body()),
+          ...given,
           const SizedBox(height: 18),
-          Text('Given this day of ${c.dateText}',
-              textAlign: TextAlign.center, style: body(weight: FontWeight.w400)),
+          Text('Given this day of ${c.dateText}', textAlign: TextAlign.center, style: body(weight: FontWeight.w400)),
+          if ((c.refNumber ?? '').isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('Reference: ${c.refNumber}', textAlign: TextAlign.center, style: body(size: 13, weight: FontWeight.w400)),
+          ],
           const SizedBox(height: 44),
           Text('Thank you for your unwavering support\nfor our rescues!', textAlign: TextAlign.center, style: body()),
           const SizedBox(height: 16),

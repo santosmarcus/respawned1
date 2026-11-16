@@ -571,18 +571,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         fillColor: AppColors.lavenderrspwn.withValues(alpha: 0.06),
       ));
     }
-    if (!_loadingReports) {
-      for (final r in _caseReports) {
-        circles.add(Circle(
-          circleId: CircleId('case_${r.caseId}'),
-          center: LatLng(r.lat, r.lng),
-          radius: GeofenceConfig.caseGeofenceRadiusMeters,
-          strokeWidth: 1,
-          strokeColor: AppColors.error.withValues(alpha: 0.6),
-          fillColor: AppColors.error.withValues(alpha: 0.08),
-        ));
-      }
-    }
+
     return circles;
   }
 

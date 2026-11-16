@@ -5,12 +5,13 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
-import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/features/donation/models.dart';
-
+import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'donation_admin_providers.dart';
 import 'donation_admin_service.dart';
+import 'sponsorable_animals.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 
 /// Starting values for a new campaign opened from somewhere else in the app
@@ -66,8 +67,11 @@ class CampaignPrefill {
 class DonationAdminCreatePage extends ConsumerStatefulWidget {
   final DonationListing? existing;
   final String initialType;
+  /// Chosen in [SponsorAnimalPickerPage]: the form opens filled from its record.
+  final AnimalRecord? initialAnimal;
   final CampaignPrefill? prefill;
-  const DonationAdminCreatePage({super.key, this.existing, this.initialType = 'donation', this.prefill});
+  const DonationAdminCreatePage(
+      {super.key, this.existing, this.initialType = 'donation', this.prefill, this.initialAnimal});
 
   @override
   ConsumerState<DonationAdminCreatePage> createState() => _DonationAdminCreatePageState();
@@ -105,7 +109,6 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
   late String _fundKind;
   final Set<String> _tags = {};
   String? _animalId;
-  String? _linkedCaseId;
   bool _speciesDog = true;
   bool _speciesCat = true;
   bool _acceptInKind = false;
@@ -115,6 +118,12 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
   String? _imageUrl;
   final List<_InKindRow> _inKind = [];
   bool _saving = false;
+  /// The animal record behind [_animalId] once known, shown as a summary.
+  AnimalRecord? _animal;
+  /// Last values filled in from an animal record, so choosing another animal
+  /// replaces them but never overwrites what the admin typed.
+  final Map<String, String?> _autoFilled = {};
+  Set<String>? _autoTags;
 
   bool get _isEdit => widget.existing != null;
   bool get _isSponsorship => _type == 'sponsorship';
@@ -136,7 +145,6 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
       _animalId = e.animalId;
       _acceptInKind = e.acceptInKind;
       _restricted = e.restricted;
-      _linkedCaseId = e.linkedCaseId;
       _deadline = e.endDate;
       _imageUrl = e.imageUrl;
       for (final it in e.inKindItems) {
@@ -148,17 +156,47 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
           instructions: it.instructions,
         ));
       }
-    } else if (widget.prefill != null) {
-      final p = widget.prefill!;
-      _title.text = p.title;
-      _description.text = p.description;
-      _amount.text = p.targetAmount > 0 ? _plain(p.targetAmount) : '';
-      _fundKind = p.fundKind;
-      _tags.addAll(p.purposeTags);
-      _restricted = p.restricted;
-      _linkedCaseId = p.linkedCaseId;
-      _deadline = p.deadline;
     }
+    if (e == null && widget.initialAnimal != null) _applyAnimal(widget.initialAnimal!);
+  }
+
+  /// Fills the fields an animal record already answers. A field is only
+  /// replaced while it is empty or still holds the previous animal's value.
+  void _applyAnimal(AnimalRecord a) {
+    _animalId = a.id;
+    _animal = a;
+    if (_isEdit || !_isSponsorship) return;
+
+    void fill(String key, TextEditingController c, String value) {
+      final current = c.text.trim();
+      if (current.isEmpty || current == _autoFilled[key]) {
+        c.text = value;
+        _autoFilled[key] = value;
+      }
+    }
+
+    fill('title', _title, a.name.trim());
+    fill('description', _description, suggestedSponsorshipDescription(a));
+    fill('intendedUse', _intendedUse, suggestedIntendedUse(a));
+
+    final cover = sponsorshipCoverFor(a);
+    if (_image == null && (_imageUrl == null || _imageUrl == _autoFilled['imageUrl'])) {
+      _imageUrl = cover;
+      _autoFilled['imageUrl'] = cover;
+    }
+
+    if (_tags.isEmpty || (_autoTags != null && _tags.length == _autoTags!.length && _tags.containsAll(_autoTags!))) {
+      final tags = suggestedSponsorshipTags(a);
+      _tags
+        ..clear()
+        ..addAll(tags);
+      _autoTags = tags;
+    }
+
+    final species = a.species.toLowerCase();
+    if (species == 'dog' && !_speciesDog) _speciesDog = true;
+    if (species == 'cat' && !_speciesCat) _speciesCat = true;
+    _fundKind = 'animal';
   }
 
   static String _plain(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
@@ -194,7 +232,7 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
 
   /// Client-side checks for fast feedback; the backend re-validates everything.
   String? _validate() {
-    if (!_isEdit && _image == null) return 'Add a cover image.';
+    if (!_isEdit && _image == null && _imageUrl == null) return 'Add a cover image.';
     if (!_isSponsorship && _title.text.trim().isEmpty) return 'Enter a title.';
     if (_isSponsorship && _animalId == null) return 'Select the animal to sponsor.';
     if (_tags.isEmpty) return 'Select at least one tag.';
@@ -239,7 +277,6 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
         'fundKind': _fundKind,
         'purposeTags': _tags.toList(),
         'restricted': _restricted,
-        if (_linkedCaseId != null) 'linkedCaseId': _linkedCaseId,
         if (_deadline != null) 'deadlineMs': _deadline!.millisecondsSinceEpoch,
         if (_isSponsorship) ...{
           'monthlyAmount': amount,
@@ -277,6 +314,7 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
     final noun = _isSponsorship ? 'Sponsorship' : 'Campaign';
     final header = _isEdit ? 'Edit $noun' : 'New $noun';
     final animals = ref.watch(linkableAnimalsProvider);
+    final openSponsorships = ref.watch(openSponsorshipsByAnimalProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -323,9 +361,10 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                 FieldLabel('Name of Animal', required: _isSponsorship),
                 animals.when(
                   loading: () => const LinearProgressIndicator(color: AppColors.textPrimary),
-                  error: (e, _) => Text('Could not load animals: $e', style: GoogleFonts.zain(color: AppColors.error)),
-                  data: (list) => _animalDropdown(list),
+                  error: (e, _) => Text('Could not load animals: $e', style: GoogleFonts.zain(color: Colors.redAccent)),
+                  data: (list) => _animalDropdown(list, openSponsorships),
                 ),
+                if (_isSponsorship) ..._animalSummary(animals.asData?.value),
                 const SizedBox(height: 18),
 
                 const FieldLabel('Donation Category'),
@@ -476,9 +515,14 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
     ),
   );
 
-  Widget _animalDropdown(List<AnimalRecord> all) {
+  Widget _animalDropdown(List<AnimalRecord> all, Map<String, DonationListing> openSponsorships) {
     final list = all.where((a) {
       if (!_isSponsorship) return true;
+      // Sponsorships: only animals that are ready to be sponsored and not
+      // already listed by another open sponsorship.
+      if (sponsorshipReadiness(a) != null) return false;
+      final listing = openSponsorships[a.id];
+      if (listing != null && listing.id != widget.existing?.id) return false;
       final s = a.species.toLowerCase();
       if (s == 'dog') return _speciesDog;
       if (s == 'cat') return _speciesCat;
@@ -496,7 +540,8 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
         if (!_isSponsorship) DropdownMenuItem<String?>(value: null, child: Text('None', style: _dropdownStyle)),
         if (missing)
           DropdownMenuItem<String?>(
-              value: _animalId, child: Text(widget.existing?.animalName ?? 'Current animal', style: _dropdownStyle)),
+              value: _animalId,
+              child: Text(_animal?.name ?? widget.existing?.animalName ?? 'Current animal', style: _dropdownStyle)),
         for (final a in list)
           DropdownMenuItem<String?>(
             value: a.id,
@@ -504,8 +549,63 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                 overflow: TextOverflow.ellipsis, style: _dropdownStyle),
           ),
       ],
-      onChanged: (v) => setState(() => _animalId = v),
+      onChanged: (v) => setState(() {
+        final picked = v == null ? null : all.where((a) => a.id == v).firstOrNull;
+        if (picked != null) {
+          _applyAnimal(picked);
+        } else {
+          _animalId = v;
+          _animal = null;
+        }
+      }),
     );
+  }
+
+  /// What the animal record already says, so admins don't re-type it.
+  List<Widget> _animalSummary(List<AnimalRecord>? all) {
+    final a = _animal ?? (all ?? const <AnimalRecord>[]).where((x) => x.id == _animalId).firstOrNull;
+    if (_animalId == null) {
+      if (_isEdit) return const [];
+      return [
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: TextButton.icon(
+            onPressed: () => Navigator.pushReplacement(
+                context, MaterialPageRoute(builder: (_) => const SponsorAnimalPickerPage())),
+            icon: const Icon(Icons.pets, size: 18, color: AppColors.textPrimary),
+            label: Text('Browse animals ready to be sponsored',
+                style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          ),
+        ),
+      ];
+    }
+    if (a == null) return const [];
+    return [
+      const SizedBox(height: 10),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.15)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SponsorAnimalTile(animal: a),
+            if (!_isEdit)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Title, photo, description, tags and intended use were filled in from this animal\'s record. '
+                      'Review them and set the monthly amount.',
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ];
   }
 
   Widget _deadlineField() {
