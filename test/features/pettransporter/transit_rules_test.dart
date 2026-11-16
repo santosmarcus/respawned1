@@ -140,16 +140,67 @@ void main() {
       expect(blank.statusLabel, isNot(contains('(')));
     });
 
-    test('Deceased / breakdown / Other end the transit', () {
+    test('Deceased, breakdown and Other end this transporter trip', () {
       expect(resolve(kEndReasonDeceased).isTerminal, isTrue);
       expect(resolve(kEndReasonBreakdown).isTerminal, isTrue);
+      expect(resolve(kEndReasonOther).isTerminal, isTrue);
+      expect(resolve(kEndReasonAggressive).isTerminal, isFalse);
+      expect(resolve(kEndReasonNotFound).kind, isNull);
+    });
 
+    test('no end reason writes a status staff screens cannot read', () {
+      for (final reason in kEndReasons) {
+        final status = resolve(reason).status;
+        expect(status, isNot('ended'), reason: reason);
+        expect(
+          RescueStatus.fromFirestoreValue(status),
+          isNot(RescueStatus.pendingReview),
+          reason: reason,
+        );
+      }
+    });
+
+    test('Vehicle breakdown goes back to Assign Transporter', () {
+      final o = resolve(kEndReasonBreakdown, notes: 'flat tire');
+      expect(
+        RescueStatus.fromFirestoreValue(o.status),
+        RescueStatus.awaitingAssignment,
+      );
+      expect(o.kind, kEndKindBreakdown);
+      expect(o.notes, 'flat tire');
+    });
+
+    test('Deceased waits for staff to confirm', () {
+      final o = resolve(kEndReasonDeceased);
+      expect(RescueStatus.fromFirestoreValue(o.status), RescueStatus.transitEnded);
+      expect(o.kind, kEndKindDeceased);
+    });
+
+    test('Other needs a staff decision and keeps the free text', () {
       final other = resolve(kEndReasonOther, other: 'Flooded road');
-      expect(other.status, 'ended');
+      expect(RescueStatus.fromFirestoreValue(other.status), RescueStatus.transitEnded);
+      expect(other.kind, kEndKindOther);
       expect(other.reasonText, 'Flooded road');
-      expect(other.statusLabel, 'Transit closed: Flooded road');
+      expect(other.statusLabel, contains('Flooded road'));
 
       expect(resolve(kEndReasonOther, other: '').reasonText, kEndReasonOther);
+    });
+
+    test('legacy ended cases read as needing a decision', () {
+      expect(RescueStatus.fromFirestoreValue('ended'), RescueStatus.transitEnded);
+    });
+
+    test('shelter drop-off sends undecided animals to Intake', () {
+      final at = DateTime(2026, 11, 17);
+      final out = animalsAfterShelterDropoff([
+        {'species': 'Dog'},
+        {'species': 'Cat', 'outcome': 'deceased'},
+        {'species': 'Dog', 'postTreatmentAction': 'release'},
+      ], at);
+      expect(out[0]['postTreatmentAction'], 'intake');
+      expect(out[0]['postTreatmentStartedAt'], at);
+      expect(out[1].containsKey('postTreatmentAction'), isFalse);
+      expect(out[2]['postTreatmentAction'], 'release');
     });
 
     test('the dialog offers every reason', () {

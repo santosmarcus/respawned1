@@ -195,6 +195,8 @@ class NotificationService {
       case 'case_status_update':
       case 'case_geofence_event':
       case 'geofence_case_nearby':
+      // notifyStaffOfTransitEnd (functions/index.js): staff open Rescue Details.
+      case 'transit_ended_staff':
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);

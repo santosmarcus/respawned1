@@ -211,10 +211,11 @@ class _TrackCasePageState extends State<TrackCasePage> {
                 FirebaseAuth.instance.currentUser?.uid == data?['reporterId'];
 
         final normalizedStatus = status.toString().toLowerCase();
+        // 'transit_ended' (and legacy 'ended') is not final: the
+        // transporter stopped, and staff still decide the next step.
         final isFinalStatus =
             normalizedStatus == 'closed' ||
-                normalizedStatus.contains('completed') ||
-                normalizedStatus.contains('ended');
+                normalizedStatus.contains('completed');
 
         // A rejected report gets the same one-time success/acknowledgment
         // screen as a closed/completed case — but only until the reporter

@@ -728,6 +728,30 @@ class TransportAssignmentRepository {
     );
   }
 
+  /// Staff decision after a transporter stopped the trip (End Reason
+  /// Deceased or Other, [RescueStatus.transitEnded]): send the case back to
+  /// Assign Transporter. Keeps `endReason`/`endReasonNotes` as the record of
+  /// what happened, and clears the old transporter from the case (their
+  /// offer was already cancelled by the transporter app).
+  Future<void> returnToAssignmentAfterTransitEnded({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _store.recordAction(
+      caseId: caseId,
+      statusLine: 'The organization is arranging another transporter.',
+      fields: {
+        'status': RescueStatus.awaitingAssignment.firestoreValue,
+        'riderId': null,
+        'assignedVolunteerId': null,
+      },
+      action: 'returned_to_assignment_after_transit_ended',
+      actorUid: actorUid,
+      actorName: actorName,
+    );
+  }
+
   /// "Keep current transporter and provide instructions" — records the
   /// admin's guidance without changing status (the case stays
   /// needsSpecializedAssistance until the admin explicitly resolves it some

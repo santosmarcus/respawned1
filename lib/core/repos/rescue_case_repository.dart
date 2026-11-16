@@ -253,6 +253,17 @@ class RescueCaseRepository {
     actorName: actorName,
   );
 
+  /// Delegates to [TransportAssignmentRepository.returnToAssignmentAfterTransitEnded].
+  Future<void> returnToAssignmentAfterTransitEnded({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) => transport.returnToAssignmentAfterTransitEnded(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+  );
+
   /// Delegates to [TransportAssignmentRepository.streamStalePendingAssignments].
   Stream<List<TransportAssignment>> streamStalePendingAssignments() =>
       transport.streamStalePendingAssignments();

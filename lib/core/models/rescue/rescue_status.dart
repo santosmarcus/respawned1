@@ -45,7 +45,15 @@ enum RescueStatus {
   // A rider has been sent to confirm the animal's location and condition
   // before the case is accepted (paper: report verification). Not terminal;
   // not auto-expired, since staff drive the next step.
-  verifying;
+  verifying,
+  // The transporter stopped the trip with End Reason "Animal Deceased" or
+  // "Other" (transit_rules.dart resolveEndReason). The case waits for staff
+  // to decide: confirm the death (Close Case), send it back to Assign
+  // Transporter, refer it or close it. Shown on the Ongoing tab and as a
+  // dashboard field issue. Older builds wrote the bare string 'ended' for
+  // these (and for Vehicle breakdown), which no screen understood; it's
+  // read as this status too.
+  transitEnded;
 
   /// The canonical string this module writes to Firestore for this status.
   ///
@@ -97,6 +105,7 @@ enum RescueStatus {
     RescueStatus.pickupUnsuccessful => 'pickup_attempt_unsuccessful',
     RescueStatus.needsSpecializedAssistance => 'needs_specialized_assistance',
     RescueStatus.verifying => 'verifying',
+    RescueStatus.transitEnded => 'transit_ended',
   };
 
   /// Every raw Firestore string that should be treated as this status when
@@ -144,6 +153,7 @@ enum RescueStatus {
     RescueStatus.pickupUnsuccessful: ['pickup_attempt_unsuccessful'],
     RescueStatus.needsSpecializedAssistance: ['needs_specialized_assistance'],
     RescueStatus.verifying: ['verifying'],
+    RescueStatus.transitEnded: ['transit_ended', 'ended'],
   };
 
   static RescueStatus fromFirestoreValue(String? value) {
@@ -176,6 +186,7 @@ enum RescueStatus {
     RescueStatus.pickupUnsuccessful => 'Pickup Attempt Unsuccessful',
     RescueStatus.needsSpecializedAssistance => 'Needs Specialized Assistance',
     RescueStatus.verifying => 'Verifying Location',
+    RescueStatus.transitEnded => 'Transit Stopped — Needs Decision',
   };
 
   Color get color => switch (this) {
@@ -196,6 +207,7 @@ enum RescueStatus {
     RescueStatus.pickupUnsuccessful => AppColors.warning,
     RescueStatus.needsSpecializedAssistance => AppColors.error,
     RescueStatus.verifying => AppColors.tearspwn,
+    RescueStatus.transitEnded => AppColors.error,
   };
 
   /// True once the case has left the active triage/rescue pipeline.

@@ -980,6 +980,82 @@ exports.notifyStaffOfOfferOutcome = onDocumentUpdated(
   },
 );
 
+// ---- Transporter ended the trip -------------------------------------------
+//
+// End Reasons Vehicle breakdown, Animal Deceased and Other (transit_rules.dart
+// resolveEndReason) end the transporter's trip and stamp endReasonKind +
+// transitEndedAt. Breakdown sends the case back to Assign Transporter;
+// Deceased and Other leave it in transit_ended for a staff decision. Staff
+// get a push and in-app notification, and an adminAlerts entry is written
+// (same shape as needs_specialized_assistance above). The reporter is told
+// about a breakdown or other stop, but not about a reported death until
+// staff confirm it.
+const TRANSIT_END_COPY = {
+  vehicle_breakdown: {
+    staffTitle: 'Transporter vehicle breakdown',
+    staffBody: 'The transporter had a vehicle breakdown. The case is back in Assign Transporter: '
+      + 'choose another transporter.',
+    reporter: {
+      title: 'Update on your rescue report',
+      body: 'The transporter had a vehicle problem. The rescue team is arranging another transporter.',
+    },
+  },
+  deceased: {
+    staffTitle: 'Animal reported deceased in transit',
+    staffBody: 'The transporter reported that the animal died in transit. Open the case to confirm.',
+    reporter: null,
+  },
+  other: {
+    staffTitle: 'Transporter stopped the trip',
+    staffBody: 'The transporter stopped the trip. Open the case to decide the next step.',
+    reporter: {
+      title: 'Update on your rescue report',
+      body: 'The transport was interrupted. The rescue team is deciding the next step.',
+    },
+  },
+};
+
+exports.notifyStaffOfTransitEnd = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after) return;
+    const endedAt = millisOf(after.transitEndedAt);
+    if (!endedAt || endedAt === millisOf(before.transitEndedAt)) return;
+    const copy = TRANSIT_END_COPY[after.endReasonKind];
+    if (!copy) return;
+
+    const caseId = event.params.caseId;
+    const reasonNote = after.endReasonNotes ? ` Note: ${after.endReasonNotes}` : '';
+
+    await db.collection('adminAlerts').add({
+      type: `transit_${after.endReasonKind}`,
+      caseId,
+      organizationId: after.organizationId || null,
+      reason: after.endReason || null,
+      notes: after.endReasonNotes || null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      resolved: false,
+    });
+
+    await notifyStaff(await orgStaffUids(after.organizationId), {
+      title: copy.staffTitle,
+      body: `${copy.staffBody}${reasonNote}`,
+      data: {type: 'transit_ended_staff', caseId, kind: after.endReasonKind},
+    });
+
+    if (copy.reporter && after.reporterId) {
+      await safeNotifyUser({
+        uid: after.reporterId,
+        title: copy.reporter.title,
+        body: copy.reporter.body,
+        data: {type: 'case_status_update', caseId, status: after.status || ''},
+      });
+    }
+  },
+);
+
 // ---- Report verification ------------------------------------------------
 //
 // Before a report is accepted, staff may ask the reporter for a fresh photo

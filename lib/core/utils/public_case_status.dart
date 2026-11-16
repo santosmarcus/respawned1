@@ -49,6 +49,9 @@ String publicCaseStatusLabel(String? status) {
       return 'Pickup attempt unsuccessful';
     case 'needs_specialized_assistance':
       return 'Needs specialized assistance';
+    case 'transit_ended':
+    case 'ended':
+      return 'Transport stopped — the team is deciding the next step';
     case 'rejected':
       return 'Rejected';
     case 'cancelled':

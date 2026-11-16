@@ -225,6 +225,40 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     }
   }
 
+  /// Transporter stopped the trip (End Reason Other): back to Assign
+  /// Transporter.
+  Future<void> _returnToAssignAfterTransitEnded(RescueCase c) async {
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Choose another transporter?',
+      message: 'The case goes back to Assign Transporter. The transporter\'s report stays on the case.',
+      confirmLabel: 'Assign Transporter',
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).returnToAssignmentAfterTransitEnded(
+            caseId: c.id,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not return the case to Assign: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _keepTransporterWithInstructions(RescueCase c) async {
     final note = await showTextInputDialog(
       context,
@@ -1354,6 +1388,111 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                         ? 'Close Case — Specialized Transport Unavailable'
                         : 'Close Case — Aggressive Animal / Unsafe Rescue',
                   ),
+                ),
+              ),
+            ] else if (c.status == RescueStatus.transitEnded) ...[
+              // The transporter stopped the trip with End Reason "Animal
+              // Deceased" or "Other" (transit_rules.dart). Staff decide.
+              Builder(
+                builder: (context) {
+                  final deceased = c.raw['endReasonKind'] == 'deceased';
+                  final reason = c.raw['endReason'] as String?;
+                  final notes = c.raw['endReasonNotes'] as String?;
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          deceased ? 'Animal reported deceased in transit' : 'Transporter stopped the trip',
+                          style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.error),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          deceased
+                              ? 'Confirm the death to record it on the animal and close the case, or choose another step if the report was wrong.'
+                              : 'Decide what happens next: offer the case to another transporter, refer it, or close it.',
+                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                        ),
+                        if (!deceased && (reason?.isNotEmpty ?? false)) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Reason: $reason',
+                            style: GoogleFonts.zain(
+                                fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                          ),
+                        ],
+                        if (notes?.isNotEmpty ?? false) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Reported: $notes',
+                            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              if (c.raw['endReasonKind'] == 'deceased') ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : () => _closeCase(c, initialReason: ClosureReason.died),
+                    style: AppButtons.primary,
+                    child: Text(
+                      'Confirm Death',
+                      style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              SizedBox(
+                width: double.infinity,
+                child: c.raw['endReasonKind'] == 'deceased'
+                    ? OutlinedButton(
+                        onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
+                        style: AppButtons.outline,
+                        child: Text(
+                          'Assign Another Transporter',
+                          style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
+                        ),
+                      )
+                    : ElevatedButton(
+                        onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
+                        style: AppButtons.primary,
+                        child: Text(
+                          'Assign Another Transporter',
+                          style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _referCase(c),
+                  style: AppButtons.outline,
+                  child: Text(
+                    'Refer Case',
+                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _closeCase(c),
+                  style: AppButtons.dangerOutline,
+                  child: Text('Close Case', style: GoogleFonts.tiltWarp(fontSize: 15)),
                 ),
               ),
             ] else if (c.status == RescueStatus.rejected) ...[

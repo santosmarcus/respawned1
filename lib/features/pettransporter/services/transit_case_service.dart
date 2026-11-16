@@ -12,7 +12,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:flutter/foundation.dart';
 import 'package:respawnd1/core/constants/maps_config.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 import 'package:geocoding/geocoding.dart';
@@ -301,12 +303,55 @@ class TransitCaseService {
     'transitCompletedBy': FirebaseAuth.instance.currentUser?.uid,
   };
 
-  Future<void> completeShelterDropoff(List<String> shelterUrls) {
-    return _record('transit_completed_shelter', 'Animal delivered to shelter. Rescue completed.', {
-      'status': 'completed',
-      'shelterVerificationUrls': shelterUrls,
-      ..._transitCompletedStamp,
-    });
+  /// Delivered to the shelter. The case moves to Intake (not Completed):
+  /// staff still confirm the animal was received and create its animal
+  /// record on Intake Details. Animals without a post-treatment action are
+  /// sent to Intake the way staff do it (animalsAfterShelterDropoff). The
+  /// transporter's own offer is completed so they show as Available again.
+  Future<void> completeShelterDropoff(List<String> shelterUrls) async {
+    final data = await fetchCase();
+    final now = Timestamp.now();
+    final animals = animalsAfterShelterDropoff(
+      List<Map<String, dynamic>>.from(
+        ((data['animals'] as List?) ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+      ),
+      now,
+    );
+    await _record(
+      'transit_delivered_to_shelter',
+      'Animal delivered to the shelter. Waiting for the organization to confirm it was received.',
+      {
+        'status': RescueStatus.intake.firestoreValue,
+        'shelterVerificationUrls': shelterUrls,
+        'shelterDeliveredAt': now,
+        if (animals.isNotEmpty) 'animals': animals,
+        if (animals.isNotEmpty) ...RescueCaseStore.stageSummaryUpdate(animals),
+        ..._transitCompletedStamp,
+      },
+    );
+    await _closeOwnAssignment(data, status: 'completed', at: now);
+  }
+
+  /// Marks the transporter's own current offer [status] ('completed' or
+  /// 'cancelled'), so syncRiderTransportStatus shows them Available and
+  /// staff can offer the case to someone else. Best effort: a failure here
+  /// never undoes the case update already written.
+  Future<void> _closeOwnAssignment(
+    Map<String, dynamic> caseData, {
+    required String status,
+    required Timestamp at,
+  }) async {
+    final assignmentId = caseData['currentAssignmentId'] as String?;
+    if (assignmentId == null || assignmentId.isEmpty) return;
+    try {
+      await caseRef.collection('transportAssignments').doc(assignmentId).update({
+        'status': status,
+        'respondedAt': at,
+        if (status == 'completed') 'completedAt': at,
+      });
+    } catch (e) {
+      debugPrint('TransitCaseService: could not close assignment $assignmentId: $e');
+    }
   }
 
   Future<void> confirmAdopterPickup() {
@@ -321,7 +366,7 @@ class TransitCaseService {
     );
   }
 
-  Future<void> applyEndReason(EndReasonOutcome outcome) {
+  Future<void> applyEndReason(EndReasonOutcome outcome) async {
     final serviceType = outcome.serviceType;
     final extra = <String, dynamic>{
       'endReason': outcome.reasonText,
@@ -341,12 +386,29 @@ class TransitCaseService {
       // animal-safety/capability escalation, not a no-show or missed job.
       if (outcome.excludeFromTransporterFault)
         'transporterFaultVerified': false,
+      // Deceased / Vehicle breakdown / Other: notifyStaffOfTransitEnd
+      // (functions/index.js) alerts staff when transitEndedAt changes.
+      if (outcome.kind != null) 'endReasonKind': outcome.kind,
+      if (outcome.kind != null) 'transitEndedAt': FieldValue.serverTimestamp(),
+      // Vehicle breakdown hands the case back to Assign Transporter: this
+      // transporter no longer holds it (their trip stats and location
+      // pushes key on these), and the next accept sets them again.
+      if (outcome.kind == kEndKindBreakdown) ...{
+        'riderId': null,
+        'assignedVolunteerId': null,
+      },
     };
 
-    return _record('transit_ended_early', outcome.statusLabel, {
+    final data = outcome.isTerminal ? await fetchCase() : null;
+    await _record('transit_ended_early', outcome.statusLabel, {
       'status': outcome.status,
       ...extra,
     });
+    // The trip is over for this transporter: free them, and free the case
+    // for a new offer (Vehicle breakdown goes straight back to Assign).
+    if (data != null) {
+      await _closeOwnAssignment(data, status: 'cancelled', at: Timestamp.now());
+    }
   }
 
   Future<void> sendMessage(String text) async {

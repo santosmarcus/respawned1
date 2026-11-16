@@ -218,6 +218,20 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   );
 
   addCases(
+    cases: (fieldIssues.asData?.value ?? const <RescueCase>[])
+        .where((c) => c.status == RescueStatus.transitEnded)
+        .toList(),
+    severity: DashSeverity.critical,
+    icon: Icons.report_outlined,
+    singleTitle: 'Transporter stopped the trip',
+    groupTitle: 'trips stopped by the transporter',
+    status: 'Needs a staff decision',
+    action: 'Confirm a reported death, re-assign, refer or close',
+    tab: null,
+    button: 'Open',
+  );
+
+  addCases(
     cases: [...reviewCases.where((c) => c.status == RescueStatus.accepted), ...assignCases].where(isCritical).toList(),
     severity: DashSeverity.critical,
     icon: Icons.local_shipping_outlined,
@@ -286,7 +300,8 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
 
   addCases(
     cases: (fieldIssues.asData?.value ?? const <RescueCase>[])
-        .where((c) => c.status != RescueStatus.needsSpecializedAssistance)
+        .where((c) =>
+            c.status != RescueStatus.needsSpecializedAssistance && c.status != RescueStatus.transitEnded)
         .toList(),
     severity: DashSeverity.warning,
     icon: Icons.location_off_outlined,

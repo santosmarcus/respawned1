@@ -64,6 +64,8 @@ const List<RescueStatus> kFieldIssueStatuses = [
   RescueStatus.awaitingReporterResponse,
   RescueStatus.pickupUnsuccessful,
   RescueStatus.needsSpecializedAssistance,
+  // Transporter stopped the trip (Animal Deceased / Other): staff decide.
+  RescueStatus.transitEnded,
 ];
 
 /// The stages of the app's actual rescue workflow, in order, each mapped
@@ -152,6 +154,10 @@ String nextStepFor(RescueCase c) {
       return 'Pickup failed — decide whether to re-attempt';
     case RescueStatus.needsSpecializedAssistance:
       return 'Arrange specialized handler or referral';
+    case RescueStatus.transitEnded:
+      return c.raw['endReasonKind'] == 'deceased'
+          ? 'Confirm the reported death in transit'
+          : 'Transporter stopped the trip — decide the next step';
     default:
       return 'Open case';
   }

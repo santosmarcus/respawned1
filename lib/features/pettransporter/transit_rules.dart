@@ -15,8 +15,11 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 // searching_clinic   - clinic rejected treatment, auto-searching next nearby clinic
 // in_transit_shelter - treatment accepted, on the way to drop the pet at the shelter
 // awaiting_adopter_pickup - treatment accepted, interested adopter collects at the clinic
-// completed          - rescue done (delivered to shelter / adopter)
-// ended              - aborted
+// intake             - delivered to the shelter; staff confirm the animal was
+//                      received and create its record (Intake Details)
+// completed          - rescue done (handed to the interested adopter)
+// transit_ended      - stopped (Animal Deceased / Other); staff decide next
+// accepted           - Vehicle breakdown: back to Assign Transporter
 
 /// How close (by road, or straight line when Directions fails) the
 /// transporter must be before an "arrived" action is accepted.
@@ -189,6 +192,7 @@ class EndReasonOutcome {
     this.serviceType,
     this.awaitingReporter = false,
     this.excludeFromTransporterFault = false,
+    this.kind,
   });
 
   final String status;
@@ -209,10 +213,22 @@ class EndReasonOutcome {
   /// Sets `transporterFaultVerified: false` (Aggressive / Specialized).
   final bool excludeFromTransporterFault;
 
-  /// A genuine terminal cancellation (shows the cancelled result screen);
-  /// every other outcome keeps the case active.
-  bool get isTerminal => status == 'ended';
+  /// Written as `endReasonKind` with `transitEndedAt` for the outcomes that
+  /// end this transporter's trip: 'vehicle_breakdown', 'deceased' or
+  /// 'other'. notifyStaffOfTransitEnd (functions/index.js) alerts staff on
+  /// it. Null for the outcomes that keep the transporter on the case.
+  final String? kind;
+
+  /// The trip is over for this transporter (shows the cancelled result
+  /// screen and frees them): Deceased, Vehicle breakdown and Other. The
+  /// case itself stays open for staff to decide.
+  bool get isTerminal => kind != null;
 }
+
+/// End Reason kinds (`cases/{id}.endReasonKind`).
+const String kEndKindBreakdown = 'vehicle_breakdown';
+const String kEndKindDeceased = 'deceased';
+const String kEndKindOther = 'other';
 
 // Decides the resulting case status from the selected End Reason.
 //
@@ -229,8 +245,16 @@ class EndReasonOutcome {
 //   visible wherever the case shows up as a service request afterward
 //   (assign_rider_page.dart, rescue_detail_page.dart) instead of a new
 //   transporter having to rediscover the same requirement on-site.
-// - Deceased / Vehicle breakdown / Other: remain a straightforward
-//   transit-ended outcome.
+// - Vehicle breakdown: the case goes back to Awaiting Assignment (same shape
+//   as the specialized-assistance retry) so staff offer it to another
+//   transporter; staff are alerted.
+// - Deceased: transit_ended, waiting for staff to confirm the death through
+//   Close Case ("Died"), which records it on the animal.
+// - Other: transit_ended, shown on the Ongoing tab and the dashboard as
+//   needing a staff decision.
+//
+// These used to write the bare status 'ended', which no staff screen
+// mapped (it read as Pending Review and matched no queue).
 EndReasonOutcome resolveEndReason(EndReasonSelection selection) {
   final selectedReason = selection.reason;
   final otherText = selection.otherText;
@@ -271,10 +295,32 @@ EndReasonOutcome resolveEndReason(EndReasonSelection selection) {
       status = RescueStatus.pickupUnsuccessful.firestoreValue;
       statusLabel = 'Pickup attempt unsuccessful — reporter unreachable.';
       break;
+    case kEndReasonBreakdown:
+      status = RescueStatus.awaitingAssignment.firestoreValue;
+      statusLabel =
+          'The transporter had a vehicle breakdown. The case is back in '
+          'Assign Transporter for another transporter.';
+      break;
+    case kEndReasonDeceased:
+      status = RescueStatus.transitEnded.firestoreValue;
+      statusLabel =
+          'The transporter reported that the animal died in transit. '
+          'Waiting for the organization to confirm.';
+      break;
     default:
-      status = 'ended';
-      statusLabel = 'Transit closed: $reasonStr';
+      status = RescueStatus.transitEnded.firestoreValue;
+      statusLabel = 'Transit stopped: $reasonStr. Waiting for the organization to decide the next step.';
   }
+
+  final kind = switch (selectedReason) {
+    kEndReasonBreakdown => kEndKindBreakdown,
+    kEndReasonDeceased => kEndKindDeceased,
+    kEndReasonAggressive ||
+    kEndReasonSpecializedTransport ||
+    kEndReasonNotFound ||
+    kEndReasonReporterUnreachable => null,
+    _ => kEndKindOther,
+  };
 
   final specializedTransport = selectedReason == kEndReasonSpecializedTransport;
 
@@ -292,5 +338,24 @@ EndReasonOutcome resolveEndReason(EndReasonSelection selection) {
         selectedReason == kEndReasonReporterUnreachable,
     excludeFromTransporterFault:
         selectedReason == kEndReasonAggressive || specializedTransport,
+    kind: kind,
   );
+}
+
+/// The case's animals after a shelter drop-off: every animal that isn't
+/// deceased and has no post-treatment action yet is sent to Intake the
+/// same way staff do it (CaseIntakeRepository: postTreatmentAction
+/// 'intake' + postTreatmentStartedAt), so Intake Details shows it waiting
+/// for "Confirm Animal Received".
+List<Map<String, dynamic>> animalsAfterShelterDropoff(
+  List<Map<String, dynamic>> animals,
+  Object startedAt,
+) {
+  return [
+    for (final a in animals)
+      if (a['outcome'] == 'deceased' || a['postTreatmentAction'] != null)
+        a
+      else
+        {...a, 'postTreatmentAction': 'intake', 'postTreatmentStartedAt': startedAt},
+  ];
 }

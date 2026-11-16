@@ -294,7 +294,9 @@ enum RescuePipelineTab {
             RescueStatus.accepted,
           ],
         RescuePipelineTab.assign => const [RescueStatus.awaitingAssignment],
-        RescuePipelineTab.ongoing => const [RescueStatus.ongoing],
+        // A trip the transporter stopped (transitEnded) stays here until
+        // staff decide what happens next.
+        RescuePipelineTab.ongoing => const [RescueStatus.ongoing, RescueStatus.transitEnded],
         RescuePipelineTab.treatment => const [RescueStatus.treatment],
         RescuePipelineTab.intake => const [RescueStatus.intake],
         // RescueStatus.rejected's own queryValues/_legacyAliases are just
