@@ -98,7 +98,7 @@ class _LocationSharingPageState extends State<LocationSharingPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Nearby alerts (geofencing)', style: titleStyle),
+        Text('Nearby alerts', style: titleStyle),
         const SizedBox(height: 4),
         Text(
           'Get notified about rescues, lost pets and completed rescues inside '

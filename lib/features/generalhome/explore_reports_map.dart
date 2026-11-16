@@ -12,6 +12,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:respawnd1/core/utils/public_case_status.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
@@ -160,9 +161,9 @@ class ReportMapEntry {
     final lng = (data['lng'] as num?)?.toDouble();
     if (lat == null || lng == null) return null;
 
-    final history = (data['statusHistory'] as List?)?.cast<Map>() ?? [];
-    final latestStatus =
-    history.isNotEmpty ? (history.last['status'] as String? ?? 'Pending') : 'Pending';
+    // The map reads the public copy, which has no status history, so this
+    // is usually the current status code turned into a label.
+    final latestStatus = caseStatusLine(data);
 
     final ts = data['createdAt'] as Timestamp?;
     final reporterName = (data['reporterName'] as String? ?? '').trim();

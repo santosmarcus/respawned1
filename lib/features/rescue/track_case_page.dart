@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
+import 'package:respawnd1/core/utils/public_case_status.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
@@ -12,11 +13,109 @@ import 'package:respawnd1/core/models/rescue/route_result.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 import 'package:respawnd1/features/rescue/widgets/live_proof_request_card.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
+
+// Case statuses written once the pet transporter has verified pickup and
+// has the animal (see transit_rules.dart for what each one means).
+// Community reports are closed from here on.
+const _kPickedUpStatuses = {
+  'treatment',
+  'dropoff',
+  'searching_clinic',
+  'in_transit_shelter',
+  'awaiting_adopter_pickup',
+  'in_treatment',
+  'intake',
+  'completed',
+  'closed',
+  'adopted',
+};
+
+bool _isAnimalPickedUp(Map<String, dynamic> data) {
+  final status = (data['status'] as String?) ?? '';
+  final pickupPhotos = data['pickupVerificationUrls'];
+  return _kPickedUpStatuses.contains(status) ||
+      (pickupPhotos is List && pickupPhotos.isNotEmpty);
+}
+
+/// The leg the transporter is currently driving, or null when they're not
+/// moving (waiting, arrived, at the clinic, done, ...). Used by both the
+/// map route and the status bar so they always agree.
+class _TransitLeg {
+  final LatLng destination;
+  final String subtitle;
+  const _TransitLeg(this.destination, this.subtitle);
+}
+
+LatLng? _latLngOf(Map<String, dynamic> data, String latKey, String lngKey) {
+  final lat = data[latKey];
+  final lng = data[lngKey];
+  if (lat is num && lng is num) return LatLng(lat.toDouble(), lng.toDouble());
+  return null;
+}
+
+String? _firstText(Map<String, dynamic> data, List<String> keys) {
+  for (final k in keys) {
+    final v = (data[k] as String?)?.trim();
+    if (v != null && v.isNotEmpty) return v;
+  }
+  return null;
+}
+
+_TransitLeg? _currentTransitLeg(Map<String, dynamic> data) {
+  final status = (data['status'] as String?) ?? '';
+  LatLng? dest;
+  String label;
+  String? place;
+  switch (status) {
+    case 'ongoing': // on the way to the pick up location
+      dest = _latLngOf(data, 'lat', 'lng');
+      label = 'To the pick up location';
+      place = _firstText(data, ['address']);
+    case 'treatment': // animal picked up, on the way to the clinic
+      dest =
+          _latLngOf(data, 'dropoffLat', 'dropoffLng') ??
+              _latLngOf(data, 'vetClinicLat', 'vetClinicLng');
+      label = 'To the clinic';
+      place = _firstText(data, [
+        'dropoffName',
+        'vetClinicName',
+        'dropoffAddress',
+        'vetClinicAddress',
+      ]);
+    case 'in_transit_shelter': // on the way to the shelter
+      dest = _latLngOf(data, 'shelterLat', 'shelterLng');
+      label = 'To the shelter';
+      place = _firstText(data, ['shelterName', 'shelterAddress']);
+    default:
+      return null;
+  }
+  if (dest == null) return null;
+  return _TransitLeg(dest, place == null ? label : '$label · $place');
+}
+
+/// One road route request shared by the map and the status bar, so both
+/// show the same Directions API route and it's only fetched once per
+/// rider position.
+class _SharedRouteLoader {
+  final _repo = DirectionsRepository();
+  Future<RouteResult>? _future;
+  LatLng? _origin;
+  LatLng? _destination;
+
+  Future<RouteResult> load(LatLng origin, LatLng destination) {
+    if (_future != null && _origin == origin && _destination == destination) {
+      return _future!;
+    }
+    _origin = origin;
+    _destination = destination;
+    return _future = _repo.fetchRoute(origin: origin, destination: destination);
+  }
+}
 
 class TrackCasePage extends StatefulWidget {
   final String caseId;
@@ -34,6 +133,7 @@ class TrackCasePage extends StatefulWidget {
 class _TrackCasePageState extends State<TrackCasePage> {
   late int _tabIndex = widget.initialTabIndex;
   final _messageController = TextEditingController();
+  final _routeLoader = _SharedRouteLoader();
   final _messageFocusNode = FocusNode();
 
   @override
@@ -53,19 +153,19 @@ class _TrackCasePageState extends State<TrackCasePage> {
         .doc(uid)
         .get();
     final name =
-        '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
-            .trim();
+    '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
+        .trim();
 
     await FirebaseFirestore.instance
         .collection('cases')
         .doc(caseId)
         .collection('messages')
         .add({
-          'senderId': uid,
-          'senderName': name,
-          'text': text,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
+      'senderId': uid,
+      'senderName': name,
+      'text': text,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
 
     _messageController.clear();
   }
@@ -92,18 +192,29 @@ class _TrackCasePageState extends State<TrackCasePage> {
 
         final data = snapshot.data!.data() as Map<String, dynamic>?;
         final status = data?['status'] ?? 'pending';
+        // True when the viewer can read the full case (reporter, willing
+        // adopter, staff, the transporter). Everyone else only gets the
+        // public copy: no status history, transporter or live location.
+        final hasFullAccess = snapshot.data!.reference.parent.id == 'cases';
         final statusHistory = List<Map<String, dynamic>>.from(
           data?['statusHistory'] ?? [],
         );
+        // The public copy has no history; show the current status instead
+        // of "No status updates yet."
+        if (statusHistory.isEmpty && !hasFullAccess && data != null) {
+          statusHistory.add({
+            'status': publicCaseStatusLabel(data['status'] as String?),
+          });
+        }
         final isReporter =
             FirebaseAuth.instance.currentUser?.uid != null &&
-            FirebaseAuth.instance.currentUser?.uid == data?['reporterId'];
+                FirebaseAuth.instance.currentUser?.uid == data?['reporterId'];
 
         final normalizedStatus = status.toString().toLowerCase();
         final isFinalStatus =
             normalizedStatus == 'closed' ||
-            normalizedStatus.contains('completed') ||
-            normalizedStatus.contains('ended');
+                normalizedStatus.contains('completed') ||
+                normalizedStatus.contains('ended');
 
         // A rejected report gets the same one-time success/acknowledgment
         // screen as a closed/completed case — but only until the reporter
@@ -114,7 +225,7 @@ class _TrackCasePageState extends State<TrackCasePage> {
         // back to this screen every time.
         final isUnacknowledgedRejection =
             normalizedStatus == 'rejected' &&
-            data?['hiddenFromExplore'] != true;
+                data?['hiddenFromExplore'] != true;
 
         if (isReporter && (isFinalStatus || isUnacknowledgedRejection)) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -155,13 +266,20 @@ class _TrackCasePageState extends State<TrackCasePage> {
                       child: _TrackCaseMap(
                         caseId: widget.caseId,
                         data: data ?? {},
+                        routeLoader: _routeLoader,
                       ),
                     ),
                     Positioned(
                       left: 24,
                       right: 24,
                       bottom: 0,
-                      child: _EtaCard(caseId: widget.caseId, data: data ?? {}),
+                      child: hasFullAccess
+                          ? _TransitStatusBar(
+                        caseId: widget.caseId,
+                        data: data ?? {},
+                        routeLoader: _routeLoader,
+                      )
+                          : const SizedBox.shrink(),
                     ),
                   ],
                 ),
@@ -220,26 +338,33 @@ class _TrackCasePageState extends State<TrackCasePage> {
                         ),
                       ),
 
+                      // Pet transporter details (name, plate, vehicle),
+                      // right under the tracking number. Shown to everyone
+                      // who can read the full case; the public copy has no
+                      // transporter details.
+                      if (hasFullAccess)
+                        _TransporterHeaderCard(caseId: widget.caseId),
+
                       const SizedBox(height: 12),
 
                       // Tab content
                       Expanded(
                         child: _tabIndex == 0
                             ? _TrackingTab(
-                                statusHistory: statusHistory,
-                                caseId: widget.caseId,
-                                messageController: _messageController,
-                                messageFocusNode: _messageFocusNode,
-                                onSend: () => _sendMessage(widget.caseId),
-                                data: data ?? {}, // ADDED
-                                isReporter: isReporter,
-                              )
+                          statusHistory: statusHistory,
+                          caseId: widget.caseId,
+                          messageController: _messageController,
+                          messageFocusNode: _messageFocusNode,
+                          onSend: () => _sendMessage(widget.caseId),
+                          data: data ?? {}, // ADDED
+                          isReporter: isReporter,
+                        )
                             : _CaseDetailTab(
-                                caseId: widget.caseId,
-                                data: data ?? {},
-                                isReporter: isReporter,
-                                onMessageOrg: _focusOrgMessages,
-                              ),
+                          caseId: widget.caseId,
+                          data: data ?? {},
+                          isReporter: isReporter,
+                          onMessageOrg: _focusOrgMessages,
+                        ),
                       ),
                     ],
                   ),
@@ -295,7 +420,12 @@ class _TabButton extends StatelessWidget {
 class _TrackCaseMap extends StatefulWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const _TrackCaseMap({required this.caseId, required this.data});
+  final _SharedRouteLoader routeLoader;
+  const _TrackCaseMap({
+    required this.caseId,
+    required this.data,
+    required this.routeLoader,
+  });
 
   @override
   State<_TrackCaseMap> createState() => _TrackCaseMapState();
@@ -337,7 +467,7 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
                   data['newLat'] is num &&
                   data['newLng'] is num;
             }).toList() ??
-            <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
@@ -364,9 +494,9 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
 
             final center =
                 riderPos ??
-                pickup ??
-                dropoff ??
-                const LatLng(14.5416, 121.0644);
+                    pickup ??
+                    dropoff ??
+                    const LatLng(14.5416, 121.0644);
 
             if (_controller != null && riderPos != null && !_centered) {
               _centered = true;
@@ -417,33 +547,57 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
                 ),
             };
 
-            final routePoints = <LatLng>[
-              ?pickup,
-              ...trail,
-              if (trail.isEmpty && dropoff != null) dropoff,
-            ];
+            // Road route from the Google Directions API, from the
+            // transporter's live position to where they're heading now.
+            // Only drawn while they're actually travelling.
+            final leg = _currentTransitLeg(widget.data);
+            if (leg != null) {
+              markers.add(
+                Marker(
+                  markerId: const MarkerId('current_destination'),
+                  position: leg.destination,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                    BitmapDescriptor.hueAzure,
+                  ),
+                  infoWindow: InfoWindow(title: leg.subtitle),
+                ),
+              );
+            }
+            final routeFuture = (leg != null && riderPos != null)
+                ? widget.routeLoader.load(riderPos, leg.destination)
+                : null;
 
-            return ClipRRect(
-              borderRadius: BorderRadius.zero,
-              child: GoogleMap(
-                onMapCreated: (ctrl) => _controller = ctrl,
-                initialCameraPosition: CameraPosition(target: center, zoom: 14),
-                myLocationEnabled: false,
-                myLocationButtonEnabled: false,
-                zoomControlsEnabled: false,
-                mapToolbarEnabled: false,
-                markers: markers,
-                polylines: routePoints.length < 2
-                    ? {}
-                    : {
-                        Polyline(
-                          polylineId: const PolylineId('route_trail'),
-                          points: routePoints,
-                          color: AppColors.textPrimary,
-                          width: 4,
-                        ),
-                      },
-              ),
+            return FutureBuilder<RouteResult>(
+              future: routeFuture,
+              builder: (context, routeSnapshot) {
+                final route = routeFuture == null ? null : routeSnapshot.data;
+                final routePoints = route?.polylinePoints ?? const <LatLng>[];
+                return ClipRRect(
+                  borderRadius: BorderRadius.zero,
+                  child: GoogleMap(
+                    onMapCreated: (ctrl) => _controller = ctrl,
+                    initialCameraPosition: CameraPosition(
+                      target: center,
+                      zoom: 14,
+                    ),
+                    myLocationEnabled: false,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    mapToolbarEnabled: false,
+                    markers: markers,
+                    polylines: routePoints.length < 2
+                        ? {}
+                        : {
+                      Polyline(
+                        polylineId: const PolylineId('route'),
+                        points: routePoints,
+                        color: AppColors.success,
+                        width: 5,
+                      ),
+                    },
+                  ),
+                );
+              },
             );
           },
         );
@@ -452,24 +606,18 @@ class _TrackCaseMapState extends State<_TrackCaseMap> {
   }
 }
 
-class _EtaCard extends StatefulWidget {
+/// "Transporter is on the way · 6 min" bar over the bottom of the map
+/// (replaces the old "# km away" card). Only shown while the transporter is
+/// travelling to the pick up location, the clinic, or the shelter.
+class _TransitStatusBar extends StatelessWidget {
   final String caseId;
   final Map<String, dynamic> data;
-  const _EtaCard({required this.caseId, required this.data});
-
-  @override
-  State<_EtaCard> createState() => _EtaCardState();
-}
-
-class _EtaCardState extends State<_EtaCard> {
-  final _directionsRepository = DirectionsRepository();
-
-  LatLng? _latLngFrom(Map<String, dynamic> data, String latKey, String lngKey) {
-    final lat = data[latKey];
-    final lng = data[lngKey];
-    if (lat is num && lng is num) return LatLng(lat.toDouble(), lng.toDouble());
-    return null;
-  }
+  final _SharedRouteLoader routeLoader;
+  const _TransitStatusBar({
+    required this.caseId,
+    required this.data,
+    required this.routeLoader,
+  });
 
   String _formatDuration(Duration d) {
     final totalMinutes = (d.inSeconds / 60).round();
@@ -480,24 +628,21 @@ class _EtaCardState extends State<_EtaCard> {
     return minutes == 0 ? '${hours}h' : '${hours}h ${minutes}m';
   }
 
-  String _formatDistance(double km) =>
-      km < 10 ? '${km.toStringAsFixed(1)}km' : '${km.round()}km';
+  String _formatDistance(double km) {
+    if (km < 1) return '${(km * 1000).round()} m';
+    return km < 10 ? '${km.toStringAsFixed(1)} km' : '${km.round()} km';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final pickup = _latLngFrom(widget.data, 'lat', 'lng');
-    final dropoff = _latLngFrom(widget.data, 'dropoffLat', 'dropoffLng');
-    final riderLastKnown = _latLngFrom(
-      widget.data,
-      'riderLastLat',
-      'riderLastLng',
-    );
-    final destination = dropoff ?? pickup;
+    final leg = _currentTransitLeg(data);
+    if (leg == null) return const SizedBox.shrink();
+    final riderLastKnown = _latLngOf(data, 'riderLastLat', 'riderLastLng');
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('cases')
-          .doc(widget.caseId)
+          .doc(caseId)
           .collection('tracking')
           .orderBy('timestamp')
           .limitToLast(1)
@@ -512,27 +657,22 @@ class _EtaCardState extends State<_EtaCard> {
             riderPos = LatLng(lat.toDouble(), lng.toDouble());
           }
         }
-
-        if (riderPos == null || destination == null) {
-          return const SizedBox.shrink();
-        }
+        final routeFuture = riderPos == null
+            ? null
+            : routeLoader.load(riderPos, leg.destination);
 
         return FutureBuilder<RouteResult>(
-          future: _directionsRepository.fetchRoute(
-            origin: riderPos,
-            destination: destination,
-          ),
+          future: routeFuture,
           builder: (context, routeSnapshot) {
             final route = routeSnapshot.data;
-            if (route == null) return const SizedBox.shrink();
-
-            final distanceLabel = _formatDistance(route.distanceKm);
-            final headline = route.duration != null
-                ? '${_formatDuration(route.duration!)}   $distanceLabel away'
-                : '$distanceLabel away';
-
+            final eta = route?.duration;
+            final km = route?.distanceKm;
+            final etaText = [
+              if (eta != null) _formatDuration(eta),
+              if (km != null) _formatDistance(km),
+            ].join(' · ');
             return Container(
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
@@ -544,26 +684,40 @@ class _EtaCardState extends State<_EtaCard> {
                   ),
                 ],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  Text(
-                    headline,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Transporter is on the way',
+                          style: GoogleFonts.tiltWarp(
+                            fontSize: 15,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          leg.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  if (route.duration != null) ...[
-                    const SizedBox(height: 2),
+                  if (etaText.isNotEmpty) ...[
+                    const SizedBox(width: 12),
                     Text(
-                      'Estimated time of arrival',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.zain(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
+                      etaText,
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 16,
+                        color: AppColors.textPrimary,
                       ),
                     ),
                   ],
@@ -573,6 +727,151 @@ class _EtaCardState extends State<_EtaCard> {
           },
         );
       },
+    );
+  }
+}
+
+/// Pet transporter details under the tracking number: avatar, name and
+/// type on the left, plate number and vehicle on the right, plus a call
+/// button. Only shown once a transporter has accepted the assignment.
+class _TransporterHeaderCard extends ConsumerWidget {
+  final String caseId;
+  const _TransporterHeaderCard({required this.caseId});
+
+  Future<void> _call(BuildContext context, String phone) async {
+    final launched = await launchUrl(
+      Uri(scheme: 'tel', path: phone),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(appSnackBar('Could not start the call.'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final assignment = ref
+        .watch(currentAssignmentProvider(caseId))
+        .asData
+        ?.value;
+    final show =
+        assignment != null &&
+            (assignment.status == TransportAssignmentStatus.accepted ||
+                assignment.status == TransportAssignmentStatus.completed);
+    if (!show) return const SizedBox.shrink();
+
+    final profile = ref
+        .watch(
+      transporterProfileProvider((
+      uid: assignment.riderId,
+      fallbackName: assignment.riderName,
+      type: assignment.riderType,
+      isDemo: assignment.isDemo,
+      )),
+    )
+        .asData
+        ?.value;
+
+    final name = profile?.name ?? assignment.riderName;
+    final type = profile?.type ?? assignment.riderType;
+    final plate = profile?.plate ?? assignment.plate ?? 'No plate';
+    final vehicle =
+        profile?.vehicle ?? assignment.vehicle ?? 'Vehicle not provided';
+    final photoUrl = profile?.photoUrl;
+    final phone = profile?.phone?.trim();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: AppColors.slaterspwn,
+            backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                ? NetworkImage(photoUrl)
+                : null,
+            child: (photoUrl == null || photoUrl.isEmpty)
+                ? const Icon(Icons.person, color: AppColors.textSecondary)
+                : null,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.zain(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  type,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  plate,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.tiltWarp(
+                    fontSize: 17,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  vehicle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: (phone == null || phone.isEmpty)
+                ? 'No phone number on file'
+                : 'Call $name',
+            onPressed: (phone == null || phone.isEmpty)
+                ? null
+                : () => _call(context, phone),
+            icon: const Icon(Icons.phone_outlined),
+            color: AppColors.textPrimary,
+            style: IconButton.styleFrom(
+              side: const BorderSide(color: AppColors.slaterspwn),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -662,10 +961,10 @@ class _TrackingTabState extends State<_TrackingTab> {
   }
 
   Widget _buildMediaSection(
-    BuildContext context,
-    String title,
-    List<String> urls,
-  ) {
+      BuildContext context,
+      String title,
+      List<String> urls,
+      ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
@@ -684,63 +983,63 @@ class _TrackingTabState extends State<_TrackingTab> {
             width: double.infinity,
             child: urls.isEmpty
                 ? Text(
-                    'Not available yet.',
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  )
+              'Not available yet.',
+              style: GoogleFonts.zain(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            )
                 : Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: urls.map((url) {
-                      return GestureDetector(
-                        onTap: () => _showFullImage(context, url),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            url,
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, progress) {
-                              if (progress == null) return child;
-                              return Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  color: AppColors.slaterspwn,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    value: progress.expectedTotalBytes != null
-                                        ? progress.cumulativeBytesLoaded /
-                                              progress.expectedTotalBytes!
-                                        : null,
-                                    strokeWidth: 2,
-                                    color: AppColors.textPrimary,
-                                  ),
-                                ),
-                              );
-                            },
-                            errorBuilder: (context, _, _) => Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                color: AppColors.slaterspwn,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(
-                                Icons.broken_image_outlined,
-                                color: AppColors.textSecondary,
-                              ),
+              spacing: 10,
+              runSpacing: 10,
+              children: urls.map((url) {
+                return GestureDetector(
+                  onTap: () => _showFullImage(context, url),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      url,
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: AppColors.slaterspwn,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              value: progress.expectedTotalBytes != null
+                                  ? progress.cumulativeBytesLoaded /
+                                  progress.expectedTotalBytes!
+                                  : null,
+                              strokeWidth: 2,
+                              color: AppColors.textPrimary,
                             ),
                           ),
+                        );
+                      },
+                      errorBuilder: (context, _, _) => Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                      );
-                    }).toList(),
+                        child: const Icon(
+                          Icons.broken_image_outlined,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
                   ),
+                );
+              }).toList(),
+            ),
           ),
         ],
       ),
@@ -751,9 +1050,9 @@ class _TrackingTabState extends State<_TrackingTab> {
   // into that reversed list, so index 0 is always the most recent update
   // and gets the checkmark, matching "latest update at the top" spec.
   Widget _buildTimelineItem(
-    List<Map<String, dynamic>> displayList,
-    int displayIndex,
-  ) {
+      List<Map<String, dynamic>> displayList,
+      int displayIndex,
+      ) {
     final item = displayList[displayIndex];
     final isNewest = displayIndex == 0;
     final ts = item['timestamp'];
@@ -926,7 +1225,10 @@ class _TrackingTabState extends State<_TrackingTab> {
         // Community Reports — visible to the reporter (for
         // situational awareness) and to every other user (who can
         // submit sighting reports to help verify/update the case).
-        CommunityReportSection(caseId: widget.caseId),
+        CommunityReportSection(
+          caseId: widget.caseId,
+          canSubmit: !_isAnimalPickedUp(widget.data),
+        ),
         const SizedBox(height: 8),
         const Divider(color: AppColors.slaterspwn),
 
@@ -959,7 +1261,7 @@ class _TrackingTabState extends State<_TrackingTab> {
                     itemCount: snap.data!.docs.length,
                     itemBuilder: (context, i) {
                       final msg =
-                          snap.data!.docs[i].data() as Map<String, dynamic>;
+                      snap.data!.docs[i].data() as Map<String, dynamic>;
                       final ts = msg['timestamp'] as Timestamp?;
                       final timeStr = ts != null
                           ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
@@ -987,7 +1289,7 @@ class _TrackingTabState extends State<_TrackingTab> {
                                 children: [
                                   Row(
                                     mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
+                                    MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
                                         msg['senderName'] ?? '',
@@ -1111,40 +1413,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
 
   Map<String, dynamic> get data => widget.data;
 
-  // Transporter Card Regression spec §2 — replaced the old bespoke card
-  // (which read flat `assignedVolunteerName`/`assignedVehicle`/
-  // `assignedPlate`/`riderLastLat`/`riderLastLng` case fields with no
-  // status gating at all, so it could keep showing a rejected/expired/
-  // cancelled/superseded offer's details) with the SAME shared
-  // TransporterDetailsCard admin Track Case already uses, fed by the live
-  // `currentAssignmentProvider` stream and gated on
-  // `TransportAssignmentStatus.accepted` — never inferred from a stale or
-  // non-accepted offer. Call-only (TransporterDetailsCard already omits
-  // Message, since the case's own Messages section covers that).
-  Widget _buildTransporterSection(BuildContext context) {
-    if (!widget.isReporter) return const SizedBox.shrink();
-    return Consumer(
-      builder: (context, ref, _) {
-        final assignmentAsync = ref.watch(currentAssignmentProvider(widget.caseId));
-        final assignment = assignmentAsync.asData?.value;
-        final accepted = assignment != null && assignment.status == TransportAssignmentStatus.accepted;
-        if (!accepted) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Text(
-              'Waiting for a transporter to accept the assignment.',
-              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-            ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: TransporterDetailsCard(assignment: assignment),
-        );
-      },
-    );
-  }
-
   bool get _hasWillingAdopter {
     final reporterWantsToAdopt = data['interestedToAdopt'] == 'yes';
     final willingAdopterId = data['willingAdopterId'] as String?;
@@ -1164,8 +1432,8 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           .get();
       final userData = userDoc.data();
       final name =
-          '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
-              .trim();
+      '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'
+          .trim();
       final label = type == 'adopt';
 
       await RescueCaseStore(FirebaseFirestore.instance).recordAction(
@@ -1246,10 +1514,10 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
   }
 
   Widget _buildMediaSection(
-    BuildContext context,
-    String title,
-    List<String> urls,
-  ) {
+      BuildContext context,
+      String title,
+      List<String> urls,
+      ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1266,63 +1534,63 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           width: double.infinity,
           child: urls.isEmpty
               ? Text(
-                  'Not available yet.',
-                  style: GoogleFonts.zain(
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                  ),
-                )
+            'Not available yet.',
+            style: GoogleFonts.zain(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+          )
               : Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: urls.map((url) {
-                    return GestureDetector(
-                      onTap: () => _showFullImage(context, url),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          url,
-                          width: 100,
-                          height: 100,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return Container(
-                              width: 100,
-                              height: 100,
-                              decoration: BoxDecoration(
-                                color: AppColors.slaterspwn,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: CircularProgressIndicator(
-                                  value: progress.expectedTotalBytes != null
-                                      ? progress.cumulativeBytesLoaded /
-                                            progress.expectedTotalBytes!
-                                      : null,
-                                  strokeWidth: 2,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, _, _) => Container(
-                            width: 100,
-                            height: 100,
-                            decoration: BoxDecoration(
-                              color: AppColors.slaterspwn,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(
-                              Icons.broken_image_outlined,
-                              color: AppColors.textSecondary,
-                            ),
+            spacing: 12,
+            runSpacing: 12,
+            children: urls.map((url) {
+              return GestureDetector(
+                onTap: () => _showFullImage(context, url),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    url,
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: AppColors.slaterspwn,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            value: progress.expectedTotalBytes != null
+                                ? progress.cumulativeBytesLoaded /
+                                progress.expectedTotalBytes!
+                                : null,
+                            strokeWidth: 2,
+                            color: AppColors.textPrimary,
                           ),
                         ),
+                      );
+                    },
+                    errorBuilder: (context, _, _) => Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: AppColors.slaterspwn,
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                    );
-                  }).toList(),
+                      child: const Icon(
+                        Icons.broken_image_outlined,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
                 ),
+              );
+            }).toList(),
+          ),
         ),
       ],
     );
@@ -1335,8 +1603,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildTransporterSection(context),
-
           // Full rejection detail (reason, rejected date, reviewer) lives
           // here rather than on the compact Home Activity card — see
           // activity_card.dart's rejected-chip comment.
@@ -1402,28 +1668,28 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed:
-                          (data['adopterArrivedAtTreatment'] == true ||
-                              _isMarkingArrival)
+                      (data['adopterArrivedAtTreatment'] == true ||
+                          _isMarkingArrival)
                           ? null
                           : _markArrivedAtTreatment,
                       style: AppButtons.primary,
                       child: _isMarkingArrival
                           ? const SizedBox(
-                              height: 16,
-                              width: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.textPrimary,
-                              ),
-                            )
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.textPrimary,
+                        ),
+                      )
                           : Text(
-                              data['adopterArrivedAtTreatment'] == true
-                                  ? 'Arrived ✓'
-                                  : 'Arrived at Treatment',
-                              style: GoogleFonts.zain(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                        data['adopterArrivedAtTreatment'] == true
+                            ? 'Arrived ✓'
+                            : 'Arrived at Treatment',
+                        style: GoogleFonts.zain(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1432,7 +1698,10 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
             const SizedBox(height: 12),
           ],
 
-          if (!_hasWillingAdopter) ...[
+          // The reporter already answered "no" to adopting on the report
+          // form, so don't prompt them again. Everyone else still sees it.
+          if (!_hasWillingAdopter &&
+              !(widget.isReporter && data['interestedToAdopt'] == 'no')) ...[
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
@@ -1461,22 +1730,22 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
                     style: AppButtons.outline,
                     child: _isSubmitting
                         ? const SizedBox(
-                            height: 16,
-                            width: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.textPrimary,
-                            ),
-                          )
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.textPrimary,
+                      ),
+                    )
                         : Text(
-                            'Interest to Adopt',
-                            style: GoogleFonts.zain(fontSize: 13),
-                          ),
+                      'Interest to Adopt',
+                      style: GoogleFonts.zain(fontSize: 13),
+                    ),
                   ),
                 ),
               ],
             ),
-          ] else
+          ] else if (_hasWillingAdopter)
             _DetailRow(
               'Willing adopter',
               '${data['willingAdopterName'] ?? '-'}'

@@ -38,7 +38,17 @@ import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 /// the submission form below still writes directly to Firestore.
 class CommunityReportSection extends ConsumerStatefulWidget {
   final String caseId;
-  const CommunityReportSection({super.key, required this.caseId});
+
+  /// When false, the "Add Community Report" button is hidden and a short
+  /// note is shown instead. Existing reports stay visible. Track Case
+  /// passes false once the pet transporter has picked up the animal.
+  final bool canSubmit;
+
+  const CommunityReportSection({
+    super.key,
+    required this.caseId,
+    this.canSubmit = true,
+  });
 
   @override
   ConsumerState<CommunityReportSection> createState() => _CommunityReportSectionState();
@@ -109,7 +119,7 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
         builder: (_) => const LastSeenLocationPicker(
           title: 'Where is the animal now?',
           instructionText:
-              'Tap anywhere on the map to drop a pin, or search an address below. This becomes the animal\'s new known location.',
+          'Tap anywhere on the map to drop a pin, or search an address below. This becomes the animal\'s new known location.',
           pinLabel: 'New location',
           confirmLabel: 'Confirm New Location',
         ),
@@ -163,13 +173,13 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
 
   String _typeDescription(String? t) => switch (t) {
     'still_here' =>
-      'Upload a recent photo to confirm the animal is still at the reported location.',
+    'Upload a recent photo to confirm the animal is still at the reported location.',
     'moved' =>
-      'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
+    'The animal is no longer at the original location. Upload a recent photo and share the new location so rescuers can keep monitoring safely.',
     'rescued' =>
-      'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
+    'This animal has already been rescued by a rescuer, bystander, or partner organization. Add a photo or other proof to help verify the report.',
     'no_animal' =>
-      'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
+    'No animal was found at the reported location. Add a recent photo of the area to confirm the report may no longer be accurate.',
     _ => '',
   };
 
@@ -231,8 +241,8 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
           .doc(uid)
           .get();
       final name =
-          '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
-              .trim();
+      '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
+          .trim();
 
       final reportRef = _reportsRef.doc();
 
@@ -424,17 +434,17 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                     ),
                     child: _pickedImage != null
                         ? ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: Image.file(
-                              File(_pickedImage!.path),
-                              fit: BoxFit.cover,
-                            ),
-                          )
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.file(
+                        File(_pickedImage!.path),
+                        fit: BoxFit.cover,
+                      ),
+                    )
                         : const Icon(
-                            Icons.add_a_photo_outlined,
-                            color: AppColors.textSecondary,
-                            size: 26,
-                          ),
+                      Icons.add_a_photo_outlined,
+                      color: AppColors.textSecondary,
+                      size: 26,
+                    ),
                   ),
                 ),
                 if (_showImageError) ...[
@@ -567,21 +577,21 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
                 style: AppButtons.primary,
                 child: _submitting
                     ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.textPrimary,
-                        ),
-                      )
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.textPrimary,
+                  ),
+                )
                     : Text(
-                        'Report',
-                        style: GoogleFonts.tiltWarp(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
+                  'Report',
+                  style: GoogleFonts.tiltWarp(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
               ),
             ),
           ],
@@ -684,126 +694,126 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
     final approvalBadge = _approvalBadge(r);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: AppColors.textPrimary,
-                child: Padding(
-                  padding: const EdgeInsets.all(9),
-                  child: Image.asset(
-                    _typeIconAsset(r.type),
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${r.reporterName ?? 'Someone'} · ${_typeLabel(r.type)}',
-                            style: GoogleFonts.zain(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ),
-                        if (date != null)
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                _formatTime(date),
-                                style: GoogleFonts.zain(
-                                  fontSize: 10,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                              Text(
-                                _formatDate(date),
-                                style: GoogleFonts.zain(
-                                  fontSize: 10,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-
-                    if (comment != null && comment.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 3),
-                        child: Text(
-                          comment,
-                          style: GoogleFonts.zain(
-                            fontSize: 14,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          // Photo moved below the row and made full-width, per the design
-          // mockup's large landscape placeholder (was a 36x36 side thumbnail).
-          if (photoUrl != null && photoUrl.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.network(
-                photoUrl,
-                width: double.infinity,
-                height: 120,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  width: double.infinity,
-                  height: 120,
-                  color: AppColors.slaterspwn,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: AppColors.textPrimary,
+              child: Padding(
+                padding: const EdgeInsets.all(9),
+                child: Image.asset(
+                  _typeIconAsset(r.type),
+                  fit: BoxFit.contain,
                 ),
               ),
             ),
-          ],
-          if (newAddress != null && newAddress.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Row(
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(
-                    Icons.location_on_outlined,
-                    size: 20,
-                    color: AppColors.textSecondary,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${r.reporterName ?? 'Someone'} · ${_typeLabel(r.type)}',
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      if (date != null)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              _formatTime(date),
+                              style: GoogleFonts.zain(
+                                fontSize: 10,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            Text(
+                              _formatDate(date),
+                              style: GoogleFonts.zain(
+                                fontSize: 10,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
                   ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      newAddress,
-                      style: GoogleFonts.zain(
-                        fontSize: 13,
-                        color: AppColors.textPrimary,
+
+                  if (comment != null && comment.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        comment,
+                        style: GoogleFonts.zain(
+                          fontSize: 14,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
-          ?approvalBadge,
-        ],
-      ),
+          ],
+        ),
+        // Photo moved below the row and made full-width, per the design
+        // mockup's large landscape placeholder (was a 36x36 side thumbnail).
+        if (photoUrl != null && photoUrl.isNotEmpty) ...[
+    const SizedBox(height: 8),
+    ClipRRect(
+    borderRadius: BorderRadius.circular(10),
+    child: Image.network(
+    photoUrl,
+    width: double.infinity,
+    height: 120,
+    fit: BoxFit.cover,
+    errorBuilder: (_, _, _) => Container(
+    width: double.infinity,
+    height: 120,
+    color: AppColors.slaterspwn,
+    ),
+    ),
+    ),
+    ],
+    if (newAddress != null && newAddress.isNotEmpty)
+    Padding(
+    padding: const EdgeInsets.only(top: 3),
+    child: Row(
+    children: [
+    const Icon(
+    Icons.location_on_outlined,
+    size: 20,
+    color: AppColors.textSecondary,
+    ),
+    const SizedBox(width: 4),
+    Expanded(
+    child: Text(
+    newAddress,
+    style: GoogleFonts.zain(
+    fontSize: 13,
+    color: AppColors.textPrimary,
+    ),
+    ),
+    ),
+    ],
+    ),
+    ),
+    ?approvalBadge,
+    ],
+    ),
     );
   }
 
@@ -842,18 +852,27 @@ class _CommunityReportSectionState extends ConsumerState<CommunityReportSection>
             ),
             if (_sectionExpanded) ...[
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: () => setState(() => _expanded = !_expanded),
-                  icon: Icon(
-                    _expanded ? Icons.close : Icons.add_circle_outline,
-                    size: 18,
+              if (widget.canSubmit)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _expanded = !_expanded),
+                    icon: Icon(
+                      _expanded ? Icons.close : Icons.add_circle_outline,
+                      size: 18,
+                    ),
+                    label: Text(_expanded ? 'Cancel' : 'Add Community Report'),
                   ),
-                  label: Text(_expanded ? 'Cancel' : 'Add Community Report'),
+                )
+              else
+                Text(
+                  'Community reports are closed. The pet transporter has already picked up the animal.',
+                  style: GoogleFonts.zain(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
-              ),
-              if (_expanded) ...[
+              if (widget.canSubmit && _expanded) ...[
                 const SizedBox(height: 10),
                 if (_selectedType == null) ...[
                   Text(

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/utils/public_case_status.dart';
 import 'package:respawnd1/core/utils/community_adoption_eligibility.dart'
 as community_adoption_util;
 
@@ -65,10 +66,9 @@ class PublicRescueItem {
       QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
 
-    final history = (data['statusHistory'] as List?)?.cast<Map>() ?? [];
-    final latestStatus = history.isNotEmpty
-        ? (history.last['status'] as String? ?? 'Pending')
-        : 'Pending';
+    // Explore reads the public copy, which has no status history, so this
+    // is usually the current status code turned into a label.
+    final latestStatus = caseStatusLine(data);
 
     final ts = data['createdAt'] as Timestamp?;
 
