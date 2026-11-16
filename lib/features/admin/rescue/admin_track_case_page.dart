@@ -1787,8 +1787,11 @@ class _PendingAssignmentBannerState
     final offeredAt = widget.assignment.offeredAt;
     if (offeredAt == null) return '';
     final elapsed = DateTime.now().difference(offeredAt);
-    if (elapsed.inMinutes < 1) return 'Pending for ${elapsed.inSeconds}s';
-    return 'Pending for ${elapsed.inMinutes}m';
+    final pending = elapsed.inMinutes < 1 ? 'Pending for ${elapsed.inSeconds}s' : 'Pending for ${elapsed.inMinutes}m';
+    // The wait depends on urgency (transportOfferTtlFor), so show the
+    // offer's own deadline rather than assume one.
+    final expiry = widget.assignment.expiryLabel();
+    return expiry.isEmpty ? pending : '$pending · $expiry';
   }
 
   Future<void> _cancelOffer() async {

@@ -198,7 +198,7 @@ void main() {
 
     test('isStalePending only flags a pending offer past expiry', () {
       final past = DateTime.now().subtract(const Duration(minutes: 1));
-      final future = DateTime.now().add(kTransportOfferTtl);
+      final future = DateTime.now().add(kTransportOfferTtlStandard);
       expect(
         assignment(
           TransportAssignmentStatus.pending,
@@ -250,6 +250,40 @@ void main() {
         unknown.userMessage,
         'An active transporter assignment already exists.',
       );
+    });
+  });
+
+  group('offer wait by urgency', () {
+    test('Critical cases get the short wait', () {
+      expect(transportOfferTtlFor('Critical'), kTransportOfferTtlCritical);
+    });
+
+    test('every other urgency, or none, gets the standard wait', () {
+      for (final urgency in ['Medium', 'Low', '', null, 'critical']) {
+        expect(
+          transportOfferTtlFor(urgency),
+          kTransportOfferTtlStandard,
+          reason: '$urgency',
+        );
+      }
+    });
+
+    test('the Critical wait is the shorter one', () {
+      expect(kTransportOfferTtlCritical < kTransportOfferTtlStandard, isTrue);
+    });
+
+    test('expiry label counts down from the offer deadline', () {
+      final now = DateTime(2026, 11, 17, 9);
+      expect(offerExpiryLabel(null, now), '');
+      expect(
+        offerExpiryLabel(now.add(const Duration(minutes: 4, seconds: 5)), now),
+        'Expires in 4m 5s',
+      );
+      expect(
+        offerExpiryLabel(now.add(const Duration(seconds: 30)), now),
+        'Expires in 30s',
+      );
+      expect(offerExpiryLabel(now, now), 'Offer expired');
     });
   });
 }

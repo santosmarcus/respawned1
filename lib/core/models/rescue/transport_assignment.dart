@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 
 /// Lifecycle of a single rider offer for a rescue case. Distinct from both
 /// [RescueStatus] (the case's own admin-facing pipeline status) and the raw
@@ -19,13 +20,31 @@ enum TransportAssignmentStatus {
       );
 }
 
-/// How long a pending offer stays actionable before it's treated as stale.
-/// There is no server-side (Cloud Functions) expiry job — expiry is enforced
-/// lazily, inside the same transactions that would otherwise accept/reject/
-/// resurrect a pending offer, and opportunistically whenever a screen reads
-/// the latest assignment for a case (see RescueCaseRepository.
-/// reconcileStaleOffer). Purely a client-computed cutoff against [offeredAt].
-const Duration kTransportOfferTtl = Duration(minutes: 20);
+// ---- How long a transporter has to answer an offer ----------------------
+//
+// The wait depends on the case's urgency, so a Critical case moves on to the
+// next transporter quickly. These are the proposed values; the organization
+// still has to confirm them, so change them here only.
+
+/// Wait for a Critical case.
+const Duration kTransportOfferTtlCritical = Duration(minutes: 5);
+
+/// Wait for every other case (Medium, Low, or not rated).
+const Duration kTransportOfferTtlStandard = Duration(minutes: 20);
+
+/// How long a new offer stays open for a case with this [urgency] (the raw
+/// `cases/{id}.urgency` string). Only used when the offer is created: the
+/// offer's own `expiresAt` is what every later check reads, so changing
+/// these values never shortens or extends offers already sent.
+///
+/// Expiry is enforced inside the accept/reject transactions, by the
+/// expireTransportOffers scheduled function (functions/index.js), and by
+/// TransportAssignmentRepository.reconcileStaleOffer whenever a staff
+/// screen reads the offer.
+Duration transportOfferTtlFor(String? urgency) =>
+    UrgencyLevel.fromFirestoreValue(urgency) == UrgencyLevel.critical
+        ? kTransportOfferTtlCritical
+        : kTransportOfferTtlStandard;
 
 /// A single doc under `cases/{caseId}/transportAssignments/{assignmentId}`.
 /// One rider offer per doc — rejecting never deletes the doc, it just moves
@@ -112,6 +131,19 @@ class TransportAssignment {
   /// timed out unanswered.
   bool get isStalePending =>
       status == TransportAssignmentStatus.pending && expiresAt != null && DateTime.now().isAfter(expiresAt!);
+
+  /// "Expires in 4m" style label for a pending offer, read from its own
+  /// [expiresAt]; empty when the offer has none (very old offers).
+  String expiryLabel([DateTime? now]) => offerExpiryLabel(expiresAt, now ?? DateTime.now());
+}
+
+/// Staff-facing countdown text for an offer that expires at [expiresAt].
+String offerExpiryLabel(DateTime? expiresAt, DateTime now) {
+  if (expiresAt == null) return '';
+  final left = expiresAt.difference(now);
+  if (left <= Duration.zero) return 'Offer expired';
+  if (left.inMinutes < 1) return 'Expires in ${left.inSeconds}s';
+  return 'Expires in ${left.inMinutes}m ${left.inSeconds % 60}s';
 }
 
 /// Thrown by [RescueCaseRepository.acceptAssignment] / [rejectAssignment]

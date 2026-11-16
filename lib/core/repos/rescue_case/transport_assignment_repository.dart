@@ -179,7 +179,7 @@ class TransportAssignmentRepository {
   /// genuine "needs attention" signal (spec's "Rejected, expired, or
   /// unanswered transporter offers" Action Required item), not a fabricated
   /// threshold: staleness is judged against the offer's own already-recorded
-  /// `expiresAt`/`kTransportOfferTtl`, never an admin-configurable cutoff
+  /// `expiresAt` (transportOfferTtlFor), never an admin-configurable cutoff
   /// invented here. Filters `status == pending` server-side, then
   /// `isStalePending` client-side (Firestore can't compare two fields), so
   /// the read stays bounded to the (normally small) set of open offers
@@ -312,8 +312,11 @@ class TransportAssignmentRepository {
         'riderType': riderType,
         'status': 'pending',
         'offeredAt': offeredAt,
+        // Critical cases get a shorter wait (transportOfferTtlFor).
         'expiresAt': Timestamp.fromDate(
-          offeredAt.toDate().add(kTransportOfferTtl),
+          offeredAt.toDate().add(
+            transportOfferTtlFor(caseSnap.data()?['urgency'] as String?),
+          ),
         ),
         'respondedAt': null,
         'acceptedAt': null,

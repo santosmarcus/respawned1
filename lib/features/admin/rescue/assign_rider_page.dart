@@ -250,6 +250,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         : DateTime.now().difference(offeredAt).inMinutes < 1
         ? 'Pending for ${DateTime.now().difference(offeredAt).inSeconds}s'
         : 'Pending for ${DateTime.now().difference(offeredAt).inMinutes}m';
+    final expiry = assignment.expiryLabel();
     return Expanded(
       child: Center(
         child: Padding(
@@ -266,6 +267,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                   style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
               if (pendingFor.isNotEmpty)
                 Text(pendingFor, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              if (expiry.isNotEmpty)
+                Text(expiry, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
               const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1265,7 +1268,7 @@ class _Avatar extends StatelessWidget {
 // manual action rather than automatic.
 enum _DialogOutcome { cancelled, accepted, acceptedStayHere, declined, offerCancelled, viewExisting }
 
-enum _ModalPhase { confirmation, creating, cancelling, pending, accepted, declined, cancelled, error, conflict }
+enum _ModalPhase { confirmation, creating, cancelling, pending, accepted, declined, expired, cancelled, error, conflict }
 
 /// The single dialog instance that carries the admin from "Confirm
 /// Transporter Assignment" through Pending and into Accepted/Declined/Error
@@ -1315,6 +1318,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   Duration _elapsed = Duration.zero;
   bool _showTimeoutMessage = false;
   static const _timeoutThreshold = Duration(seconds: 30);
+
+  /// The offer's own deadline, read from the assignment doc. Shorter for
+  /// Critical cases (transportOfferTtlFor), so it's never assumed here.
+  DateTime? _expiresAt;
 
   @override
   void dispose() {
@@ -1429,6 +1436,8 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   /// phase — used by both the live listener and Retry's one-shot re-read,
   /// so the two never disagree about what a given status means.
   void _applyAssignmentStatus(String? status, Map<String, dynamic> data) {
+    final expiresAt = data['expiresAt'];
+    if (expiresAt is Timestamp) _expiresAt = expiresAt.toDate();
     switch (status) {
       case 'accepted':
         if (_phase == _ModalPhase.accepted) return;
@@ -1445,6 +1454,14 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
           _phase = _ModalPhase.declined;
           _rejectionReason = data['rejectionReason'] as String? ?? 'No reason given';
         });
+        break;
+      case 'expired':
+      // No answer before the offer's deadline — marked by the
+      // expireTransportOffers function or a reconcile. Same next step as
+      // a decline: choose another transporter.
+        if (_phase == _ModalPhase.expired) return;
+        _elapsedTimer?.cancel();
+        setState(() => _phase = _ModalPhase.expired);
         break;
       case 'cancelled':
       // Normally only reached via our own _back() — handled defensively
@@ -1570,6 +1587,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     _ModalPhase.cancelling => 'Cancelling Offer',
     _ModalPhase.accepted => 'Assignment Accepted',
     _ModalPhase.declined => 'Assignment Declined',
+    _ModalPhase.expired => 'Offer Expired',
     _ModalPhase.cancelled => 'Offer Cancelled',
     _ModalPhase.error => 'Could Not Check Response',
     _ModalPhase.conflict => 'Active Transporter Assignment',
@@ -1582,6 +1600,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     _ModalPhase.pending => _pendingContent(),
     _ModalPhase.accepted => _acceptedContent(),
     _ModalPhase.declined => _declinedContent(),
+    _ModalPhase.expired => _expiredContent(),
     _ModalPhase.cancelled => _cancelledContent(),
     _ModalPhase.error => _errorContent(),
     _ModalPhase.conflict => _conflictContent(),
@@ -1678,6 +1697,11 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         Text('Waiting for ${_formatElapsed(_elapsed)}',
             textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
       ],
+      if (_expiresAt != null) ...[
+        const SizedBox(height: 2),
+        Text(offerExpiryLabel(_expiresAt, DateTime.now()),
+            textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+      ],
       // Purely informational — this never rejects anything on its own,
       // it just tells the org their options instead of leaving them
       // guessing behind an indefinite spinner.
@@ -1735,6 +1759,11 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       const SizedBox(height: 10),
       _infoRow('Reason', _rejectionReason ?? 'No reason given'),
     ],
+  );
+
+  Widget _expiredContent() => Text(
+    '${widget.rider.name} did not respond before the offer expired. Choose another transporter.',
+    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
   );
 
   Widget _errorContent() => Text(
@@ -1809,7 +1838,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
-    _ModalPhase.declined => [
+    _ModalPhase.declined || _ModalPhase.expired => [
       ElevatedButton(
         onPressed: () => Navigator.of(context).pop(_DialogOutcome.declined),
         style: AppButtons.primary,
@@ -1869,7 +1898,10 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     // through the cancel-the-offer confirmation rather than abandoning the
     // dialog with the offer left dangling).
     final canPop =
-        _phase == _ModalPhase.confirmation || _phase == _ModalPhase.declined || _phase == _ModalPhase.conflict;
+        _phase == _ModalPhase.confirmation ||
+        _phase == _ModalPhase.declined ||
+        _phase == _ModalPhase.expired ||
+        _phase == _ModalPhase.conflict;
 
     return PopScope(
       canPop: canPop,
