@@ -140,6 +140,9 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
         final data = doc.data();
         final status = data['status'] as String? ?? '';
         if (status == 'rejected' || status == 'withdrawn') continue;
+        // An adoption that ended in a return (the animal went back to
+        // Intake) is over; the user may apply again.
+        if (isReturnedToIntake(data)) continue;
 
         if (status == 'completed' || status == 'return_requested' || status == 'return_approved') {
           myCompletedDoc = doc;

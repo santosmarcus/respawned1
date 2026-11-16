@@ -55,12 +55,14 @@ class AdoptionApplicationService {
   Stream<DocumentSnapshot<Map<String, dynamic>>> watchApplication(String id) =>
       _adoptions.doc(id).snapshots();
 
-  /// True when [animal] already has an application that isn't rejected or
-  /// withdrawn, by either key (legacy personal.animalId, or
-  /// personal.animalRecordId). Other people's applications aren't readable
-  /// from the client (firestore.rules), so the hasBlockingAdoption callable
-  /// (functions/adoptions.js) checks and returns only a yes/no.
-  Future<bool> hasBlockingApplication(Animal animal) async {
+  /// Why [animal] can't take a new application from the signed-in user
+  /// ('reserved', 'adopted' or 'unavailable'), or null when it can. Other
+  /// people's open applications never block: staff choose between
+  /// applicants, and only a reservation or completed adoption closes the
+  /// animal. The animal record and other applications aren't readable from
+  /// the client (firestore.rules), so the hasBlockingAdoption callable
+  /// (functions/adoptions.js) checks and returns only the reason.
+  Future<String?> blockingReason(Animal animal) async {
     final result = await FirebaseFunctions.instance
         .httpsCallable('hasBlockingAdoption')
         .call<Object?>({
@@ -68,7 +70,8 @@ class AdoptionApplicationService {
       'animalRecordId': animal.animalRecordId,
     });
     final data = result.data;
-    return data is Map && data['blocked'] == true;
+    if (data is! Map || data['blocked'] != true) return null;
+    return data['reason'] as String? ?? 'unavailable';
   }
 
   //upload helper

@@ -196,7 +196,9 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     }
     final confirmed = await showConfirmActionDialog(context,
         title: 'Reserve ${app.animalName}?',
-        message: 'This reserves the animal for ${app.adopterName} and prevents other reservations while it stays reserved.',
+        message: 'This reserves the animal for ${app.adopterName}. Every other open application for '
+            '${app.animalName} will be closed as "Animal no longer available" and those applicants notified. '
+            'Unreserving later does not reopen them.',
         confirmLabel: 'Reserve');
     if (!confirmed) return;
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).reserve(

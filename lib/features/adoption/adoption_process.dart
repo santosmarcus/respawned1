@@ -294,15 +294,21 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     setState(() => _isSubmitting = true);
 
     try {
-      final stillActiveOrDone = await _service.hasBlockingApplication(
-        widget.animal,
-      );
+      // Same rule as the Adopt button (availabilityFromAnimalState): only a
+      // reservation, a completed adoption or the animal being closed to
+      // applications stops a new one.
+      final blockedBecause = await _service.blockingReason(widget.animal);
 
-      if (stillActiveOrDone) {
+      if (blockedBecause != null) {
         if (mounted) {
+          final name = widget.animal.name;
           ScaffoldMessenger.of(context).showSnackBar(
             appSnackBar(
-              '${widget.animal.name} already has an ongoing or completed adoption.',
+              switch (blockedBecause) {
+                'reserved' => '$name is now reserved for another applicant.',
+                'adopted' => '$name has already been adopted.',
+                _ => '$name is not accepting applications right now.',
+              },
               kind: AppMessageKind.error,
             ),
           );

@@ -34,6 +34,35 @@ enum AnimalAdoptionAvailability {
   unavailable,
 }
 
+/// True for an application whose adoption ended in a return that reached
+/// Intake. Its top-level status stays 'adopted' (proceedToIntake only moves
+/// returnRequest.status), but it is over: it never blocks or resumes.
+bool isReturnedToIntake(Map<String, dynamic> application) {
+  final r = application['returnRequest'];
+  return r is Map && r['status'] == ReturnRequestStatus.intake.name;
+}
+
+/// Whether someone with no application of their own can apply for an animal,
+/// from the animal's own state ([data] is its public copy or record; null
+/// when it has none). Only a reservation, a completed adoption, or the
+/// animal not being open for applications stops them: other people's open
+/// applications never do, since staff choose between applicants and the
+/// reservation is the lock. Mirrors animalBlockReason in
+/// functions/adoptions.js (the Submit check).
+AnimalAdoptionAvailability availabilityFromAnimalState(Map<String, dynamic>? data) {
+  if (data == null || data['archived'] == true) return AnimalAdoptionAvailability.unavailable;
+  if (data['status'] == 'deceased' || data['adoptionStatus'] == 'deceased') {
+    return AnimalAdoptionAvailability.unavailable;
+  }
+  return switch (data['adoptionStatus']) {
+    'adoptable' => AnimalAdoptionAvailability.available,
+    'reserved' => AnimalAdoptionAvailability.reservedForOther,
+    'adopted' => AnimalAdoptionAvailability.adopted,
+    // not_ready or any unrecognized/missing value.
+    _ => AnimalAdoptionAvailability.unavailable,
+  };
+}
+
 class AnimalAvailabilityResult {
   final AnimalAdoptionAvailability availability;
 
@@ -211,7 +240,7 @@ class AdoptionApplicationRepository {
       if (snap == null) continue;
       for (final doc in snap.docs) {
         final status = doc.data()['status'] as String? ?? '';
-        if (isActive(status)) {
+        if (isActive(status) && !isReturnedToIntake(doc.data())) {
           return AnimalAvailabilityResult(AnimalAdoptionAvailability.ownApplicationActive, ownApplicationId: doc.id);
         }
       }
@@ -224,31 +253,13 @@ class AdoptionApplicationRepository {
       return const AnimalAvailabilityResult(AnimalAdoptionAvailability.available);
     }
 
-    // 3. The animal's own authoritative state — this is what [reserve]
-    // actually checks/sets transactionally, so it's the only thing that
-    // can genuinely make the animal unavailable to a new applicant.
-    final animalSnap = await _animals.doc(animalRecordId).get();
-    final animalData = animalSnap.data();
-    if (animalData == null) {
-      return const AnimalAvailabilityResult(AnimalAdoptionAvailability.unavailable);
-    }
-    if (animalData['archived'] == true) {
-      return const AnimalAvailabilityResult(AnimalAdoptionAvailability.unavailable);
-    }
-
-    final adoptionStatus = animalData['adoptionStatus'] as String?;
-    switch (adoptionStatus) {
-      case 'adopted':
-        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.adopted);
-      case 'reserved':
-        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.reservedForOther);
-      case 'adoptable':
-        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.available);
-      default:
-        // 'not_ready' or any unrecognized/missing value — not currently
-        // open for applications, but not reserved/adopted either.
-        return const AnimalAvailabilityResult(AnimalAdoptionAvailability.unavailable);
-    }
+    // 3. The animal's own state. Read from the public copy: animals/{id}
+    // is readable only by staff and the animal's reserver/adopter
+    // (firestore.rules). A missing public copy means archived, hidden or
+    // deceased. Same rule as the hasBlockingAdoption callable that guards
+    // Submit (functions/adoptions.js), so the two agree.
+    final animalSnap = await _db.collection('publicAnimals').doc(animalRecordId).get();
+    return AnimalAvailabilityResult(availabilityFromAnimalState(animalSnap.data()));
   }
 
   Stream<List<Map<String, dynamic>>> streamNotes(String applicationId) {
