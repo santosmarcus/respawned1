@@ -88,8 +88,12 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
             builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)));
         break;
       case RescueStatus.ongoing:
+        // "Organization will transport" has no rider to track; Rescue
+        // Details carries its "Arrived at Clinic" step.
         Navigator.push(context, MaterialPageRoute(
-            builder: (_) => AdminTrackCasePage(caseId: c.id, data: c.raw)));
+            builder: (_) => c.raw['organizationTransport'] is Map
+                ? RescueDetailPage(caseId: c.id, data: c.raw)
+                : AdminTrackCasePage(caseId: c.id, data: c.raw)));
         break;
       case RescueStatus.treatment:
         Navigator.push(context, MaterialPageRoute(

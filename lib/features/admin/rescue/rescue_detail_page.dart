@@ -32,6 +32,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/referral_history_section
 import 'package:respawnd1/features/admin/rescue/widgets/rejection_reason_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/report_verification_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
+import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
@@ -332,6 +333,42 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Could not reject case: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _confirmOrganizationArrived(RescueCase c) async {
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Animal arrived at the clinic?',
+      message: 'The case moves to In Treatment.',
+      confirmLabel: 'Start Treatment',
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).confirmOrganizationTransportArrived(
+            caseId: c.id,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+      if (!mounted) return;
+      await Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TreatmentDetailPage(
+            caseId: c.id,
+            data: {...c.raw, 'status': RescueStatus.treatment.firestoreValue},
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not start treatment: $e', kind: AppMessageKind.error),
         );
       }
     } finally {
@@ -1058,6 +1095,40 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     ),
                   ),
                 ),
+            ] else if (c.status == RescueStatus.ongoing && c.raw['organizationTransport'] is Map) ...[
+              // "Organization will transport" (Assign Transporter's no-
+              // transporter prompt): no rider to track, so staff confirm
+              // arrival here, which starts treatment like Proceed to
+              // Treatment does.
+              SectionCard(
+                child: Text(
+                  'Your organization is bringing this animal to '
+                  '${c.vetClinicName ?? 'the clinic'} (recorded by '
+                  '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}).',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : () => _confirmOrganizationArrived(c),
+                  style: AppButtons.primary,
+                  child: Text(
+                    'Arrived at Clinic — Start Treatment',
+                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : () => _closeCase(c),
+                  style: AppButtons.dangerOutline,
+                  child: Text('Close Case', style: GoogleFonts.tiltWarp(fontSize: 15)),
+                ),
+              ),
             ] else if (c.status == RescueStatus.ongoing) ...[
               // Transporter assigned and en route — primary action is
               // tracking the case; reassigning the clinic stays available

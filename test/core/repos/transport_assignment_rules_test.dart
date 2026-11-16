@@ -286,4 +286,38 @@ void main() {
       expect(offerExpiryLabel(now, now), 'Offer expired');
     });
   });
+
+  group('no transporter available', () {
+    test('an exhausted search offers the fallback straight away', () {
+      expect(
+        shouldOfferNoTransporterFallback(searchExhausted: true, failedOfferCount: 0),
+        isTrue,
+      );
+    });
+
+    test('failed offers below the limit keep the normal picker', () {
+      expect(
+        shouldOfferNoTransporterFallback(
+          searchExhausted: false,
+          failedOfferCount: kNoTransporterAttemptLimit - 1,
+        ),
+        isFalse,
+      );
+    });
+
+    test('reaching the failed-offer limit offers the fallback', () {
+      expect(
+        shouldOfferNoTransporterFallback(
+          searchExhausted: false,
+          failedOfferCount: kNoTransporterAttemptLimit,
+        ),
+        isTrue,
+      );
+    });
+
+    test('declined and expired offers both count as failures', () {
+      expect(kFailedOfferStatuses, containsAll(['rejected', 'expired']));
+      expect(kFailedOfferStatuses, isNot(contains('cancelled')));
+    });
+  });
 }

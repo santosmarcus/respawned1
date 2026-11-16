@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +12,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/core/repos/rescue_case/transport_assignment_rules.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
@@ -21,6 +24,7 @@ import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_ut
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/refer_case_sheet.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
@@ -201,6 +205,119 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   }
 
   void _resetRadius() => setState(() => _currentRadiusKm = _radiusStepsKm.first);
+
+  // ---- No transporter available ------------------------------------------
+  //
+  // Shown once the search radius is at its maximum with nobody available,
+  // or after kNoTransporterAttemptLimit declined/expired offers
+  // (shouldOfferNoTransporterFallback). "Keep waiting" hides it until
+  // another offer fails.
+
+  /// Failed-offer count at the moment staff chose "Keep waiting"; null
+  /// while the prompt hasn't been dismissed.
+  int? _fallbackDismissedAtCount;
+  bool _fallbackBusy = false;
+
+  String get _actorUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _actorName {
+    final n = FirebaseAuth.instance.currentUser?.displayName;
+    return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
+  }
+
+  Future<void> _referFromFallback() async {
+    final rescueCase = ref.read(caseDetailProvider(widget.caseId)).asData?.value;
+    if (rescueCase == null) return;
+    final sent = await showReferCaseSheet(
+      context,
+      rescueCase: rescueCase,
+      caseRepository: ref.read(rescueCaseRepositoryProvider),
+      organizationDirectory: ref.read(organizationDirectoryRepositoryProvider),
+      actorUid: _actorUid,
+      actorName: _actorName,
+    );
+    if (!sent || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Referral sent. The case is now Referred.'));
+    Navigator.pop(context);
+  }
+
+  Future<void> _organizationWillTransport() async {
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Organization will transport?',
+      message: 'Your organization will bring the animal to the selected clinic itself, without a transporter. '
+          'The case moves to Ongoing; confirm arrival on Rescue Details to start treatment.',
+      confirmLabel: 'We Will Transport',
+      cancelLabel: 'Back',
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _fallbackBusy = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).startOrganizationTransport(
+            caseId: widget.caseId,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        appSnackBar('Recorded: your organization is transporting this animal.'),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar(e is ActiveAssignmentConflictException ? e.userMessage : 'Could not record this: $e',
+              kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _fallbackBusy = false);
+    }
+  }
+
+  Widget _noTransporterPrompt({required int failedOffers, required bool isCritical}) {
+    final reason = failedOffers >= kNoTransporterAttemptLimit
+        ? '$failedOffers transporter offers for this case were declined or expired.'
+        : 'Nobody is available within ${_maxRadiusKm.toStringAsFixed(0)} km.';
+    final tone = isCritical ? AppColors.error : AppColors.warning;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tone),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('No transporter available',
+              style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          Text('$reason Choose how to move this case forward.',
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            onPressed: _fallbackBusy ? null : _referFromFallback,
+            style: AppButtons.primary,
+            icon: const Icon(Icons.forward_outlined, size: 18),
+            label: Text('Refer Case (Organization / LGU)', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _fallbackBusy ? null : _organizationWillTransport,
+            style: AppButtons.outline,
+            icon: const Icon(Icons.directions_car_outlined, size: 18),
+            label: Text('Organization Will Transport', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 4),
+          TextButton(
+            onPressed: _fallbackBusy ? null : () => setState(() => _fallbackDismissedAtCount = failedOffers),
+            child: Text('Keep Waiting for a Transporter',
+                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// Guards reconcileStaleOffer against being fired again on every rebuild
   /// while its own write is still in flight (the write itself is already
@@ -687,6 +804,19 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ? currentAssignment
         : null;
 
+    final failedOffers = ref.watch(failedOfferCountProvider(widget.caseId)).asData?.value ?? 0;
+    final searchExhausted = atMaxRadius && !hasAvailableInRadius;
+    final fallbackDismissed = _fallbackDismissedAtCount != null && failedOffers <= _fallbackDismissedAtCount!;
+    // Only for the rescue pickup: this page is also the intake-leg
+    // reassignment picker, where referring or "organization will
+    // transport" don't apply.
+    final showFallback = RescueStatus.fromFirestoreValue(d['status'] as String?) ==
+            RescueStatus.awaitingAssignment &&
+        blockingOffer == null &&
+        acceptedAssignment == null &&
+        !fallbackDismissed &&
+        shouldOfferNoTransporterFallback(searchExhausted: searchExhausted, failedOfferCount: failedOffers);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -964,7 +1094,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             // scroll position/list identity otherwise untouched by radius
             // changes since this is the same ListView, just fewer/more items.
             Expanded(
-              child: visibleRiders.isEmpty
+              child: visibleRiders.isEmpty && !showFallback
                   ? Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -978,9 +1108,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                   : ListView.separated(
                 key: const PageStorageKey('assign_rider_list'),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: visibleRiders.length,
+                itemCount: visibleRiders.length + (showFallback ? 1 : 0),
                 separatorBuilder: (_, _) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
+                  if (showFallback) {
+                    if (index == 0) {
+                      return _noTransporterPrompt(
+                        failedOffers: failedOffers,
+                        isCritical: urgency == 'Critical',
+                      );
+                    }
+                    index -= 1;
+                  }
                   final rider = visibleRiders[index];
                   final isSelected = _selectedRiderUid == rider.uid;
                   return _RiderCard(

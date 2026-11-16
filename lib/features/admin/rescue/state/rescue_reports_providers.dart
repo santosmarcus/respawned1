@@ -188,6 +188,12 @@ final currentAssignmentProvider = StreamProvider.family<TransportAssignment?, St
   return ref.watch(rescueCaseRepositoryProvider).streamLatestAssignment(caseId);
 });
 
+/// Declined + expired offers on one case (Assign Transporter's
+/// "No transporter available" prompt).
+final failedOfferCountProvider = StreamProvider.family<int, String>((ref, caseId) {
+  return ref.watch(rescueCaseRepositoryProvider).streamFailedOfferCount(caseId);
+});
+
 /// Each transporter's most-recent assignment status across all cases,
 /// keyed by riderId — the single source of truth for each transporter
 /// card's Available/Pending/Busy chip in Assign Transporter (covers both

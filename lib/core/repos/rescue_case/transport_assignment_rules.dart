@@ -76,3 +76,27 @@ String? offerResponseBlockReason({
   }
   return null;
 }
+
+// ---- When no transporter can be found -----------------------------------
+
+/// After this many declined or expired offers on one case, Assign
+/// Transporter stops suggesting "try another transporter" as the only path
+/// and offers the fallbacks (refer, organization transports, keep waiting).
+/// For a Critical case, notifyStaffOfOfferOutcome (functions/index.js) also
+/// escalates to every organization admin at this point; keep its
+/// NO_TRANSPORTER_ATTEMPT_LIMIT the same. Proposed value, pending the
+/// organization's confirmation.
+const int kNoTransporterAttemptLimit = 3;
+
+/// Offer statuses that count as a failed attempt to find a transporter.
+const List<String> kFailedOfferStatuses = ['rejected', 'expired'];
+
+/// True when Assign Transporter should show the "No transporter available"
+/// prompt: the search radius reached its maximum with nobody available, or
+/// the case has had [kNoTransporterAttemptLimit] offers declined or expired.
+bool shouldOfferNoTransporterFallback({
+  required bool searchExhausted,
+  required int failedOfferCount,
+}) {
+  return searchExhausted || failedOfferCount >= kNoTransporterAttemptLimit;
+}

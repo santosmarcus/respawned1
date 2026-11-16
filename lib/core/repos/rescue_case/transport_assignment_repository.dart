@@ -611,6 +611,97 @@ class TransportAssignmentRepository {
     });
   }
 
+  /// How many offers on this case were declined or expired — drives the
+  /// "No transporter available" prompt on Assign Transporter
+  /// ([shouldOfferNoTransporterFallback]). Counts every offer the case has
+  /// had, not only the latest round.
+  Stream<int> streamFailedOfferCount(String caseId) {
+    return _store
+        .transportAssignmentsOf(caseId)
+        .where('status', whereIn: kFailedOfferStatuses)
+        .snapshots()
+        .map((snap) => snap.docs.length);
+  }
+
+  /// "Organization will transport": no transporter could be found, so the
+  /// organization moves the animal to the clinic itself. Records who
+  /// decided and when under `organizationTransport`, and moves the case out
+  /// of Awaiting Assignment into Ongoing without a transporter offer. Staff
+  /// then confirm arrival with [confirmOrganizationTransportArrived], which
+  /// starts treatment exactly as "Proceed to Treatment" does.
+  ///
+  /// Refused while an offer is still pending or accepted, so a transporter
+  /// who already said yes isn't left holding a case the organization took.
+  Future<void> startOrganizationTransport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? note,
+  }) async {
+    final caseRef = _store.caseDoc(caseId);
+    await _store.db.runTransaction((tx) async {
+      final caseSnap = await tx.get(caseRef);
+      final data = caseSnap.data();
+      if (data == null) throw StateError('This case no longer exists.');
+      if (RescueStatus.fromFirestoreValue(data['status'] as String?) !=
+          RescueStatus.awaitingAssignment) {
+        throw StateError('This case is no longer waiting for a transporter.');
+      }
+      final currentId = data['currentAssignmentId'] as String?;
+      if (currentId != null) {
+        final current = await tx.get(_store.transportAssignmentsOf(caseId).doc(currentId));
+        final currentData = current.data();
+        if (resolveOfferConflict(currentData?['status'] as String?, allowReassign: false) !=
+            OfferConflictResolution.none) {
+          throw ActiveAssignmentConflictException.fromMap(currentId, currentData!);
+        }
+      }
+      final trimmedNote = note?.trim() ?? '';
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'organization_transport_started',
+        statusLine: 'No transporter was available. The organization is bringing the animal to the clinic itself.',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {if (trimmedNote.isNotEmpty) 'note': trimmedNote},
+        fields: {
+          'status': RescueStatus.ongoing.firestoreValue,
+          'organizationTransport': {
+            'byUid': actorUid,
+            'byName': actorName,
+            'startedAt': Timestamp.now(),
+            if (trimmedNote.isNotEmpty) 'note': trimmedNote,
+          },
+          if (currentId != null) 'currentAssignmentId': FieldValue.delete(),
+        },
+      );
+    });
+  }
+
+  /// The organization brought the animal to the clinic: the case enters
+  /// treatment with the same writes as Track Case's "Proceed to Treatment".
+  Future<void> confirmOrganizationTransportArrived({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final now = Timestamp.now();
+    await _store.recordAction(
+      caseId: caseId,
+      action: 'treatment_started',
+      statusLine: 'The animal has reached the clinic. Animal is now in treatment.',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'transportedBy': 'organization'},
+      fields: {
+        'status': RescueStatus.treatment.firestoreValue,
+        'dateAdmitted': now,
+        'organizationTransport.arrivedAt': now,
+      },
+    );
+  }
+
   /// "Retry with a different transporter" after a transporter's safety
   /// report (needsSpecializedAssistance, set by the real transporter app's
   /// own End Reason flow in transit_progress_page.dart — see

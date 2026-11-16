@@ -225,6 +225,34 @@ class RescueCaseRepository {
   streamActiveAssignmentsByRider() =>
       transport.streamActiveAssignmentsByRider();
 
+  /// Delegates to [TransportAssignmentRepository.streamFailedOfferCount].
+  Stream<int> streamFailedOfferCount(String caseId) =>
+      transport.streamFailedOfferCount(caseId);
+
+  /// Delegates to [TransportAssignmentRepository.startOrganizationTransport].
+  Future<void> startOrganizationTransport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? note,
+  }) => transport.startOrganizationTransport(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+    note: note,
+  );
+
+  /// Delegates to [TransportAssignmentRepository.confirmOrganizationTransportArrived].
+  Future<void> confirmOrganizationTransportArrived({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) => transport.confirmOrganizationTransportArrived(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+  );
+
   /// Delegates to [TransportAssignmentRepository.streamStalePendingAssignments].
   Stream<List<TransportAssignment>> streamStalePendingAssignments() =>
       transport.streamStalePendingAssignments();

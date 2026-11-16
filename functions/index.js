@@ -874,6 +874,13 @@ async function orgStaffUids(orgId, {adminsOnly = false} = {}) {
     uids.push(u.id);
   });
   if (ownerId && !uids.includes(ownerId)) uids.push(ownerId);
+  if (adminsOnly) {
+    // Admin members whose account isn't linked to the organization yet.
+    members.forEach((m, uid) => {
+      const active = !['inactive', 'removed', 'disabled'].includes(m.status);
+      if (active && m.role === 'admin' && !uids.includes(uid)) uids.push(uid);
+    });
+  }
   return uids;
 }
 
@@ -895,6 +902,12 @@ async function notifyStaff(uids, {title, body, data}) {
     await safeNotifyUser({uid, title, body, data});
   }
 }
+
+// After this many declined or expired offers on a Critical case, every
+// organization admin is alerted too (Assign Transporter shows the
+// "No transporter available" choices at the same point). Keep equal to
+// kNoTransporterAttemptLimit in transport_assignment_rules.dart.
+const NO_TRANSPORTER_ATTEMPT_LIMIT = 3;
 
 const OFFER_OUTCOME_COPY = {
   rejected: (rider) => ({
@@ -945,9 +958,23 @@ exports.notifyStaffOfOfferOutcome = onDocumentUpdated(
     });
 
     const recipients = [after.offeredBy, ...(await orgStaffUids(c.organizationId))];
+    let {title, body} = copy;
+
+    if (c.urgency === 'Critical') {
+      const failed = await db.collection('cases').doc(caseId).collection('transportAssignments')
+        .where('status', 'in', ['rejected', 'expired'])
+        .get();
+      if (failed.size >= NO_TRANSPORTER_ATTEMPT_LIMIT) {
+        recipients.push(...(await orgStaffUids(c.organizationId, {adminsOnly: true})));
+        title = 'URGENT: No transporter for a Critical case';
+        body = `${failed.size} transport offers for this Critical case were declined or expired. `
+          + 'Refer the case, have the organization transport it, or offer it to another transporter.';
+      }
+    }
+
     await notifyStaff(recipients, {
-      title: copy.title,
-      body: copy.body,
+      title,
+      body,
       data: {type: 'transport_offer_outcome', caseId, assignmentId, status: after.status},
     });
   },

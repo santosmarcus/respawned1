@@ -38,6 +38,9 @@ void openRescueCase(BuildContext context, RescueCase c) {
   switch (c.status) {
     case RescueStatus.awaitingAssignment:
       _push(context, (_) => AssignRiderPage(caseId: c.id, data: c.raw));
+    case RescueStatus.ongoing when c.raw['organizationTransport'] is Map:
+      // "Organization will transport": no rider to track.
+      _push(context, (_) => RescueDetailPage(caseId: c.id, data: c.raw));
     case RescueStatus.ongoing:
       _push(context, (_) => AdminTrackCasePage(caseId: c.id, data: c.raw));
     case RescueStatus.treatment:
