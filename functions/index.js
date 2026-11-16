@@ -799,6 +799,160 @@ exports.notifyTransporterAssignment = onDocumentCreated(
   },
 );
 
+// ---- Transport offer expiry and staff alerts ------------------------------
+//
+// An offer's wait depends on the case's urgency (transportOfferTtlFor in
+// lib/core/models/rescue/transport_assignment.dart) and is stored on the
+// offer as expiresAt. Until now an unanswered offer only expired when a
+// staff screen happened to read it (reconcileStaleOffer). This job expires
+// it on time, doing exactly what reconcileStaleOffer does; the client
+// reconcile stays as a fallback. Whichever path marks an offer rejected or
+// expired, notifyStaffOfOfferOutcome tells the organization's staff to
+// choose another transporter.
+
+const OFFER_EXPIRY_BATCH_LIMIT = 200;
+
+// Same writes as TransportAssignmentRepository.reconcileStaleOffer.
+async function expireOfferIfStale(offerRef) {
+  const caseRef = offerRef.parent.parent;
+  return db.runTransaction(async (tx) => {
+    const [offerSnap, caseSnap] = await Promise.all([tx.get(offerRef), tx.get(caseRef)]);
+    if (!offerSnap.exists) return false;
+    const o = offerSnap.data();
+    if (o.status !== 'pending') return false;
+    if (!o.expiresAt || o.expiresAt.toMillis() >= Date.now()) return false;
+    const now = admin.firestore.Timestamp.now();
+    tx.update(offerRef, {status: 'expired', respondedAt: now});
+    if (caseSnap.exists && caseSnap.get('currentAssignmentId') === offerRef.id) {
+      tx.update(caseRef, {currentAssignmentId: admin.firestore.FieldValue.delete()});
+    }
+    return true;
+  });
+}
+
+// Runs every minute so a Critical case's 5-minute offer doesn't sit
+// expired for long. Needs the transportAssignments (status, expiresAt)
+// collection-group index in firestore.indexes.json.
+exports.expireTransportOffers = onSchedule('every 1 minutes', async () => {
+  const snap = await db
+    .collectionGroup('transportAssignments')
+    .where('status', '==', 'pending')
+    .where('expiresAt', '<=', admin.firestore.Timestamp.now())
+    .limit(OFFER_EXPIRY_BATCH_LIMIT)
+    .get();
+  for (const doc of snap.docs) {
+    try {
+      await expireOfferIfStale(doc.ref);
+    } catch (e) {
+      console.error('[expireTransportOffers] could not expire', doc.ref.path, e);
+    }
+  }
+});
+
+// Staff of an organization, as accounts: role in ORG_STAFF_ROLES and
+// users.organizationId == orgId, minus carers and inactive members (same
+// rule as isStaffOf in firestore.rules). With adminsOnly, only the owner
+// and Admin members.
+async function orgStaffUids(orgId, {adminsOnly = false} = {}) {
+  if (!orgId) return [];
+  const orgRef = db.collection('organizations').doc(orgId);
+  const [orgSnap, usersSnap, membersSnap] = await Promise.all([
+    orgRef.get(),
+    db.collection('users').where('organizationId', '==', orgId).get(),
+    orgRef.collection('members').get(),
+  ]);
+  const ownerId = orgSnap.exists ? orgSnap.get('ownerId') : null;
+  const members = new Map(membersSnap.docs.map((m) => [m.id, m.data()]));
+  const uids = [];
+  usersSnap.forEach((u) => {
+    if (!ORG_STAFF_ROLES.includes(u.get('role'))) return;
+    const m = members.get(u.id);
+    const isOwner = u.id === ownerId;
+    const active = !m || !['inactive', 'removed', 'disabled'].includes(m.status);
+    if (!isOwner && (!active || (m && m.role === 'carer'))) return;
+    if (adminsOnly && !isOwner && !(m && m.role === 'admin')) return;
+    uids.push(u.id);
+  });
+  if (ownerId && !uids.includes(ownerId)) uids.push(ownerId);
+  return uids;
+}
+
+// Push plus in-app notification to each uid, once.
+async function notifyStaff(uids, {title, body, data}) {
+  for (const uid of new Set(uids.filter(Boolean))) {
+    try {
+      await db.collection('users').doc(uid).collection('notifications').add({
+        title,
+        message: body,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: false,
+        type: data.type,
+        caseId: data.caseId || null,
+      });
+    } catch (e) {
+      console.warn('[notifyStaff] in-app notification failed', uid, e.message);
+    }
+    await safeNotifyUser({uid, title, body, data});
+  }
+}
+
+const OFFER_OUTCOME_COPY = {
+  rejected: (rider) => ({
+    title: 'Transporter declined',
+    body: `${rider} declined the transport offer. Choose another transporter for this case.`,
+  }),
+  expired: (rider) => ({
+    title: 'Transport offer expired',
+    body: `${rider} did not respond in time. Choose another transporter for this case.`,
+  }),
+};
+
+exports.notifyStaffOfOfferOutcome = onDocumentUpdated(
+  'cases/{caseId}/transportAssignments/{assignmentId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after || before.status === after.status) return;
+    if (before.status !== 'pending') return;
+    const copyFor = OFFER_OUTCOME_COPY[after.status];
+    if (!copyFor) return;
+    // Demo riders (debug builds) answer in seconds; don't page anyone.
+    if (after.isDemo === true) return;
+
+    const {caseId, assignmentId} = event.params;
+    const caseSnap = await db.collection('cases').doc(caseId).get();
+    if (!caseSnap.exists) return;
+    const c = caseSnap.data();
+    // The case moved on (a newer offer is already out): nothing to choose.
+    if (c.currentAssignmentId && c.currentAssignmentId !== assignmentId) return;
+
+    const rider = after.riderName || 'The transporter';
+    const copy = copyFor(rider);
+
+    // Case timeline entry (staff only; nothing for the reporter).
+    await db.collection('cases').doc(caseId).collection('activityLogs').add({
+      action: after.status === 'rejected' ? 'transporter_offer_rejected' : 'transporter_offer_expired',
+      actorUid: after.status === 'rejected' ? (after.riderId || null) : null,
+      actorName: after.status === 'rejected' ? rider : 'System',
+      actorRole: after.status === 'rejected' ? 'transporter' : null,
+      details: {
+        assignmentId,
+        riderId: after.riderId || null,
+        riderName: rider,
+        reason: after.rejectionReason || null,
+      },
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const recipients = [after.offeredBy, ...(await orgStaffUids(c.organizationId))];
+    await notifyStaff(recipients, {
+      title: copy.title,
+      body: copy.body,
+      data: {type: 'transport_offer_outcome', caseId, assignmentId, status: after.status},
+    });
+  },
+);
+
 // ---- Report verification ------------------------------------------------
 //
 // Before a report is accepted, staff may ask the reporter for a fresh photo

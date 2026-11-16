@@ -7,7 +7,9 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
+import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
@@ -196,6 +198,20 @@ class NotificationService {
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);
+
+    // A transport offer was declined or expired (notifyStaffOfOfferOutcome,
+    // functions/index.js): staff go straight to Assign Transporter while the
+    // case still needs one, otherwise to the case.
+      case 'transport_offer_outcome':
+        final caseId = data['caseId'] as String?;
+        if (caseId == null || caseId.isEmpty) return null;
+        final caseDoc = await db.collection('cases').doc(caseId).get();
+        final caseData = caseDoc.data();
+        if (caseData == null) return null;
+        if (RescueStatus.fromFirestoreValue(caseData['status'] as String?) == RescueStatus.awaitingAssignment) {
+          return AssignRiderPage(caseId: caseId, data: caseData);
+        }
+        return RescueDetailPage(caseId: caseId, data: caseData);
 
     // Pet transporter pushes (functions/index.js).
       case 'transporter_assignment':

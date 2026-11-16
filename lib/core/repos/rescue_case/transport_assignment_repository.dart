@@ -1,6 +1,7 @@
 // Split out of rescue_case_repository.dart (behavior-preserving refactor).
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
@@ -324,6 +325,9 @@ class TransportAssignmentRepository {
         'rejectionReason': null,
         'completedAt': null,
         'isDemo': isDemo,
+        // Who sent the offer: notifyStaffOfOfferOutcome (functions/index.js)
+        // tells them first if it's declined or expires.
+        'offeredBy': ?FirebaseAuth.instance.currentUser?.uid,
         'vehicle': ?vehicle,
         'plate': ?plate,
       });
@@ -543,9 +547,11 @@ class TransportAssignmentRepository {
   /// Opportunistic cleanup for a pending offer whose TTL has elapsed,
   /// without an accept/reject/cancel ever having been attempted on it.
   /// Called from screens that read the latest assignment for a case (spec
-  /// §4's startup-resolution behavior), never on a timer of its own — there
-  /// is no server-side expiry job. Safe to call redundantly; a no-op unless
-  /// the offer is still 'pending' and past its `expiresAt`.
+  /// §4's startup-resolution behavior), never on a timer of its own. The
+  /// expireTransportOffers scheduled function (functions/index.js) makes
+  /// the same writes every minute; this stays as the fallback for when it
+  /// hasn't run yet. Safe to call redundantly; a no-op unless the offer is
+  /// still 'pending' and past its `expiresAt`.
   Future<void> reconcileStaleOffer({
     required String caseId,
     required String assignmentId,
