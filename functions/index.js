@@ -1151,6 +1151,147 @@ exports.notifyTransporterCaseChanges = onDocumentUpdated(
   },
 );
 
+// ---- Adoption follow-up reminders -----------------------------------------
+//
+// Every morning: the adopter is reminded on a follow-up's due date and again
+// 3 days later, and the organization's staff are alerted once it is 7 days
+// overdue (timings in follow_up_reminder_rules.js, pending the
+// organization's confirmation). Staff can still send a reminder by hand
+// (AdoptionApplicationRepository.sendFollowUpReminder).
+//
+// Duplicate guard: each reminder is claimed in a transaction by stamping
+// followUps/{id}.autoReminders.<stage> before anything is sent, so a retry
+// or an overlapping run never sends it twice. The stamps are tied to the
+// due date (autoReminders.forDate); rescheduling starts them over.
+// Needs the followUps (status, scheduledDate) collection-group index.
+const {remindersDue} = require('./follow_up_reminder_rules');
+
+const OPEN_FOLLOW_UP_STATUSES = ['scheduled', 'reminderSent'];
+
+async function claimReminders(followUpRef, nowMs) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(followUpRef);
+    if (!snap.exists) return [];
+    const f = snap.data();
+    if (!OPEN_FOLLOW_UP_STATUSES.includes(f.status) || !f.scheduledDate) return [];
+    const scheduledMs = f.scheduledDate.toMillis();
+    const sent = f.autoReminders || null;
+    const stages = remindersDue({scheduledMs, nowMs, sent: sent && {
+      ...sent,
+      forDate: millisOf(sent.forDate),
+    }});
+    if (stages.length === 0) return [];
+
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const sameDate = sent && millisOf(sent.forDate) === scheduledMs;
+    const update = {
+      autoReminders: {
+        ...(sameDate ? sent : {}),
+        forDate: f.scheduledDate,
+        ...Object.fromEntries(stages.map((s) => [s, now])),
+      },
+    };
+    if (stages.some((s) => s !== 'staff')) {
+      // Same fields the manual reminder writes.
+      update.reminderSentAt = now;
+      update.reminderCount = (Number(f.reminderCount) || 0) + 1;
+      if (f.status === 'scheduled') update.status = 'reminderSent';
+    }
+    tx.update(followUpRef, update);
+    return stages;
+  });
+}
+
+exports.sendFollowUpReminders = onSchedule(
+  {schedule: 'every day 08:00', timeZone: 'Asia/Manila'},
+  async () => {
+    const nowMs = Date.now();
+    const snap = await db
+      .collectionGroup('followUps')
+      .where('status', 'in', OPEN_FOLLOW_UP_STATUSES)
+      .where('scheduledDate', '<=', admin.firestore.Timestamp.fromMillis(nowMs))
+      .get();
+
+    const adoptions = new Map();
+    for (const doc of snap.docs) {
+      const adoptionRef = doc.ref.parent.parent;
+      if (!adoptionRef) continue;
+      try {
+        if (!adoptions.has(adoptionRef.id)) {
+          const a = await adoptionRef.get();
+          adoptions.set(adoptionRef.id, a.exists ? a.data() : null);
+        }
+        const app = adoptions.get(adoptionRef.id);
+        // Follow-ups only matter while the adoption is live: not after the
+        // animal came back (return reached Intake) or monitoring ended.
+        if (!app || app.postAdoptionStatus === 'completed') continue;
+        if (app.returnRequest && app.returnRequest.status === 'intake') continue;
+
+        const stages = await claimReminders(doc.ref, nowMs);
+        if (stages.length === 0) continue;
+
+        const personal = app.personal || {};
+        const animalName = personal.animalName || 'your adopted animal';
+        const adoptionId = adoptionRef.id;
+
+        if (stages.includes('due') || stages.includes('overdue')) {
+          const overdue = stages.includes('overdue');
+          const title = overdue ? 'Follow-up check-in overdue' : 'Follow-up check-in due today';
+          const body = overdue
+            ? `Your check-in for ${animalName} is overdue. Please send it from the app so the organization knows how they're doing.`
+            : `Your check-in for ${animalName} is due today. Open the app to send an update.`;
+          if (personal.adopterId) {
+            try {
+              await db.collection('users').doc(personal.adopterId).collection('notifications').add({
+                title,
+                message: body,
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                isRead: false,
+                type: 'follow_up_reminder',
+                adoptionId,
+              });
+            } catch (e) {
+              console.warn('[sendFollowUpReminders] in-app notification failed', adoptionId, e.message);
+            }
+            await safeNotifyUser({
+              uid: personal.adopterId,
+              title,
+              body,
+              data: {type: 'follow_up_reminder', adoptionId, followUpId: doc.id},
+            });
+          }
+          await adoptionRef.update({
+            statusHistory: admin.firestore.FieldValue.arrayUnion({
+              status: overdue ? 'Automatic reminder sent: follow-up overdue.' : 'Automatic reminder sent: follow-up due today.',
+              timestamp: admin.firestore.Timestamp.fromMillis(nowMs),
+            }),
+          });
+        }
+
+        if (stages.includes('staff')) {
+          await db.collection('adminAlerts').add({
+            type: 'follow_up_overdue',
+            adoptionId,
+            followUpId: doc.id,
+            organizationId: app.organizationId || null,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            resolved: false,
+          });
+          const adopter = personal.adopterName || 'The adopter';
+          await notifyStaff(await orgStaffUids(app.organizationId), {
+            title: 'Adoption follow-up overdue',
+            body: `${adopter} has not sent the check-in for ${personal.animalName || 'their adopted animal'} `
+              + 'for over a week. Contact them or record the follow-up.',
+            data: {type: 'follow_up_overdue_staff', adoptionId, followUpId: doc.id},
+          });
+        }
+      } catch (e) {
+        console.error('[sendFollowUpReminders] failed for', doc.ref.path, e);
+      }
+    }
+  },
+);
+
 const REPORTER_RESPONSE_TIMEOUT_HOURS = 48;
 
 exports.expireStaleReporterResponses = onSchedule('every 60 minutes', async () => {

@@ -9,7 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
+import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
@@ -248,6 +250,17 @@ class NotificationService {
           petName: tag.data()?['name'] as String? ?? 'Your pet',
           isOwner: true,
         );
+
+      // sendFollowUpReminders (functions/index.js): the adopter's
+      // post-adoption check-ins, or staff's post-adoption details.
+      case 'follow_up_reminder':
+        final adoptionId = data['adoptionId'] as String?;
+        if (adoptionId == null || adoptionId.isEmpty) return null;
+        return PostAdoptionMonitoringPage(adoptionId: adoptionId);
+      case 'follow_up_overdue_staff':
+        final adoptionId = data['adoptionId'] as String?;
+        if (adoptionId == null || adoptionId.isEmpty) return null;
+        return PostAdoptionDetailsPage(applicationId: adoptionId);
 
       // reviewOrganization (functions/index.js): the owner's live status page.
       case 'organization_review':
