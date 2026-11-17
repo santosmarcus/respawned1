@@ -73,6 +73,28 @@ async function collectDonations() {
   return updates;
 }
 
+// PayMongo attempts take their campaign's organizationId. New ones get it from
+// createDonationCheckout; older ones stay hidden from organization financial
+// admins (firestore.rules donationPayments) until this runs.
+async function collectDonationPayments() {
+  const campaigns = await db.collection('campaigns').get();
+  const orgByCampaign = new Map(campaigns.docs.map((d) => [d.id, nonEmpty(d.data().organizationId)]));
+  const payments = await db.collection('donationPayments').get();
+  const updates = [];
+  let skipped = 0;
+  for (const d of payments.docs) {
+    if (nonEmpty(d.data().organizationId)) continue;
+    const orgId = orgByCampaign.get(d.data().campaignId) || null;
+    if (!orgId) {
+      skipped++;
+      continue;
+    }
+    updates.push({ref: d.ref, organizationId: orgId});
+  }
+  console.log(`donationPayments: ${payments.size} scanned, ${updates.length} to stamp, ${skipped} with no campaign organization.`);
+  return updates;
+}
+
 // Cases with no organizationId at all get '' (not owned yet), so staff can
 // query the shared review pool.
 async function collectUnstampedCases() {
@@ -99,6 +121,7 @@ async function main() {
     ...(await collect('cases', 'transportAssignments')),
     ...(await collect('adoptions', 'followUps')),
     ...(await collectDonations()),
+    ...(await collectDonationPayments()),
     // Campaign allocations (analytics spending by category).
     ...(await collect('campaigns', 'allocations')),
   ];

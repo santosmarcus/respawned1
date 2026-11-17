@@ -25,8 +25,8 @@ function animalCountOf(animals) {
 /// case carry linkedCaseId + sourceAnimalIndex; a case admitted from an
 /// existing record, sourceAnimalRecordId, already has one for each).
 /// Cases whose animals follow separate post-treatment paths (any animal with
-/// postTreatmentAction) are completed per animal by
-/// CaseIntakeRepository.completeIntakeForAnimals and are left to the app.
+/// postTreatmentAction) are completed per animal instead
+/// (animalsDueForIntakeCompletion below).
 ///   c: the case data; recordIndexes: the sourceAnimalIndex values of the
 ///   animal records linked to the case.
 function intakeCompletionDue(c, recordIndexes) {
@@ -39,4 +39,63 @@ function intakeCompletionDue(c, recordIndexes) {
   return done.size >= expected;
 }
 
-module.exports = {quarantineDue, animalCountOf, intakeCompletionDue};
+/// Per-animal intake completion, for cases whose animals follow separate
+/// post-treatment paths: the indexes of animals sent to Intake
+/// (postTreatmentAction 'intake'), not completed yet, received at the
+/// shelter (receivedAt), and with their animal record (or admitted from an
+/// existing record). Mirrors CaseIntakeRepository.completeIntakeForAnimals
+/// and IntakeDetailPage's per-animal check. Each animal is completed on its
+/// own; none waits on another animal on the case.
+function animalsDueForIntakeCompletion(c, recordIndexes) {
+  const animals = c && Array.isArray(c.animals) ? c.animals : [];
+  if (!animals.length) return [];
+  const hasRecord = new Set((recordIndexes || []).filter((i) => Number.isInteger(i)));
+  const due = [];
+  animals.forEach((a, i) => {
+    if (!a || a.postTreatmentAction !== 'intake' || a.intakeCompletedAt || !a.receivedAt) return;
+    if (!c.sourceAnimalRecordId && !hasRecord.has(i)) return;
+    due.push(i);
+  });
+  return due;
+}
+
+/// Waiting for the confirmed adopter to collect it (RescueCaseStore.
+/// isAwaitingAdopterPickup): still counts as in Treatment.
+function awaitingAdopterPickup(a) {
+  return a.postTreatmentAction === 'release' && !a.releaseCompletedAt;
+}
+
+/// RescueCaseStore.stageSummaryUpdate: the Treatment/Intake tab counts a
+/// multi-animal case carries.
+function stageSummary(animals) {
+  if (!Array.isArray(animals) || !animals.length) return {};
+  const counts = {};
+  for (const a of animals) {
+    if (!a || a.outcome === 'deceased') continue;
+    let stage = null;
+    if (a.postTreatmentAction == null || awaitingAdopterPickup(a)) stage = 'in_treatment';
+    else if (a.postTreatmentAction === 'intake' && !a.intakeCompletedAt) stage = 'intake';
+    if (stage) counts[stage] = (counts[stage] || 0) + 1;
+  }
+  return {activeAnimalStages: Object.keys(counts).sort(), animalStageCounts: counts};
+}
+
+/// RescueCaseStore.deriveCaseStatusOverride: the case status its animals
+/// imply. Null for a case with no animals[].
+function derivedCaseStatus(animals) {
+  if (!Array.isArray(animals) || !animals.length) return null;
+  const live = animals.filter((a) => a && a.outcome !== 'deceased');
+  if (live.some((a) => a.postTreatmentAction == null || awaitingAdopterPickup(a))) return 'in_treatment';
+  // Like the Dart original, a pending Intake counts even for a deceased animal.
+  if (animals.some((a) => a && a.postTreatmentAction === 'intake' && !a.intakeCompletedAt)) return 'intake';
+  return 'completed';
+}
+
+module.exports = {
+  quarantineDue,
+  animalCountOf,
+  intakeCompletionDue,
+  animalsDueForIntakeCompletion,
+  stageSummary,
+  derivedCaseStatus,
+};

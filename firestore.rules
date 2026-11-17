@@ -71,6 +71,15 @@ service cloud.firestore {
       return signedIn() && myRole() in ['admin', 'ngo_staff'];
     }
 
+    // System admins (users/{uid}.role 'system_admin', set in the console
+    // only): the sign-up approval and user directory console. They read
+    // profiles (below) and organizations and members (open to signed-in
+    // users); they are not platform staff, so cases, animals, medical
+    // records, adoptions and finances stay closed to them.
+    function isSystemAdmin() {
+      return signedIn() && myRole() == 'system_admin';
+    }
+
     // Staff of an approved organization, or platform staff — the pool that
     // may pick up unowned (pending/referred) cases and read staff-only data.
     function isOrgStaff() {
@@ -176,6 +185,18 @@ service cloud.firestore {
       );
     }
 
+    // Financial admin of one organization: mirrors loadFinanceActorFor in
+    // functions/paymongo.js (a platform 'admin', or an Admin member of
+    // `orgId` whose account points at it).
+    function isFinanceAdminOf(orgId) {
+      return signedIn() && (
+        myRole() == 'admin' ||
+        (orgId is string && orgId != '' && myOrgId() == orgId &&
+          exists(memberPath(orgId, request.auth.uid)) &&
+          get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin')
+      );
+    }
+
     // ---- Organizations -----------------------------------------------------
 
     // Anyone signed in can read profiles. Only the organization's own staff
@@ -227,9 +248,40 @@ service cloud.firestore {
     // settings (settings/shelter: safe capacity, isolation spots, monthly
     // care budget, daily food use, riders wanted free; shelter_settings.dart).
     // Its staff read them (the dashboard); only its admins change them.
+    // settings/care (care_rounds.dart: areas, round tasks, shifts, weekly
+    // roster) is read by its carers too: they tick the rounds it lists.
     match /organizations/{orgId}/settings/{docId} {
-      allow read: if isStaffOf(orgId) || isPlatformStaff();
+      allow read: if isStaffOf(orgId) || isPlatformStaff() || (docId == 'care' && isCarerOf(orgId));
       allow write: if isOrgAdmin(orgId) || (isPlatformStaff() && myRole() == 'admin');
+    }
+
+    // Dashboard gap 2: each day's care-round ticks (careRounds/{yyyy-MM-dd},
+    // field done.<area>__<task> = who and when). The organization's staff
+    // and carers tick and untick; nobody deletes a day.
+    match /organizations/{orgId}/careRounds/{day} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId) || isCarerOf(orgId);
+      allow create, update: if (isApprovedStaffOf(orgId) || isCarerOf(orgId)) &&
+        request.resource.data.get('organizationId', '') == orgId;
+      allow delete: if false;
+    }
+
+    // Dashboard gap 7: who is handling a Priority actions item. Staff claim
+    // for themselves (and may take over a claim); they release their own,
+    // admins release anyone's. sendDashboardDigest deletes lapsed ones.
+    match /organizations/{orgId}/alertClaims/{key} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId);
+      allow create, update: if (isPlatformStaff() || isApprovedStaffOf(orgId)) &&
+        request.resource.data.get('byUid', '') == request.auth.uid &&
+        request.resource.data.get('organizationId', '') == orgId;
+      allow delete: if (isPlatformStaff() || isApprovedStaffOf(orgId)) &&
+        (resource.data.get('byUid', '') == request.auth.uid || isOrgAdmin(orgId));
+    }
+
+    // Analytics gap 6: monthly summaries, written only by
+    // writeAnalyticsSummaries / rebuildAnalyticsSummaries (dashboard_ops.js).
+    match /organizations/{orgId}/analyticsSummaries/{month} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId);
+      allow write: if false;
     }
 
     // organizations/{orgId}/members/{uid}
@@ -321,7 +373,8 @@ service cloud.firestore {
     // Every other organization subcollection (communityReports,
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
-      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements']);
+      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements',
+        'careRounds', 'alertClaims', 'analyticsSummaries']);
     }
 
     // ---- Organization invitations ------------------------------------------
@@ -527,9 +580,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // PayMongo attempts
+    // PayMongo attempts. Readable by the donor and by the financial admins of
+    // the organization that owns the campaign (stamped by
+    // createDonationCheckout; older docs: scripts/backfill_log_organization_ids.js).
+    // Staff lists query by organizationId; platform admins list everything.
     match /donationPayments/{paymentId} {
-      allow read: if signedIn() && (resource.data.donorId == request.auth.uid || isFinanceAdmin());
+      allow read: if signedIn() && (
+        resource.data.get('donorId', '') == request.auth.uid ||
+        isFinanceAdminOf(resource.data.get('organizationId', ''))
+      );
       allow write: if false;
     }
 
@@ -629,7 +688,7 @@ service cloud.firestore {
       // of the same organization (team pages before approval). The
       // organization comparison reads the field directly so a query that
       // doesn't filter on it is denied rather than matched against ''.
-      allow read: if isSelf(uid) || isOrgStaff() ||
+      allow read: if isSelf(uid) || isOrgStaff() || isSystemAdmin() ||
         (signedIn() && myOrgId() != '' && resource.data.organizationId == myOrgId());
       allow create: if isSelf(uid) && selfFieldsOk(request.resource.data);
       allow update: if (isSelf(uid) && selfUpdateOk()) ||
@@ -1324,6 +1383,11 @@ service cloud.firestore {
       allow read: if canReadOrgRecord(true);
     }
 
+    // Analytics gap 5: the Medical tab's illness log, counted on Analytics.
+    match /{path=**}/illnesses/{docId} {
+      allow read: if canReadOrgRecord(true);
+    }
+
     match /{path=**}/medications/{docId} {
       allow read: if canReadOrgRecord(true);
     }
@@ -1469,6 +1533,12 @@ service cloud.firestore {
       }
     }
 
+    // Shareable referral links (functions/referral_shares.js). The web page
+    // and the app go through callables only.
+    match /referralShares/{token}/{document=**} {
+      allow read, write: if false;
+    }
+
     // ---- Everything else ---------------------------------------------------
     // Any signed-in user, except the collections with their own blocks above.
 
@@ -1479,7 +1549,8 @@ service cloud.firestore {
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
         'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
-        'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns'
+        'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns',
+        'referralShares'
       ]);
     }
   }

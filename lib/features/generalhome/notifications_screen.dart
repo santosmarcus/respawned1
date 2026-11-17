@@ -16,11 +16,7 @@ import 'package:respawnd1/features/generalhome/history_screen.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
-import 'package:respawnd1/features/adoption/adoption_process.dart';
-import 'package:respawnd1/features/adoption/adoption_page.dart';
-import 'package:respawnd1/features/adoption/post_adoption_page.dart';
-import 'package:respawnd1/core/models/adoption/adoption_application.dart';
-import 'package:respawnd1/core/models/adoption/return_request.dart';
+import 'package:respawnd1/features/adoption/adopter_adoption_route.dart';
 
 const double _kNearbyRadiusKm = 5;
 
@@ -33,7 +29,8 @@ const List<String> _kDismissedCaseStatuses = [
 
 // donation: users/{uid}/notifications written by the backend (donation /
 // sponsorship confirmations, in-kind received / cancelled / follow-up, goal
-// reached, sponsorship ended).
+// reached, sponsorship ended, and the applicant's no-show / booking
+// reminders, which open their application).
 enum _NotifKind { rescue, adoption, donation }
 
 /// users/{uid}/notifications `type` → the label shown before the title.
@@ -48,6 +45,12 @@ const Map<String, String> _kDonationNotifLabels = {
   'inkind_cancelled': 'In-Kind Donation',
   'inkind_followup': 'In-Kind Donation',
   'certificate': 'Certificate',
+  // functions/adoptions.js tellApplicant: about the applicant's own
+  // application (kApplicantAdoptionNotifTypes); opens that application.
+  'adoption_no_show_rebook': 'Adoption',
+  'adoption_no_show_closed': 'Adoption',
+  'adoption_booking_reminder': 'Adoption',
+  'adoption_booking_withdrawn': 'Adoption',
 };
 
 /// Notification types whose tap opens Profile → Certificates.
@@ -857,6 +860,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         await _askToRenewSponsorship(item);
         return;
       }
+      final adoptionId = item.data?['adoptionId'] as String?;
+      if (kApplicantAdoptionNotifTypes.contains(item.sourceType) && adoptionId != null && adoptionId.isNotEmpty) {
+        try {
+          final page = await adopterPageForAdoption(adoptionId);
+          if (page == null || !mounted) return;
+          Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+        } catch (_) {}
+        return;
+      }
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -877,65 +889,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('adoptions')
-          .doc(item.docId)
-          .get();
-      final data = doc.data();
-      if (data == null || !mounted) return;
-
-      final status = data['status'] as String? ?? '';
-      final isAdopted = AdoptionStatus.adopted.queryValues.contains(status);
-      if (isAdopted) {
-        final returnRequest = ReturnRequest.fromMap(data['returnRequest'] as Map<String, dynamic>?);
-        if (returnRequest != null &&
-            (returnRequest.status.isApprovedAwaitingSchedule ||
-                returnRequest.status == ReturnRequestStatus.retrievalScheduled ||
-                returnRequest.status == ReturnRequestStatus.retrieved)) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ReturnApprovedPage(adoptionId: item.docId),
-            ),
-          );
-          return;
-        }
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => PostAdoptionMonitoringPage(adoptionId: item.docId),
-          ),
-        );
-        return;
-      }
-
-      final personal = (data['personal'] as Map?) ?? {};
-      final animalIdRaw = personal['animalId'];
-      final animalName = personal['animalName'] as String? ?? item.refLabel;
-
-      final animal = Animal(
-        id: animalIdRaw is int ? animalIdRaw : 0,
-        name: animalName,
-        breed: '',
-        age: '',
-        description: '',
-        healthTags: const [],
-        gender: AnimalGender.male,
-        category: AnimalCategory.dog,
-        cardColor: AppColors.greenrspwn,
-      );
-
-      if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => AdoptionProcess(
-              animal: animal,
-              existingAdoptionId: item.docId,
-            ),
-          ),
-        );
-      }
+      final page = await adopterPageForAdoption(item.docId, fallbackName: item.refLabel);
+      if (page == null || !mounted) return;
+      Navigator.push(context, MaterialPageRoute(builder: (_) => page));
     } catch (_) {}
   }
 

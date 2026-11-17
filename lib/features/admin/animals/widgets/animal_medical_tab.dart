@@ -23,6 +23,7 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/treatment_log_widgets.dart';
+import 'package:respawnd1/features/admin/animals/widgets/illness_log_section.dart';
 import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
@@ -56,6 +57,8 @@ class AnimalMedicalTab extends ConsumerWidget {
           VaccineSection(animal: animal),
           const SizedBox(height: 20),
           PreventiveCareSection(animal: animal),
+          const SizedBox(height: 20),
+          IllnessLogSection(animal: animal),
           const SizedBox(height: 20),
           MedicationSection(animal: animal),
           const SizedBox(height: 20),

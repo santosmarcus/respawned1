@@ -155,6 +155,7 @@ class RescueReportService {
         'accessInstructions': form.accessInstructionsController.text.trim(),
       if (!form.isPetSurrenderType)
         'bestTimeToContact': form.bestTimeContactController.text.trim(),
+      if (form.asksCommunityCat && form.communityCat) 'communityCat': true,
       'reportAnonymously': form.selectedRescueType == 'Neglect or Abuse'
           ? form.reportAnonymously
           : false,

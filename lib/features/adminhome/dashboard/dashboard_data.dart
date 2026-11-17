@@ -8,6 +8,7 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
+import 'package:respawnd1/core/models/rescue/illness_entry.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
@@ -238,6 +239,17 @@ final careRecordsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<
   });
 });
 
+/// Analytics gap 5: every illness entry of the organization's animals.
+final allIllnessesProvider = StreamProvider.autoDispose<List<IllnessEntry>>((ref) {
+  return OrgListScope.watch(FirebaseFirestore.instance.collectionGroup('illnesses'), empty: const <IllnessEntry>[],
+      (snap) {
+    return [
+      for (final d in snap.docs)
+        if (d.reference.parent.parent case final animal?) ?IllnessEntry.fromFirestore(d, animal.id),
+    ];
+  });
+});
+
 final vaccinationsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<VaccinationRecord>>>((ref) {
   return OrgListScope.watch(FirebaseFirestore.instance.collectionGroup('vaccinations'), empty: const {}, (snap) {
     final out = <String, List<VaccinationRecord>>{};
@@ -368,6 +380,19 @@ final _openFollowUpsProvider = StreamProvider.autoDispose<List<({String applicat
 // ─── Small helpers ───────────────────────────────────────────────────────
 
 DateTime? tsOf(Object? v) => v is Timestamp ? v.toDate() : null;
+
+/// Analytics gap 3: when an animal record was confirmed ready for adoption.
+/// `readyForAdoptionAt` is stamped from now on; older records fall back to
+/// the readiness checklist's own `confirmedAt` (an ISO string). Null when
+/// the animal was never confirmed ready in the app.
+DateTime? readyForAdoptionAtOf(Map<String, dynamic> raw) {
+  final stamped = tsOf(raw['readyForAdoptionAt']);
+  if (stamped != null) return stamped;
+  final r = raw['adoptionReadiness'];
+  final at = r is Map ? r['confirmedAt'] : null;
+  if (at is Timestamp) return at.toDate();
+  return at is String ? DateTime.tryParse(at) : null;
+}
 
 bool inPeriod(DateTime? t, DateTime from, DateTime to) => t != null && !t.isBefore(from) && t.isBefore(to);
 

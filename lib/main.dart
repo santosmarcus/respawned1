@@ -16,6 +16,8 @@ import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/userauth/login_screen.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/features/systemadmin/system_admin_home_screen.dart';
+import 'package:respawnd1/features/systemadmin/user_directory.dart' show kSystemAdminRole;
 import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
 import 'package:respawnd1/features/carer/carer_home_screen.dart';
 import 'package:respawnd1/features/userauth/details_screen.dart';
@@ -245,6 +247,10 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
 
         // Existing user with role — route based on role
         switch (role) {
+          // Set in the Firebase console only: approvals and the user
+          // directory, nothing else (system_admin_home_screen.dart).
+          case kSystemAdminRole:
+            return const SystemAdminHomeScreen();
           case 'ngo_staff':
           case 'admin':
             return const AdminHomeScreen();

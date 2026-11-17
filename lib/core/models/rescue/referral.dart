@@ -1,6 +1,63 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 
+/// The shareable web link for a referral (`share` on the referral doc,
+/// written by functions/referral_shares.js createReferralShare).
+class ReferralShareLink {
+  final String url;
+  final bool revoked;
+  final bool includeReporter;
+  final DateTime? expiresAt;
+
+  const ReferralShareLink({required this.url, this.revoked = false, this.includeReporter = false, this.expiresAt});
+
+  bool isOpen(DateTime now) => !revoked && (expiresAt == null || now.isBefore(expiresAt!));
+
+  static ReferralShareLink? fromMap(Object? raw) {
+    if (raw is! Map) return null;
+    final url = raw['url'];
+    if (url is! String || url.isEmpty) return null;
+    final exp = raw['expiresAt'];
+    return ReferralShareLink(
+      url: url,
+      revoked: raw['revoked'] == true,
+      includeReporter: raw['includeReporter'] == true,
+      expiresAt: exp is Timestamp ? exp.toDate() : null,
+    );
+  }
+}
+
+/// The latest answer someone gave from the referral web page
+/// (`lastResponse`, written by respondToReferralShare).
+class ReferralShareResponse {
+  final String response;
+  final String name;
+  final String? contact;
+  final String? note;
+  final DateTime? at;
+
+  const ReferralShareResponse({required this.response, required this.name, this.contact, this.note, this.at});
+
+  String get label => switch (response) {
+        'will_handle' => 'Will handle it',
+        'cannot_handle' => "Can't take it",
+        'need_info' => 'Needs more information',
+        _ => response,
+      };
+
+  static ReferralShareResponse? fromMap(Object? raw) {
+    if (raw is! Map || raw['response'] is! String) return null;
+    final at = raw['at'];
+    return ReferralShareResponse(
+      response: raw['response'] as String,
+      name: (raw['name'] as String?) ?? '',
+      contact: raw['contact'] as String?,
+      note: raw['note'] as String?,
+      at: at is Timestamp ? at.toDate() : null,
+    );
+  }
+}
+
 /// A referral document under `cases/{caseId}/referrals/{referralId}`.
 /// Fields are a superset across the three referral types; each type only
 /// populates the fields relevant to it (see the per-type factories below).
@@ -32,6 +89,10 @@ class Referral {
   final String? lguExplanation;
   final List<String> attachedMediaUrls;
 
+  /// Web link for people outside the app, and the latest answer from it.
+  final ReferralShareLink? share;
+  final ReferralShareResponse? lastResponse;
+
   const Referral({
     required this.id,
     required this.caseId,
@@ -53,6 +114,8 @@ class Referral {
     this.lguReason,
     this.lguExplanation,
     this.attachedMediaUrls = const [],
+    this.share,
+    this.lastResponse,
   });
 
   factory Referral.fromFirestore(
@@ -84,6 +147,8 @@ class Referral {
           : null,
       lguExplanation: data['lguExplanation'] as String?,
       attachedMediaUrls: List<String>.from(data['attachedMediaUrls'] ?? const []),
+      share: ReferralShareLink.fromMap(data['share']),
+      lastResponse: ReferralShareResponse.fromMap(data['lastResponse']),
     );
   }
 }

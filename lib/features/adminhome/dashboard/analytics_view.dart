@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -14,7 +16,11 @@ import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart'
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/adminhome/dashboard/analytics_export.dart';
+import 'package:respawnd1/features/adminhome/dashboard/analytics_range.dart';
 import 'package:respawnd1/features/adminhome/dashboard/area_reports.dart';
+
+export 'package:respawnd1/features/adminhome/dashboard/analytics_range.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
@@ -41,21 +47,13 @@ import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 
 // ─── Period ──────────────────────────────────────────────────────────────
 
-class AnalyticsPeriodNotifier extends Notifier<int> {
+class AnalyticsPeriodNotifier extends Notifier<AnalyticsRange> {
   @override
-  int build() => 90;
-  void set(int days) => state = days;
+  AnalyticsRange build() => const AnalyticsRange.lastDays(90);
+  void set(AnalyticsRange r) => state = r;
 }
 
-final analyticsPeriodProvider = NotifierProvider<AnalyticsPeriodNotifier, int>(AnalyticsPeriodNotifier.new);
-
-class Period {
-  final DateTime from;
-  final DateTime to;
-  const Period(this.from, this.to);
-  Period get previous => Period(from.subtract(to.difference(from)), from);
-  bool has(DateTime? t) => inPeriod(t, from, to);
-}
+final analyticsPeriodProvider = NotifierProvider<AnalyticsPeriodNotifier, AnalyticsRange>(AnalyticsPeriodNotifier.new);
 
 // ─── Outcomes ────────────────────────────────────────────────────────────
 
@@ -88,7 +86,17 @@ class DeathRecord {
   final String name;
   final DateTime at;
   final String? cause;
-  const DeathRecord(this.name, this.at, this.cause);
+
+  /// The record that holds the death ('animals/{id}' or 'cases/{id}'), where
+  /// a euthanasia's second review is saved (Analytics gap 5).
+  final String? docPath;
+
+  /// Who recorded the death, when known; they can't be the second reviewer.
+  final String? recordedByUid;
+
+  /// `euthanasiaReview` on that record, if a second admin reviewed it.
+  final Map<String, dynamic>? review;
+  const DeathRecord(this.name, this.at, this.cause, {this.docPath, this.recordedByUid, this.review});
   bool get euthanasia => (cause ?? '').toLowerCase().contains('euthan');
 }
 
@@ -98,8 +106,16 @@ OutcomeCounts computeOutcomes({
   required List<RescueCase> cases,
 }) {
   final o = OutcomeCounts();
-  void death(String name, DateTime at, String? cause) {
-    final d = DeathRecord(name, at, cause);
+  void death(String name, DateTime at, String? cause, {String? docPath, Map<String, dynamic>? raw}) {
+    final review = raw?['euthanasiaReview'];
+    final d = DeathRecord(
+      name,
+      at,
+      cause,
+      docPath: docPath,
+      recordedByUid: raw?['deceasedByUid'] as String?,
+      review: review is Map ? Map<String, dynamic>.from(review) : null,
+    );
     o.deaths.add(d);
     if (d.euthanasia) {
       o.euthanasia++;
@@ -117,7 +133,7 @@ OutcomeCounts computeOutcomes({
     } else if (a.raw['transferStatus'] != null && p.has(transferAt)) {
       o.transferStarted++;
     } else if (p.has(a.deceasedAt)) {
-      death(a.name.isEmpty ? a.species : a.name, a.deceasedAt!, a.deceasedCause);
+      death(a.name.isEmpty ? a.species : a.name, a.deceasedAt!, a.deceasedCause, docPath: 'animals/${a.id}', raw: a.raw);
     } else if (a.archived &&
         a.adoptedAt == null &&
         a.deceasedAt == null &&
@@ -131,7 +147,7 @@ OutcomeCounts computeOutcomes({
     // Case-level death during treatment; skip admissions of existing
     // animal records so a death is never counted twice.
     if (p.has(c.deceasedAt) && c.raw['sourceType'] != 'animalRecordAdmission') {
-      death('${c.speciesSummary} #${c.shortCaseId}', c.deceasedAt!, c.causeOfDeath);
+      death('${c.speciesSummary} #${c.shortCaseId}', c.deceasedAt!, c.causeOfDeath, docPath: 'cases/${c.id}', raw: c.raw);
     }
     if (_reunitedReasons.contains(c.raw['closureReason']) && p.has(tsOf(c.raw['closedAt']))) {
       o.returnedToOwner += c.animalCount;
@@ -145,7 +161,7 @@ OutcomeCounts computeOutcomes({
   return o;
 }
 
-final _allCasesForAnalyticsProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((ref) {
+final analyticsCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((ref) {
   final snap = ref.watch(dashboardRescueSnapshotProvider);
   final closed = ref.watch(closedCasesProvider);
   if (snap.hasError) return AsyncValue.error(snap.error!, StackTrace.current);
@@ -165,11 +181,11 @@ class AnalyticsView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final days = ref.watch(analyticsPeriodProvider);
+    final range = ref.watch(analyticsPeriodProvider);
     final now = DateTime.now();
-    final period = Period(now.subtract(Duration(days: days)), now);
+    final period = range.period(now);
     final recordsAsync = ref.watch(allAnimalRecordsProvider);
-    final casesAsync = ref.watch(_allCasesForAnalyticsProvider);
+    final casesAsync = ref.watch(analyticsCasesProvider);
 
     if (recordsAsync.hasError) return DashError(what: 'animal records', error: recordsAsync.error!);
     if (casesAsync.hasError) return DashError(what: 'rescue cases', error: casesAsync.error!);
@@ -195,11 +211,13 @@ class AnalyticsView extends ConsumerWidget {
         const SizedBox(height: 14),
         _DiversionCard(period: period, cases: cases),
         const SizedBox(height: 14),
-        _PreventionCard(records: records),
+        _PreventionCard(records: records, period: period),
         const SizedBox(height: 14),
         _EndOfCareCard(cur: cur),
         const SizedBox(height: 14),
         const _FocusAreasCard(),
+        const SizedBox(height: 14),
+        _MonthlyTrendCard(records: records, cases: cases),
         const SizedBox(height: 14),
         const AreaReportsCard(),
       ],
@@ -213,22 +231,95 @@ class AnalyticsPeriodButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final days = ref.watch(analyticsPeriodProvider);
-    return PopupMenuButton<int>(
-      tooltip: 'Reporting period',
-      onSelected: (d) => ref.read(analyticsPeriodProvider.notifier).set(d),
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 30, child: Text('Last 30 days')),
-        PopupMenuItem(value: 90, child: Text('Last 90 days')),
-        PopupMenuItem(value: 365, child: Text('Last 12 months')),
+    final range = ref.watch(analyticsPeriodProvider);
+    final now = DateTime.now();
+    final thisMonth = AnalyticsRange.month(now.year, now.month);
+    final lastMonth = now.month == 1 ? AnalyticsRange.month(now.year - 1, 12) : AnalyticsRange.month(now.year, now.month - 1);
+    final q = (now.month - 1) ~/ 3 + 1;
+    final thisQuarter = AnalyticsRange.quarter(now.year, q);
+    final lastQuarter = q == 1 ? AnalyticsRange.quarter(now.year - 1, 4) : AnalyticsRange.quarter(now.year, q - 1);
+
+    Future<void> pick(Object? choice) async {
+      final notifier = ref.read(analyticsPeriodProvider.notifier);
+      if (choice is AnalyticsRange) {
+        notifier.set(choice);
+      } else if (choice == 'custom') {
+        final p = range.period(now);
+        final picked = await showDateRangePicker(
+          context: context,
+          firstDate: DateTime(2020),
+          lastDate: now,
+          initialDateRange: DateTimeRange(start: p.from, end: p.to.subtract(const Duration(minutes: 1))),
+          helpText: 'Reporting period',
+        );
+        if (picked != null) notifier.set(AnalyticsRange.custom(picked.start, picked.end));
+      } else if (choice == 'month' && context.mounted) {
+        final m = await _pickMonth(context, now);
+        if (m != null) notifier.set(m);
+      }
+    }
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        PopupMenuButton<Object>(
+          tooltip: 'Reporting period',
+          onSelected: pick,
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: AnalyticsRange.lastDays(30), child: Text('Last 30 days')),
+            const PopupMenuItem(value: AnalyticsRange.lastDays(90), child: Text('Last 90 days')),
+            const PopupMenuItem(value: AnalyticsRange.lastDays(365), child: Text('Last 12 months')),
+            const PopupMenuDivider(),
+            PopupMenuItem(value: thisMonth, child: Text('This month (${thisMonth.label})')),
+            PopupMenuItem(value: lastMonth, child: Text('Last month (${lastMonth.label})')),
+            const PopupMenuItem(value: 'month', child: Text('Another month…')),
+            PopupMenuItem(value: thisQuarter, child: Text('This quarter (${thisQuarter.label})')),
+            PopupMenuItem(value: lastQuarter, child: Text('Last quarter (${lastQuarter.label})')),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: 'custom', child: Text('Custom range…')),
+          ],
+          child: _Pill(icon: Icons.timer_outlined, text: range.label, dropdown: true),
+        ),
+        // Analytics gap 1: PDF summary, CSV of the rows, monthly report.
+        PopupMenuButton<String>(
+          tooltip: 'Export',
+          onSelected: (k) => runAnalyticsExport(context, ref, k),
+          itemBuilder: (_) => [
+            PopupMenuItem(value: 'pdf', child: Text('Summary PDF · ${range.label}')),
+            const PopupMenuItem(value: 'csv', child: Text('Rows as CSV (cases, animals, adoptions, donations)')),
+            PopupMenuItem(value: 'monthly', child: Text('Monthly accomplishment report · ${lastMonth.label}')),
+          ],
+          child: const _Pill(icon: Icons.ios_share, text: 'Export'),
+        ),
       ],
-      child: _Pill(
-        icon: Icons.timer_outlined,
-        text: days == 365 ? 'Last 12 months' : 'Last $days days',
-        dropdown: true,
-      ),
     );
   }
+}
+
+/// A month picker for the last 24 months.
+Future<AnalyticsRange?> _pickMonth(BuildContext context, DateTime now) {
+  final months = [
+    for (var i = 0; i < 24; i++) AnalyticsRange.month(DateTime(now.year, now.month - i).year, DateTime(now.year, now.month - i).month),
+  ];
+  return showDialog<AnalyticsRange>(
+    context: context,
+    builder: (ctx) => SimpleDialog(
+      title: const Text('Choose a month'),
+      children: [
+        SizedBox(
+          width: 280,
+          height: 360,
+          child: ListView(
+            children: [
+              for (final m in months)
+                ListTile(dense: true, title: Text(m.label), onTap: () => Navigator.pop(ctx, m)),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _Pill extends StatelessWidget {
@@ -648,6 +739,22 @@ class _SpeedCard extends ConsumerWidget {
       for (final c in cases)
         if (c.dateAdmitted != null && period.has(c.dischargedAt)) c.dischargedAt!.difference(c.dateAdmitted!).inDays,
     ]);
+    // Analytics gap 3: the "ready" date splits the time in care in two.
+    // Discharge comes from the animal's source case; an animal that never
+    // went to the vet is measured from intake (its record's creation).
+    final caseById = {for (final c in cases) c.id: c};
+    final toReady = median([
+      for (final a in records)
+        if (readyForAdoptionAtOf(a.raw) case final ready? when period.has(ready))
+          if ((caseById[a.linkedCaseId]?.dischargedAt ?? a.createdAt) case final from? when !ready.isBefore(from))
+            ready.difference(from).inDays,
+    ]);
+    final readyToAdopted = median([
+      for (final a in records)
+        if (period.has(a.adoptedAt))
+          if (readyForAdoptionAtOf(a.raw) case final ready? when !a.adoptedAt!.isBefore(ready))
+            a.adoptedAt!.difference(ready).inDays,
+    ]);
     final overall = median([
       for (final a in records)
         if (a.createdAt != null && period.has(a.adoptedAt)) a.adoptedAt!.difference(a.createdAt!).inDays,
@@ -684,8 +791,18 @@ class _SpeedCard extends ConsumerWidget {
             d(stabilize),
             stabilize == null ? null : (stabilize / 60).clamp(0.05, 1.0),
           ),
-          const _StepRow(Icons.check, 'Stable to ready for adoption', 'not recorded', null),
-          const _StepRow(Icons.home, 'Ready to adopted', 'not recorded', null),
+          _StepRow(
+            Icons.check,
+            'Discharge (or intake) to ready for adoption',
+            d(toReady),
+            toReady == null ? null : (toReady / 60).clamp(0.05, 1.0),
+          ),
+          _StepRow(
+            Icons.home,
+            'Ready to adopted',
+            d(readyToAdopted),
+            readyToAdopted == null ? null : (readyToAdopted / 90).clamp(0.05, 1.0),
+          ),
           _StepRow(
             Icons.timer_outlined,
             'Intake to adopted, overall',
@@ -717,7 +834,8 @@ class _SpeedCard extends ConsumerWidget {
           const SizedBox(height: 6),
           DetailLine(
             Icons.info_outline,
-            'Recording a “ready” date would show where the days go. Readiness still needs health, behavior and preventive care.',
+            'The “ready” date is when staff confirmed the readiness checklist. Animals listed before it was '
+            'recorded are left out of those two steps, not counted as zero.',
             maxLines: null,
           ),
         ],
@@ -947,6 +1065,10 @@ class _DiversionCard extends ConsumerWidget {
     final ownerKnown = confirmed + closedHere.where((c) => reason(c) == 'hasOwner').length;
     final diverted = confirmed + unknown;
     final referred = cases.where((c) => c.status == RescueStatus.referred && period.has(lastUpdateOf(c))).length;
+    final catCases =
+        cases.where((c) => period.has(c.createdAt) && c.allSpecies.any((s) => s.toLowerCase() == 'cat')).toList();
+    final catReports = catCases.length;
+    final communityCats = catCases.where((c) => c.raw['communityCat'] == true).length;
 
     return SectionCard(
       icon: Icons.groups,
@@ -1021,11 +1143,17 @@ class _DiversionCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Row(
+          Row(
             children: [
-              Expanded(child: _MiniStat('—', 'Help requests (food, vet costs) · not tracked', dashed: true)),
-              SizedBox(width: 8),
-              Expanded(child: _MiniStat('—', 'Community cats · not tagged on reports', dashed: true)),
+              const Expanded(child: _MiniStat('—', 'Help requests (food, vet costs) · not tracked', dashed: true)),
+              const SizedBox(width: 8),
+              // Analytics gap 5: tagged on the report form or by staff.
+              Expanded(
+                child: _MiniStat(
+                  '$communityCats',
+                  'Community cats reported · of $catReports cat reports',
+                ),
+              ),
             ],
           ),
         ],
@@ -1038,13 +1166,15 @@ class _DiversionCard extends ConsumerWidget {
 
 class _PreventionCard extends ConsumerWidget {
   final List<AnimalRecord> records;
-  const _PreventionCard({required this.records});
+  final Period period;
+  const _PreventionCard({required this.records, required this.period});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final vaxAsync = ref.watch(vaccinationsByAnimalProvider);
     final care = ref.watch(careRecordsByAnimalProvider).asData?.value;
     final snap = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
+    final illnesses = ref.watch(allIllnessesProvider).asData?.value;
     return SectionCard(
       icon: Icons.vaccines,
       title: 'Are animals protected from illness?',
@@ -1142,7 +1272,16 @@ class _PreventionCard extends ConsumerWidget {
                   StatusChip(careChip(CareType.deworming), tone: ChipTone.info),
                   StatusChip(careChip(CareType.fleaTick), tone: ChipTone.info),
                   StatusChip('Quarantine active $quarantines', tone: quarantines > 0 ? ChipTone.amber : ChipTone.green),
-                  const StatusChip('Illness log not tracked', tone: ChipTone.notRecorded),
+                  // Analytics gap 5: the Medical tab's illness log.
+                  if (illnesses == null)
+                    const StatusChip('Illness log —', tone: ChipTone.notRecorded)
+                  else
+                    StatusChip(
+                      '${illnesses.where((e) => period.has(e.onset)).length} new illness cases'
+                      '${illnesses.where((e) => period.has(e.onset) && e.contagious).isEmpty ? '' : ' (${illnesses.where((e) => period.has(e.onset) && e.contagious).length} contagious)'}'
+                      ' · ${illnesses.where((e) => e.active).length} active',
+                      tone: illnesses.any((e) => e.active && e.contagious) ? ChipTone.amber : ChipTone.info,
+                    ),
                 ],
               ),
               if (recentNoVax > 0)
@@ -1200,14 +1339,277 @@ class _EndOfCareCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const _MiniStat(
-            '—',
-            'Second review and alternatives considered: not recorded yet. This supports careful decisions; it is never used to delay medically justified ones.',
-            dashed: true,
-          ),
+          // Analytics gap 5: a second admin reviews each euthanasia and
+          // records the alternatives considered.
+          () {
+            final euth = cur.deaths.where((d) => d.euthanasia).toList();
+            final reviewed = euth.where((d) => d.review != null).length;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _MiniStat(
+                  euth.isEmpty ? '—' : '$reviewed of ${euth.length}',
+                  'Euthanasia with a second review and alternatives recorded. This supports careful decisions; '
+                  'it is never used to delay medically justified ones.',
+                  dashed: euth.isEmpty,
+                ),
+                for (final d in euth)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${d.name} · ${shortDate(d.at)}'
+                            '${d.review == null ? '' : ' · reviewed by ${d.review!['reviewerName'] ?? 'an admin'}'}',
+                            style: dashBody(size: 12.5),
+                          ),
+                        ),
+                        if (d.review == null && d.docPath != null)
+                          TextButton(
+                            onPressed: () => _recordSecondReview(context, d),
+                            child: const Text('Review'),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          }(),
         ],
       ),
     );
+  }
+}
+
+// ─── Month by month (Analytics gap 6) ────────────────────────────────────
+
+/// The stored monthly summaries (writeAnalyticsSummaries,
+/// functions/dashboard_ops.js), newest first, for the signed-in staff
+/// member's organization.
+final analyticsSummariesProvider = StreamProvider.autoDispose<List<Map<String, dynamic>>>((ref) async* {
+  final orgId = await ref.watch(dashboardOrgIdProvider.future);
+  if (orgId == null) {
+    yield const [];
+    return;
+  }
+  yield* FirebaseFirestore.instance
+      .collection('organizations')
+      .doc(orgId)
+      .collection('analyticsSummaries')
+      .orderBy('month', descending: true)
+      .limit(12)
+      .snapshots()
+      .map((s) => s.docs.map((d) => d.data()).toList());
+});
+
+class _MonthlyTrendCard extends ConsumerStatefulWidget {
+  final List<AnimalRecord> records;
+  final List<RescueCase> cases;
+  const _MonthlyTrendCard({required this.records, required this.cases});
+
+  @override
+  ConsumerState<_MonthlyTrendCard> createState() => _MonthlyTrendCardState();
+}
+
+class _MonthlyTrendCardState extends ConsumerState<_MonthlyTrendCard> {
+  bool _rebuilding = false;
+
+  Future<void> _rebuild() async {
+    setState(() => _rebuilding = true);
+    try {
+      final res = await FirebaseFunctions.instance.httpsCallable('rebuildAnalyticsSummaries').call<Object?>();
+      final written = (res.data as Map?)?['written'];
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rebuilt ${written ?? 0} monthly summaries.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not rebuild: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _rebuilding = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(analyticsSummariesProvider);
+    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final now = DateTime.now();
+    // The current month is always live.
+    final thisMonth = AnalyticsRange.month(now.year, now.month).period(now);
+    final live = computeOutcomes(p: thisMonth, records: widget.records, cases: widget.cases);
+    final liveReports = widget.cases.where((c) => thisMonth.has(c.createdAt)).length;
+
+    String rate(Object? v) => v is num ? '${(v * 100).round()}%' : '—';
+    Widget row(String month, String reports, String intake, String adopted, String r, {bool bold = false}) {
+      final style = dashBody(size: 12.5, weight: bold ? FontWeight.w800 : FontWeight.w500);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(flex: 3, child: Text(month, style: style)),
+            Expanded(flex: 2, child: Text(reports, textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 2, child: Text(intake, textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 2, child: Text(adopted, textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 2, child: Text(r, textAlign: TextAlign.right, style: style)),
+          ],
+        ),
+      );
+    }
+
+    return SectionCard(
+      icon: Icons.calendar_month,
+      title: 'Month by month',
+      child: DashAsync<List<Map<String, dynamic>>>(
+        value: async,
+        what: 'monthly summaries',
+        builder: (rows) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            row('Month', 'Reports', 'In', 'Adopted', 'Live', bold: true),
+            row(
+              '${AnalyticsRange.month(now.year, now.month).label} (so far)',
+              '$liveReports',
+              '${live.intake}',
+              '${live.adopted}',
+              live.liveRate == null ? '—' : '${(live.liveRate! * 100).round()}%',
+            ),
+            for (final m in rows)
+              row(
+                () {
+                  final key = '${m['month'] ?? ''}';
+                  final parts = key.split('-');
+                  return parts.length == 2
+                      ? AnalyticsRange.month(int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 1).label
+                      : key;
+                }(),
+                '${m['reports'] ?? '—'}',
+                '${m['intake'] ?? '—'}',
+                '${m['adopted'] ?? '—'}',
+                rate(m['liveRate']),
+              ),
+            if (rows.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Past months are summarized on the 1st of each month. None are stored yet.',
+                  style: dashMuted(),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Past months come from stored summaries of your organization’s own cases and records; the current '
+                'month is calculated live.',
+                style: dashMuted(11.5),
+              ),
+            ),
+            if (canManage)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _rebuilding ? null : _rebuild,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: Text(_rebuilding ? 'Rebuilding…' : 'Rebuild the last 12 months'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Saves `euthanasiaReview` on the death's record. The person who recorded
+/// the death can't review it.
+Future<void> _recordSecondReview(BuildContext context, DeathRecord d) async {
+  final me = FirebaseAuth.instance.currentUser;
+  if (me == null || d.docPath == null) return;
+  if (d.recordedByUid != null && d.recordedByUid == me.uid) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('You recorded this death. Another admin needs to do the second review.')),
+    );
+    return;
+  }
+  final alternatives = TextEditingController();
+  final notes = TextEditingController();
+  var agrees = true;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        title: Text('Second review · ${d.name}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Recorded cause: ${d.cause ?? 'not recorded'}', style: dashMuted(12.5)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: alternatives,
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Alternatives considered',
+                  hintText: 'Treatment, transfer, foster, specialist referral…',
+                ),
+              ),
+              RadioGroup<bool>(
+                groupValue: agrees,
+                onChanged: (v) => setState(() => agrees = v ?? true),
+                child: const Column(
+                  children: [
+                    RadioListTile<bool>(
+                      contentPadding: EdgeInsets.zero,
+                      value: true,
+                      title: Text('I agree the decision was justified'),
+                    ),
+                    RadioListTile<bool>(
+                      contentPadding: EdgeInsets.zero,
+                      value: false,
+                      title: Text('I have concerns'),
+                    ),
+                  ],
+                ),
+              ),
+              TextField(
+                controller: notes,
+                maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(labelText: 'Notes (optional)'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => alternatives.text.trim().isEmpty ? null : Navigator.pop(ctx, true),
+            child: const Text('Save review'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (ok != true) return;
+  try {
+    await FirebaseFirestore.instance.doc(d.docPath!).update({
+      'euthanasiaReview': {
+        'reviewerUid': me.uid,
+        'reviewerName': (me.displayName?.trim().isNotEmpty ?? false) ? me.displayName!.trim() : (me.email ?? 'Admin'),
+        'reviewedAt': FieldValue.serverTimestamp(),
+        'alternativesConsidered': alternatives.text.trim(),
+        'agrees': agrees,
+        if (notes.text.trim().isNotEmpty) 'notes': notes.text.trim(),
+      },
+    });
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save the review: $e')));
+    }
   }
 }
 

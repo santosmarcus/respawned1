@@ -18,6 +18,7 @@ import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart';
 import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/features/admin/stock/stock_service.dart';
+import 'package:respawnd1/features/care/care_rounds.dart';
 
 /// The four transparent readiness states. There is no overall score: the
 /// card names which factors cause a constraint, and the decision to accept
@@ -77,6 +78,7 @@ class RescueReadinessCard extends ConsumerWidget {
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
     final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
     final stock = ref.watch(stockItemsProvider).asData?.value;
+    final careSetup = orgId == null ? null : ref.watch(careSetupProvider(orgId)).asData?.value;
 
     return SectionCard(
       icon: Icons.dashboard,
@@ -95,6 +97,7 @@ class RescueReadinessCard extends ConsumerWidget {
             canManage: canManage,
             campaigns: campaigns,
             stock: stock,
+            careSetup: careSetup,
           );
           final limiting = factors
               .where((f) => f.state == ReadinessState.constrained)
@@ -188,6 +191,8 @@ class RescueReadinessCard extends ConsumerWidget {
     required bool canManage,
     required List<DonationListing>? campaigns,
     List<StockItem>? stock,
+    CareSetup? careSetup,
+    DateTime? now,
   }) {
     // Space — physical capacity only; the other factors cover care.
     final free = occ.free;
@@ -229,13 +234,38 @@ class RescueReadinessCard extends ConsumerWidget {
       );
     }
 
-    // Care coverage — carer schedules aren't recorded anywhere yet.
-    const care = ReadinessFactor(
-      Icons.groups,
-      'Care coverage',
-      'Carer schedules aren’t recorded yet',
-      ReadinessState.incomplete,
-    );
+    // Care coverage — Dashboard gap 3: the weekly carer roster. Any shift
+    // in the next 7 days with no one on it is a constraint.
+    final ReadinessFactor care;
+    if (careSetup == null || !careSetup.hasRoster) {
+      care = const ReadinessFactor(
+        Icons.groups,
+        'Care coverage',
+        'Carer roster not set',
+        ReadinessState.incomplete,
+      );
+    } else {
+      final today = now ?? DateTime.now();
+      final gaps = rosterGaps(careSetup, today);
+      final todayNames = {
+        for (final s in careSetup.shifts) ...careSetup.onShift(today.weekday, s.id).map((e) => e.name),
+      };
+      care = gaps.isEmpty
+          ? ReadinessFactor(
+              Icons.groups,
+              'Care coverage',
+              'Every shift covered this week · today: ${todayNames.take(3).join(', ')}'
+                  '${todayNames.length > 3 ? ' +${todayNames.length - 3}' : ''}',
+              ReadinessState.confirmed,
+            )
+          : ReadinessFactor(
+              Icons.groups,
+              'Care coverage',
+              '${plural(gaps.length, 'shift')} with no carer in 7 days · first: '
+                  '${kWeekdayShort[gaps.first.day.weekday - 1]} ${gaps.first.shift.label.toLowerCase()}',
+              ReadinessState.constrained,
+            );
+    }
 
     // Vet access — a clinic has been used on an active case.
     final clinics = snap == null

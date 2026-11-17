@@ -1,6 +1,126 @@
 # Handoff
 
-_Latest: defense gap fixes on `claude/remaining-gap-fixes-481458` (2026-11-17). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: System admin console, one-organization scope and referral links on `dev` (2026-11-17, uncommitted; backend and Hosting deployed, app build not yet). Then the release fixes and deploy of the same day (committed `13f36df`). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## System admin console, one-organization scope, referral links (2026-11-17, not checked on a device)
+
+**Deployed 2026-11-17:** all 87 functions (new: the four referral-link callables; `reviewOrganization` changed), Firestore and Storage rules, Hosting (`/referral`). The full functions deploy hit Cloud Run's per-minute read quota (HTTP 429): the CLI retried every function but `evaluateCampaignDeadlines`, which was redeployed on its own. `createReferralShare` and `revokeReferralShare` were then redeployed to check sign-in before looking up the case (a signed-out caller could tell whether a case existed). Smoke test on the live site: a made-up link shows "Link not found"; signed-out create is refused. **Not done:** the app build with these screens, and setting `role: system_admin` on an account.
+
+### System admin console
+
+- New account role `system_admin` (`users/{uid}.role`), **set in the Firebase console only** (`selfRoles` in firestore.rules never lets a client pick it). `main.dart` routes it to `SystemAdminHomeScreen` (`lib/features/systemadmin/`), two tabs:
+  - **Approvals:** the existing `OrganizationReviewPage` (organization sign-ups under review; approve, ask for changes, not approve through `reviewOrganization`). Badge shows the pending count.
+  - **Users:** read-only directory. Organization tab lists each organization with its people and their role there (owner, Admin, Staff, Carer, linked account, inactive), plus organization accounts not on one yet. Transporters (with verification state), Volunteers, General, Admins. Search; tap for details (type, organization and role, transporter state, email, phone, joined, copy ID).
+- **Transporters are still verified by organization staff** (admin drawer → Transporters); the console only shows their state.
+- Access is narrow on purpose: `isSystemAdmin()` in firestore.rules adds `users` reads; organizations and members were already readable by signed-in users; storage.rules lets it read `organizations/{id}/verification/**` (not upload); `reviewOrganization` accepts it. It is **not** platform staff: no cases, animals, medical records, adoptions or money (rules tests check this).
+- The six existing `role: 'admin'` accounts are unchanged and keep the organization tools. To make a system admin, set `role` to `system_admin` on an account in the console (not one of those six, or it loses the org tools).
+
+### One organization for now
+
+`FeatureFlags.multiOrganizationEnabled = false` (`lib/core/constants/feature_flags.dart`) hides: Refer → Another organization, Transfer Animal → Organization (Treatment Details), Transfer Animal Record → Another Organization (the sheet goes straight to a named volunteer), the "Open for transfer" switch on Accept Case, and Organization approvals in the admin drawer (now in the system admin console). Code, data, rules and functions are untouched; flip the flag to bring them back.
+
+### Referral links (shareable web page)
+
+- After an LGU/barangay referral is saved, staff are offered **Share link**; every referral in Referral History (Rescue Details) also has Share link / Share again / Stop sharing. Staff choose whether to include the reporter's name and phone (never for an anonymous report). The share sheet sends a link like `https://respawnd1-45021.web.app/referral/<token>`.
+- The page (`public/referral/index.html`, Hosting rewrite `/referral/**`) works without the app or sign-in: report copy (animals, condition, risks, photos and videos staff attached, address + Open in Google Maps, why it was referred, the organization's call/email/Facebook), the case's status in plain words, and a form: Will handle it / Can't take it / Needs more information, with name, contact and note. `noindex`.
+- Backend `functions/referral_shares.js`: `createReferralShare`, `revokeReferralShare` (staff of the owning organization, or platform staff), `getReferralShare`, `respondToReferralShare` (no sign-in; the token is the key). Stored at `referralShares/{token}` (rules: no client access). The page never reads Firestore. The copy is built by `buildReferralSnapshot` (`functions/referral_share_rules.js`): no notes, verification evidence, status history or rider location. Links expire after 30 days (`SHARE_TTL_DAYS`, pending the organization's confirmation), take at most 20 answers, and a new choice about the reporter's contact replaces the old link.
+- An answer is kept with the link, shown in Referral History ("Answer from …"), added to the case's status history and activity log, and pushed to the organization's staff (`referral_response`, opens the case). On an LGU referral, Will handle it marks it Accepted and Can't take it marks it Declined with the note.
+
+### Deploy, in this order (steps 1–3 done)
+
+1. **Functions:** new `createReferralShare`, `revokeReferralShare`, `getReferralShare`, `respondToReferralShare`; changed `reviewOrganization`. `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions`.
+2. **Rules:** `firebase deploy --only firestore:rules,storage` (`system_admin` reads, `referralShares` locked). Safe for current builds: only adds access.
+3. **Hosting:** `firebase deploy --only hosting` (the `/referral` page and rewrite).
+4. **App build.**
+5. Set `role: system_admin` on the account(s) that should approve sign-ups.
+
+### Checks run
+
+- `flutter analyze`: the same 9 issues as before. `flutter test`: 212 pass (new: `test/features/systemadmin/user_directory_test.dart`, `test/core/models/referral_share_test.dart`). `functions/`: `npm test` 59 pass (7 new in `referral_share_rules.test.js`). `rules-tests`: 146 pass (system admin reads and limits, storage verification reads, `referralShares` locked).
+- The referral page was checked at phone width with sample data in a local preview: layout, answer choice, validation and the thank-you message. Not checked against the deployed functions.
+
+### Check on a device
+
+- Sign in as a `system_admin` account: only Approvals and Users show; Users lists the test organization's members with roles, and the transporters with Pending. Opening an organization's documents in Approvals works.
+- Refer a case to a barangay, choose Share link, open the link on another phone without the app, answer Can't take it with a note: the referral shows Declined with the note, staff get a push, and the case history shows the answer. Stop sharing: the link shows "This link is closed".
+
+## Deploy status (2026-11-17)
+
+- **Functions:** all 83 deployed from `dev`'s working tree (14 created: `pledgeInKindDonation`, `recordDonationReversal`, `mirrorCampaignHistoryToAudit`, `stampAnimalsIllnessesOrganization`, `syncRescueAdoptionRequest`, `onRescueAdoptionCaseUpdate`, `followUpAdopterPickups`, `escalateCriticalReports`, `scheduleCommunityAdoptionCheckIn`, `sendCommunityAdoptionCheckIns`, `sendDashboardDigest`, `notifyStaffOfSpecializedAssistance`, `writeAnalyticsSummaries`, `rebuildAnalyticsSummaries`; 69 updated). Needed `FUNCTIONS_DISCOVERY_TIMEOUT=60`: the default 10 s load timeout failed once while another deploy was running.
+- **Indexes:** deployed.
+- **Scripts: run 2026-11-17** with a service-account key (`GOOGLE_APPLICATION_CREDENTIALS`), each dry run then `--apply`, in this order: `backfill_organization_ids` (22 docs from evidence; no `--default-org`, so 71 cases stay in the review pool and 4 animals have no organization), `backfill_log_organization_ids` (88), `backfill_public_animals` (11), `backfill_public_cases` (77), `backfill_rider_status` (6 riders), `backfill_volunteer_stats` (none), `backfill_referral_targets` (1), `migrate_shelter_settings --org=RdU4Oc7eUPiRX5iGL6Tu` (Respawnd Test Org, the project's only organization; Loved by the Gapz isn't in this project).
+- **Campaigns have no `organizationId`** (all 7; created by a general user, a platform admin, or nobody). Their 22 donations, 8 payments and 5 allocations stay unstamped, so once the rules are live only platform admins and the donors themselves see them. Assign the campaigns to an organization, then rerun `backfill_log_organization_ids.js`.
+- **Rules (`firestore`, `storage`): deployed 2026-11-17**, before the new app build was out. Phones on older builds lose their staff case lists, Explore map, job board, payment lists, public donor counts and the other screens listed in the release-order notes below until they install the new build.
+- **Hosting:** deployed 2026-11-17 (payment return pages and `/tag`; the previous deploy was 2026-10-15). The first try failed with a one-off Hosting API error; the retry released fine.
+- **App build:** release APK built 2026-11-17 from the uncommitted `dev` working tree (`build/app/outputs/flutter-apk/app-release.apk`, 101 MB). Signed with the debug key (`android/app/build.gradle.kts` has no release signing config), so it installs by sideloading, not through the Play Store. Not installed on a device yet.
+
+## Release open issues (2026-11-17, not checked on a device, not deployed)
+
+The three "Still open" items under Defense gap fixes, now closed.
+
+| Issue | Fix |
+|---|---|
+| `donationPayments` readable by every organization's financial admins | Rule now uses `isFinanceAdminOf(resource.data.organizationId)`: the donor, a platform `admin`, or an Admin member of the owning organization. `paymentAttemptsProvider` queries by `organizationId` (platform admins: everything); Payments to Verify drops its client-side campaign filter. New index `donationPayments (organizationId, createdAt desc)`. `scripts/backfill_log_organization_ids.js` now also stamps older payments from their campaign; until it runs, older payments are hidden from organization admins. |
+| Adopter notifications for no-show, booking reminder and withdrawal opened nothing | Push taps (`notification_service.dart`) and the in-app list (`notifications_screen.dart`, now labelled "Adoption", not "Donation") open the application through the new `adopterPageForAdoption` (`lib/features/adoption/adopter_adoption_route.dart`), which the list's other adoption items now use too. |
+| Multi-animal intakes on separate post-treatment paths needed staff to open the page | `completeDueIntakes` now also runs `completeDueAnimalIntakes`: cases with `activeAnimalStages` containing `intake`; each animal sent to Intake, received and with its record gets `intakeCompletedAt`, with the stage counts and case status recomputed the way `completeIntakeForAnimals` does. Rules in `functions/rescue_timer_rules.js` (`animalsDueForIntakeCompletion`, `stageSummary`, `derivedCaseStatus`) with tests. |
+
+### Deploy, in this order
+
+1. **Functions:** `completeDueIntakes` changed (a full `firebase deploy --only functions` covers it).
+2. **Indexes:** `firebase deploy --only firestore:indexes` (the new `donationPayments` index).
+3. **Script:** `node scripts/backfill_log_organization_ids.js --project=respawnd1-45021`, dry run, then `--apply`.
+4. **App build.**
+5. **Rules:** `firebase deploy --only firestore:rules`. Older builds list payments without the organization filter, which the new rule refuses, so their Payments to Verify and payment-attempt lists go empty.
+
+### Checks run
+
+- `flutter analyze`: the same 9 issues as before. `flutter test`: 201 pass.
+- `functions/`: `npm test` 52 pass (2 new for per-animal intake).
+- `rules-tests`: all pass, including 3 new for payment attempts.
+
+### Check on a device
+
+- As an org Admin, Payments to Verify and the payment-attempt list show only your organization's payments; as a platform admin, all of them.
+- As an applicant, tap a no-show, booking-reminder and withdrawal notification (push and in-app): each opens the application.
+- A two-animal case: send one animal to Intake, receive it and create its record, leave the other in Treatment. Within 30 minutes the first animal's Intake completes without opening the page, and the case stays in Treatment.
+
+## Dashboard and Analytics gaps (2026-11-17, not checked on a device, not deployed)
+
+| Gap | What |
+|---|---|
+| Dashboard 2, care rounds | `lib/features/care/`. Areas × round tasks (default: Main shelter; morning feed, water, cleaning, evening feed) ticked once a day at `organizations/{orgId}/careRounds/{yyyy-MM-dd}`, with who and when. On the carer's Care tasks screen (full list) and the Shelter care card (progress, what is still open, link to the full list). |
+| Dashboard 3, care coverage | Weekly roster (weekday × shift → members) in `organizations/{orgId}/settings/care`, edited by admins on **Roster & tasks**. The readiness factor reads Constrained when any shift in the next 7 days has no one, "not set" with no roster. The accept-case snapshot uses the same factor. |
+| Dashboard 6, pushes | `functions/dashboard_ops.js`: `sendDashboardDigest` (07:00 Manila) pushes each approved org's admins the Priority actions counts by area, and deletes lapsed claims. `notifyStaffOfSpecializedAssistance` pushes staff at once when a rescue needs specialized assistance (the other critical alerts already pushed). |
+| Dashboard 7, alert ownership | Every alert has a stable `key`. The row's ⋮ menu: I'm on it / Release / Take over. Claims at `organizations/{orgId}/alertClaims/{key}`, shown as "Ana is on it · 2h ago", lapse after 24 h (`kAlertClaimTtl`). Alerts still clear only when the record changes. |
+| Analytics 1, export | Export menu next to the period: summary PDF for the period vs. the comparison period, CSVs (cases, animals, adoptions, donations for financial admins), and a monthly accomplishment report for last month with up to five earlier months from the stored summaries. |
+| Analytics 2, periods | `analytics_range.dart`: last 30/90/365 days, this/last/any month, this/last quarter, custom range. Calendar ranges compare with the previous month or quarter. |
+| Analytics 3, timestamps | `readyForAdoptionAt` is stamped when an animal is confirmed ready (older records fall back to the checklist's `confirmedAt`). "Discharge (or intake) to ready" and "Ready to adopted" now show medians. |
+| Analytics 4, location | Rescue report: "By city", "By barangay" (parsed from the saved Google address, `case_location.dart`) and a heat map of report pins. |
+| Analytics 5, untracked events | Community cat: a switch on the stray report form when a cat is reported, and a staff switch on Rescue Details (`communityCat`). Illness log: a section on the Medical tab (`animals/{id}/illnesses`). Euthanasia second review: on the End-of-care card, a different admin records alternatives considered and agrees or has concerns (`euthanasiaReview`; `markDeceased` now stores `deceasedByUid`). **Help requests are still not tracked: ask the organization whether they should become a report type.** |
+| Analytics 6, summaries | `writeAnalyticsSummaries` (1st of the month, 02:00 Manila) stores `organizations/{orgId}/analyticsSummaries/{yyyy-MM}` for the month just ended and fills in any of the last 12 that are missing. `rebuildAnalyticsSummaries` (callable, org admins) rebuilds all 12. A new **Month by month** card reads them; the current month is live. The existing cards still compute on the phone. |
+
+Pending the organization's confirmation: the default round tasks and shifts, the 24 h claim lapse, the 07:00 digest time.
+
+### Deploy, in this order
+
+1. **Functions:** new `sendDashboardDigest`, `notifyStaffOfSpecializedAssistance`, `writeAnalyticsSummaries`, `rebuildAnalyticsSummaries`, `stampAnimalsIllnessesOrganization`. A full `firebase deploy --only functions` covers them.
+2. **Indexes:** `firebase deploy --only firestore:indexes` (new `illnesses.organizationId` field override).
+3. Optional: an org admin presses **Rebuild the last 12 months** on Analytics → Month by month, so the card isn't empty until 1 December.
+4. **App build.**
+5. **Rules:** `firebase deploy --only firestore:rules` (care settings readable by carers; `careRounds`, `alertClaims`, `analyticsSummaries`; `illnesses` collection-group read).
+
+### Checks run
+
+- `flutter analyze`: the same 9 issues as before, none in new code. `flutter test`: 201 pass (12 new in `test/features/adminhome/dashboard_analytics_gaps_test.dart`).
+- `functions/`: `npm test` 50 pass (digest and summary rules are new). `rules-tests`: 137 pass (6 new).
+
+### Check on a device
+
+- Care rounds: as a carer, tick and untick a task; the dashboard card updates. As an admin, edit the roster, leave a shift empty, and see Care coverage turn Constrained.
+- Claims: as two admins, claim an alert on one phone and see "… is on it" on the other; release as a non-admin fails for someone else's claim.
+- Export: each of the three exports opens the share sheet; PDFs show peso amounts as "PHP".
+- Heat map: needs the Maps SDK key that the other maps use; check it draws on Android.
+- Digest: run `sendDashboardDigest` from the Cloud Scheduler console once and check the push.
 
 ## Defense gap fixes (2026-11-17, not checked on a device)
 
@@ -69,9 +189,7 @@ From `functions/` (with `functions/.env` and the secrets in place). Merge this b
 
 ### Still open (not done here)
 
-- `donationPayments` is readable by every organization's financial admins. Older payment docs have no `organizationId`, so the new screen filters them by campaign on the client.
-- Adopter-side notifications for no-show, booking reminder and withdrawal are informational: tapping them opens nothing.
-- Intake completion for multi-animal cases on separate post-treatment paths still depends on staff opening the page.
+All three items that were listed here are closed: see Release open issues at the top.
 
 ## Build fix status (2026-11-04)
 

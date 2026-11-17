@@ -10,4 +10,12 @@ class FeatureFlags {
   /// "Organization" quick-action entry point on Home is hidden/disabled.
   /// Set back to true to re-enable that entry point.
   static const bool organizationsFeatureEnabled = false;
+
+  /// The app is scoped to one organization for now. Off hides everything
+  /// that works between organizations: referring a case to another
+  /// organization, transferring an animal or record to one, the "Open for
+  /// transfer" switch on Accept Case, and Organization approvals in the
+  /// admin drawer (system admins approve sign-ups from their own console).
+  /// The code, data and rules stay; set to true to bring them back.
+  static const bool multiOrganizationEnabled = false;
 }

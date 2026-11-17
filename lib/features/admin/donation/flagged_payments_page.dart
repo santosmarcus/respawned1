@@ -9,7 +9,6 @@ import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_service.dart';
-import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 
 /// Online (PayMongo) payments whose paid amount differed from the amount
@@ -89,8 +88,6 @@ class _FlaggedPaymentsPageState extends ConsumerState<FlaggedPaymentsPage> {
   @override
   Widget build(BuildContext context) {
     final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
-    final orgId = ref.watch(currentOrganizationIdProvider).asData?.value;
-    final campaigns = ref.watch(orgCampaignsProvider).asData?.value;
     final paymentsAsync = ref.watch(paymentAttemptsProvider);
 
     Widget body;
@@ -101,13 +98,9 @@ class _FlaggedPaymentsPageState extends ConsumerState<FlaggedPaymentsPage> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => _message('Could not load payments: $e'),
         data: (all) {
-          // Only this organization's campaigns (platform admins see all).
-          final mine = campaigns?.map((c) => c.id).toSet();
-          final flagged = all
-              .where((p) => p.status == 'needs_review')
-              .where((p) =>
-                  orgId == null || p.organizationId == orgId || (mine != null && mine.contains(p.campaignId)))
-              .toList();
+          // paymentAttemptsProvider already holds only this organization's
+          // attempts (platform admins: every organization's).
+          final flagged = all.where((p) => p.status == 'needs_review').toList();
           if (flagged.isEmpty) return _message('No payments are waiting for review.');
           return ListView.separated(
             padding: const EdgeInsets.all(16),

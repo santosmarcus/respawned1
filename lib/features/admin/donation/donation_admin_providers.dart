@@ -143,10 +143,15 @@ final campaignHistoryProvider = StreamProvider.autoDispose.family<List<CampaignH
       .map((s) => s.docs.map(CampaignHistoryEntry.fromFirestore).toList());
 });
 
-/// PayMongo attempts, any status
-final paymentAttemptsProvider = StreamProvider.autoDispose<List<PaymentAttempt>>((ref) {
-  return _db
-      .collection('donationPayments')
+/// PayMongo attempts, any status, for the signed-in staff member's
+/// organization. firestore.rules lets an organization's financial admins
+/// read only its own attempts (by `organizationId`); an account with no
+/// organization (a platform admin) lists every organization's.
+final paymentAttemptsProvider = StreamProvider.autoDispose<List<PaymentAttempt>>((ref) async* {
+  final orgId = await ref.watch(currentOrganizationIdProvider.future);
+  Query<Map<String, dynamic>> q = _db.collection('donationPayments');
+  if (orgId != null && orgId.isNotEmpty) q = q.where('organizationId', isEqualTo: orgId);
+  yield* q
       .orderBy('createdAt', descending: true)
       .limit(100)
       .snapshots()

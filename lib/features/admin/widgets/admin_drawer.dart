@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
@@ -294,8 +295,10 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
               selected: widget.active == AdminModule.audit,
               onTap: () => _openModule(context, (_) => const AuditPage()),
             ),
-            // Platform staff only: organizations waiting for approval.
-            if (ref.watch(isPlatformStaffProvider).asData?.value ?? false)
+            // Platform staff only: organizations waiting for approval. With
+            // one organization, sign-ups are approved from the system admin
+            // console instead (FeatureFlags.multiOrganizationEnabled).
+            if (FeatureFlags.multiOrganizationEnabled && (ref.watch(isPlatformStaffProvider).asData?.value ?? false))
               _DrawerItem(
                 label: 'Organization approvals',
                 count: ref.watch(pendingOrganizationReviewCountProvider).asData?.value,

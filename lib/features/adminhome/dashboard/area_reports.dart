@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart' show Factory;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -19,6 +22,7 @@ import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart' show currentOrganizationIdProvider;
+import 'package:respawnd1/features/adminhome/dashboard/case_location.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 
 // ─── Reports by area ────────────────────────────────────────────────────
@@ -425,6 +429,20 @@ class _RescueReport extends ConsumerStatefulWidget {
 
 class _RescueReportState extends ConsumerState<_RescueReport> {
   String _urgencyWindow = 'All time';
+  String _locationView = 'By city';
+
+  static Map<String, num> _byPlace(List<RescueCase> cases, {required bool barangay}) {
+    final out = <String, num>{};
+    for (final c in cases) {
+      final p = placeOf(c.address);
+      final key = barangay
+          ? (p.barangay == null ? null : (p.city == null ? p.barangay! : '${p.barangay}, ${p.city}'))
+          : p.city;
+      if (key == null) continue;
+      out[key] = (out[key] ?? 0) + 1;
+    }
+    return out;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -533,11 +551,25 @@ class _RescueReportState extends ConsumerState<_RescueReport> {
           onFilterChanged: (v) => setState(() => _urgencyWindow = v),
           child: _BarChart(data: byUrgency),
         ),
-        const _ChartBlock(
-          title: 'Rescues by location',
-          height: 64,
-          child: _EmptyChart('Not tracked yet: needs a map view over case locations.'),
+        // Analytics gap 4: grouped from each report's saved address, or a
+        // heat layer over the reported pins.
+        _ChartBlock(
+          title: 'Rescues by location (cases)',
+          filterOptions: const ['By city', 'By barangay', 'Map'],
+          selectedFilter: _locationView,
+          onFilterChanged: (v) => setState(() => _locationView = v),
+          height: _locationView == 'Map' ? 260 : 200,
+          child: _locationView == 'Map'
+              ? _CaseHeatmap(cases: cases)
+              : _HorizontalBars(
+                  data: _byPlace(cases, barangay: _locationView == 'By barangay'),
+                  empty: 'No report addresses to group yet.',
+                ),
         ),
+        if (_locationView != 'Map')
+          _note('From each report’s address. '
+              '${cases.where((c) => (_locationView == 'By barangay' ? placeOf(c.address).barangay : placeOf(c.address).city) == null).length} '
+              'without a readable ${_locationView == 'By barangay' ? 'barangay' : 'city'} are left out.'),
         _ChartBlock(
           title: 'Reports by rescue type (cases)',
           child: _BarChart(data: byRescueType),
@@ -557,6 +589,42 @@ class _RescueReportState extends ConsumerState<_RescueReport> {
         ),
         const _TransporterReport(),
       ],
+    );
+  }
+}
+
+/// A heat layer over every case's reported pin.
+class _CaseHeatmap extends StatelessWidget {
+  const _CaseHeatmap({required this.cases});
+  final List<RescueCase> cases;
+
+  @override
+  Widget build(BuildContext context) {
+    final points = [
+      for (final c in cases)
+        if (c.lat case final lat? when lat != 0)
+          if (c.lng case final lng? when lng != 0) LatLng(lat, lng),
+    ];
+    if (points.isEmpty) return const _EmptyChart('No reported locations yet.');
+    final lat = points.fold<double>(0, (s, p) => s + p.latitude) / points.length;
+    final lng = points.fold<double>(0, (s, p) => s + p.longitude) / points.length;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: GoogleMap(
+        initialCameraPosition: CameraPosition(target: LatLng(lat, lng), zoom: 11),
+        myLocationButtonEnabled: false,
+        mapToolbarEnabled: false,
+        zoomControlsEnabled: true,
+        // Pan and zoom the map instead of scrolling the page.
+        gestureRecognizers: {Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new)},
+        heatmaps: {
+          Heatmap(
+            heatmapId: const HeatmapId('cases'),
+            data: [for (final p in points) WeightedLatLng(p)],
+            radius: const HeatmapRadius.fromPixels(30),
+          ),
+        },
+      ),
     );
   }
 }

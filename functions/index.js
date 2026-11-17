@@ -1514,7 +1514,13 @@ exports.followUpCaseReferrals = onSchedule('every 60 minutes', async () => {
 //     status 'completed' + intakeCompletedAt with the same status line and
 //     activity-log entry. Cases whose animals follow separate
 //     post-treatment paths are completed per animal in the app.
-const {quarantineDue, intakeCompletionDue} = require('./rescue_timer_rules');
+const {
+  quarantineDue,
+  intakeCompletionDue,
+  animalsDueForIntakeCompletion,
+  stageSummary,
+  derivedCaseStatus,
+} = require('./rescue_timer_rules');
 
 const QUARANTINE_AUTO_REASON = 'Automatic — scheduled duration elapsed.';
 
@@ -1602,7 +1608,60 @@ exports.completeDueIntakes = onSchedule('every 30 minutes', async () => {
       console.error('[completeDueIntakes] failed for', doc.ref.path, e);
     }
   }
+  await completeDueAnimalIntakes();
 });
+
+async function linkedRecordIndexes(caseId) {
+  const records = await db.collection('animals').where('linkedCaseId', '==', caseId).get();
+  return records.docs
+    .map((r) => r.get('sourceAnimalIndex'))
+    .filter((i) => typeof i === 'number')
+    .map((i) => Math.trunc(i));
+}
+
+// Multi-animal cases whose animals took separate post-treatment paths: each
+// animal sent to Intake is completed once it was received and has its
+// record, with the same writes as CaseIntakeRepository.completeIntakeForAnimals.
+// The case may still read in_treatment while another animal is in
+// treatment, so these are found by their Intake stage, not their status.
+async function completeDueAnimalIntakes() {
+  const snap = await db.collection('cases').where('activeAnimalStages', 'array-contains', 'intake').get();
+  for (const doc of snap.docs) {
+    try {
+      const indexes = await linkedRecordIndexes(doc.id);
+      if (!animalsDueForIntakeCompletion(doc.data(), indexes).length) continue;
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists) return;
+        const c = s.data();
+        const due = animalsDueForIntakeCompletion(c, indexes);
+        if (!due.length) return;
+        const now = admin.firestore.Timestamp.now();
+        const animals = c.animals.map((a, i) => (due.includes(i) ? {...a, intakeCompletedAt: now} : a));
+        const update = {
+          animals,
+          ...stageSummary(animals),
+          status: derivedCaseStatus(animals) || c.status || 'intake',
+          statusHistory: admin.firestore.FieldValue.arrayUnion({
+            status: 'Intake completed for the selected animal(s).',
+            timestamp: now,
+          }),
+        };
+        tx.update(doc.ref, update);
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'intake_completed',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          details: {animalIndexes: due},
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (e) {
+      console.error('[completeDueAnimalIntakes] failed for', doc.ref.path, e);
+    }
+  }
+}
 
 const REPORTER_RESPONSE_TIMEOUT_HOURS = 48;
 
@@ -1860,12 +1919,15 @@ Object.assign(exports, require('./campaigns'));
 Object.assign(exports, require('./adoptions'));
 // Organization stamp on case/animal logs for the Audit page — see functions/audit_logs.js.
 Object.assign(exports, require('./audit_logs'));
+// Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
+Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
 
 // ---- Organization verification review ------------------------------------
 //
-// Platform staff (users/{uid}.role 'admin' or 'ngo_staff') approve, reject or
+// Platform staff (users/{uid}.role 'admin' or 'ngo_staff') and system admins
+// ('system_admin', the approvals console) approve, reject or
 // ask for changes on an organization that submitted its documents
 // (verificationStatus 'pending'). firestore.rules blocks every client from
 // setting these fields, so each decision goes through here, is logged to
@@ -1890,7 +1952,7 @@ exports.reviewOrganization = onCall(async (request) => {
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const reviewer = await db.collection('users').doc(uid).get();
   const reviewerData = reviewer.exists ? reviewer.data() : {};
-  if (!['admin', 'ngo_staff'].includes(reviewerData.role)) {
+  if (!['admin', 'ngo_staff', 'system_admin'].includes(reviewerData.role)) {
     throw new HttpsError('permission-denied', 'Only platform staff can review organizations.');
   }
 
@@ -2343,3 +2405,12 @@ exports.sendCommunityAdoptionCheckIns = onSchedule({schedule: '30 9 * * *', time
     }
   }
 });
+
+// ---- Dashboard digest, critical pushes, monthly analytics summaries ------
+// (Dashboard gaps 6 and 7, Analytics gap 6). See functions/dashboard_ops.js.
+Object.assign(exports, require('./dashboard_ops')({
+  db,
+  orgStaffUids,
+  notifyStaff,
+  openFollowUpStatuses: OPEN_FOLLOW_UP_STATUSES,
+}));

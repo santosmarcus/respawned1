@@ -196,3 +196,86 @@ describe('dashboard records across animals and cases', () => {
     await assertFails(as('staffA').collectionGroup('expenses').get());
   });
 });
+
+describe('PayMongo payment attempts', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('donationPayments/pA').set({ donorId: 'adopter', campaignId: 'c1', organizationId: 'orgA', status: 'needs_review', createdAt: 1 });
+      await db.doc('donationPayments/pD').set({ donorId: 'stranger', campaignId: 'c9', organizationId: 'orgD', status: 'paid', createdAt: 2 });
+      await db.doc('donationPayments/legacy').set({ donorId: 'stranger', campaignId: 'c1', status: 'paid', createdAt: 3 });
+    });
+  });
+
+  test("an organization's financial admins list only its own attempts", async () => {
+    await assertSucceeds(as('ownerA').collection('donationPayments').where('organizationId', '==', 'orgA').get());
+    await assertSucceeds(as('ownerA').doc('donationPayments/pA').get());
+    await assertFails(as('ownerA').collection('donationPayments').get());
+    await assertFails(as('ownerA').collection('donationPayments').where('organizationId', '==', 'orgD').get());
+    await assertFails(as('ownerA').doc('donationPayments/pD').get());
+    // Older attempts with no organizationId wait for the backfill.
+    await assertFails(as('ownerA').doc('donationPayments/legacy').get());
+    // Another organization's Admin can't read orgA's.
+    await assertFails(as('draftOwner').doc('donationPayments/pA').get());
+  });
+
+  test('non-admin staff and carers cannot read them', async () => {
+    await assertFails(as('staffA').collection('donationPayments').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('carerA').doc('donationPayments/pA').get());
+  });
+
+  test('platform admins list every attempt; donors read their own', async () => {
+    await assertSucceeds(as('admin').collection('donationPayments').get());
+    await assertSucceeds(as('adopter').doc('donationPayments/pA').get());
+    await assertFails(as('adopter').doc('donationPayments/pD').get());
+  });
+});
+
+describe('system admin console', () => {
+  test('reads every profile, organization and member', async () => {
+    await assertSucceeds(as('sysadmin').collection('users').get());
+    await assertSucceeds(as('sysadmin').doc('users/rider').get());
+    await assertSucceeds(as('sysadmin').collection('organizations').get());
+    await assertSucceeds(as('sysadmin').collection('organizations/orgA/members').get());
+  });
+
+  test('cannot read cases, animals, adoptions or money', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('animals/a1').set({ name: 'Bao', organizationId: 'orgA' });
+      await db.doc('donations/d1').set({ userId: 'adopter', campaignId: 'c1', organizationId: 'orgA' });
+      await db.doc('donationPayments/p1').set({ donorId: 'adopter', organizationId: 'orgA' });
+      await db.doc('orgExpenses/x1').set({ organizationId: 'orgA', amount: 1 });
+    });
+    await assertFails(as('sysadmin').doc('cases/ownedA').get());
+    await assertFails(as('sysadmin').doc('cases/pending1').get());
+    await assertFails(as('sysadmin').doc('animals/a1').get());
+    await assertFails(as('sysadmin').doc('donations/d1').get());
+    await assertFails(as('sysadmin').doc('donationPayments/p1').get());
+    await assertFails(as('sysadmin').doc('orgExpenses/x1').get());
+    await assertFails(as('sysadmin').collection('adoptions').get());
+  });
+
+  test('cannot change profiles or approve organizations directly', async () => {
+    await assertFails(as('sysadmin').doc('users/rider').update({ transporterVerificationStatus: 'approved', isVerified: true }));
+    await assertFails(as('sysadmin').doc('organizations/orgD').update({ verificationStatus: 'approved' }));
+  });
+
+  test('nobody can give themselves the role', async () => {
+    await assertFails(as('newcomer').doc('users/newcomer').set({ role: 'system_admin' }));
+    await assertFails(as('stranger').doc('users/stranger').update({ role: 'system_admin' }));
+  });
+});
+
+describe('referral share links', () => {
+  test('no client reads or writes them, staff and platform admins included', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('referralShares/abcdefghijklmnopqrstuvwx').set({ caseId: 'ownedA', organizationId: 'orgA' }));
+    for (const uid of ['staffA', 'ownerA', 'admin', 'sysadmin', 'reporter', 'stranger']) {
+      await assertFails(as(uid).doc('referralShares/abcdefghijklmnopqrstuvwx').get());
+      await assertFails(as(uid).collection('referralShares').get());
+      await assertFails(as(uid).doc('referralShares/zzzzzzzzzzzzzzzzzzzzzzzz').set({ caseId: 'ownedA' }));
+      await assertFails(as(uid).doc('referralShares/abcdefghijklmnopqrstuvwx/responses/r1').set({ response: 'will_handle' }));
+    }
+  });
+});
