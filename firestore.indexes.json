@@ -89,6 +89,20 @@
       ]
     },
     {
+      "collectionGroup": "campaigns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "activityLogs",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
