@@ -1370,6 +1370,24 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ---- Community Adoption check-ins (Adoption gap 10) ---------------------
+    // Written by the backend (scheduleCommunityAdoptionCheckIn). The adopter
+    // answers once, with a photo and a note; staff of the organizations in
+    // the area read them (queries filter on organizationIds).
+    match /communityAdoptionCheckIns/{checkInId} {
+      allow read: if signedIn() && (
+        resource.data.get('adopterId', '') == request.auth.uid ||
+        isPlatformStaff() ||
+        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && isApprovedStaffOf(myOrgId()))
+      );
+      allow update: if signedIn() &&
+        resource.data.get('adopterId', '') == request.auth.uid &&
+        resource.data.get('status', '') == 'requested' &&
+        changedOnly(['status', 'photoUrl', 'note', 'submittedAt']) &&
+        request.resource.data.status == 'submitted';
+      allow create, delete: if false;
+    }
+
     // ---- Collar tags / rescue sessions -------------------------------------
     // Not excluded from the catch-all below (see the header note), so these
     // only add to its open access today.
@@ -1418,7 +1436,7 @@ service cloud.firestore {
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
         'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
-        'transporterApplications', 'auditLogs', 'orgExpenses'
+        'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns'
       ]);
     }
   }

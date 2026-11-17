@@ -20,8 +20,8 @@ class AdoptionApplicationService {
     FirebaseStorage? storage,
     FirebaseAuth? auth,
   }) : _firestore = firestore,
-       _storage = storage,
-       _auth = auth;
+        _storage = storage,
+        _auth = auth;
 
   final FirebaseFirestore? _firestore;
   final FirebaseStorage? _storage;
@@ -76,10 +76,10 @@ class AdoptionApplicationService {
 
   //upload helper
   Future<String?> _uploadFile(
-    File? file,
-    String pathSegment,
-    String adoptionId,
-  ) async {
+      File? file,
+      String pathSegment,
+      String adoptionId,
+      ) async {
     if (file == null) return null;
     final ref = _st.ref('adoptions/$adoptionId/$pathSegment.jpg');
     await ref.putFile(file);
@@ -92,13 +92,13 @@ class AdoptionApplicationService {
   /// Future.wait list on purpose: unpacking a variable-length upload by a
   /// fixed position is exactly what caused the RangeError this replaces.
   Future<List<String>> _uploadHomePhotos(
-    List<File> files,
-    String adoptionId,
-  ) async {
+      List<File> files,
+      String adoptionId,
+      ) async {
     if (files.isEmpty) return const [];
     final urls = await Future.wait([
       for (var i = 0; i < files.length; i++)
-        () async {
+            () async {
           final ref = _st.ref('adoptions/$adoptionId/home_photos/img_$i.jpg');
           await ref.putFile(files[i]);
           return ref.getDownloadURL();
@@ -151,86 +151,86 @@ class AdoptionApplicationService {
     }
 
     await docRef.set({
-      'organizationId': ?organizationId,
-      'personal': {
-        'adopterId': uid,
-        // Legacy join key — a stringified stableIntIdFor hash, kept only
-        // for matching against applications written the same way before
-        // animalRecordId existed. Never reliably reversible to a real
-        // animals/{id} doc; see AdoptionProcess's class doc comment.
-        'animalId': '${animal.id}',
-        // The real animals/{id} Firestore document id — the reliable join
-        // key going forward for admin-side "View Applications" and any
-        // other lookup that needs to resolve back to the actual
-        // AnimalRecord. Omitted (not written as '') if unavailable.
-        if (animal.animalRecordId.isNotEmpty)
-          'animalRecordId': animal.animalRecordId,
-        'animalName': animal.name,
-        'adopterName': form.nameCtrl.text.trim(),
-        'adopterEmail': form.emailCtrl.text.trim(),
-        'adopterAge': form.ageCtrl.text.trim(),
-        'adopterPhone': form.phoneCtrl.text.trim(),
-        'homeAddress': form.homeAddressCtrl.text.trim(),
-        // Legacy field kept for backward compatibility with older reads.
-        'adopterCity': form.homeAddressCtrl.text.trim(),
-      },
-      'household': {
-        'residenceType': form.residenceType,
-        'residenceOther': form.residenceType == 'Other'
-            ? form.residenceOtherCtrl.text.trim()
-            : null,
-        'ownershipStatus': form.ownershipStatus,
-        'householdMembers': form.householdMembers,
-      },
-      'petExperience': {
-        'hadPetsBefore': form.hadPetsBefore,
-        'currentPets': {
-          'dogs': form.currentDogs,
-          'cats': form.currentCats,
-          'birds': form.currentBirds,
-          'fish': form.currentFish,
-          'reptiles': form.currentReptiles,
-          'other': form.currentOther,
-          'otherType': form.currentOtherTypeCtrl.text.trim(),
-        },
-        'currentPetsVaccinated': form.petsVaccinated,
-        'currentPetsSpayedNeutered': form.petsSpayedNeutered,
-      },
-      'lifestyle': {
-        'hoursAlone': form.hoursAlone,
-        'primaryCaregiver': form.primaryCaregiver,
-        'petStayLocation': form.petStayLocation,
-        'canAfford': {
-          'food': form.canAffordFood,
-          'vaccinations': form.canAffordVaccinations,
-          'vetVisits': form.canAffordVetVisits,
-          'emergencyMedicalCare': form.canAffordEmergencyCare,
-          'grooming': form.canAffordGrooming,
-          'careSupplies': form.canAffordCareSupplies,
-        },
-      },
-      'uploads': {
-        'governmentId': form.governmentIdUrl,
-        'proofOfAddress': form.proofOfAddressUrl,
-        //'digitalSignature': _digitalSignatureUrl,
-        // A list, not a single URL — every uploaded home photo is kept,
-        // never overwritten by only the most recent one. The admin
-        // Required Documents reader already accepts either shape.
-        'homePhotos': homePhotoUrls,
-      },
-      'agreement': {
-        'reason': form.reasonCtrl.text.trim(),
-        'care': form.agreeCare,
-        'noAbandon': form.agreeNoAbandon,
-        'followUp': form.agreeFollowup,
-        'infoAccurate': form.agreeAccurate,
-        'approvalNotGuaranteed': form.agreeNotGuaranteed,
-      },
-      'status': 'pending',
-      'statusHistory': [
-        {'status': 'Form submitted.', 'timestamp': Timestamp.now()},
-      ],
-      'createdAt': FieldValue.serverTimestamp(),
+    'organizationId': ?organizationId,
+    'personal': {
+    'adopterId': uid,
+    // Legacy join key — a stringified stableIntIdFor hash, kept only
+    // for matching against applications written the same way before
+    // animalRecordId existed. Never reliably reversible to a real
+    // animals/{id} doc; see AdoptionProcess's class doc comment.
+    'animalId': '${animal.id}',
+    // The real animals/{id} Firestore document id — the reliable join
+    // key going forward for admin-side "View Applications" and any
+    // other lookup that needs to resolve back to the actual
+    // AnimalRecord. Omitted (not written as '') if unavailable.
+    if (animal.animalRecordId.isNotEmpty)
+    'animalRecordId': animal.animalRecordId,
+    'animalName': animal.name,
+    'adopterName': form.nameCtrl.text.trim(),
+    'adopterEmail': form.emailCtrl.text.trim(),
+    'adopterAge': form.ageCtrl.text.trim(),
+    'adopterPhone': form.phoneCtrl.text.trim(),
+    'homeAddress': form.homeAddressCtrl.text.trim(),
+    // Legacy field kept for backward compatibility with older reads.
+    'adopterCity': form.homeAddressCtrl.text.trim(),
+    },
+    'household': {
+    'residenceType': form.residenceType,
+    'residenceOther': form.residenceType == 'Other'
+    ? form.residenceOtherCtrl.text.trim()
+        : null,
+    'ownershipStatus': form.ownershipStatus,
+    'householdMembers': form.householdMembers,
+    },
+    'petExperience': {
+    'hadPetsBefore': form.hadPetsBefore,
+    'currentPets': {
+    'dogs': form.currentDogs,
+    'cats': form.currentCats,
+    'birds': form.currentBirds,
+    'fish': form.currentFish,
+    'reptiles': form.currentReptiles,
+    'other': form.currentOther,
+    'otherType': form.currentOtherTypeCtrl.text.trim(),
+    },
+    'currentPetsVaccinated': form.petsVaccinated,
+    'currentPetsSpayedNeutered': form.petsSpayedNeutered,
+    },
+    'lifestyle': {
+    'hoursAlone': form.hoursAlone,
+    'primaryCaregiver': form.primaryCaregiver,
+    'petStayLocation': form.petStayLocation,
+    'canAfford': {
+    'food': form.canAffordFood,
+    'vaccinations': form.canAffordVaccinations,
+    'vetVisits': form.canAffordVetVisits,
+    'emergencyMedicalCare': form.canAffordEmergencyCare,
+    'grooming': form.canAffordGrooming,
+    'careSupplies': form.canAffordCareSupplies,
+    },
+    },
+    'uploads': {
+    'governmentId': form.governmentIdUrl,
+    'proofOfAddress': form.proofOfAddressUrl,
+    //'digitalSignature': _digitalSignatureUrl,
+    // A list, not a single URL — every uploaded home photo is kept,
+    // never overwritten by only the most recent one. The admin
+    // Required Documents reader already accepts either shape.
+    'homePhotos': homePhotoUrls,
+    },
+    'agreement': {
+    'reason': form.reasonCtrl.text.trim(),
+    'care': form.agreeCare,
+    'noAbandon': form.agreeNoAbandon,
+    'followUp': form.agreeFollowup,
+    'infoAccurate': form.agreeAccurate,
+    'approvalNotGuaranteed': form.agreeNotGuaranteed,
+    },
+    'status': 'pending',
+    'statusHistory': [
+    {'status': 'Form submitted.', 'timestamp': Timestamp.now()},
+    ],
+    'createdAt': FieldValue.serverTimestamp(),
     });
 
     return docRef.id;
@@ -252,10 +252,33 @@ class AdoptionApplicationService {
     });
   }
 
-  Future<void> withdraw({
+  /// Before release the application is withdrawn. After release the
+  /// animal is already home with the adopter, so a withdrawal is really a
+  /// return (Adoption gap 8): it opens the return procedure as an
+  /// adopter-requested return and returns true. Staff then approve it,
+  /// schedule the retrieval and take the animal back through Intake, as for
+  /// any other return.
+  Future<bool> withdraw({
     required String adoptionId,
     required String animalRecordId,
   }) async {
+    final repo = AdoptionApplicationRepository();
+    final current = (await _adoptions.doc(adoptionId).get()).data() ?? const <String, dynamic>{};
+    if (current['status'] == 'adopted' || current['releasedAt'] != null) {
+      // A return already in progress isn't opened twice.
+      final open = current['returnRequest'];
+      if (open is Map && !['declined', 'cancelled', 'intake'].contains(open['status'])) return true;
+      await repo.requestReturn(
+        applicationId: adoptionId,
+        reason: 'Other',
+        reasonOther: 'Withdrew after release',
+        urgency: 'Within 1 Week',
+        explanation: 'The adopter withdrew the adoption after the animal was released to them.',
+        images: const [],
+        actorUid: _au.currentUser?.uid ?? '',
+      );
+      return true;
+    }
     await _adoptions.doc(adoptionId).update({
       'status': 'withdrawn',
       'withdrawnAt': FieldValue.serverTimestamp(),
@@ -276,11 +299,14 @@ class AdoptionApplicationService {
     // stableIntIdFor hash (Animal.id) would never resolve to the actual
     // animal document and this call would silently no-op.
     if (animalRecordId.isNotEmpty) {
-      await AdoptionApplicationRepository().clearReservationOnWithdrawal(
+      await repo.clearReservationOnWithdrawal(
         applicationId: adoptionId,
         animalId: animalRecordId,
       );
     }
+    // Adoption gap 7.
+    await repo.logAdopterWithdrawal(adoptionId);
+    return false;
   }
 
   Future<void> requestDeliveryReschedule({
@@ -295,7 +321,7 @@ class AdoptionApplicationService {
       'statusHistory': FieldValue.arrayUnion([
         {
           'status':
-              'Adopter requested a delivery reschedule (attempt $nextAttempt of $maxAttempts).',
+          'Adopter requested a delivery reschedule (attempt $nextAttempt of $maxAttempts).',
           'timestamp': Timestamp.now(),
         },
       ]),

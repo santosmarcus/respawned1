@@ -2280,3 +2280,66 @@ exports.escalateCriticalReports = onSchedule('every 5 minutes', async () => {
     }
   }
 });
+
+// ---- Community Adoption check-in (Adoption gap 10) ------------------------
+//
+// Community Adoption stays light, but each claim gets one check-in two
+// weeks later (communityAdoptionCheckIns/{id}, same id as the claim). The
+// adopter answers from Home with a photo and a line; staff of the
+// organizations in the area see every claim and its check-in under
+// Adoptions → Community adoptions. Decisions in community_checkin_rules.js.
+
+const communityCheckIn = require('./community_checkin_rules');
+
+exports.scheduleCommunityAdoptionCheckIn = onDocumentCreated('communityAdoptions/{adoptionId}', async (event) => {
+  const a = event.data && event.data.data();
+  if (!a || !a.adopterId) return;
+  const caseSnap = a.sourceCaseId ? await db.collection('cases').doc(a.sourceCaseId).get() : null;
+  const claimedAtMs = millisOf(a.createdAt) || Date.now();
+  await db.collection('communityAdoptionCheckIns').doc(event.params.adoptionId).set({
+    communityAdoptionId: event.params.adoptionId,
+    caseId: a.sourceCaseId || null,
+    adopterId: a.adopterId,
+    adopterName: a.adopterName || null,
+    animalName: a.name || null,
+    species: a.species || null,
+    address: a.address || null,
+    organizationIds: communityCheckIn.checkInOrgIds(caseSnap && caseSnap.exists ? caseSnap.data() : null, a),
+    status: 'scheduled',
+    dueAt: admin.firestore.Timestamp.fromMillis(communityCheckIn.checkInDueAtMs(claimedAtMs)),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+});
+
+// Daily 09:30 Manila: ask each adopter whose check-in is due.
+// Index: communityAdoptionCheckIns (status, dueAt).
+exports.sendCommunityAdoptionCheckIns = onSchedule({schedule: '30 9 * * *', timeZone: 'Asia/Manila'}, async () => {
+  const nowMs = Date.now();
+  const snap = await db.collection('communityAdoptionCheckIns')
+    .where('status', '==', 'scheduled')
+    .where('dueAt', '<=', admin.firestore.Timestamp.fromMillis(nowMs))
+    .get();
+  for (const doc of snap.docs) {
+    const c = doc.data();
+    if (!communityCheckIn.checkInRequestDue({...c, dueAtMs: millisOf(c.dueAt)}, nowMs)) continue;
+    try {
+      await doc.ref.update({status: 'requested', requestedAt: admin.firestore.FieldValue.serverTimestamp()});
+      await db.collection('users').doc(c.adopterId).collection('notifications').add({
+        title: 'How is your adopted animal doing?',
+        message: 'It has been two weeks since your Community Adoption. Please send a quick check-in with a photo from Home.',
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: false,
+        type: 'community_adoption_checkin',
+        caseId: c.caseId || null,
+      });
+      await safeNotifyUser({
+        uid: c.adopterId,
+        title: 'How is your adopted animal doing?',
+        body: 'Please send a quick check-in with a photo from the Home screen.',
+        data: {type: 'community_adoption_checkin', checkInId: doc.id},
+      });
+    } catch (e) {
+      console.error('[sendCommunityAdoptionCheckIns] failed for', doc.ref.path, e);
+    }
+  }
+});

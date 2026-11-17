@@ -60,7 +60,7 @@ AnimalAdoptionAvailability availabilityFromAnimalState(Map<String, dynamic>? dat
     'adoptable' => AnimalAdoptionAvailability.available,
     'reserved' => AnimalAdoptionAvailability.reservedForOther,
     'adopted' => AnimalAdoptionAvailability.adopted,
-    // not_ready or any unrecognized/missing value.
+  // not_ready or any unrecognized/missing value.
     _ => AnimalAdoptionAvailability.unavailable,
   };
 }
@@ -218,10 +218,10 @@ class AdoptionApplicationRepository {
     // check.
     bool isActive(String status) =>
         status != 'rejected' &&
-        status != 'withdrawn' &&
-        status != 'completed' &&
-        status != 'return_requested' &&
-        status != 'return_approved';
+            status != 'withdrawn' &&
+            status != 'completed' &&
+            status != 'return_requested' &&
+            status != 'return_approved';
 
     // 1. Does the CURRENT user already have their own active application
     // for this exact animal? If so, that takes priority over anything
@@ -233,9 +233,9 @@ class AdoptionApplicationRepository {
     final byRecordFuture = animalRecordId.isEmpty
         ? Future<QuerySnapshot<Map<String, dynamic>>?>.value(null)
         : _adoptions
-            .where('personal.animalRecordId', isEqualTo: animalRecordId)
-            .where('personal.adopterId', isEqualTo: uid)
-            .get();
+        .where('personal.animalRecordId', isEqualTo: animalRecordId)
+        .where('personal.adopterId', isEqualTo: uid)
+        .get();
     final ownResults = await Future.wait([legacyFuture, byRecordFuture]);
 
     for (final snap in ownResults) {
@@ -270,6 +270,50 @@ class AdoptionApplicationRepository {
     );
   }
 
+  // ---- Audit (Adoption gap 7) ---------------------------------------------
+
+  /// Every adoption step's audit entry goes through here, stamped with the
+  /// application's organization: the Audit page only lists entries of the
+  /// staff member's own organization, so entries without it were never
+  /// shown. Best effort, after the real write, never throws.
+  Future<void> _logStep({
+    required String action,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+    String targetType = 'AdoptionApplication',
+    required String targetId,
+    Map<String, dynamic>? oldValues,
+    Map<String, dynamic>? newValues,
+    Map<String, dynamic>? metadata,
+  }) async {
+    String? organizationId;
+    try {
+      organizationId = (await _adoptionDoc(targetId).get()).data()?['organizationId'] as String?;
+    } catch (_) {
+      // Logged without the organization rather than not at all.
+    }
+    final user = FirebaseAuth.instance.currentUser;
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: action,
+      // auditLogs rules: an entry is always about the signed-in user's own action.
+      actorId: user?.uid ?? actorId,
+      actorEmail: actorEmail ?? user?.email,
+      actorName: actorName,
+      organizationId: organizationId,
+      targetType: targetType,
+      targetId: targetId,
+      oldValues: oldValues,
+      newValues: newValues,
+      metadata: metadata,
+    );
+  }
+
+  /// The adopter withdrew before release (AdoptionApplicationService.withdraw).
+  Future<void> logAdopterWithdrawal(String applicationId) =>
+      _logStep(action: 'Application withdrawn by the adopter', targetId: applicationId, newValues: const {'status': 'withdrawn'});
+
   // ---- Interview ------------------------------------------------------
 
   Future<void> completeInterview({
@@ -284,6 +328,7 @@ class AdoptionApplicationRepository {
         {'status': 'Interview completed by $actorName.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _logStep(action: 'Interview completed', actorId: actorUid, actorName: actorName, targetId: applicationId);
   }
 
   /// Admin confirms the interview the applicant booked — moves the
@@ -302,6 +347,7 @@ class AdoptionApplicationRepository {
         {'status': 'Interview confirmed by organization.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _logStep(action: 'Interview confirmed', actorName: actorName, targetId: applicationId, newValues: const {'status': 'interview'});
   }
 
   /// Admin-side interview reschedule — edits the SAME appointment fields
@@ -325,6 +371,7 @@ class AdoptionApplicationRepository {
         {'status': 'Interview rescheduled by organization.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _logStep(action: 'Interview rescheduled', actorName: actorName, targetId: applicationId, newValues: {'date': date.toIso8601String(), 'time': time, 'type': type});
   }
 
   /// Records that the applicant missed the booked interview. The first
@@ -398,8 +445,7 @@ class AdoptionApplicationRepository {
       }
       return (outcome: outcome, previousStatus: data['status'] as String?, count: previous + 1);
     });
-    await _auditLog.log(
-      category: AuditCategory.adoptions,
+    await _logStep(
       action: result.outcome == NoShowOutcome.close
           ? 'Application closed — second interview no-show'
           : 'Interview no-show recorded — may rebook once',
@@ -494,8 +540,7 @@ class AdoptionApplicationRepository {
     });
     // Best-effort, after the real write — an audit-log failure must never
     // roll back or block the actual approval.
-    await _auditLog.log(
-      category: AuditCategory.adoptions,
+    await _logStep(
       action: 'Application approved',
       actorId: actorUid,
       actorName: actorName,
@@ -526,8 +571,7 @@ class AdoptionApplicationRepository {
         {'status': 'Application rejected: ${reasons.join(', ')}.', 'timestamp': Timestamp.now()}
       ]),
     });
-    await _auditLog.log(
-      category: AuditCategory.adoptions,
+    await _logStep(
       action: 'Application rejected',
       actorId: actorUid,
       actorName: actorName,
@@ -545,11 +589,11 @@ class AdoptionApplicationRepository {
   /// rubric version, plus the staff's manual fit value and notes as they
   /// stand now.
   Future<Map<String, dynamic>> _fitAtDecision(
-    String applicationId,
-    String decision,
-    String actorName,
-    AdoptionFitAssessment? assessment,
-  ) async {
+      String applicationId,
+      String decision,
+      String actorName,
+      AdoptionFitAssessment? assessment,
+      ) async {
     final appSnap = await _adoptionDoc(applicationId).get();
     final manual = (appSnap.data()?['fitAssessment'] as Map?) ?? const {};
     final notesSnap = await _notesOf(applicationId).orderBy('createdAt', descending: true).limit(50).get();
@@ -573,11 +617,11 @@ class AdoptionApplicationRepository {
   }
 
   static Map<String, dynamic> _fitAuditMetadata(AdoptionFitAssessment? a, Map<String, dynamic> fit) => {
-        'fitScoreAtDecision': (a == null || a.insufficientData) ? null : a.score,
-        'fitBandAtDecision': (a == null || a.insufficientData) ? null : a.band.label,
-        'fitRubricVersion': a?.version,
-        'staffFitValue': (fit['staffFit'] as Map?)?['value'],
-      };
+    'fitScoreAtDecision': (a == null || a.insufficientData) ? null : a.score,
+    'fitBandAtDecision': (a == null || a.insufficientData) ? null : a.band.label,
+    'fitRubricVersion': a?.version,
+    'staffFitValue': (fit['staffFit'] as Map?)?['value'],
+  };
 
   // ---- Reserve / Unreserve / Release (transactional) ---------------------
 
@@ -642,8 +686,7 @@ class AdoptionApplicationRepository {
         'timestamp': FieldValue.serverTimestamp(),
       });
     });
-    await _auditLog.log(
-      category: AuditCategory.adoptions,
+    await _logStep(
       action: 'Animal reserved',
       actorId: actorId,
       actorName: actorName,
@@ -689,6 +732,7 @@ class AdoptionApplicationRepository {
         ]),
       });
     });
+    await _logStep(action: 'Reservation cleared', targetId: applicationId, metadata: {'animalId': animalId});
   }
 
   /// The actual adoption handoff — application must already be approved,
@@ -834,14 +878,32 @@ class AdoptionApplicationRepository {
             .where('status', whereIn: [FollowUpStatus.scheduled.name, FollowUpStatus.reminderSent.name]),
         empty: const <({String applicationId, FollowUpRecord record})>[],
         firestore: _db,
-        (snap) => [
-              for (final d in snap.docs)
-                if (d.reference.parent.parent != null)
-                  (applicationId: d.reference.parent.parent!.id, record: FollowUpRecord.fromFirestore(d)),
-            ]);
+            (snap) => [
+          for (final d in snap.docs)
+            if (d.reference.parent.parent != null)
+              (applicationId: d.reference.parent.parent!.id, record: FollowUpRecord.fromFirestore(d)),
+        ]);
   }
 
   // ---- Release Details (pre-release) ------------------------------------
+
+  /// Adoption gap 6: a photo or scan of the agreement both parties signed
+  /// at release, kept on the application.
+  Future<void> attachSignedAgreement({
+    required String applicationId,
+    required String url,
+    required String actorName,
+  }) async {
+    await _adoptionDoc(applicationId).update({
+      'signedAgreementUrl': url,
+      'signedAgreementAt': FieldValue.serverTimestamp(),
+      'signedAgreementBy': actorName,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Signed adoption agreement attached by $actorName.', 'timestamp': Timestamp.now()}
+      ]),
+    });
+    await _logStep(action: 'Signed agreement attached', actorName: actorName, targetId: applicationId);
+  }
 
   Future<void> setScheduledReleaseDate({required String applicationId, required DateTime date}) async {
     await _adoptionDoc(applicationId).update({'scheduledReleaseDate': Timestamp.fromDate(date)});
@@ -994,8 +1056,7 @@ class AdoptionApplicationRepository {
         'timestamp': FieldValue.serverTimestamp(),
       });
     });
-    await _auditLog.log(
-      category: AuditCategory.adoptions,
+    await _logStep(
       action: 'Adoption completed / animal released',
       actorId: actorId,
       actorName: actorName,
@@ -1042,6 +1103,7 @@ class AdoptionApplicationRepository {
         ]),
       });
     });
+    await _logStep(action: 'Unsuccessful delivery attempt recorded', actorName: actorName, targetId: applicationId);
   }
 
   // ---- Post-Adoption follow-up review ------------------------------------
@@ -1063,6 +1125,7 @@ class AdoptionApplicationRepository {
         {'status': 'Follow-up submission confirmed by $actorName.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _logStep(action: 'Follow-up check-in confirmed', actorName: actorName, targetId: applicationId, newValues: {'followUpId': followUpId});
   }
 
   /// Sets (or clears, when [note] is empty) this specific follow-up's own
@@ -1103,6 +1166,7 @@ class AdoptionApplicationRepository {
       'completedBy': actorName,
       if (manualOverride) 'manualCompletionReason': reason,
     });
+    await _logStep(action: manualOverride ? 'Follow-up closed without a check-in' : 'Follow-up completed', actorName: actorName, targetId: applicationId, newValues: {'followUpId': followUpId, 'manualOverride': manualOverride, 'reason': ?reason});
   }
 
   /// Guards against rapid duplicate taps by rejecting a second reminder for
@@ -1134,6 +1198,7 @@ class AdoptionApplicationRepository {
         {'status': 'Follow-up reminder sent.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _logStep(action: 'Follow-up reminder sent', actorName: actorName, targetId: applicationId, newValues: {'followUpId': followUpId});
   }
 
   /// Reschedules one future follow-up date without regenerating the rest of
@@ -1165,6 +1230,7 @@ class AdoptionApplicationRepository {
         {'status': 'A follow-up was rescheduled by $actorName.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _logStep(action: 'Follow-up rescheduled', actorName: actorName, targetId: applicationId, newValues: {'followUpId': followUpId, 'newDate': newDate.toIso8601String(), 'reason': ?reason});
   }
 
   Future<void> markPostAdoptionComplete({
@@ -1188,6 +1254,7 @@ class AdoptionApplicationRepository {
         {'status': 'Post-adoption monitoring completed.', 'timestamp': now}
       ]),
     });
+    await _logStep(action: 'Post-adoption monitoring completed', actorName: actorName, targetId: applicationId);
   }
 
   // ---- Post-adoption warnings (adoptions/{id}/warnings) ------------------
@@ -1222,6 +1289,7 @@ class AdoptionApplicationRepository {
         {'status': 'Warning sent: $category.', 'timestamp': now}
       ]),
     });
+    await _logStep(action: 'Warning sent', actorId: actorUid, actorName: actorName, targetId: applicationId, newValues: {'category': category, 'requiredAction': ?requiredAction, 'responseDeadline': ?responseDeadline?.toIso8601String()});
   }
 
   /// Marks a warning resolved — does not notify the adopter (per the
@@ -1243,6 +1311,7 @@ class AdoptionApplicationRepository {
         {'status': 'Warning marked resolved by $actorName.', 'timestamp': now}
       ]),
     });
+    await _logStep(action: 'Warning resolved', actorName: actorName, targetId: applicationId, newValues: {'warningId': warningId});
   }
 
   // ---- Animal Return --------------------------------------------------
@@ -1290,6 +1359,7 @@ class AdoptionApplicationRepository {
         {'status': 'Return requested.', 'timestamp': Timestamp.now()}
       ]),
     });
+    await _logStep(action: 'Return requested by adopter', actorId: actorUid, targetId: applicationId, newValues: {'reason': reason, 'urgency': urgency});
   }
 
   /// Starts the exact same `returnRequest` state machine [requestReturn]
@@ -1328,6 +1398,7 @@ class AdoptionApplicationRepository {
         {'status': 'Return initiated by organization ($actorName).', 'timestamp': now}
       ]),
     });
+    await _logStep(action: 'Return started by the organization', actorId: actorUid, actorName: actorName, targetId: applicationId, newValues: {'reason': reason, 'urgency': urgency});
   }
 
   Future<void> approveReturn({required String applicationId, required String actorName}) async {
@@ -1340,6 +1411,7 @@ class AdoptionApplicationRepository {
         {'status': 'Return approved.', 'timestamp': now}
       ]),
     });
+    await _logStep(action: 'Return approved', actorName: actorName, targetId: applicationId);
   }
 
   Future<void> declineReturn({
@@ -1357,6 +1429,7 @@ class AdoptionApplicationRepository {
         {'status': 'Return declined: $reason.', 'timestamp': now}
       ]),
     });
+    await _logStep(action: 'Return declined', actorName: actorName, targetId: applicationId, newValues: {'reason': reason});
   }
 
   /// Also used to reschedule an already-scheduled retrieval — same fields,
@@ -1372,21 +1445,22 @@ class AdoptionApplicationRepository {
   }) async {
     final now = Timestamp.now();
     await _adoptionDoc(applicationId).update({
-      'returnRequest.status': ReturnRequestStatus.retrievalScheduled.name,
-      'returnRequest.retrievalScheduledAt': now,
-      'returnRequest.retrievalDateTime': Timestamp.fromDate(dateTime),
-      if (address != null && address.isNotEmpty) 'returnRequest.retrievalAddress': address,
-      'returnRequest.retrievalLat': ?lat,
-      'returnRequest.retrievalLng': ?lng,
-      if (notes != null && notes.isNotEmpty) 'returnRequest.retrievalNotes': notes,
-      'returnRequest.scheduledBy': actorName,
-      // A (re)schedule always resets the adopter's own acknowledgement —
-      // they're confirming this specific date/time, not just "a" schedule.
-      'returnRequest.confirmedByAdopter': false,
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Retrieval scheduled.', 'timestamp': now}
-      ]),
+    'returnRequest.status': ReturnRequestStatus.retrievalScheduled.name,
+    'returnRequest.retrievalScheduledAt': now,
+    'returnRequest.retrievalDateTime': Timestamp.fromDate(dateTime),
+    if (address != null && address.isNotEmpty) 'returnRequest.retrievalAddress': address,
+    'returnRequest.retrievalLat': ?lat,
+    'returnRequest.retrievalLng': ?lng,
+    if (notes != null && notes.isNotEmpty) 'returnRequest.retrievalNotes': notes,
+    'returnRequest.scheduledBy': actorName,
+    // A (re)schedule always resets the adopter's own acknowledgement —
+    // they're confirming this specific date/time, not just "a" schedule.
+    'returnRequest.confirmedByAdopter': false,
+    'statusHistory': FieldValue.arrayUnion([
+    {'status': 'Retrieval scheduled.', 'timestamp': now}
+    ]),
     });
+    await _logStep(action: 'Retrieval scheduled', actorName: actorName, targetId: applicationId, newValues: {'dateTime': dateTime.toIso8601String(), 'address': ?address});
   }
 
   /// Marks the animal physically retrieved. Deliberately light-touch on the
@@ -1412,6 +1486,7 @@ class AdoptionApplicationRepository {
       });
       tx.update(animalRef, {'currentStatus': 'returning', 'updatedAt': FieldValue.serverTimestamp()});
     });
+    await _logStep(action: 'Animal retrieved from the adopter', actorName: actorName, targetId: applicationId, metadata: {'animalId': animalId});
   }
 
   /// The final "un-adopt" + hand-off-to-Intake step. Reuses
@@ -1473,6 +1548,7 @@ class AdoptionApplicationRepository {
       ]),
     });
 
+    await _logStep(action: 'Returned animal sent to intake', actorId: actorUid, actorName: actorName, targetId: applicationId, metadata: {'animalId': animalId});
     return caseId;
   }
 }

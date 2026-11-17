@@ -528,6 +528,40 @@ describe('rescue adoption requests (Rescue gaps 6/10)', () => {
   });
 });
 
+describe('community adoption check-ins (Adoption gap 10)', () => {
+  test('staff in the area read them; the adopter answers once when asked', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('communityAdoptionCheckIns/c1').set({
+      adopterId: 'adopter', status: 'scheduled', organizationIds: ['orgA'],
+    }));
+    await assertSucceeds(as('staffA').doc('communityAdoptionCheckIns/c1').get());
+    await assertSucceeds(as('staffA').collection('communityAdoptionCheckIns').where('organizationIds', 'array-contains', 'orgA').get());
+    await assertFails(as('staffB').doc('communityAdoptionCheckIns/c1').get());
+    await assertFails(as('stranger').doc('communityAdoptionCheckIns/c1').get());
+    // Not asked yet.
+    await assertFails(as('adopter').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', note: 'Fine' }));
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('communityAdoptionCheckIns/c1').update({ status: 'requested' }));
+    await assertFails(as('stranger').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', note: 'x' }));
+    await assertFails(as('adopter').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', organizationIds: [] }));
+    await assertSucceeds(as('adopter').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', note: 'Doing well' }));
+    await assertFails(as('adopter').collection('communityAdoptionCheckIns').add({ adopterId: 'adopter', status: 'scheduled' }));
+  });
+});
+
+describe('adoption audit entries (Adoption gap 7)', () => {
+  test("an entry carries the application's organization so its staff see it", async () => {
+    const entry = (uid, data) => as(uid).collection('auditLogs').add({
+      category: 'adoptions', action: 'Application withdrawn by the adopter', actorId: uid,
+      organizationId: 'orgA', targetType: 'AdoptionApplication', targetId: 'appA',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(), ...data,
+    });
+    await assertSucceeds(entry('adopter'));
+    await assertSucceeds(entry('staffA', { action: 'Interview confirmed' }));
+    await assertFails(entry('adopter', { actorId: 'staffA' }));
+    await assertSucceeds(as('staffA').collection('auditLogs')
+      .where('category', '==', 'adoptions').where('organizationId', '==', 'orgA').get());
+  });
+});
+
 describe('adoptions', () => {
   test('adopters submit pending applications for the right organization', async () => {
     const app = (data) => as('adopter').collection('adoptions').add({

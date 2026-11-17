@@ -13,6 +13,7 @@ import 'package:respawnd1/core/widgets/animal_record_header_image.dart';
 import 'package:respawnd1/core/widgets/date_time_picker_sheet.dart' as picker;
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
+import 'package:respawnd1/features/admin/adoption/widgets/signed_agreement_tile.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -90,7 +91,7 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
         title: 'Mark Follow-up Complete?', message: 'This closes follow-up #${f.sequenceNumber}.', confirmLabel: 'Mark Complete');
     if (!confirmed) return;
     await _run(
-        () => ref.read(adoptionApplicationRepositoryProvider).completeFollowUp(applicationId: widget.applicationId, followUpId: f.id, actorName: _actorName));
+            () => ref.read(adoptionApplicationRepositoryProvider).completeFollowUp(applicationId: widget.applicationId, followUpId: f.id, actorName: _actorName));
   }
 
   Future<void> _reschedule(FollowUpRecord f) async {
@@ -104,12 +105,12 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     if (result == null) return;
     final reason = await _promptText(title: 'Reschedule Follow-up', label: 'Reason');
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).rescheduleFollowUp(
-          applicationId: widget.applicationId,
-          followUpId: f.id,
-          newDate: result.date,
-          actorName: _actorName,
-          reason: (reason == null || reason.isEmpty) ? null : reason,
-        ));
+      applicationId: widget.applicationId,
+      followUpId: f.id,
+      newDate: result.date,
+      actorName: _actorName,
+      reason: (reason == null || reason.isEmpty) ? null : reason,
+    ));
   }
 
   Future<void> _markPostAdoptionComplete() async {
@@ -140,14 +141,14 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     );
     if (result == null) return;
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).sendWarning(
-          applicationId: widget.applicationId,
-          category: result.category,
-          message: result.message,
-          requiredAction: result.requiredAction,
-          responseDeadline: result.responseDeadline,
-          actorUid: _actorUid,
-          actorName: _actorName,
-        ));
+      applicationId: widget.applicationId,
+      category: result.category,
+      message: result.message,
+      requiredAction: result.requiredAction,
+      responseDeadline: result.responseDeadline,
+      actorUid: _actorUid,
+      actorName: _actorName,
+    ));
   }
 
   Future<void> _resolveWarning(String warningId) async {
@@ -174,15 +175,15 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     );
     if (!confirmed) return;
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).adminInitiateReturn(
-          applicationId: widget.applicationId,
-          reason: result.reason,
-          explanation: result.explanation,
-          urgency: result.urgency,
-          proposedRetrievalDateTime: result.proposedRetrievalDateTime,
-          internalNotes: result.internalNotes,
-          actorUid: _actorUid,
-          actorName: _actorName,
-        ));
+      applicationId: widget.applicationId,
+      reason: result.reason,
+      explanation: result.explanation,
+      urgency: result.urgency,
+      proposedRetrievalDateTime: result.proposedRetrievalDateTime,
+      internalNotes: result.internalNotes,
+      actorUid: _actorUid,
+      actorName: _actorName,
+    ));
   }
 
   @override
@@ -212,64 +213,67 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
       body: app == null
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _Header(app: app, followUps: followUps),
-                  const SizedBox(height: 12),
-                  if (app.returnRequest != null) ...[
-                    _ReturnBanner(app: app),
-                    const SizedBox(height: 12),
-                  ],
-                  _OrgActionsSection(
-                    activeMonitoring: activeMonitoring,
-                    monitoringCompleted: monitoringCompleted,
-                    busy: _busy,
-                    onAddNote: _addNote,
-                    onSendWarning: _sendWarning,
-                    onInitiateReturn: _initiateReturn,
-                  ),
-                  const SizedBox(height: 12),
-                  // Post-Adoption Notes spec §5 — surfaces the SAME
-                  // notesLog/addPrivateNote history the "Add General
-                  // Post-Adoption Note" button above already writes to,
-                  // which previously had no display anywhere on this
-                  // screen at all (only visible, mislabeled "Interview
-                  // Notes", on the separate application-review page).
-                  _GeneralNotesSection(applicationId: widget.applicationId),
-                  const SizedBox(height: 12),
-                  _WarningsSection(applicationId: widget.applicationId, busy: _busy, onResolve: _resolveWarning),
-                  const SizedBox(height: 12),
-                  if (app.noFollowUpsPlanned)
-                    SectionCard(
-                      child: Text('No post-adoption follow-ups were scheduled for this adoption.',
-                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                    )
-                  else if (followUps.isEmpty)
-                    SectionCard(
-                      child: Text('Follow-ups will appear here once generated.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                    )
-                  else
-                    for (final f in followUps) ...[
-                      _FollowUpCard(
-                        applicationId: widget.applicationId,
-                        followUp: f,
-                        expanded: _expanded.contains(f.id),
-                        busy: _busy,
-                        onToggle: () => setState(() => _expanded.contains(f.id) ? _expanded.remove(f.id) : _expanded.add(f.id)),
-                        onSendReminder: () => _sendReminder(f),
-                        onComplete: () => _completeFollowUp(f),
-                        onReschedule: () => _reschedule(f),
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                  const SizedBox(height: 14),
-                  if (!app.noFollowUpsPlanned) _CompleteMonitoringButton(app: app, followUps: followUps, busy: _busy, onTap: _markPostAdoptionComplete),
-                  const SizedBox(height: 24),
-                ],
-              ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _Header(app: app, followUps: followUps),
+            const SizedBox(height: 12),
+            // Adoption gap 6.
+            SignedAgreementTile(app: app, actorName: _actorName),
+            const SizedBox(height: 12),
+            if (app.returnRequest != null) ...[
+              _ReturnBanner(app: app),
+              const SizedBox(height: 12),
+            ],
+            _OrgActionsSection(
+              activeMonitoring: activeMonitoring,
+              monitoringCompleted: monitoringCompleted,
+              busy: _busy,
+              onAddNote: _addNote,
+              onSendWarning: _sendWarning,
+              onInitiateReturn: _initiateReturn,
             ),
+            const SizedBox(height: 12),
+            // Post-Adoption Notes spec §5 — surfaces the SAME
+            // notesLog/addPrivateNote history the "Add General
+            // Post-Adoption Note" button above already writes to,
+            // which previously had no display anywhere on this
+            // screen at all (only visible, mislabeled "Interview
+            // Notes", on the separate application-review page).
+            _GeneralNotesSection(applicationId: widget.applicationId),
+            const SizedBox(height: 12),
+            _WarningsSection(applicationId: widget.applicationId, busy: _busy, onResolve: _resolveWarning),
+            const SizedBox(height: 12),
+            if (app.noFollowUpsPlanned)
+              SectionCard(
+                child: Text('No post-adoption follow-ups were scheduled for this adoption.',
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              )
+            else if (followUps.isEmpty)
+              SectionCard(
+                child: Text('Follow-ups will appear here once generated.', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              )
+            else
+              for (final f in followUps) ...[
+                _FollowUpCard(
+                  applicationId: widget.applicationId,
+                  followUp: f,
+                  expanded: _expanded.contains(f.id),
+                  busy: _busy,
+                  onToggle: () => setState(() => _expanded.contains(f.id) ? _expanded.remove(f.id) : _expanded.add(f.id)),
+                  onSendReminder: () => _sendReminder(f),
+                  onComplete: () => _completeFollowUp(f),
+                  onReschedule: () => _reschedule(f),
+                ),
+                const SizedBox(height: 10),
+              ],
+            const SizedBox(height: 14),
+            if (!app.noFollowUpsPlanned) _CompleteMonitoringButton(app: app, followUps: followUps, busy: _busy, onTap: _markPostAdoptionComplete),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -327,14 +331,14 @@ class _Header extends StatelessWidget {
   }
 
   Widget _row(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
-          children: [
-            SizedBox(width: 110, child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
-            Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      children: [
+        SizedBox(width: 110, child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
+        Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+      ],
+    ),
+  );
 }
 
 class _ReturnBanner extends StatelessWidget {
@@ -677,11 +681,11 @@ class _SendWarningSheetState extends State<_SendWarningSheet> {
                 onPressed: _messageController.text.trim().isEmpty
                     ? null
                     : () => Navigator.pop(context, (
-                          category: _category,
-                          message: _messageController.text.trim(),
-                          requiredAction: _actionController.text.trim().isEmpty ? null : _actionController.text.trim(),
-                          responseDeadline: _deadline,
-                        )),
+                category: _category,
+                message: _messageController.text.trim(),
+                requiredAction: _actionController.text.trim().isEmpty ? null : _actionController.text.trim(),
+                responseDeadline: _deadline,
+                )),
                 style: AppButtons.primary,
                 child: const Text('Send Warning'),
               ),
@@ -694,11 +698,11 @@ class _SendWarningSheetState extends State<_SendWarningSheet> {
 }
 
 typedef _InitiateReturnDraft = ({
-  String reason,
-  String explanation,
-  String urgency,
-  DateTime? proposedRetrievalDateTime,
-  String? internalNotes,
+String reason,
+String explanation,
+String urgency,
+DateTime? proposedRetrievalDateTime,
+String? internalNotes,
 });
 
 const List<String> kAdminReturnUrgencyOptions = ['Low', 'Medium', 'High'];
@@ -798,12 +802,12 @@ class _InitiateReturnSheetState extends State<_InitiateReturnSheet> {
                 onPressed: !_canSubmit
                     ? null
                     : () => Navigator.pop(context, (
-                          reason: _reasonController.text.trim(),
-                          explanation: _explanationController.text.trim(),
-                          urgency: _urgency,
-                          proposedRetrievalDateTime: _proposedDate,
-                          internalNotes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-                        )),
+                reason: _reasonController.text.trim(),
+                explanation: _explanationController.text.trim(),
+                urgency: _urgency,
+                proposedRetrievalDateTime: _proposedDate,
+                internalNotes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+                )),
                 style: AppButtons.danger,
                 child: const Text('Continue'),
               ),
@@ -943,7 +947,7 @@ class _FollowUpAdminNoteFieldState extends State<_FollowUpAdminNoteField> {
               else if (_saveState == _NoteSaveState.saved)
                 Text('Saved', style: GoogleFonts.zain(fontSize: 11, color: AppColors.greenrspwn))
               else if (_saveState == _NoteSaveState.error)
-                Text('Could not save', style: GoogleFonts.zain(fontSize: 11, color: AppColors.error)),
+                  Text('Could not save', style: GoogleFonts.zain(fontSize: 11, color: AppColors.error)),
             ],
           ),
           const SizedBox(height: 6),
@@ -979,13 +983,13 @@ class _FollowUpAdminNoteFieldState extends State<_FollowUpAdminNoteField> {
             alignment: Alignment.centerRight,
             child: widget.followUp.isTerminal && !_editing
                 ? TextButton(
-                    onPressed: () => setState(() => _editing = true),
-                    child: Text('Edit anyway', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                  )
+              onPressed: () => setState(() => _editing = true),
+              child: Text('Edit anyway', style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+            )
                 : TextButton(
-                    onPressed: _saveState == _NoteSaveState.saving ? null : _save,
-                    child: Text('Save Note', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700)),
-                  ),
+              onPressed: _saveState == _NoteSaveState.saving ? null : _save,
+              child: Text('Save Note', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700)),
+            ),
           ),
         ],
       ),
@@ -1015,12 +1019,12 @@ class _FollowUpCard extends StatelessWidget {
   });
 
   Color _statusColor(String label) => switch (label) {
-        'Overdue' => AppColors.error,
-        'Completed' => AppColors.greenrspwn,
-        'Confirmed' => AppColors.greenrspwn,
-        'Cancelled' => AppColors.slaterspwn,
-        _ => AppColors.textSecondary,
-      };
+    'Overdue' => AppColors.error,
+    'Completed' => AppColors.greenrspwn,
+    'Confirmed' => AppColors.greenrspwn,
+    'Cancelled' => AppColors.slaterspwn,
+    _ => AppColors.textSecondary,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -1051,7 +1055,7 @@ class _FollowUpCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration:
-                        BoxDecoration(color: _statusColor(displayStatus).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+                    BoxDecoration(color: _statusColor(displayStatus).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
                     child: Text(displayStatus, style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: _statusColor(displayStatus))),
                   ),
                   Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textSecondary),
@@ -1100,7 +1104,7 @@ class _FollowUpCard extends StatelessWidget {
                               ElevatedButton(
                                 onPressed: busy ? null : onSendReminder,
                                 style:
-                                    AppButtons.primary,
+                                AppButtons.primary,
                                 child: const Text('Send Reminder'),
                               ),
                             // No separate Confirm Receipt step — Mark as
@@ -1142,17 +1146,17 @@ class _FollowUpCard extends StatelessWidget {
   }
 
   Widget _detail(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: RichText(
-          text: TextSpan(
-            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
-            children: [
-              TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w700)),
-              TextSpan(text: value),
-            ],
-          ),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 6),
+    child: RichText(
+      text: TextSpan(
+        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+        children: [
+          TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w700)),
+          TextSpan(text: value),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Reads the SAME `checkins/{followUpId}` doc the existing adopter-side

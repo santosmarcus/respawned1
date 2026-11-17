@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/features/adoption/community_adoption_checkins.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/adoption/sponsored_animals_section.dart';
 import 'package:respawnd1/features/donation/donation_page.dart';
@@ -91,6 +92,9 @@ class HomeScreen extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 24),
+
+                // Adoption gap 10: a Community Adoption check-in is due.
+                const CommunityCheckInBanner(),
 
                 // Quick action cards
                 SizedBox(
