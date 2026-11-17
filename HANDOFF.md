@@ -1,14 +1,85 @@
-# Handoff: build fixed, analyzer clean
+# Handoff
 
-_Branch: `marcus` (base `a899293`, merged from `dev`) · 2026-11-04_
+_Latest: defense gap fixes on `claude/remaining-gap-fixes-481458` (2026-11-17). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
 
-## Status
+## Defense gap fixes (2026-11-17, not checked on a device)
+
+Two rounds of fixes from a code-reading gap review of `dev`. Numbers marked "pending the organization's confirmation" are named constants, easy to change.
+
+### Round 1 (`703981a..862d754`, on `dev`)
+
+Six functions and two indexes from this round were deployed on 2026-11-16 from the unmerged branch: `expireTransportOffers`, `notifyStaffOfOfferOutcome`, `hasBlockingAdoption` (changed), `closeOtherAdoptionApplications`, `notifyStaffOfTransitEnd`, `sendFollowUpReminders`, plus the `transportAssignments (status, expiresAt)` and `followUps (status, scheduledDate)` indexes. Local `dev` was fast-forwarded to `862d754` and not pushed. The app changes need a new build.
+
+| Commit | What |
+|---|---|
+| `703981a` | Transport offers wait 5 min for a Critical case, 20 min otherwise (`kTransportOfferTtlCritical` / `kTransportOfferTtlStandard`). Staff screens show the offer's own deadline and an "Offer Expired" state. |
+| `607c6dd` | `expireTransportOffers` (every minute) expires stale offers on the server. `notifyStaffOfOfferOutcome` pushes to the sender and staff when an offer is declined or expires. New `offeredBy` on offers. |
+| `f331e5d` | "No transporter available" prompt on Assign Transporter after the radius is exhausted or 3 failed offers: Refer, Organization Will Transport (`organizationTransport`, case goes to Ongoing), Keep Waiting. Critical case at the limit: URGENT push to org admins. |
+| `e933a43` | **Policy commit (revert alone if the organization says no):** several applicants per animal; the reservation is the lock. `hasBlockingAdoption` blocks only reserved-for-someone-else / adopted / closed. `closeOtherAdoptionApplications` closes the other open applications on reserve or adopt. |
+| `d4a6502` | Transporter end reasons: Vehicle breakdown returns the case to Awaiting Assignment; Deceased / Other become `transit_ended` with a staff decision panel and `notifyStaffOfTransitEnd`. Shelter drop-off goes to Intake instead of Completed. |
+| `862d754` | `sendFollowUpReminders` (daily 08:00 Manila): adopter reminded on the due date and 3 days later, staff alerted at 7 days overdue. Rules in `functions/follow_up_reminder_rules.js` with node tests. |
+
+### Round 2 (branch `claude/remaining-gap-fixes-481458`, cut from `dev`)
+
+| Commit | What |
+|---|---|
+| `1fc9c75` | **Missing donation backend.** The app called `voidAllocation` and sent `generalFund: true` to `recordOfflineDonation`, but neither existed in `functions/`. Added both in `functions/campaigns.js`: `voidAllocation` (financial admins of the campaign's org, transaction, allocation marked `voided`, amount back to the campaign's balance, history + `auditLogs`), and the General fund at `campaigns/general_{orgId}`, created on first use (`ensureGeneralFund`), not editable, closable, deactivatable or archivable, same duplicate-reference check. Offline donations now write `auditLogs` too. `recordAllocation` and excess transfers now stamp `organizationId` on the allocation (the analytics queries filter on it; only the backfill set it before). **Kept in its own commit in case the original code turns up elsewhere.** |
+| `dd27fb6` | **Referral follow-through.** The target is stored on the case (`referredToOrgId` + `referral`); only that organization's staff (and platform staff) see it in Referred and can answer it. Accept: their org becomes owner, case to their Rescue Review. Decline: reason required, case back to the referring org's Review with a "Referral returned" card. Referral record gets Accepted / Declined / Expired. `notifyCaseReferralCreated`, `notifyCaseReferralOutcome`, and `followUpCaseReferrals` (hourly: remind the target at 24 h, return the case at 48 h; `functions/referral_rules.js`). An unowned case is stamped with the referring org when referred. LGU referral unchanged. `scripts/backfill_referral_targets.js` for cases referred before this. |
+| `d289bd0` | **Fit score saved at decision.** Accept and Reject save `fitAtDecision`: score, band, breakdown, strengths/concerns, rubric version, the staff's manual fit value and their notes. Adoption Details shows "Fit Assessment at decision time" from the saved copy; the review list chip says "(at decision)". The audit entries carry the score. Adopters can't edit `fitAtDecision` (rules). |
+| `0b6ea49` | **Shelter pin and per-org shelter settings.** (a) No more hard-coded Rodriguez coordinates. Without a saved shelter pin the shelter leg doesn't start: the transporter is told, the case is stamped `shelterLocationMissing`, `notifyStaffOfMissingShelterPin` alerts staff and admins, and a "Shelter location not set" prompt with a Set button appears on the dashboard readiness card, Rescue Details and Organization Profile edit. (b) Dashboard shelter settings and Organization Profile's capacity move to `organizations/{orgId}/settings/shelter` (staff read, admins write; the old open org-subcollection rule now excludes `settings`). The old `settings/shelter` is still read as a fallback until migrated: `scripts/migrate_shelter_settings.js`. |
+| `a76c84d` | **Settle "needs review" payments.** New `settleFlaggedPayment` callable (`functions/paymongo.js`), financial admins of the owning org only: `check` (fetch the paid amount from PayMongo), `accept` (credit the amount actually paid through the same `finalizePaidDonation` path: donation, history, campaign total, certificate, plus campaign history and `auditLogs`), `void` (reason required, `auditLogs`; a voided payment is never credited by a later webhook). New "Payments to Verify" screen from the dashboard alert and tile. New flags store the paid amount; new payments store `organizationId`. |
+| `3c383e0` | **No-shows and stalled applications.** "Mark No-show" on Adoption Details (it existed in the repository but nothing called it). First no-show: back to Pending, appointment cleared, the applicant can book once more. Second: closed as rejected, "Did not attend the interview twice". `notifyAdopterOfNoShow` tells the applicant. `followUpStalledApplications` (daily 09:00 Manila): pending with no interview booked → reminder after 3 days, withdrawn after 14 (from submission or the last no-show), with duplicate guards. Rules in `functions/adoption_stall_rules.js` and `adoption_no_show_rules.dart` with tests. |
+| `64c5773` | **Rescue timers.** `completeDueQuarantines` and `completeDueIntakes` (every 30 min) make the same writes the app makes when staff open the case, and staff are told when a quarantine ends. Intakes where animals follow separate post-treatment paths are still completed per animal by the app. The app checks stay as the fallback. |
+
+### Deploy, in this order
+
+From `functions/` (with `functions/.env` and the secrets in place). Merge this branch into `dev` first, so a later `deploy --only functions` from `dev` doesn't offer to delete these.
+
+1. **Functions.**
+   - New: `voidAllocation`, `settleFlaggedPayment`, `notifyCaseReferralCreated`, `notifyCaseReferralOutcome`, `followUpCaseReferrals`, `notifyStaffOfMissingShelterPin`, `notifyAdopterOfNoShow`, `followUpStalledApplications`, `completeDueQuarantines`, `completeDueIntakes`.
+   - Changed: `recordOfflineDonation`, `recordAllocation`, `reallocateExcess`, `saveCampaign`, `setCampaignStatus` (campaigns.js); `createDonationCheckout`, `syncDonationPayment`, `cancelDonationCheckout`, `paymongoWebhook`, `expireStaleDonationCheckouts` (they share `finalizePaidDonation`).
+   - A full `firebase deploy --only functions` covers all of them.
+2. **Indexes:** `firebase deploy --only firestore:indexes` (new: `cases (quarantineStatus, quarantineScheduledEndAt)`). `completeDueQuarantines` logs errors until it finishes building.
+3. **Scripts**, each as a dry run, then `--apply`:
+   - `node scripts/migrate_shelter_settings.js --project=respawnd1-45021`. With no flags it lists the organizations. Then run `--org=<Loved by the Gapz id>`, then add `--apply`.
+   - `node scripts/backfill_referral_targets.js --project=respawnd1-45021`.
+4. **App build.**
+5. **Rules:** `firebase deploy --only firestore:rules`, only once the new build is what people use. Older builds query referred cases by status, which the new rules refuse, and that query error can empty their whole Referred list.
+
+### Checks run
+
+- `flutter analyze`: 8 issues, the same 8 as before round 1, all in lines this branch doesn't change (initializing formals in `transit_case_service.dart` and `adoption_application_service.dart`, a duplicate import in `donation_admin_create.dart`, an unused `_FundTrackingPanel` in `donation_detail.dart`).
+- `flutter test`: 181 pass (175 before this round, plus the new `fit_at_decision_test.dart` and `adoption_no_show_rules_test.dart`).
+- `functions/`: `npm test` 24 pass (referral, stalled-application and timer rules are new), and `node --check` passes for every file.
+- `rules-tests`: 121 pass, including the new referral, shelter-settings, fit-score and no-show cases and the expression budget.
+- Nothing was deployed and nothing was run on a device or the emulator suite beyond the rules tests.
+
+### Check on a device
+
+- **General fund.** Donations admin → Record donation with no campaign creates "General Fund" and credits it. Recording the same reference twice is refused. Close or Edit on the General fund is refused.
+- **Voiding spending.** Pay an expense from a campaign, then delete the expense or remove that funding line. The campaign's balance goes back up, and Fund Tracking hides the voided line.
+- **Referrals (two organizations).** Refer from org A to org B: only B sees it in Referred. As B, Accept: it lands in B's Rescue Review. Refer again and Decline with a reason: it returns to A with the reason, and A gets a push. The 24 h reminder and 48 h return need waiting or a test case with an old `referral.referredAt`.
+- **Fit score.** Accept one applicant and reject another for the same animal. Reopen both: "Fit Assessment at decision time" shows the saved score, staff fit and notes.
+- **Shelter pin.** With an org that has no pin, run a transporter through Accept Treatment: the trip to the shelter is blocked and staff get the alert. Set the pin from the prompt, retry, and arrival at the shelter should work within 150 m.
+- **Shelter settings.** Set up the shelter from the dashboard, as an org admin and as a non-admin. Check the capacity in Organization Profile matches.
+- **Payments to Verify.** Needs a PayMongo test payment whose amount differs from the priced amount, or a `donationPayments` doc set to `needs_review` in the test project. Check, then Accept: the campaign total, donor history and certificate show the paid amount. Void another with a reason.
+- **No-shows.** Book an interview, then Mark No-show: the applicant's app shows Book Appointment again, and they get a push. Book again and mark a second no-show: the application closes with the reason.
+- **Stalled applications.** A pending application with no booking gets the 3-day reminder and the 14-day withdrawal (needs an old `createdAt` in the test project).
+- **Timers.** A quarantine with a short duration ends on its own, and staff get "Quarantine ended" without anyone opening the case. A single-animal intake completes on its own once its record exists.
+
+### Still open (not done here)
+
+- `donationPayments` is readable by every organization's financial admins. Older payment docs have no `organizationId`, so the new screen filters them by campaign on the client.
+- Adopter-side notifications for no-show, booking reminder and withdrawal are informational: tapping them opens nothing.
+- Intake completion for multi-animal cases on separate post-treatment paths still depends on staff opening the page.
+
+## Build fix status (2026-11-04)
 
 - **The app builds.** `flutter analyze` reports **no issues** (down from 301), and `flutter test` passes **87/87**. `assembleDebug` succeeds.
 - **Nothing is committed.** All changes are in the working tree, about 115 files.
 - **Not yet checked on a device.** See [Manual test checklist](#manual-test-checklist).
 
-## What was done
+## What was done (build fix)
 
 ### 1. Fixed the build
 - **Upgraded Flutter.** The old version was 3.41.2 with Dart 3.11, but `native_geofence ^1.5.1` (from commit `39ff2f5`) needs Dart 3.12 or newer, so `pub get` failed and nothing resolved. **Everyone on the team needs to upgrade Flutter**, or they'll hit the same failure.
@@ -149,7 +220,7 @@ These commits landed before the `dev` merge and are in this branch's history. Th
     - `users/{uid}` is readable by its owner, approved organization staff, platform staff, and members of the same organization.
     - Release order: deploy functions and `firestore:indexes` (new `publicCases` status + createdAt index), run `node scripts/backfill_public_cases.js --project=respawnd1-45021` (dry run, then `--apply`), ship the app build, then deploy `firestore:rules`. Older builds lose the Explore map and feed, Nearby Reports and the job board once the rules are live.
   - Staff scoped to their own organization (2026-11-15, not deployed, not checked on a device):
-    - Cases: staff read their own organization's cases, the unowned review pool (`organizationId == ''`) and every `referred` case (the referral target isn't recorded on the case). Every case now carries `organizationId`: new reports write `''`, `stampCaseOrganizationDefault` (functions/audit_logs.js) covers older builds, and the backfill sets `''` on existing ones. Staff lists merge those three queries (`RescueCaseQueryRepository.watchScopedCaseDocs`).
+    - Cases: staff read their own organization's cases, the unowned review pool (`organizationId == ''`) and every `referred` case (the referral target wasn't recorded on the case; since `dd27fb6` only the target organization sees it, see Defense gap fixes). Every case now carries `organizationId`: new reports write `''`, `stampCaseOrganizationDefault` (functions/audit_logs.js) covers older builds, and the backfill sets `''` on existing ones. Staff lists merge those three queries (`RescueCaseQueryRepository.watchScopedCaseDocs`).
     - Lookups that span organizations read `publicCases`: duplicate detection, the reporter's track record, old grouped submissions, and a transporter's trip counts. Merging a duplicate that belongs to another organization now fails with a message.
     - Transport offers and adoption follow-ups carry their parent's `organizationId` (stamp/restamp triggers); staff queries filter on it. Assign Transporter's Available/Pending/Busy and the dashboard transport counts read `users/{uid}.transportStatus`, kept by the new `syncRiderTransportStatus` function (functions/rider_status.js). Users can't write it.
     - Release order: deploy functions and `firestore:indexes` (new cases, transportAssignments, followUps and publicCases indexes), run `node scripts/backfill_log_organization_ids.js --project=respawnd1-45021` (now also sets `''` on unowned cases and stamps offers and follow-ups), `node scripts/backfill_public_cases.js` (adds trip-completion fields) and `node scripts/backfill_rider_status.js`, each as a dry run then `--apply`, ship the app build, then deploy `firestore:rules`. Older builds lose every staff case list, the stale-offer and follow-up alerts and the transporter chips once the rules are live.
