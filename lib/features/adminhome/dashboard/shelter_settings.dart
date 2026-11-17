@@ -21,7 +21,8 @@ import 'package:respawnd1/core/utils/app_date_format.dart';
 /// see firestore.rules), the same document Organization Profile's "Shelter
 /// Capacity" field writes (`maxCapacity`). Until an organization's values
 /// are migrated (functions/scripts/migrate_shelter_settings.js) the old
-/// platform-wide `settings/shelter` document is read as a fallback. Every
+/// platform-wide `settings/shelter` document is read as a fallback for each
+/// value the organization has not saved yet. Every
 /// value is nullable — a missing value means "not set", never zero, and the
 /// dashboard shows a setup prompt instead of guessing.
 class ShelterSettings {
@@ -85,13 +86,34 @@ DocumentReference<Map<String, dynamic>> shelterSettingsDoc(String organizationId
 DocumentReference<Map<String, dynamic>> get _legacyShelterSettingsDoc =>
     FirebaseFirestore.instance.collection('settings').doc('shelter');
 
-/// The raw shelter settings for [organizationId]: its own document once it
-/// exists, the old platform-wide one before that (or with no organization).
+/// The five shelter values. Only these fall back to the old platform-wide
+/// document; who/when last updated always comes from the organization's own.
+const shelterValueFields = ['maxCapacity', 'isolationCapacity', 'monthlyBudget', 'foodPerDayKg', 'ridersNeeded'];
+
+/// The organization's [own] settings, with each value it has not saved yet
+/// taken from the old platform-wide [legacy] document. A value the
+/// organization saved as null ("not set") stays null. Field by field, not
+/// whole document: Organization Profile saves only `maxCapacity`, and that
+/// one write must not hide the other values until they are migrated.
+Map<String, dynamic>? mergeShelterSettingsData(Map<String, dynamic>? own, Map<String, dynamic>? legacy) {
+  if (own == null) return legacy;
+  if (legacy == null) return own;
+  return {
+    for (final k in shelterValueFields)
+      if (!own.containsKey(k) && legacy.containsKey(k)) k: legacy[k],
+    ...own,
+  };
+}
+
+/// The raw shelter settings for [organizationId]: its own document, with
+/// values it doesn't have yet read from the old platform-wide one (which is
+/// all there is before the organization has a document, or with no
+/// organization). See [mergeShelterSettingsData].
 Stream<Map<String, dynamic>?> watchShelterSettingsData(String? organizationId) {
   final legacy = _legacyShelterSettingsDoc.snapshots().map((d) => d.data());
   if (organizationId == null || organizationId.isEmpty) return legacy;
   final own = shelterSettingsDoc(organizationId).snapshots().map((d) => d.exists ? d.data() : null);
-  return combineLatest<Map<String, dynamic>?>([own, legacy]).map((v) => v[0] ?? v[1]);
+  return combineLatest<Map<String, dynamic>?>([own, legacy]).map((v) => mergeShelterSettingsData(v[0], v[1]));
 }
 
 final shelterSettingsProvider = StreamProvider.autoDispose<ShelterSettings>((ref) async* {

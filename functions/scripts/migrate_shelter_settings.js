@@ -12,8 +12,9 @@
 //   --org=ID[,ID...]   copy to these organizations
 //   --all              copy to every approved organization
 // With neither, the dry run lists the organizations to choose from. An
-// organization that already has its own settings is skipped unless
-// --overwrite is passed.
+// organization that already has its own settings keeps them: only the
+// values it doesn't have yet are filled in, unless --overwrite is passed
+// (which replaces all of them).
 //
 // Usage (from functions/, with Application Default Credentials for the
 // project, e.g. GOOGLE_APPLICATION_CREDENTIALS pointing at a service account key):
@@ -36,10 +37,9 @@ const OVERWRITE = args.overwrite === true;
 admin.initializeApp(args.project ? {projectId: args.project} : undefined);
 const db = admin.firestore();
 
-const FIELDS = [
-  'maxCapacity', 'isolationCapacity', 'monthlyBudget', 'foodPerDayKg', 'ridersNeeded',
-  'updatedAt', 'updatedBy', 'updatedByName',
-];
+// Keep equal to shelterValueFields in shelter_settings.dart.
+const VALUE_FIELDS = ['maxCapacity', 'isolationCapacity', 'monthlyBudget', 'foodPerDayKg', 'ridersNeeded'];
+const FIELDS = [...VALUE_FIELDS, 'updatedAt', 'updatedBy', 'updatedByName'];
 
 async function main() {
   const legacy = await db.collection('settings').doc('shelter').get();
@@ -75,14 +75,24 @@ async function main() {
     }
     const ref = db.collection('organizations').doc(orgId).collection('settings').doc('shelter');
     const existing = await ref.get();
+    const name = org.get('name') || '';
+    let toWrite = values;
     if (existing.exists && !OVERWRITE) {
-      console.log(`${orgId} (${org.get('name') || ''}): already has its own settings, skipped (--overwrite to replace).`);
-      continue;
+      // Keep what the organization saved itself (Organization Profile writes
+      // only maxCapacity) and fill in just the values it doesn't have yet.
+      const own = existing.data();
+      toWrite = Object.fromEntries(VALUE_FIELDS.filter((k) => k in values && !(k in own)).map((k) => [k, values[k]]));
+      if (Object.keys(toWrite).length === 0) {
+        console.log(`${orgId} (${name}): already has every value, skipped (--overwrite to replace).`);
+        continue;
+      }
+      console.log(`${orgId} (${name}): has its own settings; ${APPLY ? 'filling in' : 'would fill in'} ${JSON.stringify(toWrite)}.`);
+    } else {
+      console.log(`${orgId} (${name}): ${APPLY ? 'writing' : 'would write'} the values above.`);
     }
-    console.log(`${orgId} (${org.get('name') || ''}): ${APPLY ? 'writing' : 'would write'} the values above.`);
     if (APPLY) {
       await ref.set({
-        ...values,
+        ...toWrite,
         migratedFrom: 'settings/shelter',
         migratedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
