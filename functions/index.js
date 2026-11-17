@@ -1498,6 +1498,112 @@ exports.followUpCaseReferrals = onSchedule('every 60 minutes', async () => {
   }
 });
 
+// ---- Rescue timers: quarantine end and intake completion ------------------
+//
+// These used to happen only when staff opened the case
+// (CaseIntakeRepository.checkAndCompleteQuarantineIfDue and
+// checkAndCompleteIntakeIfDue, which stay as the in-app fallback). Every 30
+// minutes the server makes the same writes, each re-checked inside a
+// transaction so a run never repeats or undoes what the app already did.
+// Decisions in rescue_timer_rules.js.
+//   - Quarantine: quarantineStatus 'completed', quarantineEndedAt = the
+//     scheduled end, the same automatic reason; plus an activity-log entry,
+//     and the organization's staff are told (push + in-app notification).
+//     Needs the cases (quarantineStatus, quarantineScheduledEndAt) index.
+//   - Intake: once the animal is received and every animal has its record,
+//     status 'completed' + intakeCompletedAt with the same status line and
+//     activity-log entry. Cases whose animals follow separate
+//     post-treatment paths are completed per animal in the app.
+const {quarantineDue, intakeCompletionDue} = require('./rescue_timer_rules');
+
+const QUARANTINE_AUTO_REASON = 'Automatic — scheduled duration elapsed.';
+
+function caseAnimalLabel(c) {
+  const animals = Array.isArray(c.animals) ? c.animals : [];
+  const names = animals.map((a) => a && (a.name || a.species)).filter(Boolean);
+  if (names.length) return names.slice(0, 3).join(', ');
+  return c.animalName || c.animalType || c.species || 'The animal';
+}
+
+exports.completeDueQuarantines = onSchedule('every 30 minutes', async () => {
+  const nowMs = Date.now();
+  const snap = await db.collection('cases')
+    .where('quarantineStatus', '==', 'active')
+    .where('quarantineScheduledEndAt', '<=', admin.firestore.Timestamp.fromMillis(nowMs))
+    .get();
+  for (const doc of snap.docs) {
+    try {
+      const ended = await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists) return null;
+        const c = s.data();
+        const endMs = millisOf(c.quarantineScheduledEndAt) || null;
+        if (!quarantineDue({status: c.quarantineStatus, scheduledEndMs: endMs, nowMs})) return null;
+        tx.update(doc.ref, {
+          quarantineStatus: 'completed',
+          quarantineEndedAt: c.quarantineScheduledEndAt,
+          quarantineEndReason: QUARANTINE_AUTO_REASON,
+        });
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'quarantine_completed',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          details: {reason: QUARANTINE_AUTO_REASON, scheduledEndAt: c.quarantineScheduledEndAt},
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return c;
+      });
+      if (!ended) continue;
+      await notifyStaff(await orgStaffUids(ended.organizationId), {
+        title: 'Quarantine ended',
+        body: `${caseAnimalLabel(ended)} finished the scheduled quarantine. Check on them and plan the next step.`,
+        data: {type: 'quarantine_ended', caseId: doc.id},
+      });
+    } catch (e) {
+      console.error('[completeDueQuarantines] failed for', doc.ref.path, e);
+    }
+  }
+});
+
+exports.completeDueIntakes = onSchedule('every 30 minutes', async () => {
+  const snap = await db.collection('cases').where('status', '==', 'intake').get();
+  for (const doc of snap.docs) {
+    const first = doc.data();
+    if (!first.intakeReceivedAt) continue;
+    try {
+      const records = await db.collection('animals').where('linkedCaseId', '==', doc.id).get();
+      const indexes = records.docs
+        .map((r) => r.get('sourceAnimalIndex'))
+        .filter((i) => typeof i === 'number')
+        .map((i) => Math.trunc(i));
+      if (!intakeCompletionDue(first, indexes)) continue;
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists || !intakeCompletionDue(s.data(), indexes)) return;
+        const now = admin.firestore.Timestamp.now();
+        tx.update(doc.ref, {
+          status: 'completed',
+          intakeCompletedAt: now,
+          statusHistory: admin.firestore.FieldValue.arrayUnion({
+            status: 'Intake completed — all animal records created.',
+            timestamp: now,
+          }),
+        });
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'intake_completed',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (e) {
+      console.error('[completeDueIntakes] failed for', doc.ref.path, e);
+    }
+  }
+});
+
 const REPORTER_RESPONSE_TIMEOUT_HOURS = 48;
 
 exports.expireStaleReporterResponses = onSchedule('every 60 minutes', async () => {
