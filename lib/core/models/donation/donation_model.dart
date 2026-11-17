@@ -252,6 +252,7 @@ class CampaignHistoryEntry {
     'converted_to_general' => 'Converted to general fund',
     'offline_donation_recorded' => 'Offline donation recorded',
     'allocation_recorded' => 'Funds allocated',
+    'allocation_voided' => 'Spending voided (returned to balance)',
     'excess_transferred_out' => 'Excess transferred out',
     'excess_transferred_in' => 'Excess received (transfer)',
     'inkind_received' => 'In-kind donation received',

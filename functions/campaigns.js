@@ -196,6 +196,93 @@ async function organizerNameFor(actor) {
   return typeof name === 'string' && name.trim() ? name.trim() : null;
 }
 
+// ── General fund ────────────────────────────────────────────────────────────
+// Each organization has one permanent General fund at
+// campaigns/general_{orgId}: an open-ended donation listing (no deadline, no
+// target) for money that isn't for a particular campaign. It is created on
+// first use and can't be edited, closed, deactivated or archived, so there is
+// always somewhere to record unrestricted money and pay general costs from.
+
+const GENERAL_FUND_PREFIX = 'general_';
+const generalFundId = (orgId) => `${GENERAL_FUND_PREFIX}${orgId}`;
+const isGeneralFund = (campaignId, c) =>
+  (c && c.isGeneralFund === true) || String(campaignId || '').startsWith(GENERAL_FUND_PREFIX);
+
+function generalFundDoc(actor, organizer) {
+  return {
+    title: 'General Fund',
+    description: 'Donations not tied to a particular campaign. Used for any of the organization\'s rescue, care and shelter costs.',
+    imageUrl: null,
+    type: 'donation',
+    fundKind: 'general',
+    purposeTags: ['General Operations'],
+    restricted: false,
+    linkedCaseId: null,
+    animalId: null,
+    animalName: null,
+    targetAmount: 0,
+    acceptInKind: false,
+    inKindItems: [],
+    monthlyAmount: null,
+    intendedUse: null,
+    isGeneralFund: true,
+    date: null,
+    startDate: FieldValue.serverTimestamp(),
+    status: 'active',
+    isActive: true,
+    organizer: organizer || 'Rescue Shelter',
+    organizationId: actor.organizationId,
+    collectedAmount: 0,
+    allocatedAmount: 0,
+    transferredOutAmount: 0,
+    transferredInAmount: 0,
+    numdonors: 0,
+    needsExtensionDecision: false,
+    extensionCount: 0,
+    backgroundColor: 0xFFE3E0B9,
+    createdBy: actor.uid,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+    updatedBy: actor.uid,
+  };
+}
+
+// Inside a transaction, after every other read: returns the actor's General
+// fund data, creating the document (with a history entry) when it doesn't
+// exist yet. `snap` is the transaction's read of generalFundId(orgId).
+function ensureGeneralFund(tx, ref, snap, actor, organizer) {
+  if (snap.exists) return snap.data();
+  const data = generalFundDoc(actor, organizer);
+  tx.create(ref, data);
+  historyEntry(tx, ref, actor, 'created', {status: 'active', generalFund: true});
+  return {...data, collectedAmount: 0, allocatedAmount: 0};
+}
+
+function assertNotGeneralFund(campaignId, c, what) {
+  if (isGeneralFund(campaignId, c)) {
+    throw new HttpsError('failed-precondition', `The General fund is permanent and can't be ${what}.`);
+  }
+}
+
+// Appends an entry to the top-level auditLogs collection (Audit page,
+// Donations / Expenses tabs) inside the same transaction as the change.
+function auditEntry(tx, actor, {category, action, organizationId, targetType, targetId, oldValues, newValues, metadata}) {
+  tx.set(db.collection('auditLogs').doc(), {
+    category,
+    action,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    ...(organizationId ? {organizationId} : {}),
+    targetType,
+    targetId,
+    oldValues: oldValues || null,
+    newValues: newValues || null,
+    metadata: metadata || null,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
 // ── Listing payload validation ──────────────────────────────────────────────
 
 function parseInKindItems(raw) {
@@ -362,6 +449,7 @@ exports.saveCampaign = onCall(async (request) => {
   if (!snap.exists) throw new HttpsError('not-found', 'Listing not found.');
   const existing = snap.data();
   assertSameOrg(actor, existing);
+  assertNotGeneralFund(campaignId, existing, 'edited');
   const status = statusOf(existing);
   if (status === 'closed') throw new HttpsError('failed-precondition', 'Closed listings cannot be edited. Relaunch it first.');
   if (status === 'archived') throw new HttpsError('failed-precondition', 'Archived listings cannot be edited.');
@@ -405,8 +493,11 @@ exports.setCampaignStatus = onCall(async (request) => {
     if (!snap.exists) throw new HttpsError('not-found', 'Listing not found.');
     const c = snap.data();
     assertSameOrg(actor, c);
+    if (action !== 'publish') {
+      assertNotGeneralFund(campaignId, c, action === 'deactivate' ? 'deactivated' : `${action}d`);
+    }
     const status = statusOf(c);
-    const deadlinePassed = c.date instanceof Timestamp && c.date.toMillis() <= Date.now();
+    const deadlinePassed =c.date instanceof Timestamp && c.date.toMillis() <= Date.now();
     const now = FieldValue.serverTimestamp();
     let next;
 
@@ -579,10 +670,20 @@ exports.postCampaignUpdate = onCall(async (request) => {
 // Payment received outside PayMongo (bank transfer, cash, ...). Credited to
 // collectedAmount like a verified donation, but marked source 'manual' with
 // who recorded it. Duplicate guard: one record per campaign + method + reference.
+// generalFund: true (instead of campaignId) records it to the actor's
+// organization's General fund, creating that fund on first use.
 exports.recordOfflineDonation = onCall(async (request) => {
   const actor = await loadActor(request, {finance: true});
   const d = request.data || {};
+  const toGeneralFund = d.generalFund === true;
+  if (toGeneralFund) {
+    if (!actor.organizationId) {
+      throw new HttpsError('failed-precondition', 'Your account is not linked to an organization, so it has no General fund.');
+    }
+    d.campaignId = generalFundId(actor.organizationId);
+  }
   requireCampaignId(d.campaignId);
+  const organizer = toGeneralFund ? await organizerNameFor(actor) : null;
   const amount = requireAmount(d.amount, 'Amount');
   if (!Object.prototype.hasOwnProperty.call(OFFLINE_METHODS, d.method)) throw new HttpsError('invalid-argument', 'Choose how the payment was received.');
   const reference = requireString(d.referenceNumber, 'Reference number', {max: 100});
@@ -603,9 +704,15 @@ exports.recordOfflineDonation = onCall(async (request) => {
 
   await db.runTransaction(async (tx) => {
     const [dup, campaignSnap] = await Promise.all([tx.get(refDoc), tx.get(campaignRef)]);
-    if (dup.exists) throw new HttpsError('already-exists', 'A payment with this reference number was already recorded for this campaign.');
-    if (!campaignSnap.exists) throw new HttpsError('not-found', 'Listing not found.');
-    const c = campaignSnap.data();
+    if (dup.exists) {
+      throw new HttpsError('already-exists', toGeneralFund ?
+        'A payment with this reference number was already recorded for the General fund.' :
+        'A payment with this reference number was already recorded for this campaign.');
+    }
+    if (!campaignSnap.exists && !toGeneralFund) throw new HttpsError('not-found', 'Listing not found.');
+    const c = toGeneralFund ?
+      ensureGeneralFund(tx, campaignRef, campaignSnap, actor, organizer) :
+      campaignSnap.data();
     assertSameOrg(actor, c);
     if ((c.type || 'donation') !== 'donation') throw new HttpsError('failed-precondition', 'Offline payments can only be recorded for donation campaigns.');
     if (statusOf(c) === 'draft') throw new HttpsError('failed-precondition', 'Publish the campaign first.');
@@ -650,6 +757,14 @@ exports.recordOfflineDonation = onCall(async (request) => {
     if (completes) Object.assign(campaignUpdate, completedCampaignFields());
     tx.update(campaignRef, campaignUpdate);
     historyEntry(tx, campaignRef, actor, 'offline_donation_recorded', {donationId: donationRef.id, amount, method: d.method, reference});
+    auditEntry(tx, actor, {
+      category: 'donations',
+      action: toGeneralFund ? 'Offline donation recorded to the General fund' : 'Offline donation recorded',
+      organizationId: c.organizationId || actor.organizationId,
+      targetType: 'Donation',
+      targetId: donationRef.id,
+      newValues: {amount, method: label, reference, campaignId: d.campaignId, campaignTitle: c.title || ''},
+    });
     if (completes) historyEntry(tx, campaignRef, actor, 'goal_completed', {to: 'goal_met', donationId: donationRef.id});
   });
   return {donationId: donationRef.id};
@@ -698,6 +813,8 @@ exports.recordAllocation = onCall(async (request) => {
       linkedCaseId,
       inKindDescription,
       status: 'recorded',
+      // Analytics and the dashboard read allocations by organization.
+      organizationId: c.organizationId || null,
       recordedBy: actor.uid,
       recordedByName: actor.name,
       createdAt: now,
@@ -705,6 +822,57 @@ exports.recordAllocation = onCall(async (request) => {
     tx.update(campaignRef, {allocatedAmount: FieldValue.increment(amount), updatedAt: now});
     historyEntry(tx, campaignRef, actor, 'allocation_recorded', {allocationId: requestId, amount, category});
     return {allocationId: requestId, duplicate: false};
+  });
+});
+
+// Reverses a spending record (its expense line was removed or the expense
+// deleted, see lib/core/services/expense_funding_service.dart): the
+// allocation is kept for history but marked 'voided', and its amount goes
+// back to the campaign's available balance. Transfers can't be voided here.
+// Repeating the call for an already-voided allocation changes nothing.
+exports.voidAllocation = onCall(async (request) => {
+  const actor = await loadActor(request, {finance: true});
+  const d = request.data || {};
+  requireCampaignId(d.campaignId);
+  const allocationId = requireCampaignId(d.allocationId, 'allocationId');
+  const reason = requireString(d.reason, 'Reason', {max: 500});
+
+  const campaignRef = campaignsCol().doc(d.campaignId);
+  const allocRef = campaignRef.collection('allocations').doc(allocationId);
+
+  return db.runTransaction(async (tx) => {
+    const [campaignSnap, allocSnap] = await Promise.all([tx.get(campaignRef), tx.get(allocRef)]);
+    if (!campaignSnap.exists) throw new HttpsError('not-found', 'Listing not found.');
+    if (!allocSnap.exists) throw new HttpsError('not-found', 'Spending record not found.');
+    const c = campaignSnap.data();
+    assertSameOrg(actor, c);
+    const a = allocSnap.data();
+    if (a.status === 'voided') return {allocationId, duplicate: true};
+    if ((a.kind || 'expense') !== 'expense') {
+      throw new HttpsError('failed-precondition', 'Only spending records can be voided. Transfers between campaigns stay as recorded.');
+    }
+    const amount = num(a.amount);
+    const now = FieldValue.serverTimestamp();
+    tx.update(allocRef, {
+      status: 'voided',
+      voidReason: reason,
+      voidedAt: now,
+      voidedBy: actor.uid,
+      voidedByName: actor.name,
+    });
+    tx.update(campaignRef, {allocatedAmount: FieldValue.increment(-amount), updatedAt: now});
+    historyEntry(tx, campaignRef, actor, 'allocation_voided', {allocationId, amount, category: a.category || null, reason});
+    auditEntry(tx, actor, {
+      category: 'expenses',
+      action: 'Campaign spending voided',
+      organizationId: c.organizationId || actor.organizationId,
+      targetType: 'CampaignAllocation',
+      targetId: allocationId,
+      oldValues: {status: a.status || 'recorded', amount},
+      newValues: {status: 'voided', reason},
+      metadata: {campaignId: d.campaignId, campaignTitle: c.title || '', label: a.label || null, linkedCaseId: a.linkedCaseId || null},
+    });
+    return {allocationId, duplicate: false};
   });
 });
 
@@ -799,6 +967,7 @@ exports.reallocateExcess = onCall(async (request) => {
       destinationCampaignId: destinationId,
       notes: reason,
       status: 'recorded',
+      organizationId: src.organizationId || null,
       recordedBy: actor.uid,
       recordedByName: actor.name,
       createdAt: now,
