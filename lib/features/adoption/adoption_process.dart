@@ -109,10 +109,10 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       _adoptionSub = _service
           .watchApplication(widget.existingAdoptionId!)
           .listen((_) {
-            // Re-parses via the same _loadExistingAdoption path used on open —
-            // no separate live-parsing logic to keep in sync with it.
-            if (!_isLoadingExisting) _loadExistingAdoption();
-          });
+        // Re-parses via the same _loadExistingAdoption path used on open —
+        // no separate live-parsing logic to keep in sync with it.
+        if (!_isLoadingExisting) _loadExistingAdoption();
+      });
     } else {
       _prefillFromAccount();
     }
@@ -163,7 +163,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
       );
     }
     setState(
-      () => _form.homePhotosFiles.addAll(accepted.map((x) => File(x.path))),
+          () => _form.homePhotosFiles.addAll(accepted.map((x) => File(x.path))),
     );
   }
 
@@ -246,8 +246,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
         final rawStatus = data['status'] as String?;
         final releaseDateTs = data['scheduledReleaseDate'];
         _scheduledReleaseDate =
-            (kAdoptionReleasedStatuses.contains(rawStatus) &&
-                releaseDateTs is Timestamp)
+        (kAdoptionReleasedStatuses.contains(rawStatus) &&
+            releaseDateTs is Timestamp)
             ? releaseDateTs.toDate()
             : null;
         _deliveryAttempts = data['deliveryAttempts'] as int? ?? 0;
@@ -377,10 +377,21 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
     setState(() => _isSubmitting = true);
     try {
-      await _service.withdraw(
+      final becameReturn = await _service.withdraw(
         adoptionId: _adoptionId!,
         animalRecordId: widget.animal.animalRecordId,
       );
+      // Adoption gap 8: the animal is already home, so the organization got a
+      // return request instead; they will arrange the retrieval.
+      if (becameReturn) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+            '${widget.animal.name} is already home with you, so the organization was sent a return request. '
+                'They will contact you to arrange the pickup.',
+          ));
+        }
+        return;
+      }
 
       setState(() => _step = AdoptionStep.withdrawn);
     } catch (e) {
@@ -405,8 +416,8 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
 
     final nextAttempt = _deliveryAttempts + 1;
     final confirmed = await showConfirmActionDialog(context, title: 'Request Reschedule?', message: 'This will use attempt $nextAttempt of $kMaxDeliveryAttempts. The '
-          'organization will reach out to arrange a new delivery date '
-          'and time for ${widget.animal.name}.', confirmLabel: 'Request');
+        'organization will reach out to arrange a new delivery date '
+        'and time for ${widget.animal.name}.', confirmLabel: 'Request');
 
     if (confirmed != true || _adoptionId == null || !mounted) return;
 
@@ -477,7 +488,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                 activeIndex: _activeStepIndex,
                 displayIndex: _displayIndex,
                 rejected:
-                    _step == AdoptionStep.appReject ||
+                _step == AdoptionStep.appReject ||
                     _step == AdoptionStep.withdrawn,
                 onStepTap: _onTrackerTap,
               ),
@@ -508,7 +519,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
                       Expanded(
                         child: Text(
                           'Viewing a previous step — read only. Tap your '
-                          'current step\'s circle above to return.',
+                              'current step\'s circle above to return.',
                           style: GoogleFonts.zain(
                             fontSize: 12,
                             color: AppColors.textPrimary,
@@ -527,17 +538,17 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
             Expanded(
               child: _isLoadingExisting
                   ? const Center(
-                      child: CircularProgressIndicator(
-                        color: AppColors.greenrspwn,
-                      ),
-                    )
+                child: CircularProgressIndicator(
+                  color: AppColors.greenrspwn,
+                ),
+              )
                   : SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: IgnorePointer(
-                        ignoring: _isReadOnly,
-                        child: _buildStepBody(),
-                      ),
-                    ),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: IgnorePointer(
+                  ignoring: _isReadOnly,
+                  child: _buildStepBody(),
+                ),
+              ),
             ),
           ],
         ),

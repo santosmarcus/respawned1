@@ -109,24 +109,37 @@ int capabilityDeclineCount(Map<String, dynamic> tally) {
       .fold<int>(0, (sum, e) => sum + ((e.value as num?)?.toInt() ?? 0));
 }
 
-/// Where the case goes once a clinic accepts treatment. When the reporter
-/// answered "yes" to "interested to adopt" on the report form, that
-/// reporter is the intended adopter, so the transporter waits at the clinic
-/// for them (see AwaitingAdopterPanel) instead of continuing to the shelter.
-({String status, String label}) statusAfterTreatmentAccepted(
-  Map<String, dynamic> caseData,
-) {
-  final hasInterestedAdopter = caseData['interestedToAdopt'] == 'yes';
-  return hasInterestedAdopter
-      ? (
-          status: 'awaiting_adopter_pickup',
-          label:
-              'Treatment accepted. Awaiting the interested adopter to arrive at the treatment location.',
-        )
-      : (
-          status: 'in_transit_shelter',
-          label: 'Treatment accepted. On the way to shelter.',
-        );
+/// Where the case goes once a clinic accepts treatment (Rescue gaps 6 and
+/// 10). With a confirmed adopter (the organization confirmed their adoption
+/// request, `adoptionRequest.status == 'approved'`), the animal stays at the
+/// clinic for treatment and that adopter collects it there later, so the
+/// transporter's trip is complete ([completesTransit]). Without one, even
+/// if someone is interested or their request is still waiting, the
+/// transporter continues to the shelter; a request confirmed later is
+/// collected from the shelter instead.
+({String status, String label, bool completesTransit}) statusAfterTreatmentAccepted(
+    Map<String, dynamic> caseData,
+    ) {
+  final request = caseData['adoptionRequest'];
+  final confirmedAdopter = request is Map && request['status'] == 'approved';
+  if (confirmedAdopter) {
+    return (
+    status: 'awaiting_adopter_pickup',
+    label: 'Treatment accepted. The confirmed adopter will collect the animal from the clinic after treatment. '
+        'Transport completed.',
+    completesTransit: true,
+    );
+  }
+  final interested = caseData['interestedToAdopt'] == 'yes' ||
+      ((caseData['willingAdopterId'] as String?)?.isNotEmpty ?? false);
+  return (
+  status: 'in_transit_shelter',
+  label: interested
+      ? 'Treatment accepted. On the way to the shelter; the interested adopter can collect the animal there once '
+      'the organization confirms them.'
+      : 'Treatment accepted. On the way to shelter.',
+  completesTransit: false,
+  );
 }
 
 // End Reason (close transit) options.
@@ -256,34 +269,34 @@ EndReasonOutcome resolveEndReason(EndReasonSelection selection) {
 
   final reasonStr = selectedReason == kEndReasonOther
       ? (otherText != null && otherText.isNotEmpty
-            ? otherText
-            : kEndReasonOther)
+      ? otherText
+      : kEndReasonOther)
       : selectedReason;
 
   String status;
   String statusLabel;
   switch (selectedReason) {
     case kEndReasonAggressive:
-      // Escalate — not a failure, not counted against the transporter.
+    // Escalate — not a failure, not counted against the transporter.
       status = RescueStatus.needsSpecializedAssistance.firestoreValue;
       statusLabel =
-          'Pickup postponed — animal could not be safely handled. '
+      'Pickup postponed — animal could not be safely handled. '
           'Escalated for specialized assistance.';
       break;
     case kEndReasonSpecializedTransport:
-      // Escalate — same as Aggressive, this is a capability mismatch
-      // with THIS transporter/vehicle, not a failed rescue.
+    // Escalate — same as Aggressive, this is a capability mismatch
+    // with THIS transporter/vehicle, not a failed rescue.
       status = RescueStatus.needsSpecializedAssistance.firestoreValue;
       statusLabel = serviceType != null && serviceType.isNotEmpty
           ? 'Pickup postponed — requires specialized transport ($serviceType). '
-                'Escalated for reassignment.'
+          'Escalated for reassignment.'
           : 'Pickup postponed — requires specialized transport. '
-                'Escalated for reassignment.';
+          'Escalated for reassignment.';
       break;
     case kEndReasonNotFound:
       status = RescueStatus.unableToLocate.firestoreValue;
       statusLabel =
-          'Animal not found at reported location. Awaiting reporter response.';
+      'Animal not found at reported location. Awaiting reporter response.';
       break;
     case kEndReasonReporterUnreachable:
       status = RescueStatus.pickupUnsuccessful.firestoreValue;
@@ -292,13 +305,13 @@ EndReasonOutcome resolveEndReason(EndReasonSelection selection) {
     case kEndReasonBreakdown:
       status = RescueStatus.awaitingAssignment.firestoreValue;
       statusLabel =
-          'The transporter had a vehicle breakdown. The case is back in '
+      'The transporter had a vehicle breakdown. The case is back in '
           'Assign Transporter for another transporter.';
       break;
     case kEndReasonDeceased:
       status = RescueStatus.transitEnded.firestoreValue;
       statusLabel =
-          'The transporter reported that the animal died in transit. '
+      'The transporter reported that the animal died in transit. '
           'Waiting for the organization to confirm.';
       break;
     default:
@@ -324,14 +337,14 @@ EndReasonOutcome resolveEndReason(EndReasonSelection selection) {
     reasonText: reasonStr,
     notes: selection.notes,
     serviceType:
-        specializedTransport && serviceType != null && serviceType.isNotEmpty
+    specializedTransport && serviceType != null && serviceType.isNotEmpty
         ? serviceType
         : null,
     awaitingReporter:
-        selectedReason == kEndReasonNotFound ||
+    selectedReason == kEndReasonNotFound ||
         selectedReason == kEndReasonReporterUnreachable,
     excludeFromTransporterFault:
-        selectedReason == kEndReasonAggressive || specializedTransport,
+    selectedReason == kEndReasonAggressive || specializedTransport,
     kind: kind,
   );
 }
@@ -342,9 +355,9 @@ EndReasonOutcome resolveEndReason(EndReasonSelection selection) {
 /// 'intake' + postTreatmentStartedAt), so Intake Details shows it waiting
 /// for "Confirm Animal Received".
 List<Map<String, dynamic>> animalsAfterShelterDropoff(
-  List<Map<String, dynamic>> animals,
-  Object startedAt,
-) {
+    List<Map<String, dynamic>> animals,
+    Object startedAt,
+    ) {
   return [
     for (final a in animals)
       if (a['outcome'] == 'deceased' || a['postTreatmentAction'] != null)

@@ -300,10 +300,28 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Donation gap 5: the organization's stock. Received in-kind goods are
+    // added by the backend (manageInKindDonation); its staff and carers
+    // record usage, purchases and low-stock levels. Every change is a
+    // movement row that names who made it and is never edited.
+    match /organizations/{orgId}/stock/{itemId} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId) || isCarerOf(orgId);
+      allow create, update: if (isApprovedStaffOf(orgId) || isCarerOf(orgId)) &&
+        request.resource.data.get('quantity', 0) is number &&
+        request.resource.data.get('quantity', 0) >= 0;
+      allow delete: if false;
+    }
+    match /organizations/{orgId}/stockMovements/{moveId} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId) || isCarerOf(orgId);
+      allow create: if (isApprovedStaffOf(orgId) || isCarerOf(orgId)) &&
+        request.resource.data.get('byUid', '') == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // Every other organization subcollection (communityReports,
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
-      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings']);
+      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements']);
     }
 
     // ---- Organization invitations ------------------------------------------
@@ -486,12 +504,6 @@ service cloud.firestore {
         && (!changedAny(['nextChargeAmount'])
             || (request.resource.data.nextChargeAmount is number && request.resource.data.nextChargeAmount > 0));
     }
-    // donation_review_inkind.dart (no money involved)
-    function inKindCreate(uid) {
-      return request.resource.data.userId == uid
-        && request.resource.data.type == 'inkind'
-        && request.resource.data.amount == 0;
-    }
 
     match /donations/{donationId} {
       // Donor records (names, notes, addresses, receipts): the donor, and
@@ -506,8 +518,9 @@ service cloud.firestore {
         isPlatformStaff() ||
         isApprovedStaffOf(resource.data.organizationId)
       );
-      // Monetary records are only ever created by the backend.
-      allow create: if signedIn() && inKindCreate(request.auth.uid);
+      // Every record, in-kind pledges included (pledgeInKindDonation,
+      // Donation gap 9), is created by the backend.
+      allow create: if false;
       allow update: if signedIn()
         && resource.data.userId == request.auth.uid
         && (donorSelfServiceEdit() || inKindCancel() || sponsorshipEdit());
@@ -664,7 +677,8 @@ service cloud.firestore {
       }
       match /history/{itemId} {
         allow read: if isSelf(uid);
-        allow create: if isSelf(uid) && inKindCreate(uid);
+        // Written by the backend (payments, offline gifts, in-kind pledges).
+        allow create: if false;
         allow update: if isSelf(uid) && (inKindCancel() || sponsorshipEdit());
         allow delete: if false;
       }
@@ -775,6 +789,31 @@ service cloud.firestore {
       );
     }
 
+    // Donation gap 6: an expense above the organization's approval
+    // threshold is saved 'pending', with no new funding, and a different
+    // financial admin approves it (expense_oversight_page.dart). Nobody
+    // creates an expense already approved, a pending expense gets no funding
+    // lines until it is approved, it can't be quietly un-flagged, and the
+    // one who asked never approves their own.
+    function expenseApprovalCreateOk() {
+      let status = request.resource.data.get('approvalStatus', null);
+      return status == null ||
+        (status == 'pending' && request.resource.data.get('fundings', []).size() == 0);
+    }
+
+    function expenseApprovalUpdateOk() {
+      let before = resource.data.get('approvalStatus', null);
+      let after = request.resource.data.get('approvalStatus', null);
+      return (before != 'pending' || after in ['pending', 'approved']) &&
+        (after != 'pending' || !changedAny(['fundings'])) &&
+        (!changedAny(['approvalStatus', 'approvedBy']) || after != 'approved' || (
+          before == 'pending' &&
+          resource.data.get('approvalRequestedBy', '') != request.auth.uid &&
+          request.resource.data.get('approvedBy', '') == request.auth.uid &&
+          !changedAny(['fundings', 'amount'])
+        ));
+    }
+
     function canWorkCase(caseId) {
       let data = get(casePath(caseId)).data;
       return canStaffCase(data) ||
@@ -814,7 +853,10 @@ service cloud.firestore {
       function reporterUpdate() {
         return resource.data.get('reporterId', '') == request.auth.uid &&
           !changedAny(['reporterId', 'organizationId', 'riderId', 'assignedVolunteerId',
-            'verification', 'liveProofRequest', 'reportEvidence']) &&
+            'verification', 'liveProofRequest', 'reportEvidence',
+            // Rescue gaps 6/10: the adoption request mirror and the pickup
+            // window belong to staff and the backend.
+            'adoptionRequest', 'adopterPickup']) &&
           (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data));
       }
 
@@ -962,7 +1004,9 @@ service cloud.firestore {
       // organization (or a platform 'admin') record, edit or delete them.
       match /expenses/{expenseId} {
         allow read: if canStaffCase(get(casePath(caseId)).data);
-        allow write: if canFinanceCase(get(casePath(caseId)).data);
+        allow create: if canFinanceCase(get(casePath(caseId)).data) && expenseApprovalCreateOk();
+        allow update: if canFinanceCase(get(casePath(caseId)).data) && expenseApprovalUpdateOk();
+        allow delete: if canFinanceCase(get(casePath(caseId)).data);
       }
 
       // Treatment logs, referrals and anything else: case staff and the
@@ -1136,7 +1180,8 @@ service cloud.firestore {
         // no-show and booking-reminder counters are staff/backend only.
         return isAdopterOf(resource.data) &&
           !changedAny(['personal', 'organizationId', 'fitAtDecision',
-            'noShowCount', 'noShows', 'lastNoShowAt', 'bookingReminders']) &&
+            'noShowCount', 'noShows', 'lastNoShowAt', 'bookingReminders',
+            'source', 'caseId', 'agreement']) &&
           (!changedAny(['status']) || request.resource.data.status == 'withdrawn');
       }
 
@@ -1150,10 +1195,31 @@ service cloud.firestore {
         isPlatformStaff() ||
         isApprovedStaffOf(resource.data.organizationId)
       );
+      // Rescue gaps 6/10: an adoption request for a rescued animal, from the
+      // reporter who said they want to adopt it or the user who registered
+      // interest on the case. Belongs to the case's organization (none yet
+      // for an unowned report; stamped when one accepts it). All three
+      // agreements are required.
+      function rescueRequestOk(data) {
+        let c = get(casePath(data.get('caseId', 'none'))).data;
+        let agreement = data.get('agreement', {});
+        return data.get('source', '') == 'rescue_case' &&
+          data.get('caseId', '') is string && data.get('caseId', '') != '' &&
+          !('animalRecordId' in data.get('personal', {})) &&
+          ((c.get('reporterId', '') == request.auth.uid && c.get('interestedToAdopt', '') == 'yes') ||
+            c.get('willingAdopterId', '') == request.auth.uid) &&
+          data.get('organizationId', '') == c.get('organizationId', '') &&
+          agreement.get('vetFees', false) == true &&
+          agreement.get('obligations', false) == true &&
+          agreement.get('pickupWindow', false) == true;
+      }
+
       allow create: if signedIn() &&
         isAdopterOf(request.resource.data) &&
         request.resource.data.get('status', '') == 'pending' &&
-        orgMatchesAnimal(request.resource.data);
+        (request.resource.data.get('source', '') == 'rescue_case'
+          ? rescueRequestOk(request.resource.data)
+          : orgMatchesAnimal(request.resource.data));
       allow update: if signedIn() && (
         (canStaffAdoption(resource.data) && orgStampOk()) ||
         adopterUpdate()
@@ -1312,10 +1378,12 @@ service cloud.firestore {
       }
       allow read, delete: if financeOf(resource.data.get('organizationId', ''));
       allow create: if financeOf(request.resource.data.get('organizationId', '')) &&
+        expenseApprovalCreateOk() &&
         request.resource.data.get('amount', 0) is number &&
         request.resource.data.get('amount', 0) > 0;
       allow update: if financeOf(resource.data.get('organizationId', '')) &&
         !changedAny(['organizationId']) &&
+        expenseApprovalUpdateOk() &&
         request.resource.data.get('amount', 0) is number &&
         request.resource.data.get('amount', 0) > 0;
     }
@@ -1343,6 +1411,24 @@ service cloud.firestore {
           'metadata', 'createdAt'
         ]);
       allow update, delete: if false;
+    }
+
+    // ---- Community Adoption check-ins (Adoption gap 10) ---------------------
+    // Written by the backend (scheduleCommunityAdoptionCheckIn). The adopter
+    // answers once, with a photo and a note; staff of the organizations in
+    // the area read them (queries filter on organizationIds).
+    match /communityAdoptionCheckIns/{checkInId} {
+      allow read: if signedIn() && (
+        resource.data.get('adopterId', '') == request.auth.uid ||
+        isPlatformStaff() ||
+        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && isApprovedStaffOf(myOrgId()))
+      );
+      allow update: if signedIn() &&
+        resource.data.get('adopterId', '') == request.auth.uid &&
+        resource.data.get('status', '') == 'requested' &&
+        changedOnly(['status', 'photoUrl', 'note', 'submittedAt']) &&
+        request.resource.data.status == 'submitted';
+      allow create, delete: if false;
     }
 
     // ---- Collar tags / rescue sessions -------------------------------------
@@ -1393,7 +1479,7 @@ service cloud.firestore {
         'campaigns', 'donations', 'donationPayments', 'fundTransfers',
         'manualDonationRefs', 'paymongoWebhookEvents',
         'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
-        'transporterApplications', 'auditLogs', 'orgExpenses'
+        'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns'
       ]);
     }
   }

@@ -37,8 +37,8 @@ class RescueCaseStore {
       caseDoc(caseId).collection('communityReports');
 
   CollectionReference<Map<String, dynamic>> transportAssignmentsOf(
-    String caseId,
-  ) => caseDoc(caseId).collection('transportAssignments');
+      String caseId,
+      ) => caseDoc(caseId).collection('transportAssignments');
 
   CollectionReference<Map<String, dynamic>> get users => db.collection('users');
 
@@ -105,16 +105,16 @@ class RescueCaseStore {
 
   /// [recordAction] inside a running transaction.
   void recordActionIn(
-    Transaction tx, {
-    required String caseId,
-    required String action,
-    String? statusLine,
-    Map<String, dynamic> fields = const {},
-    String? actorUid,
-    String? actorName,
-    String? actorRole,
-    Map<String, dynamic>? details,
-  }) {
+      Transaction tx, {
+        required String caseId,
+        required String action,
+        String? statusLine,
+        Map<String, dynamic> fields = const {},
+        String? actorUid,
+        String? actorName,
+        String? actorRole,
+        Map<String, dynamic>? details,
+      }) {
     final update = _withStatusLine(fields, statusLine);
     if (update.isNotEmpty) tx.update(caseDoc(caseId), update);
     tx.set(activityLogsOf(caseId).doc(), _logEntry(caseId, action, actorUid, actorName, actorRole, details));
@@ -122,34 +122,34 @@ class RescueCaseStore {
 
   /// [recordAction] as part of a [WriteBatch] the caller commits.
   void recordActionInBatch(
-    WriteBatch batch, {
-    required String caseId,
-    required String action,
-    String? statusLine,
-    Map<String, dynamic> fields = const {},
-    String? actorUid,
-    String? actorName,
-    String? actorRole,
-    Map<String, dynamic>? details,
-  }) {
+      WriteBatch batch, {
+        required String caseId,
+        required String action,
+        String? statusLine,
+        Map<String, dynamic> fields = const {},
+        String? actorUid,
+        String? actorName,
+        String? actorRole,
+        Map<String, dynamic>? details,
+      }) {
     final update = _withStatusLine(fields, statusLine);
     if (update.isNotEmpty) batch.update(caseDoc(caseId), update);
     batch.set(activityLogsOf(caseId).doc(), _logEntry(caseId, action, actorUid, actorName, actorRole, details));
   }
 
   static Map<String, dynamic> _withStatusLine(Map<String, dynamic> fields, String? statusLine) => {
-        ...fields,
-        if (statusLine != null) 'statusHistory': FieldValue.arrayUnion([statusLineEntry(statusLine)]),
-      };
+    ...fields,
+    if (statusLine != null) 'statusHistory': FieldValue.arrayUnion([statusLineEntry(statusLine)]),
+  };
 
   static Map<String, dynamic> _logEntry(
-    String caseId,
-    String action,
-    String? actorUid,
-    String? actorName,
-    String? actorRole,
-    Map<String, dynamic>? details,
-  ) {
+      String caseId,
+      String action,
+      String? actorUid,
+      String? actorName,
+      String? actorRole,
+      Map<String, dynamic>? details,
+      ) {
     final user = actorUid == null ? FirebaseAuth.instance.currentUser : null;
     return ActivityLogEntry(
       id: '',
@@ -171,15 +171,17 @@ class RescueCaseStore {
   /// single scalar `status` field alone still drives its one tab, exactly
   /// as before this round.
   static Map<String, dynamic> stageSummaryUpdate(
-    List<Map<String, dynamic>> animals,
-  ) {
+      List<Map<String, dynamic>> animals,
+      ) {
     if (animals.isEmpty) return const {};
     final counts = <String, int>{};
     for (final a in animals) {
       if (a['outcome'] == 'deceased') continue;
       final action = a['postTreatmentAction'] as String?;
       String? stage;
-      if (action == null) {
+      if (action == null || isAwaitingAdopterPickup(a)) {
+        // Waiting for the confirmed adopter to collect it (Rescue gaps
+        // 6/10) keeps the animal in the Treatment queue until it leaves.
         stage = 'in_treatment';
       } else if (action == 'intake' && a['intakeCompletedAt'] == null) {
         stage = 'intake';
@@ -200,15 +202,21 @@ class RescueCaseStore {
   /// every animal has resolved (transferred/released/intake-completed/
   /// deceased). Returns null for a legacy case with no `animals[]` — the
   /// caller keeps whatever explicit status write it already had.
+  /// Marked ready for the confirmed adopter but not collected yet.
+  static bool isAwaitingAdopterPickup(Map<String, dynamic> a) =>
+      a['postTreatmentAction'] == 'release' && a['releaseCompletedAt'] == null;
+
   static String? deriveCaseStatusOverride(List<Map<String, dynamic>> animals) {
     if (animals.isEmpty) return null;
     final anyUnactioned = animals.any(
-      (a) => a['outcome'] != 'deceased' && a['postTreatmentAction'] == null,
+          (a) =>
+      a['outcome'] != 'deceased' &&
+          (a['postTreatmentAction'] == null || isAwaitingAdopterPickup(a)),
     );
     if (anyUnactioned) return RescueStatus.treatment.firestoreValue;
     final anyIntakePending = animals.any(
-      (a) =>
-          a['postTreatmentAction'] == 'intake' &&
+          (a) =>
+      a['postTreatmentAction'] == 'intake' &&
           a['intakeCompletedAt'] == null,
     );
     if (anyIntakePending) return RescueStatus.intake.firestoreValue;

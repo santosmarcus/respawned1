@@ -9,6 +9,8 @@ import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'donation_admin_providers.dart';
 import 'donation_admin_service.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
+import 'package:respawnd1/core/services/donation_acknowledgment_service.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 /// All donation records
 class DonationRecordsPage extends ConsumerStatefulWidget {
@@ -187,6 +189,7 @@ class DonationRecordCard extends StatelessWidget {
                             style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                       ),
                       if (r.isManual) ...[const SizedBox(width: 6), const _Badge('OFFLINE', AppColors.lavenderrspwn)],
+                      if (r.isReversed) ...[const SizedBox(width: 6), const _Badge('REFUNDED', Colors.redAccent)],
                       if (r.type == 'sponsorship') ...[const SizedBox(width: 6), const _Badge('SPONSOR', AppColors.pinkrspwn)],
                       if (r.isInKind) ...[
                         const SizedBox(width: 6),
@@ -321,6 +324,54 @@ class _DonationRecordSheetState extends ConsumerState<DonationRecordSheet> {
     }
   }
 
+  /// Donation gap 3: record that this donation was given back.
+  Future<void> _reverse() async {
+    final r = widget.record;
+    final reason = await showTextInputDialog(context,
+        title: 'Record refund',
+        message: 'Use this when ${formatPesoExact(r.amountValue)} from ${r.displayName} was given back: refunded in '
+            'PayMongo, a bounced check, or an offline entry recorded by mistake. The campaign total goes down'
+            '${r.userId != null ? ', the donor\'s certificate is voided and they are told' : ''}.',
+        label: 'Reason',
+        confirmLabel: 'Continue',
+        required: true);
+    if (reason == null || !mounted) return;
+    final reference = await showTextInputDialog(context,
+        title: 'Refund reference',
+        label: 'PayMongo refund id or receipt no. (optional)',
+        confirmLabel: 'Record refund',
+        destructive: true,
+        maxLines: 1);
+    if (reference == null || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await DonationAdminService.recordReversal(r.id, reason: reason, reference: reference.trim());
+      if (!mounted) return;
+      await _showResult(
+          title: 'Refund recorded',
+          message: 'The donation is marked as refunded and the campaign total was lowered by '
+              '${formatPesoExact(r.amountValue)}.');
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _error = DonationAdminService.errorMessage(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Donation gap 8: printable acknowledgment for an offline donor, who may
+  /// have no account to receive the in-app certificate.
+  Future<void> _printAcknowledgment() async {
+    try {
+      await DonationAcknowledgmentService().preview(widget.record);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not build the acknowledgment: $e');
+    }
+  }
+
   Future<void> _showResult({required String title, required String message}) => showDialog<void>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -376,12 +427,43 @@ class _DonationRecordSheetState extends ConsumerState<DonationRecordSheet> {
               if (!r.isInKind) row('Method', r.method.isEmpty ? '—' : r.method),
               row('Reference', r.refNumber.isEmpty ? '—' : r.refNumber),
               row('Verification', r.isManual ? 'Recorded offline by ${r.recordedByName ?? 'an administrator'}' : (r.isInKind ? 'Pledge' : 'PayMongo (verified by server)')),
+              if (r.isManual && r.acknowledgmentNumber != null) row('Acknowledgment', r.acknowledgmentNumber!),
+              if (r.isReversed)
+                row('Refunded',
+                    '${r.reversalReason ?? 'Yes'}${(r.reversalReference ?? '').isEmpty ? '' : ' · ref ${r.reversalReference}'}'
+                        '${r.reversedByName == null ? '' : ' · by ${r.reversedByName}'}'),
               if (r.type == 'sponsorship') row('Sponsorship', '${r.sponsorshipStatus.isEmpty ? r.status : r.sponsorshipStatus} · next due ${formatLongDate(r.nextChargeDate)}'),
               if (r.isInKind) ...[
                 row('Category', r.category),
                 row('Items', r.clarification),
                 row('Drop-off / pickup', r.address.isEmpty ? '—' : r.address),
                 row('Status', r.isCompletedInKind ? 'Received${r.quantityReceived != null ? ' (${r.quantityReceived})' : ''}' : (r.status == 'cancelled' ? 'Cancelled' : 'Pending')),
+              ],
+              if (!r.isInKind && (r.isManual || (r.canReverse && (ref.watch(canManageFinancesProvider).asData?.value ?? false)))) ...[
+                const Divider(height: 28),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(_error!, style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
+                  ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    if (r.isManual && !r.isReversed)
+                      TextButton.icon(
+                        onPressed: _busy ? null : _printAcknowledgment,
+                        icon: const Icon(Icons.print_outlined, color: AppColors.textPrimary),
+                        label: Text('Print acknowledgment',
+                            style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
+                      ),
+                    if (r.canReverse && (ref.watch(canManageFinancesProvider).asData?.value ?? false))
+                      TextButton.icon(
+                        onPressed: _busy ? null : _reverse,
+                        icon: const Icon(Icons.undo, color: Colors.redAccent),
+                        label: Text('Record refund', style: GoogleFonts.zain(fontSize: 15, color: Colors.redAccent)),
+                      ),
+                  ],
+                ),
               ],
               if (r.isPendingInKind) ...[
                 const Divider(height: 28),

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:respawnd1/core/utils/photo_metadata.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 
 void main() {
@@ -25,10 +26,10 @@ void main() {
 
     test('phone a little way off is a caution, far away is a concern', () {
       EvidenceLevel levelAt(double latOffset) => evidenceFlags(
-            ReportEvidence(deviceLat: pinLat + latOffset, deviceLng: pinLng, pinSource: PinSource.map),
-            pinLat: pinLat,
-            pinLng: pinLng,
-          ).first.level;
+        ReportEvidence(deviceLat: pinLat + latOffset, deviceLng: pinLng, pinSource: PinSource.map),
+        pinLat: pinLat,
+        pinLng: pinLng,
+      ).first.level;
       expect(levelAt(0.01), EvidenceLevel.caution); // about 1.1 km
       expect(levelAt(0.05), EvidenceLevel.concern); // about 5.5 km
     });
@@ -41,11 +42,42 @@ void main() {
 
     test('gallery photos are a caution and say how many', () {
       final mixed = evidenceFlags(const ReportEvidence(cameraMediaCount: 1, galleryMediaCount: 2));
-      expect(mixed.last.level, EvidenceLevel.caution);
-      expect(mixed.last.label, '2 of 3 photos or videos came from the gallery');
+      final gallery = mixed.firstWhere((f) => f.label.contains('gallery'));
+      expect(gallery.level, EvidenceLevel.caution);
+      expect(gallery.label, '2 of 3 photos or videos came from the gallery');
 
       final all = evidenceFlags(const ReportEvidence(galleryMediaCount: 2));
-      expect(all.last.label, 'All 2 photos or videos came from the gallery');
+      expect(all.any((f) => f.label == 'All 2 photos or videos came from the gallery'), isTrue);
+      // Rescue gap 7: no capture details stored in the files.
+      expect(all.last.label, 'Gallery photos carry no capture details');
+      expect(all.last.level, EvidenceLevel.unknown);
+    });
+
+    test('gallery photo capture time and place are checked (Rescue gap 7)', () {
+      final recentHere = evidenceFlags(
+        ReportEvidence(galleryMediaCount: 1, galleryPhotoMetadata: [
+          PhotoMetadata(takenAt: DateTime.now().subtract(const Duration(hours: 2)), lat: pinLat, lng: pinLng),
+        ]),
+        pinLat: pinLat,
+        pinLng: pinLng,
+      );
+      expect(recentHere.last.level, EvidenceLevel.supports);
+
+      final oldFar = evidenceFlags(
+        ReportEvidence(galleryMediaCount: 1, galleryPhotoMetadata: [
+          PhotoMetadata(takenAt: DateTime.now().subtract(const Duration(days: 10)), lat: pinLat + 0.05, lng: pinLng),
+        ]),
+        pinLat: pinLat,
+        pinLng: pinLng,
+      );
+      expect(oldFar.last.level, EvidenceLevel.concern);
+      expect(oldFar.last.label, '1 photo older than 2 days, 1 taken away from the pin');
+
+      final stored = ReportEvidence.fromMap(ReportEvidence(galleryMediaCount: 1, galleryPhotoMetadata: [
+        PhotoMetadata(takenAt: DateTime(2026, 11, 1, 9), lat: 14.5, lng: 121.0),
+      ]).toMap())!;
+      expect(stored.galleryPhotoMetadata.single.takenAt, DateTime(2026, 11, 1, 9));
+      expect(stored.galleryPhotoMetadata.single.lat, 14.5);
     });
   });
 
@@ -172,7 +204,7 @@ void main() {
       expect(found.isConfirmed, isTrue);
 
       final notFound =
-          CaseVerification.fromMap({'deskOutcome': 'needsRider', 'riderName': 'Ana', 'riderOutcome': 'notFound'})!;
+      CaseVerification.fromMap({'deskOutcome': 'needsRider', 'riderName': 'Ana', 'riderOutcome': 'notFound'})!;
       expect(notFound.isConfirmed, isFalse);
       expect(notFound.summary, 'Rider: animal not found');
     });

@@ -42,13 +42,13 @@ class ShelterLocationMissing implements Exception {
 
 class TransitCaseService {
   TransitCaseService(
-    this.caseId, {
-    FirebaseFirestore? firestore,
-    FirebaseStorage? storage,
-    FirebaseAuth? auth,
-  }) : _firestore = firestore,
-       _storage = storage,
-       _auth = auth;
+      this.caseId, {
+        FirebaseFirestore? firestore,
+        FirebaseStorage? storage,
+        FirebaseAuth? auth,
+      }) : _firestore = firestore,
+        _storage = storage,
+        _auth = auth;
 
   final String caseId;
   final FirebaseFirestore? _firestore;
@@ -102,9 +102,9 @@ class TransitCaseService {
   }
 
   Future<List<String>> uploadVerificationImages(
-    List<File?> images,
-    String type,
-  ) async {
+      List<File?> images,
+      String type,
+      ) async {
     final urls = <String>[];
     for (int i = 0; i < images.length; i++) {
       final f = images[i];
@@ -123,7 +123,9 @@ class TransitCaseService {
     });
   }
 
-  Future<void> acceptTreatment(List<String> clinicUrls) async {
+  /// Returns true when the transporter's trip ends here (a confirmed
+  /// adopter will collect the animal from the clinic, Rescue gaps 6/10).
+  Future<bool> acceptTreatment(List<String> clinicUrls) async {
     final data = await fetchCase();
 
     // The case never had its own shelter destination — resolve the
@@ -139,27 +141,32 @@ class TransitCaseService {
       throw const ShelterLocationMissing();
     }
 
+    final now = Timestamp.now();
     await _record('transit_treatment_accepted', next.label, {
       'status': next.status,
       'clinicVerificationUrls': clinicUrls,
-      ..._shelterFields(shelter),
+      if (next.completesTransit) ..._transitCompletedStamp else ..._shelterFields(shelter),
+      if (next.completesTransit) 'treatmentAcceptedAt': now,
     });
+    // The transporter is free again: their offer is completed.
+    if (next.completesTransit) await _closeOwnAssignment(data, status: 'completed', at: now);
 
     unawaited(
       logClinicDecision(
         placeId: data['dropoffPlaceId'] as String?,
         name:
-            (data['dropoffName'] ??
-                    data['dropoffAddress'] ??
-                    data['vetClinicAddress'] ??
-                    'Clinic')
-                .toString(),
+        (data['dropoffName'] ??
+            data['dropoffAddress'] ??
+            data['vetClinicAddress'] ??
+            'Clinic')
+            .toString(),
         address: clinicAddressFrom(data),
         lat: (data['dropoffLat'] as num?)?.toDouble(),
         lng: (data['dropoffLng'] as num?)?.toDouble(),
         accepted: true,
       ),
     );
+    return next.completesTransit;
   }
 
   Future<void> rejectTreatment(String reason) async {
@@ -279,8 +286,8 @@ class TransitCaseService {
 
     final loc = candidate['geometry']?['location'] as Map<String, dynamic>?;
     final newAddress =
-        (candidate['vicinity'] ?? candidate['name'] ?? 'Nearby Clinic')
-            .toString();
+    (candidate['vicinity'] ?? candidate['name'] ?? 'Nearby Clinic')
+        .toString();
     final newPlaceId = candidate['place_id'] as String?;
     final newName = (candidate['name'] ?? newAddress).toString();
 
@@ -299,8 +306,8 @@ class TransitCaseService {
   /// with coordinates (a name-only legacy location doesn't count: arrival
   /// is checked against the pin).
   Future<({String name, String? address, double lat, double lng})?> _shelterPin(
-    Map<String, dynamic> caseData,
-  ) async {
+      Map<String, dynamic> caseData,
+      ) async {
     final s = await OrganizationDirectoryRepository()
         .resolveShelterLocation(caseData['organizationId'] as String?);
     if (s == null || s.lat == null || s.lng == null) return null;
@@ -375,10 +382,10 @@ class TransitCaseService {
   /// staff can offer the case to someone else. Best effort: a failure here
   /// never undoes the case update already written.
   Future<void> _closeOwnAssignment(
-    Map<String, dynamic> caseData, {
-    required String status,
-    required Timestamp at,
-  }) async {
+      Map<String, dynamic> caseData, {
+        required String status,
+        required Timestamp at,
+      }) async {
     final assignmentId = caseData['currentAssignmentId'] as String?;
     if (assignmentId == null || assignmentId.isEmpty) return;
     try {
@@ -407,45 +414,45 @@ class TransitCaseService {
   Future<void> applyEndReason(EndReasonOutcome outcome) async {
     final serviceType = outcome.serviceType;
     final extra = <String, dynamic>{
-      'endReason': outcome.reasonText,
-      if (outcome.notes.isNotEmpty) 'endReasonNotes': outcome.notes,
-      // The specific service type the animal needs — this is what
-      // assign_rider_page.dart reads to show the org what to arrange
-      // and to weight vehicle-compatibility ranking for the next
-      // transporter offered the case.
-      'endReasonServiceType': ?serviceType,
-      // Consumed by expireStaleReporterResponses; cleared automatically
-      // once the reporter replies (see TrackCasePage's reporter-response
-      // handling) or the case is manually resolved by staff.
-      if (outcome.awaitingReporter)
-        'awaitingReporterSince': FieldValue.serverTimestamp(),
-      // So a future reliability-score feature can exclude this pickup
-      // from counting against the transporter — verified here as an
-      // animal-safety/capability escalation, not a no-show or missed job.
-      if (outcome.excludeFromTransporterFault)
-        'transporterFaultVerified': false,
-      // Deceased / Vehicle breakdown / Other: notifyStaffOfTransitEnd
-      // (functions/index.js) alerts staff when transitEndedAt changes.
-      if (outcome.kind != null) 'endReasonKind': outcome.kind,
-      if (outcome.kind != null) 'transitEndedAt': FieldValue.serverTimestamp(),
-      // Vehicle breakdown hands the case back to Assign Transporter: this
-      // transporter no longer holds it (their trip stats and location
-      // pushes key on these), and the next accept sets them again.
-      if (outcome.kind == kEndKindBreakdown) ...{
-        'riderId': null,
-        'assignedVolunteerId': null,
-      },
+    'endReason': outcome.reasonText,
+    if (outcome.notes.isNotEmpty) 'endReasonNotes': outcome.notes,
+    // The specific service type the animal needs — this is what
+    // assign_rider_page.dart reads to show the org what to arrange
+    // and to weight vehicle-compatibility ranking for the next
+    // transporter offered the case.
+    'endReasonServiceType': ?serviceType,
+    // Consumed by expireStaleReporterResponses; cleared automatically
+    // once the reporter replies (see TrackCasePage's reporter-response
+    // handling) or the case is manually resolved by staff.
+    if (outcome.awaitingReporter)
+    'awaitingReporterSince': FieldValue.serverTimestamp(),
+    // So a future reliability-score feature can exclude this pickup
+    // from counting against the transporter — verified here as an
+    // animal-safety/capability escalation, not a no-show or missed job.
+    if (outcome.excludeFromTransporterFault)
+    'transporterFaultVerified': false,
+    // Deceased / Vehicle breakdown / Other: notifyStaffOfTransitEnd
+    // (functions/index.js) alerts staff when transitEndedAt changes.
+    if (outcome.kind != null) 'endReasonKind': outcome.kind,
+    if (outcome.kind != null) 'transitEndedAt': FieldValue.serverTimestamp(),
+    // Vehicle breakdown hands the case back to Assign Transporter: this
+    // transporter no longer holds it (their trip stats and location
+    // pushes key on these), and the next accept sets them again.
+    if (outcome.kind == kEndKindBreakdown) ...{
+    'riderId': null,
+    'assignedVolunteerId': null,
+    },
     };
 
     final data = outcome.isTerminal ? await fetchCase() : null;
     await _record('transit_ended_early', outcome.statusLabel, {
-      'status': outcome.status,
-      ...extra,
+    'status': outcome.status,
+    ...extra,
     });
     // The trip is over for this transporter: free them, and free the case
     // for a new offer (Vehicle breakdown goes straight back to Assign).
     if (data != null) {
-      await _closeOwnAssignment(data, status: 'cancelled', at: Timestamp.now());
+    await _closeOwnAssignment(data, status: 'cancelled', at: Timestamp.now());
     }
   }
 
@@ -453,8 +460,8 @@ class TransitCaseService {
     final uid = _au.currentUser!.uid;
     final userDoc = await _db.collection('users').doc(uid).get();
     final name =
-        '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
-            .trim();
+    '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
+        .trim();
     await caseRef.collection('messages').add({
       'senderId': uid,
       'senderName': name.isEmpty ? 'Rider' : name,
@@ -493,35 +500,35 @@ class TransitCaseService {
         }
 
         tx.set(ref, {
-          'name': name,
-          'address': address,
-          'lat': ?lat,
-          'lng': ?lng,
-          'declineReasonTally': tally,
-          'totalDeclines':
-              ((data['totalDeclines'] as num?)?.toInt() ?? 0) +
-              (accepted ? 0 : 1),
-          'totalAccepted':
-              ((data['totalAccepted'] as num?)?.toInt() ?? 0) +
-              (accepted ? 1 : 0),
-          'declineLog': FieldValue.arrayUnion([
-            if (!accepted)
-              {
-                'reason': reason,
-                'caseId': caseId,
-                'timestamp': Timestamp.now(),
-              },
-          ]),
-          'lastUpdated': Timestamp.now(),
+        'name': name,
+        'address': address,
+        'lat': ?lat,
+        'lng': ?lng,
+        'declineReasonTally': tally,
+        'totalDeclines':
+        ((data['totalDeclines'] as num?)?.toInt() ?? 0) +
+        (accepted ? 0 : 1),
+        'totalAccepted':
+        ((data['totalAccepted'] as num?)?.toInt() ?? 0) +
+        (accepted ? 1 : 0),
+        'declineLog': FieldValue.arrayUnion([
+        if (!accepted)
+        {
+        'reason': reason,
+        'caseId': caseId,
+        'timestamp': Timestamp.now(),
+        },
+        ]),
+        'lastUpdated': Timestamp.now(),
         }, SetOptions(merge: true));
       });
     } catch (_) {}
   }
 
   Future<Map<String, dynamic>?> fetchClinicProfile(
-    String? placeId,
-    String address,
-  ) async {
+      String? placeId,
+      String address,
+      ) async {
     try {
       final id = clinicProfileId(placeId: placeId, address: address);
       final snap = await _db.collection('clinic_profiles').doc(id).get();

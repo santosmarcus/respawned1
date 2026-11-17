@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/features/adoption/community_adoption_checkins.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
@@ -56,48 +58,48 @@ enum _PageTab {
   withdrawn;
 
   String get label => switch (this) {
-        _PageTab.pending => 'Pending',
-        _PageTab.interview => 'Interview',
-        // Label only — the underlying AdoptionStatus.approved value/query is
-        // unchanged (see queryStatus below); applications in this tab are
-        // approved and awaiting release/handover, which "Release" names
-        // more accurately than "Approved" did.
-        _PageTab.approved => 'Release',
-        _PageTab.adopted => 'Adopted',
-        _PageTab.complete => 'Complete',
-        _PageTab.returns_ => 'Returns',
-        _PageTab.rejected => 'Rejected',
-        _PageTab.withdrawn => 'Withdrawn',
-      };
+    _PageTab.pending => 'Pending',
+    _PageTab.interview => 'Interview',
+  // Label only — the underlying AdoptionStatus.approved value/query is
+  // unchanged (see queryStatus below); applications in this tab are
+  // approved and awaiting release/handover, which "Release" names
+  // more accurately than "Approved" did.
+    _PageTab.approved => 'Release',
+    _PageTab.adopted => 'Adopted',
+    _PageTab.complete => 'Complete',
+    _PageTab.returns_ => 'Returns',
+    _PageTab.rejected => 'Rejected',
+    _PageTab.withdrawn => 'Withdrawn',
+  };
 
   String get emptyMessage => switch (this) {
-        _PageTab.pending => 'No pending applications',
-        _PageTab.interview => 'No scheduled interviews',
-        _PageTab.approved => 'No applications awaiting release',
-        _PageTab.adopted => 'No adoptions in active monitoring',
-        _PageTab.complete => 'No completed post-adoption monitoring yet',
-        _PageTab.returns_ => 'No return requests',
-        _PageTab.rejected => 'No rejected applications',
-        _PageTab.withdrawn => 'No withdrawn applications',
-      };
+    _PageTab.pending => 'No pending applications',
+    _PageTab.interview => 'No scheduled interviews',
+    _PageTab.approved => 'No applications awaiting release',
+    _PageTab.adopted => 'No adoptions in active monitoring',
+    _PageTab.complete => 'No completed post-adoption monitoring yet',
+    _PageTab.returns_ => 'No return requests',
+    _PageTab.rejected => 'No rejected applications',
+    _PageTab.withdrawn => 'No withdrawn applications',
+  };
 
   // Adopted, Complete and Returns all draw from the same AdoptionStatus.
   // adopted query bucket (see the class doc comment) and are split
   // client-side by classifyAdoptionLifecycle/isReturnActive — never a
   // separate Firestore query per tab.
   AdoptionStatus get queryStatus => switch (this) {
-        _PageTab.pending => AdoptionStatus.pending,
-        _PageTab.interview => AdoptionStatus.interview,
-        _PageTab.approved => AdoptionStatus.approved,
-        _PageTab.adopted => AdoptionStatus.adopted,
-        _PageTab.complete => AdoptionStatus.adopted,
-        _PageTab.returns_ => AdoptionStatus.adopted,
-        _PageTab.rejected => AdoptionStatus.rejected,
-        _PageTab.withdrawn => AdoptionStatus.withdrawn,
-      };
+    _PageTab.pending => AdoptionStatus.pending,
+    _PageTab.interview => AdoptionStatus.interview,
+    _PageTab.approved => AdoptionStatus.approved,
+    _PageTab.adopted => AdoptionStatus.adopted,
+    _PageTab.complete => AdoptionStatus.adopted,
+    _PageTab.returns_ => AdoptionStatus.adopted,
+    _PageTab.rejected => AdoptionStatus.rejected,
+    _PageTab.withdrawn => AdoptionStatus.withdrawn,
+  };
 
   static _PageTab fromStatus(AdoptionStatus status) => values.firstWhere(
-      (t) => t.queryStatus == status && t != _PageTab.returns_ && t != _PageTab.complete,
+          (t) => t.queryStatus == status && t != _PageTab.returns_ && t != _PageTab.complete,
       orElse: () => _PageTab.pending);
 }
 
@@ -115,16 +117,16 @@ enum _SortOption {
 
 extension on _SortOption {
   String get label => switch (this) {
-        _SortOption.newestSubmitted => 'Newest Submitted',
-        _SortOption.oldestSubmitted => 'Oldest Submitted',
-        _SortOption.animalNameAsc => 'Animal Name A–Z',
-        _SortOption.animalNameDesc => 'Animal Name Z–A',
-        _SortOption.applicantNameAsc => 'Applicant Name A–Z',
-        _SortOption.applicantNameDesc => 'Applicant Name Z–A',
-        _SortOption.interviewSoonest => 'Interview Date Soonest',
-        _SortOption.interviewLatest => 'Interview Date Latest',
-        _SortOption.recentlyUpdated => 'Recently Updated',
-      };
+    _SortOption.newestSubmitted => 'Newest Submitted',
+    _SortOption.oldestSubmitted => 'Oldest Submitted',
+    _SortOption.animalNameAsc => 'Animal Name A–Z',
+    _SortOption.animalNameDesc => 'Animal Name Z–A',
+    _SortOption.applicantNameAsc => 'Applicant Name A–Z',
+    _SortOption.applicantNameDesc => 'Applicant Name Z–A',
+    _SortOption.interviewSoonest => 'Interview Date Soonest',
+    _SortOption.interviewLatest => 'Interview Date Latest',
+    _SortOption.recentlyUpdated => 'Recently Updated',
+  };
 }
 
 /// One practical, comprehensive filter set on top of the top-level status
@@ -155,17 +157,17 @@ class _AdoptionFilters {
   });
 
   int get activeCount => [
-        appointmentType,
-        reviewState,
-        submissionBucket,
-        interviewBucket,
-        homePhotosProvided,
-        documentsComplete,
-      ].where((v) => v != null).length;
+    appointmentType,
+    reviewState,
+    submissionBucket,
+    interviewBucket,
+    homePhotosProvided,
+    documentsComplete,
+  ].where((v) => v != null).length;
 
   bool _inRange(DateTime d, DateTimeRange r) =>
       !d.isBefore(DateTime(r.start.year, r.start.month, r.start.day)) &&
-      d.isBefore(DateTime(r.end.year, r.end.month, r.end.day).add(const Duration(days: 1)));
+          d.isBefore(DateTime(r.end.year, r.end.month, r.end.day).add(const Duration(days: 1)));
 
   bool _matchesDateBucket(DateTime? d, String bucket, DateTimeRange? customRange) {
     if (bucket == 'custom') return d != null && customRange != null && _inRange(d, customRange);
@@ -325,15 +327,15 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, setSheetState) {
           Widget sectionTitle(String label) => Padding(
-                padding: const EdgeInsets.only(top: 14, bottom: 6),
-                child: Text(label, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-              );
+            padding: const EdgeInsets.only(top: 14, bottom: 6),
+            child: Text(label, style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+          );
           Widget choice(String label, bool selected, VoidCallback onTap) => ChoiceChip(
-                label: Text(label),
-                selected: selected,
-                selectedColor: AppColors.yellowrspwn,
-                onSelected: (_) => onTap(),
-              );
+            label: Text(label),
+            selected: selected,
+            selectedColor: AppColors.yellowrspwn,
+            onSelected: (_) => onTap(),
+          );
 
           return DraggableScrollableSheet(
             initialChildSize: 0.85,
@@ -373,33 +375,33 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                         sectionTitle('Appointment type'),
                         Wrap(spacing: 8, runSpacing: 8, children: [
                           choice('Any', filters.appointmentType == null,
-                              () => setSheetState(() => filters = _copy(filters, clearAppointmentType: true))),
+                                  () => setSheetState(() => filters = _copy(filters, clearAppointmentType: true))),
                           for (final t in kInterviewTypes)
                             choice(t, filters.appointmentType == t,
-                                () => setSheetState(() => filters = _copy(filters, appointmentType: t))),
+                                    () => setSheetState(() => filters = _copy(filters, appointmentType: t))),
                         ]),
                         sectionTitle('Review state'),
                         Wrap(spacing: 8, runSpacing: 8, children: [
                           choice('Any', filters.reviewState == null, () => setSheetState(() => filters = _copy(filters, clearReviewState: true))),
                           choice('Not reviewed', filters.reviewState == 'notReviewed',
-                              () => setSheetState(() => filters = _copy(filters, reviewState: 'notReviewed'))),
+                                  () => setSheetState(() => filters = _copy(filters, reviewState: 'notReviewed'))),
                           choice('Reviewed', filters.reviewState == 'reviewed',
-                              () => setSheetState(() => filters = _copy(filters, reviewState: 'reviewed'))),
+                                  () => setSheetState(() => filters = _copy(filters, reviewState: 'reviewed'))),
                           choice('Interview completed', filters.reviewState == 'interviewCompleted',
-                              () => setSheetState(() => filters = _copy(filters, reviewState: 'interviewCompleted'))),
+                                  () => setSheetState(() => filters = _copy(filters, reviewState: 'interviewCompleted'))),
                           choice('No-show', filters.reviewState == 'noShow',
-                              () => setSheetState(() => filters = _copy(filters, reviewState: 'noShow'))),
+                                  () => setSheetState(() => filters = _copy(filters, reviewState: 'noShow'))),
                         ]),
                         sectionTitle('Submission date'),
                         Wrap(spacing: 8, runSpacing: 8, children: [
                           choice('Any', filters.submissionBucket == null,
-                              () => setSheetState(() => filters = _copy(filters, clearSubmissionBucket: true))),
+                                  () => setSheetState(() => filters = _copy(filters, clearSubmissionBucket: true))),
                           choice('Today', filters.submissionBucket == 'today',
-                              () => setSheetState(() => filters = _copy(filters, submissionBucket: 'today'))),
+                                  () => setSheetState(() => filters = _copy(filters, submissionBucket: 'today'))),
                           choice('Last 7 days', filters.submissionBucket == 'last7',
-                              () => setSheetState(() => filters = _copy(filters, submissionBucket: 'last7'))),
+                                  () => setSheetState(() => filters = _copy(filters, submissionBucket: 'last7'))),
                           choice('Last 30 days', filters.submissionBucket == 'last30',
-                              () => setSheetState(() => filters = _copy(filters, submissionBucket: 'last30'))),
+                                  () => setSheetState(() => filters = _copy(filters, submissionBucket: 'last30'))),
                           choice('Custom range', filters.submissionBucket == 'custom', () async {
                             final range = await showDateRangePicker(
                                 context: context, firstDate: DateTime(2015), lastDate: DateTime.now().add(const Duration(days: 1)));
@@ -409,13 +411,13 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                         sectionTitle('Interview date'),
                         Wrap(spacing: 8, runSpacing: 8, children: [
                           choice('Any', filters.interviewBucket == null,
-                              () => setSheetState(() => filters = _copy(filters, clearInterviewBucket: true))),
+                                  () => setSheetState(() => filters = _copy(filters, clearInterviewBucket: true))),
                           choice('Upcoming', filters.interviewBucket == 'upcoming',
-                              () => setSheetState(() => filters = _copy(filters, interviewBucket: 'upcoming'))),
+                                  () => setSheetState(() => filters = _copy(filters, interviewBucket: 'upcoming'))),
                           choice('Past', filters.interviewBucket == 'past',
-                              () => setSheetState(() => filters = _copy(filters, interviewBucket: 'past'))),
+                                  () => setSheetState(() => filters = _copy(filters, interviewBucket: 'past'))),
                           choice('No interview scheduled', filters.interviewBucket == 'notScheduled',
-                              () => setSheetState(() => filters = _copy(filters, interviewBucket: 'notScheduled'))),
+                                  () => setSheetState(() => filters = _copy(filters, interviewBucket: 'notScheduled'))),
                           choice('Custom range', filters.interviewBucket == 'custom', () async {
                             final range = await showDateRangePicker(
                                 context: context, firstDate: DateTime(2015), lastDate: DateTime.now().add(const Duration(days: 365)));
@@ -425,20 +427,20 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
                         sectionTitle('Home photos'),
                         Wrap(spacing: 8, runSpacing: 8, children: [
                           choice('Any', filters.homePhotosProvided == null,
-                              () => setSheetState(() => filters = _copy(filters, clearHomePhotos: true))),
+                                  () => setSheetState(() => filters = _copy(filters, clearHomePhotos: true))),
                           choice('Provided', filters.homePhotosProvided == true,
-                              () => setSheetState(() => filters = _copy(filters, homePhotosProvided: true))),
+                                  () => setSheetState(() => filters = _copy(filters, homePhotosProvided: true))),
                           choice('Not provided', filters.homePhotosProvided == false,
-                              () => setSheetState(() => filters = _copy(filters, homePhotosProvided: false))),
+                                  () => setSheetState(() => filters = _copy(filters, homePhotosProvided: false))),
                         ]),
                         sectionTitle('Required documents'),
                         Wrap(spacing: 8, runSpacing: 8, children: [
                           choice('Any', filters.documentsComplete == null,
-                              () => setSheetState(() => filters = _copy(filters, clearDocumentsComplete: true))),
+                                  () => setSheetState(() => filters = _copy(filters, clearDocumentsComplete: true))),
                           choice('Complete', filters.documentsComplete == true,
-                              () => setSheetState(() => filters = _copy(filters, documentsComplete: true))),
+                                  () => setSheetState(() => filters = _copy(filters, documentsComplete: true))),
                           choice('Incomplete', filters.documentsComplete == false,
-                              () => setSheetState(() => filters = _copy(filters, documentsComplete: false))),
+                                  () => setSheetState(() => filters = _copy(filters, documentsComplete: false))),
                         ]),
                         const SizedBox(height: 12),
                       ],
@@ -471,22 +473,22 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
   // are meaningful "any" values, not "unset") — this local helper lets the
   // sheet clear one field at a time without touching the others.
   _AdoptionFilters _copy(
-    _AdoptionFilters f, {
-    String? appointmentType,
-    bool clearAppointmentType = false,
-    String? reviewState,
-    bool clearReviewState = false,
-    String? submissionBucket,
-    DateTimeRange? submissionRange,
-    bool clearSubmissionBucket = false,
-    String? interviewBucket,
-    DateTimeRange? interviewRange,
-    bool clearInterviewBucket = false,
-    bool? homePhotosProvided,
-    bool clearHomePhotos = false,
-    bool? documentsComplete,
-    bool clearDocumentsComplete = false,
-  }) =>
+      _AdoptionFilters f, {
+        String? appointmentType,
+        bool clearAppointmentType = false,
+        String? reviewState,
+        bool clearReviewState = false,
+        String? submissionBucket,
+        DateTimeRange? submissionRange,
+        bool clearSubmissionBucket = false,
+        String? interviewBucket,
+        DateTimeRange? interviewRange,
+        bool clearInterviewBucket = false,
+        bool? homePhotosProvided,
+        bool clearHomePhotos = false,
+        bool? documentsComplete,
+        bool clearDocumentsComplete = false,
+      }) =>
       _AdoptionFilters(
         appointmentType: clearAppointmentType ? null : (appointmentType ?? f.appointmentType),
         reviewState: clearReviewState ? null : (reviewState ?? f.reviewState),
@@ -552,9 +554,9 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
     final apps = switch (_tab) {
       _PageTab.returns_ => statusApps.where((a) => isReturnActive(a.returnRequest)).toList(),
       _PageTab.adopted =>
-        statusApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted).toList(),
+          statusApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted).toList(),
       _PageTab.complete =>
-        statusApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete).toList(),
+          statusApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete).toList(),
       _ => statusApps,
     };
     List<AdoptionApplication> filtered;
@@ -586,9 +588,9 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
       return switch (t) {
         _PageTab.returns_ => tabApps.where((a) => isReturnActive(a.returnRequest)).length,
         _PageTab.adopted =>
-          tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted).length,
+        tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted).length,
         _PageTab.complete =>
-          tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete).length,
+        tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete).length,
         _ => tabApps.length,
       };
     }
@@ -603,6 +605,20 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
         // from an Animal Record keeps its own context and a back arrow.
         title: isRootModule ? 'Adoptions' : null,
         showDrawerButton: isRootModule,
+        // Adoption gap 10: community adoptions in this organization's area.
+        actions: [
+          if (isRootModule)
+            IconButton(
+              tooltip: 'Community adoptions',
+              icon: const Icon(Icons.diversity_1_outlined),
+              onPressed: () async {
+                final orgId = await ref.read(currentOrganizationIdProvider.future);
+                if (orgId == null || !context.mounted) return;
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => CommunityAdoptionsStaffPage(organizationId: orgId)));
+              },
+            ),
+        ],
         bottom: AdminTabBar(
           tabs: [for (final t in _PageTab.values) AdminTab(t.label, count: tabCount(t))],
           selectedIndex: _tab.index,
@@ -628,77 +644,77 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
               index: _tab.index,
               count: _PageTab.values.length,
               onSelected: selectTab,
-            // Pull to Refresh spec §13 — same manual re-subscribe the
-            // existing "Retry" button already performs on error, now also
-            // reachable via a pull gesture; never a second/duplicate
-            // listener.
-            child: RefreshIndicator(
-              onRefresh: () async => ref.invalidate(adoptionsByStatusesProvider(statusFilter(_tab.queryStatus))),
-              child: appsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.lock_outline, size: 32, color: AppColors.textSecondary),
-                      const SizedBox(height: 10),
-                      Text(_friendlyAdoptionsError(e),
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                      const SizedBox(height: 14),
-                      OutlinedButton(
-                        // Manual re-subscribe of only this tab's family
-                        // instance — never an automatic retry loop.
-                        onPressed: () => ref.invalidate(adoptionsByStatusesProvider(statusFilter(_tab.queryStatus))),
-                        child: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                ),
-                ],
-              ),
-              data: (_) {
-                // `sorted` already reflects the search/animalRecordId
-                // filter computed above — the exact same list this
-                // branch's item count is built from, never a second,
-                // independently-filtered value.
-                if (sorted.isEmpty) {
-                  return ListView(
+              // Pull to Refresh spec §13 — same manual re-subscribe the
+              // existing "Retry" button already performs on error, now also
+              // reachable via a pull gesture; never a second/duplicate
+              // listener.
+              child: RefreshIndicator(
+                onRefresh: () async => ref.invalidate(adoptionsByStatusesProvider(statusFilter(_tab.queryStatus))),
+                child: appsAsync.when(
+                  loading: () => const Center(child: CircularProgressIndicator()),
+                  error: (e, _) => ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 80),
-                        child: Center(
-                          child: Text(_tab.emptyMessage, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.lock_outline, size: 32, color: AppColors.textSecondary),
+                            const SizedBox(height: 10),
+                            Text(_friendlyAdoptionsError(e),
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                            const SizedBox(height: 14),
+                            OutlinedButton(
+                              // Manual re-subscribe of only this tab's family
+                              // instance — never an automatic retry loop.
+                              onPressed: () => ref.invalidate(adoptionsByStatusesProvider(statusFilter(_tab.queryStatus))),
+                              child: const Text('Retry'),
+                            ),
+                          ],
                         ),
                       ),
                     ],
-                  );
-                }
-                return ListView.separated(
-                  // Navigation State spec §11 — keyed per tab so each keeps
-                  // its own scroll offset.
-                  key: PageStorageKey('adoption_review_list_${_tab.name}'),
-                  padding: const EdgeInsets.all(16),
-                  itemCount: sorted.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 12),
-                  itemBuilder: (context, i) => switch (_tab) {
-                    _PageTab.returns_ => _ReturnCard(application: sorted[i]),
-                    // Navigation spec (§5/§6) — Adopted/Complete cards route
-                    // straight to Post-Adoption; the old application-review
-                    // page is only a secondary "View Application" action.
-                    _PageTab.adopted => _AdoptedCard(application: sorted[i]),
-                    _PageTab.complete => _CompleteCard(application: sorted[i]),
-                    _ => _ApplicationCard(application: sorted[i]),
+                  ),
+                  data: (_) {
+                    // `sorted` already reflects the search/animalRecordId
+                    // filter computed above — the exact same list this
+                    // branch's item count is built from, never a second,
+                    // independently-filtered value.
+                    if (sorted.isEmpty) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 80),
+                            child: Center(
+                              child: Text(_tab.emptyMessage, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+                    return ListView.separated(
+                      // Navigation State spec §11 — keyed per tab so each keeps
+                      // its own scroll offset.
+                      key: PageStorageKey('adoption_review_list_${_tab.name}'),
+                      padding: const EdgeInsets.all(16),
+                      itemCount: sorted.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, i) => switch (_tab) {
+                        _PageTab.returns_ => _ReturnCard(application: sorted[i]),
+                      // Navigation spec (§5/§6) — Adopted/Complete cards route
+                      // straight to Post-Adoption; the old application-review
+                      // page is only a secondary "View Application" action.
+                        _PageTab.adopted => _AdoptedCard(application: sorted[i]),
+                        _PageTab.complete => _CompleteCard(application: sorted[i]),
+                        _ => _ApplicationCard(application: sorted[i]),
+                      },
+                    );
                   },
-                );
-              },
+                ),
               ),
-            ),
             ),
           ),
         ],
@@ -716,12 +732,12 @@ class _ReturnCard extends ConsumerWidget {
   const _ReturnCard({required this.application});
 
   Color _returnStatusColor(ReturnRequestStatus s) => switch (s) {
-        ReturnRequestStatus.pendingReview => AppColors.slaterspwn,
-        ReturnRequestStatus.approved || ReturnRequestStatus.retrievalUnscheduled => AppColors.yellowrspwn,
-        ReturnRequestStatus.retrievalScheduled => AppColors.lavenderrspwn,
-        ReturnRequestStatus.retrieved || ReturnRequestStatus.intake => AppColors.greenrspwn,
-        ReturnRequestStatus.declined || ReturnRequestStatus.cancelled => AppColors.error,
-      };
+    ReturnRequestStatus.pendingReview => AppColors.slaterspwn,
+    ReturnRequestStatus.approved || ReturnRequestStatus.retrievalUnscheduled => AppColors.yellowrspwn,
+    ReturnRequestStatus.retrievalScheduled => AppColors.lavenderrspwn,
+    ReturnRequestStatus.retrieved || ReturnRequestStatus.intake => AppColors.greenrspwn,
+    ReturnRequestStatus.declined || ReturnRequestStatus.cancelled => AppColors.error,
+  };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -782,11 +798,11 @@ class _ReturnCard extends ConsumerWidget {
   }
 
   Widget _returnPlaceholder() => Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
-        child: const Icon(Icons.pets, color: AppColors.textSecondary),
-      );
+    width: 56,
+    height: 56,
+    decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+    child: const Icon(Icons.pets, color: AppColors.textSecondary),
+  );
 }
 
 class _ApplicationCard extends ConsumerWidget {
@@ -794,13 +810,13 @@ class _ApplicationCard extends ConsumerWidget {
   const _ApplicationCard({required this.application});
 
   Color _statusColor(AdoptionStatus s) => switch (s) {
-        AdoptionStatus.pending => AppColors.slaterspwn,
-        AdoptionStatus.interview => AppColors.yellowrspwn,
-        AdoptionStatus.approved => AppColors.greenrspwn,
-        AdoptionStatus.adopted => AppColors.lavenderrspwn,
-        AdoptionStatus.rejected => AppColors.error,
-        AdoptionStatus.withdrawn => AppColors.tearspwn,
-      };
+    AdoptionStatus.pending => AppColors.slaterspwn,
+    AdoptionStatus.interview => AppColors.yellowrspwn,
+    AdoptionStatus.approved => AppColors.greenrspwn,
+    AdoptionStatus.adopted => AppColors.lavenderrspwn,
+    AdoptionStatus.rejected => AppColors.error,
+    AdoptionStatus.withdrawn => AppColors.tearspwn,
+  };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -869,7 +885,7 @@ class _ApplicationCard extends ConsumerWidget {
                   if (application.appointmentDate != null)
                     Text(
                         'Interview: ${formatDate(application.appointmentDate!)}'
-                        '${application.appointmentTime != null ? ' · ${application.appointmentTime}' : ''}',
+                            '${application.appointmentTime != null ? ' · ${application.appointmentTime}' : ''}',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
                   Container(
@@ -915,11 +931,11 @@ class _ApplicationCard extends ConsumerWidget {
   }
 
   Widget _placeholder() => Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
-        child: const Icon(Icons.pets, color: AppColors.textSecondary),
-      );
+    width: 56,
+    height: 56,
+    decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+    child: const Icon(Icons.pets, color: AppColors.textSecondary),
+  );
 }
 
 String _dateLabel(DateTime? d) => d == null ? '-' : formatDate(d);
@@ -935,11 +951,11 @@ String _dateLabel(DateTime? d) => d == null ? '-' : formatDate(d);
 }
 
 Widget _monitoringCardPlaceholder() => Container(
-      width: 56,
-      height: 56,
-      decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
-      child: const Icon(Icons.pets, color: AppColors.textSecondary),
-    );
+  width: 56,
+  height: 56,
+  decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+  child: const Icon(Icons.pets, color: AppColors.textSecondary),
+);
 
 /// "View Application" secondary action — every monitoring card's primary
 /// tap goes to Post-Adoption (spec §5/§6); this is the only way back to the

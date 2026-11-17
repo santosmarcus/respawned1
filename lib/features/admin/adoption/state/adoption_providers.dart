@@ -6,7 +6,7 @@ import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 
 final adoptionApplicationRepositoryProvider =
-    Provider<AdoptionApplicationRepository>((ref) => AdoptionApplicationRepository());
+Provider<AdoptionApplicationRepository>((ref) => AdoptionApplicationRepository());
 
 final adoptionApplicationProvider = StreamProvider.family<AdoptionApplication?, String>((ref, id) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamApplication(id);
@@ -15,10 +15,18 @@ final adoptionApplicationProvider = StreamProvider.family<AdoptionApplication?, 
 // autoDispose so a listener is torn down once nothing is watching it
 // anymore, instead of staying subscribed to Firestore forever.
 final adoptionsByStatusesProvider =
-    StreamProvider.family.autoDispose<List<AdoptionApplication>, List<AdoptionStatus>>((ref, statuses) {
+StreamProvider.family.autoDispose<List<AdoptionApplication>, List<AdoptionStatus>>((ref, statuses) {
   final repo = ref.watch(adoptionApplicationRepositoryProvider);
-  return _withOrg(ref, (orgId) => repo.streamByStatuses(statuses, organizationId: orgId));
+  return _withOrg(ref, (orgId) => repo.streamByStatuses(statuses, organizationId: orgId))
+      .map((list) => list.where(isInAdoptionQueues).toList());
 });
+
+/// Rescue gaps 6/10: an adoption request for a rescued animal is reviewed
+/// and confirmed on the case's Rescue Details. It joins the Adoptions
+/// queues once it is linked to an animal record (at pickup, or when the
+/// animal is already in the shelter), where Release Details finishes it.
+bool isInAdoptionQueues(AdoptionApplication a) =>
+    a.raw['source'] != 'rescue_case' || (a.animalRecordId?.isNotEmpty ?? false);
 
 /// Stable, cached single-status lists. [adoptionsByStatusesProvider] is a
 /// StreamProvider.family keyed by a List, and Dart's List uses identity
@@ -43,13 +51,13 @@ final allAdoptionsProvider = StreamProvider.autoDispose<List<AdoptionApplication
 });
 
 final adoptionsForAnimalProvider =
-    StreamProvider.autoDispose.family<List<AdoptionApplication>, String>((ref, animalId) {
+StreamProvider.autoDispose.family<List<AdoptionApplication>, String>((ref, animalId) {
   final repo = ref.watch(adoptionApplicationRepositoryProvider);
   return _withOrg(ref, (orgId) => repo.streamForAnimal(animalId, organizationId: orgId));
 });
 
 final adoptionsForApplicantProvider =
-    StreamProvider.autoDispose.family<List<AdoptionApplication>, String>((ref, adopterId) {
+StreamProvider.autoDispose.family<List<AdoptionApplication>, String>((ref, adopterId) {
   final repo = ref.watch(adoptionApplicationRepositoryProvider);
   return _withOrg(ref, (orgId) => repo.streamForApplicant(adopterId, organizationId: orgId));
 });

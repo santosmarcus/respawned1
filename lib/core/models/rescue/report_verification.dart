@@ -1,3 +1,4 @@
+import 'package:respawnd1/core/utils/photo_metadata.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/media_ref.dart';
@@ -59,7 +60,12 @@ class ReportEvidence {
     this.deviceLng,
     this.deviceAccuracyM,
     this.deviceFixAt,
+    this.galleryPhotoMetadata = const [],
   });
+
+  /// Rescue gap 7: capture time/place read from each gallery photo file
+  /// (empty entries for photos with no EXIF).
+  final List<PhotoMetadata> galleryPhotoMetadata;
 
   /// Photos and videos taken inside the report form.
   final int cameraMediaCount;
@@ -87,18 +93,23 @@ class ReportEvidence {
       deviceLng: _double(raw['deviceLng']),
       deviceAccuracyM: _double(raw['deviceAccuracyM']),
       deviceFixAt: _date(raw['deviceFixAt']),
+      galleryPhotoMetadata: [
+        for (final m in (raw['galleryPhotoMetadata'] as List? ?? const [])) PhotoMetadata.fromMap(m) ?? const PhotoMetadata(),
+      ],
     );
   }
 
   Map<String, dynamic> toMap() => {
-        'cameraMediaCount': cameraMediaCount,
-        'galleryMediaCount': galleryMediaCount,
-        'pinSource': ?pinSource?.name,
-        'deviceLat': ?deviceLat,
-        'deviceLng': ?deviceLng,
-        'deviceAccuracyM': ?deviceAccuracyM,
-        if (deviceFixAt != null) 'deviceFixAt': Timestamp.fromDate(deviceFixAt!),
-      };
+  if (galleryPhotoMetadata.isNotEmpty)
+  'galleryPhotoMetadata': [for (final m in galleryPhotoMetadata) m.toMap()],
+  'cameraMediaCount': cameraMediaCount,
+  'galleryMediaCount': galleryMediaCount,
+  'pinSource': ?pinSource?.name,
+  'deviceLat': ?deviceLat,
+  'deviceLng': ?deviceLng,
+  'deviceAccuracyM': ?deviceAccuracyM,
+  if (deviceFixAt != null) 'deviceFixAt': Timestamp.fromDate(deviceFixAt!),
+};
 }
 
 /// How much a single check supports the report.
@@ -172,8 +183,48 @@ List<EvidenceFlag> evidenceFlags(ReportEvidence? evidence, {double? pinLat, doub
       ));
     }
   }
+
+  // Rescue gap 7: what the gallery photo files themselves say.
+  final meta = evidence.galleryPhotoMetadata.where((m) => !m.isEmpty).toList();
+  if (evidence.galleryMediaCount > 0) {
+    if (meta.isEmpty) {
+      flags.add(const EvidenceFlag(
+        EvidenceLevel.unknown,
+        'Gallery photos carry no capture details',
+        'No time or place is stored in the files (screenshots and forwarded photos lose them).',
+      ));
+    } else {
+      final now = DateTime.now();
+      final old = meta.where((m) => m.takenAt != null && now.difference(m.takenAt!).inHours > 48).length;
+      final distances = [
+      for (final m in meta) ?metresBetween(m.lat, m.lng, pinLat, pinLng),
+  ];
+  final far = distances.where((d) => d > kAtLocationMetres).length;
+  final oldest = meta.map((m) => m.takenAt).whereType<DateTime>().fold<DateTime?>(
+  null, (a, b) => a == null || b.isBefore(a) ? b : a);
+  if (old == 0 && far == 0) {
+  flags.add(EvidenceFlag(
+  EvidenceLevel.supports,
+  'Gallery photos were taken recently${distances.isEmpty ? '' : ' at the location'}',
+  oldest == null ? 'Capture details match the report.' : 'Oldest taken ${formatDistanceInTime(now.difference(oldest))} ago.',
+  ));
+  } else {
+  flags.add(EvidenceFlag(
+  far > 0 ? EvidenceLevel.concern : EvidenceLevel.caution,
+  [
+  if (old > 0) '$old photo${old == 1 ? '' : 's'} older than 2 days',
+  if (far > 0) '$far taken away from the pin',
+  ].join(', '),
+  'From the capture time and place stored in the photo files.',
+  ));
+  }
+}
+}
   return flags;
 }
+
+String formatDistanceInTime(Duration d) =>
+    d.inDays >= 1 ? '${d.inDays} day${d.inDays == 1 ? '' : 's'}' : (d.inHours >= 1 ? '${d.inHours} h' : '${d.inMinutes} min');
 
 // ---- Reporter track record -------------------------------------------------
 
@@ -467,11 +518,11 @@ class CaseVerificationState {
   final CaseVerification? verification;
 
   factory CaseVerificationState.fromCase(Map<String, dynamic> data) => CaseVerificationState(
-        evidence: ReportEvidence.fromMap(data['reportEvidence']),
-        request: LiveProofRequest.fromMap(data['liveProofRequest']),
-        proof: LiveProof.fromMap(data['liveProof']),
-        verification: CaseVerification.fromMap(data['verification']),
-      );
+    evidence: ReportEvidence.fromMap(data['reportEvidence']),
+    request: LiveProofRequest.fromMap(data['liveProofRequest']),
+    proof: LiveProof.fromMap(data['liveProof']),
+    verification: CaseVerification.fromMap(data['verification']),
+  );
 
   bool get proofPending => isLiveProofPending(request, proof);
 

@@ -43,22 +43,22 @@ import 'package:respawnd1/core/repos/rescue_case/treatment_log_repository.dart';
 /// public fields below.
 class RescueCaseRepository {
   RescueCaseRepository({FirebaseFirestore? firestore})
-    : this._withStore(RescueCaseStore(firestore ?? FirebaseFirestore.instance));
+      : this._withStore(RescueCaseStore(firestore ?? FirebaseFirestore.instance));
 
   RescueCaseRepository._withStore(RescueCaseStore store)
-    : this._withTransport(store, TransportAssignmentRepository(store));
+      : this._withTransport(store, TransportAssignmentRepository(store));
 
   RescueCaseRepository._withTransport(RescueCaseStore store, this.transport)
-    : _store = store,
-      queries = RescueCaseQueryRepository(store),
-      status = CaseStatusRepository(store, transport),
-      intake = CaseIntakeRepository(store, transport),
-      duplicates = CaseDuplicateRepository(store),
-      referrals = CaseReferralRepository(store),
-      clinics = ClinicAssignmentRepository(store),
-      treatment = TreatmentLogRepository(store),
-      expenses = CaseExpenseRepository(store),
-      verification = CaseVerificationRepository(store);
+      : _store = store,
+        queries = RescueCaseQueryRepository(store),
+        status = CaseStatusRepository(store, transport),
+        intake = CaseIntakeRepository(store, transport),
+        duplicates = CaseDuplicateRepository(store),
+        referrals = CaseReferralRepository(store),
+        clinics = ClinicAssignmentRepository(store),
+        treatment = TreatmentLogRepository(store),
+        expenses = CaseExpenseRepository(store),
+        verification = CaseVerificationRepository(store);
 
   final RescueCaseStore _store;
   final RescueCaseQueryRepository queries;
@@ -270,10 +270,10 @@ class RescueCaseRepository {
 
   /// Delegates to [CaseDuplicateRepository.findPossibleDuplicates].
   Future<List<RescueCase>> findPossibleDuplicates(
-    RescueCase source, {
-    double radiusKm = 1.0,
-    int limit = 20,
-  }) => duplicates.findPossibleDuplicates(
+      RescueCase source, {
+        double radiusKm = 1.0,
+        int limit = 20,
+      }) => duplicates.findPossibleDuplicates(
     source,
     radiusKm: radiusKm,
     limit: limit,
@@ -702,6 +702,28 @@ class RescueCaseRepository {
     animalIndexes: animalIndexes,
   );
 
+  /// Delegates to [CaseIntakeRepository.markReadyForAdopterPickup].
+  Future<void> markReadyForAdopterPickup({
+    required String caseId,
+    required String place,
+    required String actorUid,
+    required String actorName,
+    List<int>? animalIndexes,
+  }) => intake.markReadyForAdopterPickup(
+    caseId: caseId,
+    place: place,
+    actorUid: actorUid,
+    actorName: actorName,
+    animalIndexes: animalIndexes,
+  );
+
+  /// Delegates to [CaseIntakeRepository.confirmAdopterPickup].
+  Future<String> confirmAdopterPickup({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) => intake.confirmAdopterPickup(caseId: caseId, actorUid: actorUid, actorName: actorName);
+
   /// Delegates to [CaseIntakeRepository.releaseToReporter].
   Future<void> releaseToReporter({
     required String caseId,
@@ -804,10 +826,10 @@ class RescueCaseRepository {
 
   /// Delegates to [CaseIntakeRepository.checkAndCompleteIntakeIfDue].
   Future<void> checkAndCompleteIntakeIfDue(
-    RescueCase c, {
-    required int totalAnimalsExpected,
-    required int completedCount,
-  }) => intake.checkAndCompleteIntakeIfDue(
+      RescueCase c, {
+        required int totalAnimalsExpected,
+        required int completedCount,
+      }) => intake.checkAndCompleteIntakeIfDue(
     c,
     totalAnimalsExpected: totalAnimalsExpected,
     completedCount: completedCount,

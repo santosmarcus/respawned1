@@ -13,7 +13,9 @@ import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart'
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
+import 'package:respawnd1/features/admin/donation/expense_oversight_page.dart';
 import 'package:respawnd1/features/admin/donation/flagged_payments_page.dart';
+import 'package:respawnd1/features/admin/stock/stock_page.dart';
 import 'package:respawnd1/features/admin/events/admin_event_detail_page.dart';
 import 'package:respawnd1/features/admin/events/admin_events_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -40,7 +42,7 @@ void openRescueCase(BuildContext context, RescueCase c) {
     case RescueStatus.awaitingAssignment:
       _push(context, (_) => AssignRiderPage(caseId: c.id, data: c.raw));
     case RescueStatus.ongoing when c.raw['organizationTransport'] is Map:
-      // "Organization will transport": no rider to track.
+    // "Organization will transport": no rider to track.
       _push(context, (_) => RescueDetailPage(caseId: c.id, data: c.raw));
     case RescueStatus.ongoing:
       _push(context, (_) => AdminTrackCasePage(caseId: c.id, data: c.raw));
@@ -87,6 +89,12 @@ void openReturn(BuildContext context, AdoptionApplication app) =>
 void openDonationsAdmin(BuildContext context) => _push(context, (_) => const DonationAdminHomeScreen());
 
 void openFlaggedPayments(BuildContext context) => _push(context, (_) => const FlaggedPaymentsPage());
+
+/// Donation gaps 6 and 7: expenses awaiting approval and overdue receipts.
+void openExpenseOversight(BuildContext context) => _push(context, (_) => const ExpenseOversightPage());
+
+/// Donation gap 5: what the shelter has on hand.
+void openStock(BuildContext context) => _push(context, (_) => const StockPage());
 
 void openCampaign(BuildContext context, String campaignId) =>
     _push(context, (_) => DonationAdminInfoPage(campaignId: campaignId));

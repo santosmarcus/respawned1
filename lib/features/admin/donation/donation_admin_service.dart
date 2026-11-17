@@ -125,6 +125,16 @@ class DonationAdminService {
         if (reason != null && reason.isNotEmpty) 'reason': reason,
       });
 
+  /// Donation gap 3: record that a credited donation was refunded. The
+  /// campaign total goes down and the donor's certificate is voided.
+  /// functions/campaigns.js recordDonationReversal.
+  static Future<Map<String, dynamic>> recordReversal(String donationId, {required String reason, String? reference}) =>
+      _call('recordDonationReversal', {
+        'donationId': donationId,
+        'reason': reason,
+        if (reference != null && reference.isNotEmpty) 'reference': reference,
+      });
+
   /// action: received | cancel | follow_up. Returns {status, donorNotified, donorName}.
   static Future<Map<String, dynamic>> manageInKind(String donationId, String action,
       {int? itemIndex, int? quantityReceived, String? notes}) =>

@@ -25,9 +25,11 @@
 const crypto = require('crypto');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
+const {onDocumentCreated} = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const {completedCampaignFields, certificateBenefit, issueCertificate} = require('./donation_common');
+const donationRules = require('./donation_rules');
 
 // index.js calls admin.initializeApp() before requiring this module.
 const db = admin.firestore();
@@ -741,6 +743,10 @@ exports.recordOfflineDonation = onCall(async (request) => {
       status: 'received',
       source: 'manual',
       verification: 'admin_recorded',
+      generalFund: toGeneralFund,
+      // Offline donors often have no account, so no certificate reaches
+      // them: staff print an acknowledgment instead (Donation gap 8).
+      acknowledgmentNumber: donationRules.acknowledgmentNumber(donationRef.id),
       recordedBy: actor.uid,
       recordedByName: actor.name,
       notes,
@@ -1025,6 +1031,13 @@ exports.manageInKindDonation = onCall(async (request) => {
     // Donor name for the certificate (all reads before any write).
     const donorSnap = action === 'received' && typeof p.userId === 'string' ?
       await tx.get(db.collection('users').doc(p.userId)) : null;
+    // Donation gap 5: received goods go into the organization's stock.
+    const stockOrgId = (campaignSnap && campaignSnap.exists && campaignSnap.data().organizationId) ||
+      p.organizationId || actor.organizationId || null;
+    const stockRef = action === 'received' && stockOrgId ?
+      db.collection('organizations').doc(stockOrgId).collection('stock').doc(donationRules.stockItemId(p.category)) :
+      null;
+    const stockSnap = stockRef ? await tx.get(stockRef) : null;
     if (campaignSnap && campaignSnap.exists) assertSameOrg(actor, campaignSnap.data());
     const current = String(p.status || '').toLowerCase();
     if (current === 'complete' || current === 'completed' || current === 'cancelled') {
@@ -1049,6 +1062,19 @@ exports.manageInKindDonation = onCall(async (request) => {
         update.itemIndex = itemIndex;
         tx.update(campaignRef, {inKindItems: items, updatedAt: now});
       }
+    }
+    if (stockRef && update.quantityReceived) {
+      const listed = campaignSnap && campaignSnap.exists && Array.isArray(campaignSnap.data().inKindItems) ?
+        campaignSnap.data().inKindItems : [];
+      addStock(tx, stockRef, stockSnap, {
+        category: p.category,
+        unit: donationRules.stockUnit(Number.isInteger(itemIndex) ? listed[itemIndex] : null),
+        quantity: update.quantityReceived,
+        organizationId: stockOrgId,
+        source: {kind: 'inkind', donationId, campaignId: p.campaignId || null},
+        actor,
+      });
+      update.stockItemId = stockRef.id;
     }
     tx.update(donationRef, update);
     const c = campaignSnap && campaignSnap.exists ? campaignSnap.data() : {};
@@ -1107,6 +1133,229 @@ exports.manageInKindDonation = onCall(async (request) => {
       donorNotified: hasDonor,
       donorName: p.isAnonymous === true ? 'Anonymous' : (p.donorName || null),
     };
+  });
+});
+
+// ── In-kind stock (Donation gap 5) ──────────────────────────────────────────
+// organizations/{orgId}/stock/{itemId}: {name, category, unit, quantity,
+// lowStockThreshold}. Received in-kind goods are added by
+// manageInKindDonation above; staff record usage and purchases in the app
+// (lib/features/admin/stock/stock_page.dart). Every change is a row in
+// organizations/{orgId}/stockMovements.
+function addStock(tx, ref, snap, {category, unit, quantity, organizationId, source, actor}) {
+  const now = FieldValue.serverTimestamp();
+  const name = typeof category === 'string' && category.trim() ? category.trim() : 'Others';
+  if (snap && snap.exists) {
+    tx.update(ref, {quantity: FieldValue.increment(quantity), updatedAt: now, updatedBy: actor.uid});
+  } else {
+    tx.set(ref, {
+      name,
+      category: name,
+      unit,
+      quantity,
+      lowStockThreshold: null,
+      organizationId,
+      createdAt: now,
+      updatedAt: now,
+      updatedBy: actor.uid,
+    });
+  }
+  tx.set(db.collection('organizations').doc(organizationId).collection('stockMovements').doc(), {
+    itemId: ref.id,
+    itemName: (snap && snap.exists && snap.data().name) || name,
+    change: quantity,
+    kind: 'received',
+    source,
+    note: null,
+    organizationId,
+    byUid: actor.uid,
+    byName: actor.name,
+    at: now,
+  });
+}
+
+// ── In-kind pledge (Donation gap 9) ─────────────────────────────────────────
+// The pledge used to be written from the phone, including the campaign's
+// donor count. Now one backend transaction creates the pledge, the donor's
+// history entry and notification, and counts the donor, like money does.
+exports.pledgeInKindDonation = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const uid = request.auth.uid;
+  const d = request.data || {};
+  requireCampaignId(d.campaignId);
+  const category = requireString(d.category, 'Category', {max: 60});
+  const clarification = requireString(d.clarification, 'Items', {max: 1000});
+  const address = requireString(d.address, 'Address', {max: 500, optional: true}) || '';
+  const isAnonymous = d.isAnonymous === true;
+
+  const campaignRef = campaignsCol().doc(d.campaignId);
+  const userRef = db.collection('users').doc(uid);
+  const donationRef = db.collection('donations').doc();
+  const refNumber = `REF-IK-${Date.now()}`;
+
+  await db.runTransaction(async (tx) => {
+    const [campaignSnap, userSnap] = await Promise.all([tx.get(campaignRef), tx.get(userRef)]);
+    if (!campaignSnap.exists) throw new HttpsError('not-found', 'Campaign not found.');
+    const c = campaignSnap.data();
+    if (statusOf(c) !== 'active') throw new HttpsError('failed-precondition', 'This campaign is not taking donations right now.');
+    const u = userSnap.exists ? userSnap.data() : {};
+    const full = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || 'User';
+    const organizer = c.organizer || 'the organization';
+    const now = FieldValue.serverTimestamp();
+    // Same fields donation_review_inkind.dart used to write.
+    const record = {
+      userId: uid,
+      donorName: isAnonymous ? 'Anonymous' : full,
+      campaignId: d.campaignId,
+      campaignName: c.title || '',
+      organizationName: c.organizer || '',
+      organizer: c.organizer || '',
+      organizationId: c.organizationId || null,
+      category,
+      clarification,
+      itemDescription: `${category}: ${clarification}`,
+      isAnonymous,
+      address,
+      timestamp: now,
+      createdAt: now,
+      date: formatManilaDate(new Date()),
+      refNumber,
+      status: 'inprogress',
+      type: 'inkind',
+      amount: 0,
+      amountString: `In-kind: ${category}`,
+      source: 'app',
+    };
+    tx.set(donationRef, record);
+    tx.set(userRef.collection('history').doc(donationRef.id), record);
+    tx.set(userRef.collection('notifications').doc(`inkind_pledged_${donationRef.id}`), {
+      title: 'In-Kind Pledge Recorded',
+      message: `Your pledge of ${category} to ${organizer} was recorded. ` +
+        'You will be notified once they confirm receiving the items.',
+      timestamp: now,
+      isRead: false,
+      type: 'inkind_pledged',
+      donationId: donationRef.id,
+      campaignId: d.campaignId,
+    });
+    tx.set(userRef.collection('donated').doc(d.campaignId), {donationId: d.campaignId, donatedAt: now});
+    tx.update(campaignRef, {numdonors: FieldValue.increment(1)});
+    tx.set(campaignRef.collection('history').doc(), {
+      type: 'inkind_pledged',
+      donationId: donationRef.id,
+      category,
+      byUid: uid,
+      byName: isAnonymous ? 'Anonymous' : full,
+      at: now,
+    });
+  });
+  return {donationId: donationRef.id, refNumber};
+});
+
+// ── Refunds and reversals (Donation gap 3) ──────────────────────────────────
+// A financial admin records that money already credited was given back
+// (refunded in PayMongo, a bounced check, an offline entry made by mistake).
+// The donation is kept but marked 'reversed', the campaign's collected total
+// and donor count go down, the donor's certificate is voided and they are
+// told. Refused while the money is already spent: void a spending record
+// first. Repeating the call for a refunded donation changes nothing.
+exports.recordDonationReversal = onCall(async (request) => {
+  const actor = await loadActor(request, {finance: true});
+  const d = request.data || {};
+  if (typeof d.donationId !== 'string' || !CAMPAIGN_ID_PATTERN.test(d.donationId)) {
+    throw new HttpsError('invalid-argument', 'A valid donationId is required.');
+  }
+  const reason = requireString(d.reason, 'Reason', {max: 1000});
+  const reference = requireString(d.reference, 'Refund reference', {max: 120, optional: true});
+  const donationRef = db.collection('donations').doc(d.donationId);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(donationRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'Donation not found.');
+    const r = snap.data();
+    if (r.status === 'reversed') return {status: 'reversed', duplicate: true};
+    const campaignRef = typeof r.campaignId === 'string' && CAMPAIGN_ID_PATTERN.test(r.campaignId) ?
+      campaignsCol().doc(r.campaignId) : null;
+    const campaignSnap = campaignRef ? await tx.get(campaignRef) : null;
+    const c = campaignSnap && campaignSnap.exists ? campaignSnap.data() : null;
+    assertSameOrg(actor, c || r);
+    const amount = num(r.amount);
+    const blocker = donationRules.reversalBlocker(r, c ? moneyOf(c) : null, centavos(amount));
+    if (blocker) throw new HttpsError('failed-precondition', blocker);
+
+    const now = FieldValue.serverTimestamp();
+    tx.update(donationRef, {
+      status: 'reversed',
+      statusBeforeReversal: r.status || null,
+      reversedAt: now,
+      reversedBy: actor.uid,
+      reversedByName: actor.name,
+      reversalReason: reason,
+      reversalReference: reference,
+    });
+    if (typeof r.userId === 'string' && r.userId) {
+      const userRef = db.collection('users').doc(r.userId);
+      tx.set(userRef.collection('history').doc(d.donationId), {status: 'reversed'}, {merge: true});
+      // Certificates use the payment id (online) or the donation id; both
+      // are this record's id, see paymongo.js and issueCertificate().
+      tx.set(userRef.collection('certificates').doc(d.donationId),
+          {voided: true, voidedAt: now, voidReason: reason}, {merge: true});
+      tx.set(userRef.collection('notifications').doc(`donation_reversed_${d.donationId}`), {
+        title: 'Donation Refunded',
+        message: `Your ${r.amountString || `₱${amount.toFixed(2)}`} donation to ${r.campaignName || 'a campaign'} ` +
+          'was refunded. Its certificate is no longer valid.',
+        timestamp: now,
+        isRead: false,
+        type: 'donation_reversed',
+        donationId: d.donationId,
+      });
+    }
+    if (c) {
+      tx.update(campaignRef, {
+        collectedAmount: FieldValue.increment(-amount),
+        numdonors: FieldValue.increment(donationRules.donorCountChange(c.numdonors)),
+        updatedAt: now,
+      });
+      historyEntry(tx, campaignRef, actor, 'donation_reversed', {donationId: d.donationId, amount, reason, reference});
+    }
+    auditEntry(tx, actor, {
+      category: 'donations',
+      action: 'Donation refunded',
+      organizationId: (c && c.organizationId) || r.organizationId || actor.organizationId,
+      targetType: 'Donation',
+      targetId: d.donationId,
+      oldValues: {status: r.status || null, amount},
+      newValues: {status: 'reversed', reason, reference},
+      metadata: {campaignId: r.campaignId || null, campaignTitle: (c && c.title) || r.campaignName || null, source: r.source || 'paymongo'},
+    });
+    return {status: 'reversed', duplicate: false};
+  });
+});
+
+// ── Donation audit trail (Donation gap 4) ───────────────────────────────────
+// Every money and listing action above already writes campaigns/{id}/history
+// (and so do paymongo.js and the deadline job). This copies each entry to the
+// central auditLogs with the campaign's organization, so the Audit page's
+// Donations and Expenses tabs list them. Entries the source function already
+// audited are skipped (donation_rules.js AUDITED_AT_SOURCE). The audit id is
+// derived from the history id, so a retried trigger writes the same entry.
+exports.mirrorCampaignHistoryToAudit = onDocumentCreated('campaigns/{campaignId}/history/{entryId}', async (event) => {
+  const h = event.data && event.data.data();
+  if (!h || !donationRules.shouldMirrorHistory(h.type)) return;
+  const campaign = await campaignsCol().doc(event.params.campaignId).get();
+  const c = campaign.exists ? campaign.data() : {};
+  await db.collection('auditLogs').doc(`campaign_${event.params.campaignId}_${event.params.entryId}`).set({
+    category: donationRules.historyCategory(h.type),
+    action: donationRules.historyAction(h.type),
+    actorId: h.byUid || null,
+    actorName: h.byName || null,
+    ...(c.organizationId ? {organizationId: c.organizationId} : {}),
+    targetType: c.type === 'sponsorship' ? 'Sponsorship' : 'Campaign',
+    targetId: event.params.campaignId,
+    oldValues: null,
+    newValues: donationRules.historyDetails(h),
+    metadata: {campaignTitle: c.title || null, historyType: h.type, historyId: event.params.entryId},
+    createdAt: h.at || FieldValue.serverTimestamp(),
   });
 });
 

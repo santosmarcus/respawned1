@@ -79,6 +79,19 @@ class DonationHistoryRecord {
   final String? paymentId;
   final int? quantityReceived;
 
+  /// Donation gap 8: offline records (recordOfflineDonation) carry the
+  /// number printed on their acknowledgment.
+  final String? acknowledgmentNumber;
+
+  /// Recorded to the organization's General fund.
+  final bool generalFund;
+
+  /// Donation gap 3: set by recordDonationReversal (status 'reversed').
+  final String? reversalReason;
+  final String? reversalReference;
+  final String? reversedByName;
+  final DateTime? reversedAt;
+
   const DonationHistoryRecord({
     required this.id,
     required this.amountValue,
@@ -106,7 +119,18 @@ class DonationHistoryRecord {
     this.recordedByName,
     this.paymentId,
     this.quantityReceived,
+    this.acknowledgmentNumber,
+    this.generalFund = false,
+    this.reversalReason,
+    this.reversalReference,
+    this.reversedByName,
+    this.reversedAt,
   });
+
+  bool get isReversed => status == 'reversed';
+
+  /// Credited money that can still be refunded.
+  bool get canReverse => !isInKind && !isReversed && amountValue > 0;
 
   String get displayName => isAnonymous ? 'Anonymous' : (donorName.isEmpty ? 'Donor' : donorName);
   bool get isInKind => type == 'inkind';
@@ -153,6 +177,12 @@ class DonationHistoryRecord {
       recordedByName: data['recordedByName'] as String?,
       paymentId: data['paymentId'] as String?,
       quantityReceived: (data['quantityReceived'] is num) ? (data['quantityReceived'] as num).toInt() : null,
+      acknowledgmentNumber: data['acknowledgmentNumber'] as String?,
+      generalFund: data['generalFund'] == true,
+      reversalReason: data['reversalReason'] as String?,
+      reversalReference: data['reversalReference'] as String?,
+      reversedByName: data['reversedByName'] as String?,
+      reversedAt: ts('reversedAt'),
     );
   }
 }

@@ -18,12 +18,12 @@ class CaseExpenseRepository {
   final AuditLogRepository _audit;
 
   static Map<String, dynamic> _auditValues(Expense e) => {
-        'title': e.title,
-        'category': e.category.label,
-        'amount': e.amount,
-        'funding': e.fundingLabel,
-        'funded': e.fundedAmount,
-      };
+    'title': e.title,
+    'category': e.category.label,
+    'amount': e.amount,
+    'funding': e.fundingLabel,
+    'funded': e.fundedAmount,
+  };
 
   /// Best-effort, after the real write (AuditLogRepository.log never throws).
   Future<void> _log(String caseId, String action, String? expenseId,
@@ -54,8 +54,8 @@ class CaseExpenseRepository {
         .snapshots()
         .map(
           (snap) =>
-              snap.docs.map((d) => Expense.fromFirestore(d, caseId)).toList(),
-        );
+          snap.docs.map((d) => Expense.fromFirestore(d, caseId)).toList(),
+    );
   }
 
   /// Funding lines must each be positive and together not exceed the cost.
@@ -80,12 +80,11 @@ class CaseExpenseRepository {
       throw ArgumentError('Expense amount must be greater than zero.');
     }
     _checkFundings(expense);
-    // Every NEW expense requires a receipt (spec) — enforced here too, not
-    // just in the UI, so a malformed direct call can't skip it. Existing
-    // (legacy) expenses are never retroactively blocked — see updateExpense,
-    // which deliberately does not repeat this check.
-    if (expense.receiptUrl == null || expense.receiptUrl!.trim().isEmpty) {
-      throw ArgumentError('A receipt is required for this expense.');
+    // A bill can be logged before its receipt arrives (Donation gap 7), but
+    // then it must carry a due date for the receipt; the dashboard lists it
+    // by name once that date passes.
+    if ((expense.receiptUrl == null || expense.receiptUrl!.trim().isEmpty) && expense.receiptDueAt == null) {
+      throw ArgumentError('Attach a receipt or set when it is due.');
     }
     final ref = await _store.expensesOf(caseId).add({
       ...expense.toFirestore(),

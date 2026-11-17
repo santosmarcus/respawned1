@@ -129,6 +129,15 @@ service firebase.storage {
       }
     }
 
+    // Adoption gap 10: the Community Adoption check-in photo, by its adopter
+    // (community_adoption_checkins.dart).
+    match /communityAdoptions/{adoptionId}/{file} {
+      allow read: if signedIn();
+      allow write: if signedIn() && mediaUpload() &&
+        firestore.get(/databases/(default)/documents/communityAdoptions/$(adoptionId)).data
+          .get('adopterId', '') == request.auth.uid;
+    }
+
     // Animal files, by folder:
     //   images/       profile photos (create_animal_record_page.dart): any
     //                 signed-in user reads, staff upload — the animal doc may

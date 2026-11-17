@@ -1,4 +1,9 @@
+import 'dart:io';
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -206,7 +211,42 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     return (canRelease: true, reason: null);
   }
 
+  /// Adoption gap 6: photo or scan of the signed agreement, kept on the
+  /// application.
+  Future<void> _attachSignedAgreement(AdoptionApplication app) async {
+    final picked = await pickImageWithSource(context, ImagePicker(), imageQuality: 85);
+    if (picked == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final ref0 = FirebaseStorage.instance.ref('adoptions/${app.id}/signed_agreement_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await ref0.putFile(File(picked.path));
+      await ref.read(adoptionApplicationRepositoryProvider).attachSignedAgreement(
+        applicationId: app.id,
+        url: await ref0.getDownloadURL(),
+        actorName: _actorName,
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Signed agreement attached.'));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not attach: $e', kind: AppMessageKind.error));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _markReleased(AdoptionApplication app) async {
+    if (app.raw['signedAgreementUrl'] == null) {
+      final goOn = await showConfirmActionDialog(
+        context,
+        title: 'No signed agreement attached',
+        message: 'Attach a photo of the agreement both parties signed, so it is kept with the adoption. Release without it?',
+        confirmLabel: 'Release anyway',
+        cancelLabel: 'Attach first',
+      );
+      if (!goOn) return;
+      if (!mounted) return;
+    }
     // app.animalId is the legacy hash/catalog-int join key and would never
     // resolve to the real animal doc this transaction updates (see
     // AdoptionApplication's own doc comment) — animalRecordId is the
@@ -408,67 +448,74 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                         ),
                       ),
                     if (_rules.isNotEmpty)
-                        ReorderableListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _rules.length,
-                          onReorderItem: (o, n) => _reorder(o, n),
-                          itemBuilder: (context, i) {
-                            final r = _rules[i];
-                            return Container(
-                              key: ValueKey(r.ruleId),
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(10)),
-                              child: Row(
-                                children: [
-                                  Text('${i + 1}.', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700)),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text('${r.frequencyLabel} ${r.durationLabel}',
-                                            style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                                        Text(r.startLabel, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-                                      ],
-                                    ),
+                      ReorderableListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _rules.length,
+                        onReorderItem: (o, n) => _reorder(o, n),
+                        itemBuilder: (context, i) {
+                          final r = _rules[i];
+                          return Container(
+                            key: ValueKey(r.ruleId),
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(color: AppColors.tearspwn.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(10)),
+                            child: Row(
+                              children: [
+                                Text('${i + 1}.', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700)),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('${r.frequencyLabel} ${r.durationLabel}',
+                                          style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                                      Text(r.startLabel, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                                    ],
                                   ),
-                                  IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _editRule(i)),
-                                  IconButton(icon: const Icon(Icons.delete_outline, size: 18), onPressed: () => _removeRule(i)),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      const SizedBox(height: 6),
-                      OutlinedButton.icon(
-                        onPressed: _addRule,
-                        icon: const Icon(Icons.add),
-                        label: Text(_rules.isEmpty ? 'Set Post-Adoption Schedule' : 'Add Schedule'),
+                                ),
+                                IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _editRule(i)),
+                                IconButton(icon: const Icon(Icons.delete_outline, size: 18), onPressed: () => _removeRule(i)),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                      const SizedBox(height: 14),
-                      Text('Combined Preview', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      const SizedBox(height: 6),
-                      if (_combinedPreview.isEmpty)
-                        Text('No dates yet.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
-                      else
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 6,
-                          children: [
-                            for (final d in _combinedPreview)
-                              Chip(
-                                label: Text(_fmtDate(d), style: GoogleFonts.zain(fontSize: 11)),
-                                backgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.4),
-                              ),
-                          ],
-                        ),
+                    const SizedBox(height: 6),
+                    OutlinedButton.icon(
+                      onPressed: _addRule,
+                      icon: const Icon(Icons.add),
+                      label: Text(_rules.isEmpty ? 'Set Post-Adoption Schedule' : 'Add Schedule'),
+                    ),
+                    const SizedBox(height: 14),
+                    Text('Combined Preview', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    const SizedBox(height: 6),
+                    if (_combinedPreview.isEmpty)
+                      Text('No dates yet.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+                    else
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 6,
+                        children: [
+                          for (final d in _combinedPreview)
+                            Chip(
+                              label: Text(_fmtDate(d), style: GoogleFonts.zain(fontSize: 11)),
+                              backgroundColor: AppColors.yellowrspwn.withValues(alpha: 0.4),
+                            ),
+                        ],
+                      ),
                   ],
                 ),
               ),
               const SizedBox(height: 20),
 
+              OutlinedButton.icon(
+                onPressed: _busy ? null : () => _attachSignedAgreement(app),
+                icon: Icon(app.raw['signedAgreementUrl'] == null ? Icons.upload_file : Icons.check_circle,
+                    color: app.raw['signedAgreementUrl'] == null ? AppColors.textPrimary : AppColors.success),
+                label: Text(app.raw['signedAgreementUrl'] == null ? 'Attach signed agreement' : 'Signed agreement attached · replace'),
+              ),
+              const SizedBox(height: 12),
               if (!guard.canRelease)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),

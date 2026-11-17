@@ -31,6 +31,15 @@ class ShelterSettings {
   final double? monthlyBudget;
   final double? foodPerDayKg;
   final int? ridersNeeded;
+
+  /// Donation gap 6: expenses above this amount need a second financial
+  /// admin's approval before funding lines are added. Null = no approval.
+  final double? expenseApprovalThreshold;
+
+  /// Donation gap 7: days after an expense is recorded before a missing
+  /// receipt is overdue. Null = [defaultReceiptDueDays].
+  final int? receiptDueDays;
+
   final DateTime? updatedAt;
   final String? updatedByName;
 
@@ -40,13 +49,21 @@ class ShelterSettings {
     this.monthlyBudget,
     this.foodPerDayKg,
     this.ridersNeeded,
+    this.expenseApprovalThreshold,
+    this.receiptDueDays,
     this.updatedAt,
     this.updatedByName,
   });
 
   static const empty = ShelterSettings();
+  static const defaultReceiptDueDays = 7;
 
   bool get isConfigured => capacity != null;
+
+  int get effectiveReceiptDueDays => receiptDueDays ?? defaultReceiptDueDays;
+
+  /// Whether an expense of [amount] needs a second approval.
+  bool requiresApproval(double amount) => expenseApprovalThreshold != null && amount > expenseApprovalThreshold!;
 
   factory ShelterSettings.fromMap(Map<String, dynamic>? m) {
     if (m == null) return empty;
@@ -57,6 +74,8 @@ class ShelterSettings {
       monthlyBudget: (m['monthlyBudget'] as num?)?.toDouble(),
       foodPerDayKg: (m['foodPerDayKg'] as num?)?.toDouble(),
       ridersNeeded: (m['ridersNeeded'] as num?)?.toInt(),
+      expenseApprovalThreshold: (m['expenseApprovalThreshold'] as num?)?.toDouble(),
+      receiptDueDays: (m['receiptDueDays'] as num?)?.toInt(),
       updatedAt: ts is Timestamp ? ts.toDate() : null,
       updatedByName: m['updatedByName'] as String?,
     );
@@ -128,6 +147,8 @@ Future<void> saveShelterSettings({
   double? monthlyBudget,
   double? foodPerDayKg,
   int? ridersNeeded,
+  double? expenseApprovalThreshold,
+  int? receiptDueDays,
 }) {
   if (organizationId == null || organizationId.isEmpty) {
     throw StateError('Your account is not linked to an organization.');
@@ -139,6 +160,8 @@ Future<void> saveShelterSettings({
     'monthlyBudget': monthlyBudget,
     'foodPerDayKg': foodPerDayKg,
     'ridersNeeded': ridersNeeded,
+    'expenseApprovalThreshold': expenseApprovalThreshold,
+    'receiptDueDays': receiptDueDays,
     'updatedAt': FieldValue.serverTimestamp(),
     'updatedBy': user?.uid,
     'updatedByName': user?.displayName,
@@ -170,6 +193,8 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
   int _riders = 2;
   double _foodKg = 3;
   final _budget = TextEditingController();
+  final _approvalThreshold = TextEditingController();
+  int _receiptDays = ShelterSettings.defaultReceiptDueDays;
   bool _seeded = false;
   bool _saving = false;
   String? _error;
@@ -177,6 +202,7 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
   @override
   void dispose() {
     _budget.dispose();
+    _approvalThreshold.dispose();
     super.dispose();
   }
 
@@ -188,6 +214,8 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
     _riders = s.ridersNeeded ?? _riders;
     _foodKg = s.foodPerDayKg ?? _foodKg;
     if (s.monthlyBudget != null) _budget.text = s.monthlyBudget!.round().toString();
+    if (s.expenseApprovalThreshold != null) _approvalThreshold.text = s.expenseApprovalThreshold!.round().toString();
+    _receiptDays = s.receiptDueDays ?? _receiptDays;
   }
 
   Future<void> _save() async {
@@ -203,6 +231,8 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
         monthlyBudget: double.tryParse(_budget.text.replaceAll(',', '')),
         foodPerDayKg: _foodKg,
         ridersNeeded: _riders,
+        expenseApprovalThreshold: double.tryParse(_approvalThreshold.text.replaceAll(',', '')),
+        receiptDueDays: _receiptDays,
       );
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -298,6 +328,30 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
                 value: '$_riders',
                 onMinus: () => setState(() => _riders = (_riders - 1).clamp(0, 99)),
                 onPlus: () => setState(() => _riders = (_riders + 1).clamp(0, 99)),
+              ),
+              _FieldShell(
+                icon: Icons.verified_user,
+                title: 'Approval above',
+                hint: 'Expenses needing a 2nd admin',
+                trailing: SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _approvalThreshold,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    textAlign: TextAlign.right,
+                    style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary),
+                    decoration: const InputDecoration(prefixText: '₱ ', hintText: 'Off', isDense: true),
+                  ),
+                ),
+              ),
+              _StepField(
+                icon: Icons.receipt_long,
+                title: 'Receipt due',
+                hint: 'Days after an expense',
+                value: '$_receiptDays d',
+                onMinus: () => setState(() => _receiptDays = (_receiptDays - 1).clamp(1, 90)),
+                onPlus: () => setState(() => _receiptDays = (_receiptDays + 1).clamp(1, 90)),
               ),
               if (current?.updatedAt != null)
                 Padding(

@@ -1,3 +1,4 @@
+import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -119,10 +120,10 @@ class RescueCaseCard extends StatelessWidget {
     // no `animals[]` array to filter (legacy single-animal case).
     final filterStage = stageFilter;
     final stageAnimalIndexes =
-        filterStage != null && c.animals.isNotEmpty ? animalIndexesInStage(c, filterStage) : null;
+    filterStage != null && c.animals.isNotEmpty ? animalIndexesInStage(c, filterStage) : null;
     final stageAnimals = stageAnimalIndexes != null ? [for (final i in stageAnimalIndexes) c.animals[i]] : null;
     final speciesSummary =
-        stageAnimals != null ? species_summary_util.summarizeSpecies(animals: stageAnimals) : c.speciesSummary;
+    stageAnimals != null ? species_summary_util.summarizeSpecies(animals: stageAnimals) : c.speciesSummary;
     final animalCount = stageAnimals?.length ?? c.animalCount;
 
     return GestureDetector(
@@ -146,12 +147,12 @@ class RescueCaseCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               child: thumbnail != null
                   ? Image.network(
-                      thumbnail,
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => _placeholder(),
-                    )
+                thumbnail,
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => _placeholder(),
+              )
                   : _placeholder(),
             ),
             const SizedBox(width: 12),
@@ -169,6 +170,26 @@ class RescueCaseCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      // Rescue gap 7: confirmed from the desk or by a rider.
+                      if (CaseVerification.fromMap(c.raw['verification'])?.isConfirmed ?? false) ...[
+                        const SizedBox(width: 6),
+                        Tooltip(
+                          message: CaseVerification.fromMap(c.raw['verification'])!.summary ?? 'Verified',
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.success.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.verified, size: 13, color: AppColors.success),
+                              const SizedBox(width: 3),
+                              Text('Verified',
+                                  style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.success)),
+                            ]),
+                          ),
+                        ),
+                      ],
                       const SizedBox(width: 6),
                       UrgencyChip(urgency: c.urgency),
                     ],
@@ -214,13 +235,13 @@ class RescueCaseCard extends StatelessWidget {
                         child: showStatusChip
                             ? RescueStatusChip(status: c.status)
                             : Text(
-                                c.status == RescueStatus.accepted
-                                    ? 'Accepted · Clinic selection required'
-                                    : c.status.label,
-                                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                          c.status == RescueStatus.accepted
+                              ? 'Accepted · Clinic selection required'
+                              : c.status.label,
+                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       ElevatedButton(
                         onPressed: onTap,
@@ -252,11 +273,11 @@ class RescueCaseCard extends StatelessWidget {
   }
 
   Widget _placeholder() => Container(
-        width: 80,
-        height: 80,
-        color: AppColors.tearspwn,
-        child: const Icon(Icons.pets, color: AppColors.textSecondary),
-      );
+    width: 80,
+    height: 80,
+    color: AppColors.tearspwn,
+    child: const Icon(Icons.pets, color: AppColors.textSecondary),
+  );
 
   List<Widget> _rejectionInfoLines(RejectionCardInfo info) {
     final rejectedDate = info.rejectedDate;

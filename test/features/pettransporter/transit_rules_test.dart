@@ -56,7 +56,7 @@ void main() {
         clinicDeclineReasons(
           accepted: false,
           reason:
-              'Clinic at full capacity, Owner unreachable, No Veterinarian/Specialist Available',
+          'Clinic at full capacity, Owner unreachable, No Veterinarian/Specialist Available',
         ),
         ['Clinic at full capacity', 'No Veterinarian/Specialist Available'],
       );
@@ -75,25 +75,37 @@ void main() {
     });
   });
 
-  test('statusAfterTreatmentAccepted routes to the interested adopter', () {
-    expect(
-      statusAfterTreatmentAccepted({'interestedToAdopt': 'yes'}).status,
-      'awaiting_adopter_pickup',
-    );
-    expect(
-      statusAfterTreatmentAccepted({'interestedToAdopt': 'no'}).status,
-      'in_transit_shelter',
-    );
-    expect(statusAfterTreatmentAccepted({}).status, 'in_transit_shelter');
+  test('statusAfterTreatmentAccepted completes the trip only for a confirmed adopter', () {
+    final confirmed = statusAfterTreatmentAccepted({
+      'interestedToAdopt': 'yes',
+      'adoptionRequest': {'applicationId': 'a1', 'status': 'approved'},
+    });
+    expect(confirmed.status, 'awaiting_adopter_pickup');
+    expect(confirmed.completesTransit, isTrue);
+
+    // Interested, or a request still waiting for the organization: the
+    // transporter continues to the shelter.
+    for (final data in [
+      {'interestedToAdopt': 'yes'},
+      {'willingAdopterId': 'u1'},
+      {'interestedToAdopt': 'yes', 'adoptionRequest': {'applicationId': 'a1', 'status': 'pending'}},
+    ]) {
+      final next = statusAfterTreatmentAccepted(data);
+      expect(next.status, 'in_transit_shelter');
+      expect(next.completesTransit, isFalse);
+      expect(next.label, contains('interested adopter'));
+    }
+    expect(statusAfterTreatmentAccepted({'interestedToAdopt': 'no'}).status, 'in_transit_shelter');
+    expect(statusAfterTreatmentAccepted({}).label, 'Treatment accepted. On the way to shelter.');
   });
 
   group('resolveEndReason', () {
     EndReasonOutcome resolve(
-      String reason, {
-      String? other,
-      String notes = '',
-      String? serviceType,
-    }) => resolveEndReason(
+        String reason, {
+          String? other,
+          String notes = '',
+          String? serviceType,
+        }) => resolveEndReason(
       EndReasonSelection(
         reason: reason,
         otherText: other,

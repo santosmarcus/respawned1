@@ -475,6 +475,93 @@ describe('adoption readiness gate', () => {
   });
 });
 
+describe('rescue adoption requests (Rescue gaps 6/10)', () => {
+  const agreement = { vetFees: true, obligations: true, pickupWindow: true };
+  const request = (uid, data) => as(uid).collection('adoptions').add({
+    status: 'pending', source: 'rescue_case', caseId: 'ownedA', organizationId: 'orgA',
+    personal: { adopterId: uid }, agreement, ...data,
+  });
+
+  test('only the interested reporter or the willing adopter may ask, with every agreement', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ownedA').update({
+      interestedToAdopt: 'yes', willingAdopterId: 'adopter',
+    }));
+    await assertSucceeds(request('reporter'));
+    await assertSucceeds(request('adopter'));
+    await assertFails(request('stranger'));
+    // Every agreement must be accepted.
+    await assertFails(request('reporter', { agreement: { ...agreement, vetFees: false } }));
+    await assertFails(request('reporter', { agreement: { vetFees: true, obligations: true } }));
+    // It belongs to the case's organization, and can't be pre-approved.
+    await assertFails(request('reporter', { organizationId: 'orgB' }));
+    await assertFails(request('reporter', { status: 'approved' }));
+    // The reporter must have said yes to adopting.
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ownedA').update({ interestedToAdopt: 'no' }));
+    await assertFails(request('reporter'));
+  });
+
+  test('an unowned report gets a request with no organization yet', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/pending1').update({ interestedToAdopt: 'yes' }));
+    await assertSucceeds(as('reporter').collection('adoptions').add({
+      status: 'pending', source: 'rescue_case', caseId: 'pending1',
+      personal: { adopterId: 'reporter' }, agreement,
+    }));
+    // Claiming an organization for an unowned report is refused.
+    await assertFails(request('reporter', { caseId: 'pending1', organizationId: 'orgA' }));
+  });
+
+  test('the adopter cannot rewrite the agreement; the reporter cannot fake a confirmation', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('adoptions/r1').set({
+        status: 'pending', source: 'rescue_case', caseId: 'ownedA', organizationId: 'orgA',
+        personal: { adopterId: 'adopter' }, agreement,
+      });
+    });
+    await assertFails(as('adopter').doc('adoptions/r1').update({ agreement: { vetFees: false } }));
+    await assertSucceeds(as('adopter').doc('adoptions/r1').update({ status: 'withdrawn' }));
+    await assertFails(as('reporter').doc('cases/ownedA').update({
+      adoptionRequest: { applicationId: 'r1', status: 'approved' },
+    }));
+    await assertFails(as('reporter').doc('cases/ownedA').update({ adopterPickup: { collectedAt: 1 } }));
+    await assertSucceeds(as('staffA').doc('adoptions/r1').update({ status: 'approved' }));
+  });
+});
+
+describe('community adoption check-ins (Adoption gap 10)', () => {
+  test('staff in the area read them; the adopter answers once when asked', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('communityAdoptionCheckIns/c1').set({
+      adopterId: 'adopter', status: 'scheduled', organizationIds: ['orgA'],
+    }));
+    await assertSucceeds(as('staffA').doc('communityAdoptionCheckIns/c1').get());
+    await assertSucceeds(as('staffA').collection('communityAdoptionCheckIns').where('organizationIds', 'array-contains', 'orgA').get());
+    await assertFails(as('staffB').doc('communityAdoptionCheckIns/c1').get());
+    await assertFails(as('stranger').doc('communityAdoptionCheckIns/c1').get());
+    // Not asked yet.
+    await assertFails(as('adopter').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', note: 'Fine' }));
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('communityAdoptionCheckIns/c1').update({ status: 'requested' }));
+    await assertFails(as('stranger').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', note: 'x' }));
+    await assertFails(as('adopter').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', organizationIds: [] }));
+    await assertSucceeds(as('adopter').doc('communityAdoptionCheckIns/c1').update({ status: 'submitted', note: 'Doing well' }));
+    await assertFails(as('adopter').collection('communityAdoptionCheckIns').add({ adopterId: 'adopter', status: 'scheduled' }));
+  });
+});
+
+describe('adoption audit entries (Adoption gap 7)', () => {
+  test("an entry carries the application's organization so its staff see it", async () => {
+    const entry = (uid, data) => as(uid).collection('auditLogs').add({
+      category: 'adoptions', action: 'Application withdrawn by the adopter', actorId: uid,
+      organizationId: 'orgA', targetType: 'AdoptionApplication', targetId: 'appA',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(), ...data,
+    });
+    await assertSucceeds(entry('adopter'));
+    await assertSucceeds(entry('staffA', { action: 'Interview confirmed' }));
+    await assertFails(entry('adopter', { actorId: 'staffA' }));
+    await assertSucceeds(as('staffA').collection('auditLogs')
+      .where('category', '==', 'adoptions').where('organizationId', '==', 'orgA').get());
+  });
+});
+
 describe('adoptions', () => {
   test('adopters submit pending applications for the right organization', async () => {
     const app = (data) => as('adopter').collection('adoptions').add({
@@ -752,6 +839,83 @@ describe('general expenses', () => {
     await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('orgExpenses/x2').set(expense('orgA')));
     await assertSucceeds(as('ownerA').doc('orgExpenses/x2').update({ amount: 1800 }));
     await assertFails(as('ownerA').doc('orgExpenses/x2').update({ organizationId: 'orgB' }));
+  });
+});
+
+describe('donation gaps: approvals, stock and backend-only pledges', () => {
+  const pending = (extra = {}) => ({
+    organizationId: 'orgA', title: 'Surgery', category: 'Procedure', amount: 25000, fundings: [],
+    approvalStatus: 'pending', approvalRequestedBy: 'ownerA', ...extra,
+  });
+  const line = { source: 'Fundraiser', amount: 1000 };
+
+  async function secondAdmin() {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('users/admin2A').set({ role: 'organization_member', organizationId: 'orgA' });
+      await db.doc('organizations/orgA/members/admin2A').set({ role: 'admin', status: 'active' });
+    });
+  }
+
+  test('an expense needing approval is saved pending with no funding', async () => {
+    await assertSucceeds(as('ownerA').collection('orgExpenses').add(pending()));
+    await assertFails(as('ownerA').collection('orgExpenses').add(pending({ fundings: [line] })));
+    await assertFails(as('ownerA').collection('orgExpenses').add(pending({ approvalStatus: 'approved' })));
+    await assertSucceeds(as('ownerA').doc('cases/ownedA/expenses/p1').set(pending()));
+    await assertFails(as('ownerA').doc('cases/ownedA/expenses/p2').set(pending({ approvalStatus: 'approved' })));
+  });
+
+  test('a different financial admin approves; then it can be funded', async () => {
+    await secondAdmin();
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('orgExpenses/ap1').set(pending()));
+    const approve = (uid) => ({ approvalStatus: 'approved', approvedBy: uid, approvedAmount: 25000 });
+    // No funding and no un-flagging while it waits.
+    await assertFails(as('ownerA').doc('orgExpenses/ap1').update({ fundings: [line] }));
+    await assertFails(as('ownerA').doc('orgExpenses/ap1').update({ approvalStatus: null }));
+    // The requester can't approve their own; a staff member can't approve at all.
+    await assertFails(as('ownerA').doc('orgExpenses/ap1').update(approve('ownerA')));
+    await assertFails(as('staffA').doc('orgExpenses/ap1').update(approve('staffA')));
+    // Approval must name the approver and not change the money.
+    await assertFails(as('admin2A').doc('orgExpenses/ap1').update(approve('ownerA')));
+    await assertFails(as('admin2A').doc('orgExpenses/ap1').update({ ...approve('admin2A'), amount: 30000 }));
+    await assertSucceeds(as('admin2A').doc('orgExpenses/ap1').update(approve('admin2A')));
+    await assertSucceeds(as('ownerA').doc('orgExpenses/ap1').update({ fundings: [line] }));
+  });
+
+  test('case expenses follow the same approval rule', async () => {
+    await secondAdmin();
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ownedA/expenses/ap2').set(pending()));
+    await assertFails(as('ownerA').doc('cases/ownedA/expenses/ap2').update({ fundings: [line] }));
+    await assertSucceeds(as('admin2A').doc('cases/ownedA/expenses/ap2')
+        .update({ approvalStatus: 'approved', approvedBy: 'admin2A' }));
+    // Ordinary expenses are unaffected.
+    await assertSucceeds(as('ownerA').doc('cases/ownedA/expenses/e1').update({ amount: 600, fundings: [line] }));
+  });
+
+  test("stock belongs to the organization's staff and carers; movements are append-only", async () => {
+    const item = { name: 'Dry food', category: 'Food & Water', unit: 'kg', quantity: 10 };
+    await assertSucceeds(as('staffA').doc('organizations/orgA/stock/s1').set(item));
+    await assertSucceeds(as('carerA').doc('organizations/orgA/stock/s1').update({ quantity: 8 }));
+    await assertFails(as('carerA').doc('organizations/orgA/stock/s1').update({ quantity: -1 }));
+    await assertFails(as('staffB').doc('organizations/orgA/stock/s1').get());
+    await assertFails(as('stranger').doc('organizations/orgA/stock/s2').set(item));
+    await assertFails(as('staffA').doc('organizations/orgA/stock/s1').delete());
+    const move = { itemId: 's1', change: -2, kind: 'used', byUid: 'carerA' };
+    await assertSucceeds(as('carerA').doc('organizations/orgA/stockMovements/m1').set(move));
+    await assertFails(as('staffA').doc('organizations/orgA/stockMovements/m2').set(move));
+    await assertFails(as('carerA').doc('organizations/orgA/stockMovements/m1').update({ change: -1 }));
+    await assertFails(as('stranger').doc('organizations/orgA/stockMovements/m1').get());
+  });
+
+  test('in-kind pledges are created only by the backend', async () => {
+    const pledge = { userId: 'adopter', type: 'inkind', amount: 0, status: 'inprogress', campaignId: 'c1' };
+    await assertFails(as('adopter').collection('donations').add(pledge));
+    await assertFails(as('adopter').doc('users/adopter/history/h1').set(pledge));
+    // The donor can still cancel their own pledge.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('donations/p1').set(pledge);
+    });
+    await assertSucceeds(as('adopter').doc('donations/p1').update({ status: 'cancelled' }));
   });
 });
 

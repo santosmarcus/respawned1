@@ -228,9 +228,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   /// The stop whose photo verification is due in [status], or null when the
   /// current status has no photo verification step.
   ({LatLng? target, String place})? _verificationStopFor(
-    String status,
-    Map<String, dynamic> data,
-  ) {
+      String status,
+      Map<String, dynamic> data,
+      ) {
     switch (status) {
       case 'arrived':
         return (target: latLngFrom(data, 'lat', 'lng'), place: 'the pick up location');
@@ -238,8 +238,8 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         return (target: clinicLatLngFrom(data), place: 'the clinic');
       case 'in_transit_shelter':
         return (
-          target: latLngFrom(data, 'shelterLat', 'shelterLng'),
-          place: 'the shelter',
+        target: latLngFrom(data, 'shelterLat', 'shelterLng'),
+        place: 'the shelter',
         );
       default:
         return null;
@@ -255,11 +255,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     final meters = target == null
         ? null
         : Geolocator.distanceBetween(
-            pos.latitude,
-            pos.longitude,
-            target.latitude,
-            target.longitude,
-          );
+      pos.latitude,
+      pos.longitude,
+      target.latitude,
+      target.longitude,
+    );
     if (meters != _distanceToStopMeters) {
       setState(() => _distanceToStopMeters = meters);
     }
@@ -307,7 +307,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       if (meters <= kArrivalThresholdMeters) return true;
       _showError(
         "You're ~${meters.round()} m from ${stop.place}. "
-        'Photo verification only works at the location.',
+            'Photo verification only works at the location.',
       );
       return false;
     } catch (e) {
@@ -318,15 +318,15 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
   /// Opens the camera for a verification photo only inside the geofence.
   Future<void> _pickVerificationImage(
-    List<File?> slot,
-    int index,
-    Map<String, dynamic> data,
-  ) async {
+      List<File?> slot,
+      int index,
+      Map<String, dynamic> data,
+      ) async {
     if (!_isAtVerificationStop(data)) {
       final stop = _verificationStopFor(data['status'] as String? ?? '', data);
       _showMessage(
         'Photo verification unlocks when you are at '
-        '${stop?.place ?? 'the location'} (within ${kArrivalThresholdMeters.round()} m).',
+            '${stop?.place ?? 'the location'} (within ${kArrivalThresholdMeters.round()} m).',
       );
       return;
     }
@@ -448,9 +448,9 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   }
 
   Future<bool> _verifyArrivalViaDirections(
-    LatLng? destination,
-    String destinationLabel,
-  ) async {
+      LatLng? destination,
+      String destinationLabel,
+      ) async {
     if (destination == null) return true;
 
     setState(() => _isVerifyingArrival = true);
@@ -477,7 +477,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
         _showError(
           "Couldn't verify your route to $destinationLabel via Google Maps, and you're still "
-          '~${straightLineMeters.round()}m away by straight-line distance — keep heading there before confirming arrival.',
+              '~${straightLineMeters.round()}m away by straight-line distance — keep heading there before confirming arrival.',
         );
         return false;
       }
@@ -550,7 +550,13 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         _clinicImages,
         'clinic',
       );
-      await _service.acceptTreatment(urls);
+      final tripCompleted = await _service.acceptTreatment(urls);
+      // Rescue gaps 6/10: a confirmed adopter collects the animal from the
+      // clinic, so the transporter's trip ends here.
+      if (tripCompleted) {
+        _positionSub?.cancel();
+        _openResultPage(completed: true);
+      }
     } on ShelterLocationMissing {
       if (mounted) {
         await showInfoDialog(
@@ -789,20 +795,20 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           _proximityStatus = status as String?;
           _distanceToStopMeters = null;
           WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _refreshStopProximity(),
+                (_) => _refreshStopProximity(),
           );
         }
 
         if ((status == 'ongoing' ||
-                status == 'arrived' ||
-                status == 'treatment' ||
-                status == 'dropoff' ||
-                status == 'searching_clinic' ||
-                status == 'in_transit_shelter' ||
-                status == 'awaiting_adopter_pickup') &&
+            status == 'arrived' ||
+            status == 'treatment' ||
+            status == 'dropoff' ||
+            status == 'searching_clinic' ||
+            status == 'in_transit_shelter' ||
+            status == 'awaiting_adopter_pickup') &&
             _positionSub == null) {
           WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _beginLocationStreaming(),
+                (_) => _beginLocationStreaming(),
           );
         }
 
@@ -810,7 +816,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           if (!_isSearchingClinic && !_autoSearchAttempted) {
             _autoSearchAttempted = true;
             WidgetsBinding.instance.addPostFrameCallback(
-              (_) => _findAndRouteToNextClinic(),
+                  (_) => _findAndRouteToNextClinic(),
             );
           }
         } else {
@@ -930,7 +936,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   /// Picks the bottom panel for the current transit [status].
   Widget _buildBottomPanel(String status, Map<String, dynamic> data) {
     switch (status) {
-      // Arrived at pickup — verification
+    // Arrived at pickup — verification
       case 'arrived':
         final clinicAddress = clinicAddressFrom(data);
         return VerificationPanel(
@@ -950,7 +956,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           contactRows: buildTransitContactRows(data, onCall: _launchCall),
         );
 
-      // Arrived at a clinic — Treatment Accepted / Treatment Rejected decision
+    // Arrived at a clinic — Treatment Accepted / Treatment Rejected decision
       case 'dropoff':
         final address = clinicAddressFrom(data);
         return ClinicDecisionPanel(
@@ -972,7 +978,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           locked: !_isAtVerificationStop(data),
         );
 
-      // A clinic just rejected treatment — auto-searching for the next one
+    // A clinic just rejected treatment — auto-searching for the next one
       case 'searching_clinic':
         return SearchingClinicPanel(
           lastAddress: clinicAddressFrom(data),
@@ -981,9 +987,11 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           onRetry: _findAndRouteToNextClinic,
         );
 
-      // Treatment accepted, and the reporter marked interest to adopt on the
-      // original report — waiting at the clinic for that adopter instead of
-      // heading to the shelter.
+    // Treatment accepted, and the reporter marked interest to adopt on the
+    // original report — waiting at the clinic for that adopter instead of
+    // heading to the shelter.
+    // Cases from before Rescue gaps 6/10 still wait for the adopter here;
+    // new ones complete the transporter's trip at Accept Treatment.
       case 'awaiting_adopter_pickup':
         return AwaitingAdopterPanel(
           address: clinicAddressFrom(data),
@@ -992,13 +1000,13 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           onAdopterArrived: _confirmAdopterPresent,
         );
 
-      // Treatment accepted — final leg to the shelter
+    // Treatment accepted — final leg to the shelter
       case 'in_transit_shelter':
         final shelterAddress =
-            (data['shelterAddress'] as String?)?.isNotEmpty == true
+        (data['shelterAddress'] as String?)?.isNotEmpty == true
             ? data['shelterAddress'] as String
             : (data['shelterName'] as String?) ??
-                  'Shelter address not available';
+            'Shelter address not available';
         return VerificationPanel(
           title: 'In transit to shelter',
           address: shelterAddress,
@@ -1011,7 +1019,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           locked: !_isAtVerificationStop(data),
         );
 
-      // Standard panel for other statuses
+    // Standard panel for other statuses
       default:
         return StandardProgressPanel(
           status: status,
