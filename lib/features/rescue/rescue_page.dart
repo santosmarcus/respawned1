@@ -1,3 +1,4 @@
+import 'package:respawnd1/core/utils/photo_metadata.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -144,9 +145,9 @@ class _RescuePageState extends State<RescuePage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             appSnackBar('Please enable location services for accurate pinning.', action: SnackBarAction(
-                label: 'Settings',
-                onPressed: () => Geolocator.openLocationSettings(),
-              )),
+              label: 'Settings',
+              onPressed: () => Geolocator.openLocationSettings(),
+            )),
           );
         }
         await _fallbackToLastKnownOrDefault(
@@ -165,9 +166,9 @@ class _RescuePageState extends State<RescuePage> {
         if (mounted && permission == LocationPermission.deniedForever) {
           ScaffoldMessenger.of(context).showSnackBar(
             appSnackBar('Location permission permanently denied.', action: SnackBarAction(
-                label: 'App Settings',
-                onPressed: () => Geolocator.openAppSettings(),
-              )),
+              label: 'App Settings',
+              onPressed: () => Geolocator.openAppSettings(),
+            )),
           );
         }
         await _fallbackToLastKnownOrDefault(
@@ -180,16 +181,16 @@ class _RescuePageState extends State<RescuePage> {
       // position is available rather than ever substituting the hardcoded
       // default coordinate as if it were a real resolved location.
       final pos =
-          await Geolocator.getCurrentPosition(
-                locationSettings: const LocationSettings(
-                  accuracy: LocationAccuracy.high,
-                ),
-              )
-              .then<Position?>((p) => p)
-              .timeout(
-                const Duration(seconds: 15),
-                onTimeout: () => Geolocator.getLastKnownPosition(),
-              );
+      await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      )
+          .then<Position?>((p) => p)
+          .timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => Geolocator.getLastKnownPosition(),
+      );
 
       if (pos != null) {
         _deviceFix = pos;
@@ -332,7 +333,7 @@ class _RescuePageState extends State<RescuePage> {
 
     if (file != null && mounted) {
       setState(
-        () => _form.mediaFiles[index] = RescueMediaItem(
+            () => _form.mediaFiles[index] = RescueMediaItem(
           file: file!,
           isVideo: isVideo,
           fromCamera: action == 'photo_camera' || action == 'video_camera',
@@ -370,8 +371,8 @@ class _RescuePageState extends State<RescuePage> {
     if (placeCount < picked.length && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar(placeCount == 0
-                ? 'You already have ${_form.mediaFiles.length} photos/videos added — remove one first.'
-                : 'Only $placeCount of ${picked.length} photos were added (max ${_form.mediaFiles.length} total).', kind: AppMessageKind.error),
+            ? 'You already have ${_form.mediaFiles.length} photos/videos added — remove one first.'
+            : 'Only $placeCount of ${picked.length} photos were added (max ${_form.mediaFiles.length} total).', kind: AppMessageKind.error),
       );
     }
   }
@@ -462,10 +463,10 @@ class _RescuePageState extends State<RescuePage> {
         tagId,
         location: _hasResolvedLocation
             ? ScanLocation(
-                lat: _pinnedLocation.latitude,
-                lng: _pinnedLocation.longitude,
-                address: _pinnedAddress,
-              )
+          lat: _pinnedLocation.latitude,
+          lng: _pinnedLocation.longitude,
+          address: _pinnedAddress,
+        )
             : null,
       );
 
@@ -474,8 +475,8 @@ class _RescuePageState extends State<RescuePage> {
       if (!outcome.tagExists) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar(_form.isLostPetType
-                  ? 'Tag scanned, but no registered profile was found for it.'
-                  : 'Tag scanned: $result', kind: AppMessageKind.success),
+              ? 'Tag scanned, but no registered profile was found for it.'
+              : 'Tag scanned: $result', kind: AppMessageKind.success),
         );
         return;
       }
@@ -583,7 +584,7 @@ class _RescuePageState extends State<RescuePage> {
                   const SizedBox(height: 4),
                   Text(
                     'Provide actual images or videos of the animal. '
-                    'At least 2 are required.',
+                        'At least 2 are required.',
                     style: GoogleFonts.zain(
                       fontSize: 11,
                       color: AppColors.textSecondary,
@@ -595,7 +596,7 @@ class _RescuePageState extends State<RescuePage> {
                     runSpacing: 12,
                     children: List.generate(
                       4,
-                      (i) => RescueMediaBox(
+                          (i) => RescueMediaBox(
                         item: _form.mediaFiles[i],
                         progress: _form.uploadProgress[i],
                         onTap: _isLoading ? null : () => _pickMedia(i),
@@ -704,28 +705,28 @@ class _RescuePageState extends State<RescuePage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed:
-                      (_isLoading ||
-                          (_form.isPetSurrenderType &&
-                              _form.isRescueOrgAcquisition))
+                  (_isLoading ||
+                      (_form.isPetSurrenderType &&
+                          _form.isRescueOrgAcquisition))
                       ? null
                       : _handleSubmit,
                   style: AppButtons.primary,
                   child: _isLoading
                       ? const SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: AppColors.textPrimary,
-                          ),
-                        )
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: AppColors.textPrimary,
+                    ),
+                  )
                       : Text(
-                          'Submit Report',
-                          style: GoogleFonts.tiltWarp(
-                            fontSize: 16,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
+                    'Submit Report',
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 16,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -745,11 +746,16 @@ class _RescuePageState extends State<RescuePage> {
 
   /// What staff see when they check this report: how many photos were
   /// taken here versus picked from the gallery, and where the phone was.
-  ReportEvidence _reportEvidence() {
+  Future<ReportEvidence> _reportEvidence() async {
     final media = _form.mediaFiles.whereType<RescueMediaItem>().toList();
     final camera = media.where((m) => m.fromCamera).length;
     final fix = _deviceFix;
+    // Rescue gap 7: capture time/place inside each gallery photo.
+    final galleryMeta = [
+      for (final m in media.where((m) => !m.fromCamera && !m.isVideo)) await PhotoMetadata.read(m.file),
+    ];
     return ReportEvidence(
+      galleryPhotoMetadata: galleryMeta,
       cameraMediaCount: camera,
       galleryMediaCount: media.length - camera,
       pinSource: _pinSource,
@@ -823,7 +829,7 @@ class _RescuePageState extends State<RescuePage> {
         form: _form,
         location: _pinnedLocation,
         pinnedAddress: _pinnedAddress,
-        evidence: _reportEvidence(),
+        evidence: await _reportEvidence(),
         onProgress: _onUploadProgress,
       );
 
@@ -885,11 +891,11 @@ class _RescuePageState extends State<RescuePage> {
             content: Text(
               matchCount > 0
                   ? 'We found $matchCount possible match(es). '
-                        'Open this report from your Activity feed and check the '
-                        'Possible Matches section once our team verifies them.'
+                  'Open this report from your Activity feed and check the '
+                  'Possible Matches section once our team verifies them.'
                   : "We'll notify you the moment a possible match comes in — "
-                        'check the Possible Matches section on this report from '
-                        'your Activity feed.',
+                  'check the Possible Matches section on this report from '
+                  'your Activity feed.',
               style: GoogleFonts.zain(
                 fontSize: 14,
                 color: AppColors.textSecondary,

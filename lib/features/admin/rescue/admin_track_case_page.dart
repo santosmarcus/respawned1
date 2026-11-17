@@ -17,7 +17,7 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/species_summary.dart'
-    as species_summary_util;
+as species_summary_util;
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
@@ -36,7 +36,10 @@ import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 // of these is the multi-day clinical-care phase this screen's "Proceed to
 // Treatment" button starts — that's a separate, admin-triggered status
 // (RescueStatus.treatment / 'in_treatment').
-const _kArrivedAtClinicStatuses = {'dropoff', 'in_transit_shelter'};
+// 'awaiting_adopter_pickup': the clinic accepted treatment and a confirmed
+// adopter will collect the animal there (Rescue gaps 6/10), so staff
+// continue with Proceed to Treatment.
+const _kArrivedAtClinicStatuses = {'dropoff', 'in_transit_shelter', 'awaiting_adopter_pickup'};
 
 // Same transporter-written status vocabulary, but the slice that means
 // "animal already picked up, headed toward a clinic" — 'treatment' here is
@@ -152,8 +155,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       if (outcome.acted && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar(outcome.wholeCaseClosed
-                  ? 'Case closed.'
-                  : 'Animal marked deceased.'),
+              ? 'Case closed.'
+              : 'Animal marked deceased.'),
         );
         // Only leave this tracking page once the CASE itself is closed —
         // a per-animal death that leaves the case active (other animals
@@ -227,11 +230,11 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         .doc(widget.caseId)
         .collection('messages')
         .add({
-          'senderId': 'admin',
-          'senderName': 'Loved by the Gapz',
-          'text': text,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
+      'senderId': 'admin',
+      'senderName': 'Loved by the Gapz',
+      'text': text,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
     _messageController.clear();
   }
 
@@ -285,9 +288,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         await ref
             .read(rescueCaseRepositoryProvider)
             .completeAssignment(
-              caseId: widget.caseId,
-              assignmentId: assignment.id,
-            );
+          caseId: widget.caseId,
+          assignmentId: assignment.id,
+        );
       }
 
       if (mounted) {
@@ -318,15 +321,15 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   // exercise "Proceed to Treatment" without a live rider in transit.
   Future<void> _fastForwardToClinic() async {
     await RescueCaseStore(FirebaseFirestore.instance).recordAction(
-        caseId: widget.caseId,
-        action: 'test_arrived_at_clinic',
-        statusLine: '[TEST] Fast-forwarded — transporter marked as arrived at the clinic.',
-        actorUid: _actorUid,
-        actorName: _actorName,
-        fields: {
-          'status': 'dropoff',
-        },
-      );
+      caseId: widget.caseId,
+      action: 'test_arrived_at_clinic',
+      statusLine: '[TEST] Fast-forwarded — transporter marked as arrived at the clinic.',
+      actorUid: _actorUid,
+      actorName: _actorName,
+      fields: {
+        'status': 'dropoff',
+      },
+    );
   }
 
   LatLng? _caseLocationFrom(Map<String, dynamic> data) {
@@ -360,8 +363,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   /// pickup/dropoff status vocabulary entirely — the destination is always
   /// the intake shelter location saved by RescueCaseRepository.confirmIntake.
   ({LatLng? location, String label}) _destinationFrom(
-    Map<String, dynamic> data,
-  ) {
+      Map<String, dynamic> data,
+      ) {
     if (widget.mode == TrackingMode.intakeTransfer) {
       final lat = (data['intakeDestinationLat'] as num?)?.toDouble();
       final lng = (data['intakeDestinationLng'] as num?)?.toDouble();
@@ -370,10 +373,10 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         return (location: null, label: 'No shelter destination available yet');
       }
       return (
-        location: LatLng(lat, lng),
-        label: (name != null && name.isNotEmpty)
-            ? name
-            : 'Organization Shelter',
+      location: LatLng(lat, lng),
+      label: (name != null && name.isNotEmpty)
+          ? name
+          : 'Organization Shelter',
       );
     }
 
@@ -396,8 +399,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     final dropoffLng = (data['dropoffLng'] as num?)?.toDouble();
     if (dropoffLat != null && dropoffLng != null) {
       return (
-        location: LatLng(dropoffLat, dropoffLng),
-        label: 'Clinic (legacy destination)',
+      location: LatLng(dropoffLat, dropoffLng),
+      label: 'Clinic (legacy destination)',
       );
     }
 
@@ -425,9 +428,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       await ref
           .read(rescueCaseRepositoryProvider)
           .confirmAnimalReceived(
-            caseId: widget.caseId,
-            currentAssignmentId: assignment?.id,
-          );
+        caseId: widget.caseId,
+        currentAssignmentId: assignment?.id,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Animal received — transport complete.', kind: AppMessageKind.success),
@@ -470,9 +473,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   }
 
   Widget _buildTrackingMap(
-    Map<String, dynamic> data,
-    TransportAssignment? assignment,
-  ) {
+      Map<String, dynamic> data,
+      TransportAssignment? assignment,
+      ) {
     // Shown in place of the map, on this same page, whenever the current
     // offer hasn't been accepted yet — no separate Pending/Rejected page
     // or route. In normal use the admin never actually sees this: the
@@ -532,7 +535,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             GoogleMap(
               gestureRecognizers: {
                 Factory<OneSequenceGestureRecognizer>(
-                  () => EagerGestureRecognizer(),
+                      () => EagerGestureRecognizer(),
                 ),
               },
               // caseLocation is non-null whenever rider is null here — the
@@ -613,9 +616,9 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     // destination, so a second marker at the same point would be redundant.
     final showSeparateCaseMarker =
         isPostPickupDestination &&
-        caseLocation != null &&
-        (caseLocation.latitude != destinationLocation.latitude ||
-            caseLocation.longitude != destinationLocation.longitude);
+            caseLocation != null &&
+            (caseLocation.latitude != destinationLocation.latitude ||
+                caseLocation.longitude != destinationLocation.longitude);
 
     return FutureBuilder<RouteResult>(
       // No route until the transporter has reported a position.
@@ -657,12 +660,12 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         final distanceKm = rider == null
             ? null
             : route?.distanceKm ??
-                haversineDistanceKm(
-                  rider.latitude,
-                  rider.longitude,
-                  destinationLocation.latitude,
-                  destinationLocation.longitude,
-                );
+            haversineDistanceKm(
+              rider.latitude,
+              rider.longitude,
+              destinationLocation.latitude,
+              destinationLocation.longitude,
+            );
         final isRoadFollowing = route?.isRoadFollowing ?? false;
 
         // Covers the ordering where the route resolves *after* the map
@@ -679,7 +682,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
               GoogleMap(
                 gestureRecognizers: {
                   Factory<OneSequenceGestureRecognizer>(
-                    () => EagerGestureRecognizer(),
+                        () => EagerGestureRecognizer(),
                   ),
                 },
                 initialCameraPosition: CameraPosition(
@@ -727,7 +730,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     distanceKm == null
                         ? 'Heading to ${destination.label} · transporter location not shared yet'
                         : '${distanceKm.toStringAsFixed(1)} km to ${destination.label}'
-                            '${!isRoadFollowing ? ' (straight-line estimate)' : ''}',
+                        '${!isRoadFollowing ? ' (straight-line estimate)' : ''}',
                     style: GoogleFonts.zain(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -958,31 +961,31 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                         ),
 
                         (widget.mode == TrackingMode.intakeTransfer ||
-                                _tabIndex == 0)
+                            _tabIndex == 0)
                             ? _AdminTrackingTab(
-                                statusHistory: statusHistory,
-                                caseId: widget.caseId,
-                                messageController: _messageController,
-                                onSend: _sendMessage,
-                                isIntakeMode:
-                                    widget.mode == TrackingMode.intakeTransfer,
-                                transporterHasReachedClinic:
-                                    _kArrivedAtClinicStatuses.contains(
-                                      data['status'],
-                                    ),
-                                isProceedingToTreatment:
-                                    _isProceedingToTreatment,
-                                onProceedToTreatment: () =>
-                                    _proceedToTreatment(data),
-                                onFastForward: _fastForwardToClinic,
-                                hasReceivedIntake:
-                                    data['intakeReceivedAt'] != null,
-                                onConfirmAnimalReceived: () =>
-                                    _confirmAnimalReceived(assignment),
-                                hideCommunityContent:
-                                    data['sourceType'] ==
-                                    'animalRecordAdmission',
-                              )
+                          statusHistory: statusHistory,
+                          caseId: widget.caseId,
+                          messageController: _messageController,
+                          onSend: _sendMessage,
+                          isIntakeMode:
+                          widget.mode == TrackingMode.intakeTransfer,
+                          transporterHasReachedClinic:
+                          _kArrivedAtClinicStatuses.contains(
+                            data['status'],
+                          ),
+                          isProceedingToTreatment:
+                          _isProceedingToTreatment,
+                          onProceedToTreatment: () =>
+                              _proceedToTreatment(data),
+                          onFastForward: _fastForwardToClinic,
+                          hasReceivedIntake:
+                          data['intakeReceivedAt'] != null,
+                          onConfirmAnimalReceived: () =>
+                              _confirmAnimalReceived(assignment),
+                          hideCommunityContent:
+                          data['sourceType'] ==
+                              'animalRecordAdmission',
+                        )
                             : _AdminCaseDetailTab(data: data),
                       ],
                     ),
@@ -1261,47 +1264,47 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
                     height: 200,
                     child: docs.isEmpty
                         ? Center(
-                            child: Text(
-                              'No messages yet.',
-                              style: GoogleFonts.zain(
-                                fontSize: 12,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                          )
+                      child: Text(
+                        'No messages yet.',
+                        style: GoogleFonts.zain(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    )
                         : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            itemCount: docs.length,
-                            itemBuilder: (context, i) {
-                              final msg =
-                                  docs[i].data() as Map<String, dynamic>;
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 4),
-                                child: Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 12,
-                                      backgroundColor: AppColors.slaterspwn,
-                                      child: Text(
-                                        (msg['senderName'] ?? 'U')[0],
-                                        style: GoogleFonts.zain(fontSize: 10),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        '${msg['senderName']}: ${msg['text']}',
-                                        style: GoogleFonts.zain(
-                                          fontSize: 12,
-                                          color: AppColors.textPrimary,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: docs.length,
+                      itemBuilder: (context, i) {
+                        final msg =
+                        docs[i].data() as Map<String, dynamic>;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 12,
+                                backgroundColor: AppColors.slaterspwn,
+                                child: Text(
+                                  (msg['senderName'] ?? 'U')[0],
+                                  style: GoogleFonts.zain(fontSize: 10),
                                 ),
-                              );
-                            },
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${msg['senderName']}: ${msg['text']}',
+                                  style: GoogleFonts.zain(
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
+                        );
+                      },
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.all(12),
@@ -1372,40 +1375,40 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: widget.hasReceivedIntake
                 ? Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.greenrspwn.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    child: Center(
-                      child: Text(
-                        'Animal received at the shelter.',
-                        style: GoogleFonts.zain(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  )
-                : ElevatedButton(
-                    onPressed: widget.onConfirmAnimalReceived,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.yellowrspwn,
-                      minimumSize: const Size(double.infinity, 48),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: Text(
-                      'Confirm Animal Received',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 15,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.greenrspwn.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Center(
+                child: Text(
+                  'Animal received at the shelter.',
+                  style: GoogleFonts.zain(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
                   ),
+                ),
+              ),
+            )
+                : ElevatedButton(
+              onPressed: widget.onConfirmAnimalReceived,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.yellowrspwn,
+                minimumSize: const Size(double.infinity, 48),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+              child: Text(
+                'Confirm Animal Received',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 15,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
           )
         // Proceed to Treatment — only enabled once the transporter has
         // actually reached the clinic (status 'dropoff'/'in_transit_shelter').
@@ -1428,20 +1431,20 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
               ),
               child: widget.isProceedingToTreatment
                   ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.textPrimary,
-                      ),
-                    )
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.textPrimary,
+                ),
+              )
                   : Text(
-                      'Proceed to Treatment',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 15,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
+                'Proceed to Treatment',
+                style: GoogleFonts.tiltWarp(
+                  fontSize: 15,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ),
           )
         else
@@ -1596,22 +1599,22 @@ class _CollapsibleTransporterCard extends StatelessWidget {
       child: collapsed
           ? _CompactTransporterRow(assignment: assignment, onTap: onToggle)
           : Column(
-              children: [
-                TransporterDetailsCard(assignment: assignment),
-                GestureDetector(
-                  onTap: onToggle,
-                  behavior: HitTestBehavior.opaque,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 4),
-                    child: Icon(
-                      Icons.keyboard_arrow_up,
-                      size: 18,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
+        children: [
+          TransporterDetailsCard(assignment: assignment),
+          GestureDetector(
+            onTap: onToggle,
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Icon(
+                Icons.keyboard_arrow_up,
+                size: 18,
+                color: AppColors.textSecondary,
+              ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1627,22 +1630,22 @@ class _CompactTransporterRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(
       transporterProfileProvider((
-        uid: assignment.riderId,
-        fallbackName: assignment.riderName,
-        type: assignment.riderType,
-        isDemo: assignment.isDemo,
+      uid: assignment.riderId,
+      fallbackName: assignment.riderName,
+      type: assignment.riderType,
+      isDemo: assignment.isDemo,
       )),
     );
     final profile =
         profileAsync.asData?.value ??
-        TransporterProfile(
-          uid: assignment.riderId,
-          name: assignment.riderName,
-          type: assignment.riderType,
-          vehicle: 'Not provided',
-          plate: 'Not provided',
-          isDemo: assignment.isDemo,
-        );
+            TransporterProfile(
+              uid: assignment.riderId,
+              name: assignment.riderName,
+              type: assignment.riderType,
+              vehicle: 'Not provided',
+              plate: 'Not provided',
+              isDemo: assignment.isDemo,
+            );
 
     final isCompleted =
         assignment.status == TransportAssignmentStatus.completed;
@@ -1673,31 +1676,31 @@ class _CompactTransporterRow extends ConsumerWidget {
               borderRadius: BorderRadius.circular(8),
               child: (profile.photoUrl != null && profile.photoUrl!.isNotEmpty)
                   ? Image.network(
-                      profile.photoUrl!,
-                      width: 32,
-                      height: 32,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(
-                        width: 32,
-                        height: 32,
-                        color: AppColors.tearspwn,
-                        child: const Icon(
-                          Icons.directions_car,
-                          size: 16,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    )
+                profile.photoUrl!,
+                width: 32,
+                height: 32,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Container(
+                  width: 32,
+                  height: 32,
+                  color: AppColors.tearspwn,
+                  child: const Icon(
+                    Icons.directions_car,
+                    size: 16,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              )
                   : Container(
-                      width: 32,
-                      height: 32,
-                      color: AppColors.tearspwn,
-                      child: const Icon(
-                        Icons.directions_car,
-                        size: 16,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
+                width: 32,
+                height: 32,
+                color: AppColors.tearspwn,
+                child: const Icon(
+                  Icons.directions_car,
+                  size: 16,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -1777,9 +1780,9 @@ class _PendingAssignmentBannerState
       ref
           .read(rescueCaseRepositoryProvider)
           .reconcileStaleOffer(
-            caseId: widget.caseId,
-            assignmentId: widget.assignment.id,
-          );
+        caseId: widget.caseId,
+        assignmentId: widget.assignment.id,
+      );
     }
   }
 
@@ -1802,10 +1805,10 @@ class _PendingAssignmentBannerState
       await ref
           .read(rescueCaseRepositoryProvider)
           .cancelAssignment(
-            caseId: widget.caseId,
-            assignmentId: widget.assignment.id,
-            reason: 'Cancelled by organization while waiting',
-          );
+        caseId: widget.caseId,
+        assignmentId: widget.assignment.id,
+        reason: 'Cancelled by organization while waiting',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Offer cancelled. You may select another transporter.'),
@@ -1886,14 +1889,14 @@ class _PendingAssignmentBannerState
               ),
               child: _cancelling
                   ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
                   : Text(
-                      'Cancel Offer',
-                      style: GoogleFonts.zain(fontWeight: FontWeight.w700),
-                    ),
+                'Cancel Offer',
+                style: GoogleFonts.zain(fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         ),

@@ -3,76 +3,90 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
-import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 
-/// Release Animal — a limited, temporary handoff-to-reporter flow. Only
-/// ever shown when the reporter indicated adoption interest at submission
-/// time (`RescueCase.interestedToAdopt == 'yes'`, the same field
-/// rescue_detail_page.dart already displays) — callers must not open this
-/// otherwise (see TreatmentDetailPage's `allowRelease` gate).
+/// Release to the adopter (Rescue gaps 6/10). Only for a case with a
+/// confirmed adopter: the adopter filled in the adoption request from Track
+/// Case (accepting the vet-fee, obligations and pickup-window agreements)
+/// and staff confirmed it on Rescue Details.
 ///
-/// TODO(adoption): this is NOT a completed adoption. There is no
-/// application, approval, contract, or post-adoption follow-up here —
-/// those are a separate, not-yet-built feature. This only records the
-/// minimal handoff fields needed for testing
-/// (releasedToReporterId/Name/At/notes) and shows "Release confirmed", not
-/// "Adoption approved".
+/// This doesn't hand the animal over yet. It marks the discharged
+/// animal(s) ready for pickup and starts the [kAdopterPickupWindow]: the
+/// adopter is told where and by when. Staff confirm the actual pickup on
+/// Rescue Details, which finishes the adoption on Release Details. Not
+/// collected in time: the request is closed and the animal goes to the
+/// shelter, or is flagged for referral if the shelter is full.
 Future<bool> showReleaseAnimalSheet(
-  BuildContext context, {
-  required RescueCase rescueCase,
-  List<int>? animalIndexes,
-}) async {
+    BuildContext context, {
+      required RescueCase rescueCase,
+      List<int>? animalIndexes,
+    }) async {
+  final request = CaseAdoptionRequest.fromCase(rescueCase.raw);
+  if (request == null || !request.isConfirmed) {
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+      request == null
+          ? 'Release needs a confirmed adopter. The interested adopter applies from Track Case, then you confirm them on Rescue Details.'
+          : 'The adoption request is "${request.status.label}". Confirm the adopter on Rescue Details first.',
+      kind: AppMessageKind.error,
+    ));
+    return false;
+  }
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.background,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (_) => _ReleaseAnimalSheetBody(rescueCase: rescueCase, animalIndexes: animalIndexes),
+    builder: (_) => _ReleaseAnimalSheetBody(rescueCase: rescueCase, request: request, animalIndexes: animalIndexes),
   );
   return result ?? false;
 }
 
 class _ReleaseAnimalSheetBody extends ConsumerStatefulWidget {
   final RescueCase rescueCase;
+  final CaseAdoptionRequest request;
   final List<int>? animalIndexes;
-  const _ReleaseAnimalSheetBody({required this.rescueCase, this.animalIndexes});
+  const _ReleaseAnimalSheetBody({required this.rescueCase, required this.request, this.animalIndexes});
 
   @override
   ConsumerState<_ReleaseAnimalSheetBody> createState() => _ReleaseAnimalSheetBodyState();
 }
 
 class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody> {
-  final _notesController = TextEditingController();
+  late final _placeController = TextEditingController(
+    text: widget.rescueCase.vetClinicName ?? (widget.rescueCase.raw['dropoffName'] as String?) ?? '',
+  );
   bool _saving = false;
 
   @override
   void dispose() {
-    _notesController.dispose();
+    _placeController.dispose();
     super.dispose();
   }
 
   Future<void> _confirm() async {
-    final c = widget.rescueCase;
-    if (c.reporterId == null || c.reporterId!.isEmpty) return;
-
+    final place = _placeController.text.trim();
+    if (place.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(appSnackBar('Enter where the adopter collects the animal.', kind: AppMessageKind.error));
+      return;
+    }
     setState(() => _saving = true);
     try {
-      await ref.read(rescueCaseRepositoryProvider).releaseToReporter(
-            caseId: c.id,
-            reporterId: c.reporterId!,
-            reporterName: c.reporterName ?? 'Unnamed Reporter',
-            notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-            actorUid: 'admin',
-            actorName: 'Admin Staff',
-            animalIndexes: widget.animalIndexes,
-          );
+      await ref.read(rescueCaseRepositoryProvider).markReadyForAdopterPickup(
+        caseId: widget.rescueCase.id,
+        place: place,
+        actorUid: 'admin',
+        actorName: 'Admin Staff',
+        animalIndexes: widget.animalIndexes,
+      );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Could not confirm release: $e', kind: AppMessageKind.error),
+          appSnackBar(e is StateError ? e.message : 'Could not mark ready for pickup: $e', kind: AppMessageKind.error),
         );
         setState(() => _saving = false);
       }
@@ -82,13 +96,9 @@ class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody
   @override
   Widget build(BuildContext context) {
     final c = widget.rescueCase;
+    final hours = kAdopterPickupWindow.inHours;
     return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
-      ),
+      padding: EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 20 + MediaQuery.of(context).viewInsets.bottom),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -102,53 +112,35 @@ class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody
               ),
             ),
             const SizedBox(height: 14),
-            Text('Release Animal', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+            Text('Release to Adopter', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
             const SizedBox(height: 16),
-
-            _Label('Recipient'),
-            Text(c.reporterName ?? 'Unnamed Reporter',
+            const _Label('Confirmed adopter'),
+            Text(widget.request.adopterName,
                 style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-            Text('Reporter interested in adopting',
+            Text('Agreed to pay the vet fees, fulfil their obligations as an adopter and collect on time.',
                 style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
             const SizedBox(height: 14),
-
-            _Label('Case ID'),
-            Text('#${c.shortCaseId}', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-            const SizedBox(height: 10),
-
-            _Label('Species Summary'),
-            Text(c.speciesSummary, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-            const SizedBox(height: 10),
-
-            if ((c.reporterPhone ?? '').isNotEmpty) ...[
-              _Label('Contact Information'),
-              Text(c.reporterPhone!, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-              const SizedBox(height: 10),
-            ],
-
-            _Label('Release Notes'),
+            const _Label('Case'),
+            Text('#${c.shortCaseId} · ${c.speciesSummary}',
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+            const SizedBox(height: 14),
+            const _Label('Pickup place'),
             TextField(
-              controller: _notesController,
-              maxLines: 2,
-              decoration: InputDecoration(
-                hintText: 'Optional notes',
-                hintStyle: GoogleFonts.zain(color: AppColors.textSecondary, fontSize: 13),
+              controller: _placeController,
+              decoration: const InputDecoration(
+                hintText: 'Clinic or shelter name and address',
                 isDense: true,
-                contentPadding: const EdgeInsets.only(bottom: 6),
-                enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
-                focusedBorder:
-                    const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
               ),
-              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
             ),
-
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Text(
-              'This confirms a temporary handoff for testing only — it is not a '
-              'completed adoption. Formal adoption approval and forms are not part of this yet.',
-              style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+              'The adopter is told the animal is ready and has $hours hours to collect it. Confirm the pickup on '
+                  'Rescue Details when they arrive. If they don\'t come in time, the request is closed and the animal goes '
+                  'to the shelter, or is flagged for referral if the shelter is full.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
             ),
-
             const SizedBox(height: 20),
             Row(
               children: [
@@ -166,11 +158,10 @@ class _ReleaseAnimalSheetBodyState extends ConsumerState<_ReleaseAnimalSheetBody
                     style: AppButtons.primary,
                     child: _saving
                         ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                        : Text('Confirm Release',
-                            style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                        : Text('Ready for Pickup', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                   ),
                 ),
               ],
@@ -187,8 +178,8 @@ class _Label extends StatelessWidget {
   const _Label(this.text);
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Text(text,
-            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-      );
+    padding: const EdgeInsets.only(bottom: 2),
+    child: Text(text,
+        style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+  );
 }

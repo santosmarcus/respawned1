@@ -814,7 +814,10 @@ service cloud.firestore {
       function reporterUpdate() {
         return resource.data.get('reporterId', '') == request.auth.uid &&
           !changedAny(['reporterId', 'organizationId', 'riderId', 'assignedVolunteerId',
-            'verification', 'liveProofRequest', 'reportEvidence']) &&
+            'verification', 'liveProofRequest', 'reportEvidence',
+            // Rescue gaps 6/10: the adoption request mirror and the pickup
+            // window belong to staff and the backend.
+            'adoptionRequest', 'adopterPickup']) &&
           (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data));
       }
 
@@ -1136,7 +1139,8 @@ service cloud.firestore {
         // no-show and booking-reminder counters are staff/backend only.
         return isAdopterOf(resource.data) &&
           !changedAny(['personal', 'organizationId', 'fitAtDecision',
-            'noShowCount', 'noShows', 'lastNoShowAt', 'bookingReminders']) &&
+            'noShowCount', 'noShows', 'lastNoShowAt', 'bookingReminders',
+            'source', 'caseId', 'agreement']) &&
           (!changedAny(['status']) || request.resource.data.status == 'withdrawn');
       }
 
@@ -1150,10 +1154,31 @@ service cloud.firestore {
         isPlatformStaff() ||
         isApprovedStaffOf(resource.data.organizationId)
       );
+      // Rescue gaps 6/10: an adoption request for a rescued animal, from the
+      // reporter who said they want to adopt it or the user who registered
+      // interest on the case. Belongs to the case's organization (none yet
+      // for an unowned report; stamped when one accepts it). All three
+      // agreements are required.
+      function rescueRequestOk(data) {
+        let c = get(casePath(data.get('caseId', 'none'))).data;
+        let agreement = data.get('agreement', {});
+        return data.get('source', '') == 'rescue_case' &&
+          data.get('caseId', '') is string && data.get('caseId', '') != '' &&
+          !('animalRecordId' in data.get('personal', {})) &&
+          ((c.get('reporterId', '') == request.auth.uid && c.get('interestedToAdopt', '') == 'yes') ||
+            c.get('willingAdopterId', '') == request.auth.uid) &&
+          data.get('organizationId', '') == c.get('organizationId', '') &&
+          agreement.get('vetFees', false) == true &&
+          agreement.get('obligations', false) == true &&
+          agreement.get('pickupWindow', false) == true;
+      }
+
       allow create: if signedIn() &&
         isAdopterOf(request.resource.data) &&
         request.resource.data.get('status', '') == 'pending' &&
-        orgMatchesAnimal(request.resource.data);
+        (request.resource.data.get('source', '') == 'rescue_case'
+          ? rescueRequestOk(request.resource.data)
+          : orgMatchesAnimal(request.resource.data));
       allow update: if signedIn() && (
         (canStaffAdoption(resource.data) && orgStampOk()) ||
         adopterUpdate()

@@ -10,19 +10,30 @@ void main() {
 
     test(
       'counts in_treatment / intake stages, skipping deceased and resolved',
-      () {
+          () {
         final summary = RescueCaseStore.stageSummaryUpdate([
           {'postTreatmentAction': null},
           {'postTreatmentAction': null},
           {'postTreatmentAction': 'intake', 'intakeCompletedAt': null},
           {'postTreatmentAction': 'intake', 'intakeCompletedAt': 'done'},
-          {'postTreatmentAction': 'release'},
+          {'postTreatmentAction': 'release', 'releaseCompletedAt': 'done'},
           {'outcome': 'deceased'},
         ]);
         expect(summary['activeAnimalStages'], ['in_treatment', 'intake']);
         expect(summary['animalStageCounts'], {'in_treatment': 2, 'intake': 1});
       },
     );
+
+    test('an animal waiting for its adopter stays in treatment until collected', () {
+      final waiting = RescueCaseStore.stageSummaryUpdate([
+        {'postTreatmentAction': 'release', 'releaseCompletedAt': null},
+      ]);
+      expect(waiting['animalStageCounts'], {'in_treatment': 1});
+      final collected = RescueCaseStore.stageSummaryUpdate([
+        {'postTreatmentAction': 'release', 'releaseCompletedAt': 'done'},
+      ]);
+      expect(collected['animalStageCounts'], isEmpty);
+    });
   });
 
   group('RescueCaseStore.deriveCaseStatusOverride', () {
@@ -34,9 +45,25 @@ void main() {
       expect(
         RescueCaseStore.deriveCaseStatusOverride([
           {'postTreatmentAction': null},
-          {'postTreatmentAction': 'release'},
+          {'postTreatmentAction': 'release', 'releaseCompletedAt': 'done'},
         ]),
         RescueStatus.treatment.firestoreValue,
+      );
+    });
+
+    test('treatment while the confirmed adopter has not collected the animal', () {
+      expect(
+        RescueCaseStore.deriveCaseStatusOverride([
+          {'postTreatmentAction': 'release', 'releaseCompletedAt': null},
+          {'postTreatmentAction': 'transfer'},
+        ]),
+        RescueStatus.treatment.firestoreValue,
+      );
+      expect(
+        RescueCaseStore.deriveCaseStatusOverride([
+          {'postTreatmentAction': 'release', 'releaseCompletedAt': 'done'},
+        ]),
+        RescueStatus.completed.firestoreValue,
       );
     });
 

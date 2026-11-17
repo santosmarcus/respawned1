@@ -30,6 +30,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/ownership_status_sheet.d
 import 'package:respawnd1/features/admin/rescue/widgets/possible_duplicate_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/refer_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/referral_history_section.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/rescue_adoption_request_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rejection_reason_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/report_verification_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
@@ -87,13 +88,13 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       await ref
           .read(rescueCaseRepositoryProvider)
           .acceptCase(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-            organizationId: organizationId,
-            openForTransfer: result.openForTransfer,
-            readinessSnapshot: result.readinessSnapshot,
-          );
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        organizationId: organizationId,
+        openForTransfer: result.openForTransfer,
+        readinessSnapshot: result.readinessSnapshot,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -130,8 +131,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       if (outcome.acted && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar(outcome.wholeCaseClosed
-                  ? 'Case closed.'
-                  : 'Animal marked deceased.'),
+              ? 'Case closed.'
+              : 'Animal marked deceased.'),
         );
       }
     } catch (e) {
@@ -160,15 +161,15 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       await ref
           .read(rescueCaseRepositoryProvider)
           .updateOwnershipInfo(
-            caseId: c.id,
-            ownershipStatus: result.ownershipStatus,
-            ownedAnimalCategory: result.ownedAnimalCategory,
-            ownerName: result.ownerName,
-            ownerContact: result.ownerContact,
-            ownershipNotes: result.ownershipNotes,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        ownershipStatus: result.ownershipStatus,
+        ownedAnimalCategory: result.ownedAnimalCategory,
+        ownerName: result.ownerName,
+        ownerContact: result.ownerContact,
+        ownershipNotes: result.ownershipNotes,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -185,8 +186,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     final name = c.raw['ownerName'] as String?;
     final contact = c.raw['ownerContact'] as String?;
     showInfoDialog(context, title: 'Owner Contact', message: (contact == null || contact.isEmpty)
-              ? 'No owner contact information has been recorded yet. Use Update Ownership Info to add it.'
-              : '${name != null && name.isNotEmpty ? '$name\n' : ''}$contact');
+        ? 'No owner contact information has been recorded yet. Use Update Ownership Info to add it.'
+        : '${name != null && name.isNotEmpty ? '$name\n' : ''}$contact');
   }
 
   /// "Retry with a different transporter" after a safety report (spec
@@ -196,8 +197,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   Future<void> _retryWithDifferentTransporter(RescueCase c) async {
     final notes = c.raw['endReasonNotes'] as String?;
     final acknowledged = await showConfirmActionDialog(context, title: 'Acknowledge Safety Warning', message: 'A previous transporter reported that this animal may be aggressive.'
-          '${notes != null && notes.isNotEmpty ? '\n\n"$notes"' : ''}'
-          '\n\nDo you acknowledge this before selecting another transporter?', confirmLabel: 'I Acknowledge');
+        '${notes != null && notes.isNotEmpty ? '\n\n"$notes"' : ''}'
+        '\n\nDo you acknowledge this before selecting another transporter?', confirmLabel: 'I Acknowledge');
     if (acknowledged != true || !mounted) return;
 
     setState(() => _isLoading = true);
@@ -205,10 +206,10 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       await ref
           .read(rescueCaseRepositoryProvider)
           .resumeAssignmentAfterSafetyReport(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (mounted) {
         Navigator.push(
           context,
@@ -241,10 +242,10 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     setState(() => _isLoading = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).returnToAssignmentAfterTransitEnded(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (mounted) {
         Navigator.push(
           context,
@@ -275,11 +276,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       await ref
           .read(rescueCaseRepositoryProvider)
           .addSafetyResponseNote(
-            caseId: c.id,
-            note: note,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        note: note,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -295,9 +296,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   /// [ClinicSheetResult] — this only reacts to that result, it never
   /// assumes "the sheet closed" means "continue".
   Future<void> _openClinicSheet(
-    RescueCase c, {
-    required bool offerAssignRider,
-  }) async {
+      RescueCase c, {
+        required bool offerAssignRider,
+      }) async {
     final outcome = await showSelectClinicSheet(
       context,
       repository: ref.read(clinicSearchRepositoryProvider),
@@ -320,7 +321,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
     switch (outcome.result) {
       case ClinicSheetResult.cancelled:
-        // Remain on Rescue Details. Nothing to undo — nothing was saved.
+      // Remain on Rescue Details. Nothing to undo — nothing was saved.
         break;
       case ClinicSheetResult.clinicSaved:
         await showSuccessDialog(
@@ -348,7 +349,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       context,
       title: 'Reject This Report?',
       message:
-          'The reporter will see this report was rejected: ${result.reason.label}.',
+      'The reporter will see this report was rejected: ${result.reason.label}.',
       confirmLabel: 'Reject',
       destructive: true,
     );
@@ -359,12 +360,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       await ref
           .read(rescueCaseRepositoryProvider)
           .rejectCase(
-            caseId: c.id,
-            reason: result.reason,
-            otherText: result.otherText,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        reason: result.reason,
+        otherText: result.otherText,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -388,10 +389,10 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     setState(() => _isLoading = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).confirmOrganizationTransportArrived(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (!mounted) return;
       await Navigator.pushReplacement(
         context,
@@ -445,11 +446,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     );
     if (!ok || !mounted) return;
     await _runReferralAnswer(
-      () => ref.read(rescueCaseRepositoryProvider).acceptReferral(
-            caseId: c.id,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          ),
+          () => ref.read(rescueCaseRepositoryProvider).acceptReferral(
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      ),
       done: 'Referral accepted. The case is in your Rescue Review.',
     );
   }
@@ -470,12 +471,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     );
     if (reason == null || reason.isEmpty || !mounted) return;
     await _runReferralAnswer(
-      () => ref.read(rescueCaseRepositoryProvider).declineReferral(
-            caseId: c.id,
-            reason: reason,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          ),
+          () => ref.read(rescueCaseRepositoryProvider).declineReferral(
+        caseId: c.id,
+        reason: reason,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      ),
       done: 'Referral declined. The referring organization has been told.',
     );
   }
@@ -542,13 +543,13 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             ?.value
             .where(
               (r) =>
-                  r.type == 'moved' &&
-                  r.approvalStatus == 'pending' &&
-                  r.newLat != null &&
-                  r.newLng != null,
-            )
+          r.type == 'moved' &&
+              r.approvalStatus == 'pending' &&
+              r.newLat != null &&
+              r.newLng != null,
+        )
             .toList() ??
-        const [];
+            const [];
 
     // Whether a transporter offer is currently pending/accepted for this
     // case — used below to stop "Assign Transporter" from creating a
@@ -788,7 +789,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   child: _DetailSection(
                     label: 'QR/NFC',
                     value:
-                        (c.scannedTagId != null && c.scannedTagId!.isNotEmpty)
+                    (c.scannedTagId != null && c.scannedTagId!.isNotEmpty)
                         ? 'Linked (${c.scannedTagId})'
                         : 'No',
                   ),
@@ -836,7 +837,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       child: GoogleMap(
                         gestureRecognizers: {
                           Factory<OneSequenceGestureRecognizer>(
-                            () => EagerGestureRecognizer(),
+                                () => EagerGestureRecognizer(),
                           ),
                         },
                         initialCameraPosition: CameraPosition(
@@ -881,9 +882,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     ),
                   )
                 else
-                  // Fallback for reports with no saved coordinates —
-                  // avoids a broken/blank box instead of trying (and
-                  // failing) to render a map with nothing to center on.
+                // Fallback for reports with no saved coordinates —
+                // avoids a broken/blank box instead of trying (and
+                // failing) to render a map with nothing to center on.
                   Container(
                     height: 160,
                     decoration: BoxDecoration(
@@ -1009,6 +1010,14 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             ),
             const SizedBox(height: 12),
 
+            // Rescue gaps 6/10: the interested adopter's request, the
+            // organization's confirmation and the pickup window.
+            RescueAdoptionRequestCard(
+              rescueCase: c,
+              actorUid: _actorUid,
+              actorName: _actorName,
+              onRefer: () => _referCase(c),
+            ),
             MergeHistorySection(rescueCase: c, onOpenCase: _openCase),
             const SizedBox(height: 12),
             ReferralHistorySection(caseId: c.id),
@@ -1066,20 +1075,20 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                       style: AppButtons.primary,
                       child: _isLoading
                           ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.textPrimary,
-                              ),
-                            )
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.textPrimary,
+                        ),
+                      )
                           : Text(
-                              'Accept',
-                              style: GoogleFonts.tiltWarp(
-                                fontSize: 15,
-                                color: AppColors.textPrimary,
-                              ),
-                            ),
+                        'Accept',
+                        style: GoogleFonts.tiltWarp(
+                          fontSize: 15,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1172,11 +1181,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   ),
                 )
               else if (hasActiveAssignment)
-                // A transporter offer already exists and hasn't been
-                // rejected — route through AdminTrackCasePage, which shows
-                // an inline "waiting for the transporter to respond" view
-                // for as long as it stays pending (never a second "Assign
-                // Transporter" while one is outstanding).
+              // A transporter offer already exists and hasn't been
+              // rejected — route through AdminTrackCasePage, which shows
+              // an inline "waiting for the transporter to respond" view
+              // for as long as it stays pending (never a second "Assign
+              // Transporter" while one is outstanding).
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -1204,12 +1213,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                     onPressed: _isLoading
                         ? null
                         : () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  AssignRiderPage(caseId: c.id, data: c.raw),
-                            ),
-                          ),
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AssignRiderPage(caseId: c.id, data: c.raw),
+                      ),
+                    ),
                     style: AppButtons.primary,
                     child: Text(
                       'Assign Transporter',
@@ -1228,8 +1237,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               SectionCard(
                 child: Text(
                   'Your organization is bringing this animal to '
-                  '${c.vetClinicName ?? 'the clinic'} (recorded by '
-                  '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}).',
+                      '${c.vetClinicName ?? 'the clinic'} (recorded by '
+                      '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}).',
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
                 ),
               ),
@@ -1342,7 +1351,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   final endReason = c.raw['endReason'] as String?;
                   final isSpecializedTransport =
                       endReason ==
-                      'Animal requires specialized transport that I cannot provide';
+                          'Animal requires specialized transport that I cannot provide';
                   final serviceType = c.raw['endReasonServiceType'] as String?;
 
                   return Container(
@@ -1465,17 +1474,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                   onPressed: _isLoading
                       ? null
                       : () => _closeCase(
-                          c,
-                          initialReason:
-                              (c.raw['endReason'] as String?) ==
-                                  'Animal requires specialized transport that I cannot provide'
-                              ? ClosureReason.requiresTransport
-                              : ClosureReason.aggressive,
-                        ),
+                    c,
+                    initialReason:
+                    (c.raw['endReason'] as String?) ==
+                        'Animal requires specialized transport that I cannot provide'
+                        ? ClosureReason.requiresTransport
+                        : ClosureReason.aggressive,
+                  ),
                   style: AppButtons.dangerOutline,
                   child: Text(
                     (c.raw['endReason'] as String?) ==
-                            'Animal requires specialized transport that I cannot provide'
+                        'Animal requires specialized transport that I cannot provide'
                         ? 'Close Case — Specialized Transport Unavailable'
                         : 'Close Case — Aggressive Animal / Unsafe Rescue',
                   ),
@@ -1549,21 +1558,21 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 width: double.infinity,
                 child: c.raw['endReasonKind'] == 'deceased'
                     ? OutlinedButton(
-                        onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
-                        style: AppButtons.outline,
-                        child: Text(
-                          'Assign Another Transporter',
-                          style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
-                        ),
-                      )
+                  onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
+                  style: AppButtons.outline,
+                  child: Text(
+                    'Assign Another Transporter',
+                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
+                  ),
+                )
                     : ElevatedButton(
-                        onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
-                        style: AppButtons.primary,
-                        child: Text(
-                          'Assign Another Transporter',
-                          style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
-                        ),
-                      ),
+                  onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
+                  style: AppButtons.primary,
+                  child: Text(
+                    'Assign Another Transporter',
+                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                  ),
+                ),
               ),
               const SizedBox(height: 10),
               SizedBox(
@@ -1668,19 +1677,19 @@ class _RejectionDetailsCard extends ConsumerWidget {
     final reason = c.rejectionReason;
     final reasonLabel = reason == RejectionReason.other
         ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false
-              ? c.rejectionReasonOther!
-              : 'Other')
+        ? c.rejectionReasonOther!
+        : 'Other')
         : (reason?.label ?? 'Not specified');
 
     final logsAsync = ref.watch(caseActivityLogsProvider(c.id));
     final rejectionLog = logsAsync.asData?.value
         .where((l) => l.action == 'rejected')
         .fold<ActivityLogEntry?>(null, (latest, entry) {
-          if (latest == null) return entry;
-          if (entry.timestamp == null) return latest;
-          if (latest.timestamp == null) return entry;
-          return entry.timestamp!.isAfter(latest.timestamp!) ? entry : latest;
-        });
+      if (latest == null) return entry;
+      if (entry.timestamp == null) return latest;
+      if (latest.timestamp == null) return entry;
+      return entry.timestamp!.isAfter(latest.timestamp!) ? entry : latest;
+    });
 
     final rejectedDate = rejectionLog?.timestamp;
     final dateStr = rejectedDate != null
@@ -1904,17 +1913,17 @@ class _PhotoCarouselState extends State<_PhotoCarousel> {
                 child: isVideo
                     ? _NetworkVideoTile(url: _items[i])
                     : Image.network(
-                        _items[i],
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Container(
-                          color: AppColors.tearspwn,
-                          child: const Icon(
-                            Icons.broken_image,
-                            size: 48,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
+                  _items[i],
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(
+                    color: AppColors.tearspwn,
+                    child: const Icon(
+                      Icons.broken_image,
+                      size: 48,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
               );
             },
           ),
@@ -1963,13 +1972,13 @@ class _NetworkVideoTileState extends State<_NetworkVideoTile> {
     controller
         .initialize()
         .then((_) {
-          if (!mounted) return;
-          setState(() => _ready = true);
-        })
+      if (!mounted) return;
+      setState(() => _ready = true);
+    })
         .catchError((_) {
-          if (!mounted) return;
-          setState(() => _failed = true);
-        });
+      if (!mounted) return;
+      setState(() => _failed = true);
+    });
   }
 
   @override
@@ -2311,13 +2320,13 @@ class _AnimalCard extends StatelessWidget {
 
     final hasAssessment =
         (bodyCondition?.isNotEmpty ?? false) ||
-        (mobility?.isNotEmpty ?? false) ||
-        (alertness?.isNotEmpty ?? false) ||
-        (eyesNoseMouth?.isNotEmpty ?? false) ||
-        (skinAndCoat?.isNotEmpty ?? false) ||
-        (appetiteHydration?.isNotEmpty ?? false) ||
-        behavior.isNotEmpty ||
-        environmentSafety.isNotEmpty;
+            (mobility?.isNotEmpty ?? false) ||
+            (alertness?.isNotEmpty ?? false) ||
+            (eyesNoseMouth?.isNotEmpty ?? false) ||
+            (skinAndCoat?.isNotEmpty ?? false) ||
+            (appetiteHydration?.isNotEmpty ?? false) ||
+            behavior.isNotEmpty ||
+            environmentSafety.isNotEmpty;
 
     return [
       if (species != null && species.isNotEmpty)
@@ -2459,11 +2468,11 @@ class _ReferralPanel extends StatelessWidget {
           Text(
             isTarget
                 ? '${fromName.isEmpty ? 'Another organization' : fromName} referred this case to you'
-                    '${at == null ? '' : ' on ${formatDateTime(at)}'}. Accept to take it into your Rescue Review, '
-                    'or decline with a reason to send it back.'
+                '${at == null ? '' : ' on ${formatDateTime(at)}'}. Accept to take it into your Rescue Review, '
+                'or decline with a reason to send it back.'
                 : 'Referred to $targetName${at == null ? '' : ' on ${formatDateTime(at)}'}. They are reminded after '
-                    '$kReferralReminderHours hours; with no answer after $kReferralReturnHours hours the case comes '
-                    'back to your Rescue Review.',
+                '$kReferralReminderHours hours; with no answer after $kReferralReturnHours hours the case comes '
+                'back to your Rescue Review.',
             style: muted,
           ),
           if (note.isNotEmpty) ...[

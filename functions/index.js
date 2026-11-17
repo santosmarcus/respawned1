@@ -1,5 +1,5 @@
 const {onSchedule} = require('firebase-functions/v2/scheduler');
-const {onDocumentCreated, onDocumentUpdated} = require('firebase-functions/v2/firestore');
+const {onDocumentCreated, onDocumentUpdated, onDocumentWritten} = require('firebase-functions/v2/firestore');
 const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
 const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
@@ -1979,3 +1979,304 @@ exports.syncVolunteerStats = require('./volunteer_stats').syncVolunteerStats;
 exports.syncPublicCase = require('./public_cases').syncPublicCase;
 // Each rider's newest offer status on their user doc, for staff of every organization — see functions/rider_status.js.
 exports.syncRiderTransportStatus = require('./rider_status').syncRiderTransportStatus;
+
+// ---- Rescue adoptions (Rescue gaps 6 and 10) ----------------------------
+//
+// The interested adopter (the reporter who said yes to adopting, or a user
+// who registered interest on Track Case) sends an adoption request:
+// adoptions/{id} with source 'rescue_case' and caseId, accepting the vet-fee,
+// obligations and pickup-window agreements. The organization confirms it on
+// Rescue Details. Decisions live in functions/rescue_adoption_rules.js.
+
+const rescueAdoption = require('./rescue_adoption_rules');
+
+async function notifyAdopter(uid, {title, body, data}) {
+  if (!uid) return;
+  try {
+    await db.collection('users').doc(uid).collection('notifications').add({
+      title,
+      message: body,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      isRead: false,
+      type: data.type,
+      caseId: data.caseId || null,
+    });
+  } catch (e) {
+    console.warn('[notifyAdopter] in-app notification failed', uid, e.message);
+  }
+  await safeNotifyUser({uid, title, body, data});
+}
+
+function caseStaffOrgId(c) {
+  if (c.organizationId) return c.organizationId;
+  return Array.isArray(c.areaOrgIds) && c.areaOrgIds.length ? c.areaOrgIds[0] : null;
+}
+
+// Mirrors each request onto its case (cases/{id}.adoptionRequest), which the
+// transporter flow, Track Case and Rescue Details read, and tells the right
+// people about each step.
+exports.syncRescueAdoptionRequest = onDocumentWritten('adoptions/{adoptionId}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  const app = after || before;
+  if (!app || app.source !== rescueAdoption.RESCUE_ADOPTION_SOURCE || !app.caseId) return;
+  if (!after) return;
+  const caseRef = db.collection('cases').doc(app.caseId);
+  const id = event.params.adoptionId;
+  const mirror = rescueAdoption.caseAdoptionRequestOf(id, after);
+  const statusChanged = !before || before.status !== after.status;
+
+  const caseData = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(caseRef);
+    if (!snap.exists) return null;
+    const c = snap.data();
+    if (!rescueAdoption.shouldMirrorRequest(c.adoptionRequest, id, mirror.status)) return null;
+    if (statusChanged || !c.adoptionRequest || c.adoptionRequest.applicationId !== id) {
+      const label = {
+        pending: `${mirror.adopterName} sent an adoption request.`,
+        approved: `${mirror.adopterName} was confirmed as the adopter.`,
+        rejected: `${mirror.adopterName}'s adoption request was not approved.`,
+        withdrawn: `${mirror.adopterName}'s adoption request was closed.`,
+        adopted: `Adoption completed with ${mirror.adopterName}.`,
+      }[mirror.status];
+      tx.update(caseRef, {
+        adoptionRequest: {...mirror, updatedAt: admin.firestore.FieldValue.serverTimestamp()},
+        ...(label ? {statusHistory: admin.firestore.FieldValue.arrayUnion({
+          status: label, timestamp: admin.firestore.Timestamp.now(),
+        })} : {}),
+      });
+    }
+    return c;
+  });
+  if (!caseData || !statusChanged) return;
+
+  const data = {type: 'rescue_adoption_request', caseId: app.caseId};
+  if (mirror.status === 'pending' && !before) {
+    await notifyStaff(await orgStaffUids(caseStaffOrgId(caseData)), {
+      title: 'New adoption request',
+      body: `${mirror.adopterName} wants to adopt a rescued animal and accepted the vet-fee and pickup agreements. ` +
+        'Review it on Rescue Details.',
+      data,
+    });
+  } else if (mirror.status === 'approved') {
+    await notifyAdopter(mirror.adopterId, {
+      title: 'You are confirmed as the adopter',
+      body: 'The organization confirmed your adoption request. As agreed, you cover the vet fees from now on. ' +
+        `We will tell you when the animal is ready; you then have ${rescueAdoption.PICKUP_WINDOW_HOURS} hours to collect it.`,
+      data,
+    });
+  } else if (mirror.status === 'rejected') {
+    await notifyAdopter(mirror.adopterId, {
+      title: 'Adoption request not approved',
+      body: mirror.closedReason || 'The organization did not approve your adoption request.',
+      data,
+    });
+  }
+});
+
+// Case-side follow-through: an organization accepting an unowned case takes
+// over its pending request, and the adopter is told when the animal is
+// ready for pickup.
+exports.onRescueAdoptionCaseUpdate = onDocumentUpdated('cases/{caseId}', async (event) => {
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  const request = after.adoptionRequest;
+  if (!request || !request.applicationId) return;
+
+  if (after.organizationId && after.organizationId !== before.organizationId) {
+    const appRef = db.collection('adoptions').doc(request.applicationId);
+    try {
+      const app = await appRef.get();
+      if (app.exists && ['pending', 'approved'].includes(app.get('status')) &&
+          app.get('organizationId') !== after.organizationId) {
+        await appRef.update({organizationId: after.organizationId});
+      }
+    } catch (e) {
+      console.error('[onRescueAdoptionCaseUpdate] stamping the request failed', request.applicationId, e);
+    }
+  }
+
+  const readyBefore = millisOf((before.adopterPickup || {}).readyAt);
+  const pickup = after.adopterPickup || {};
+  const readyAfter = millisOf(pickup.readyAt);
+  if (readyAfter && readyAfter !== readyBefore) {
+    const deadline = new Date(millisOf(pickup.deadline));
+    await notifyAdopter(pickup.adopterId || request.adopterId, {
+      title: 'Ready for pickup',
+      body: `The animal you are adopting is ready at ${pickup.place || 'the clinic'}. Please collect it by ` +
+        `${deadline.toLocaleString('en-PH', {timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short'})}. ` +
+        'Bring a valid ID and be ready to settle the vet fees.',
+      data: {type: 'rescue_adoption_ready', caseId: event.params.caseId},
+    });
+  }
+});
+
+async function shelterCapacityOf(orgId) {
+  if (!orgId) return null;
+  const own = await db.collection('organizations').doc(orgId).collection('settings').doc('shelter').get();
+  const legacy = own.exists ? null : await db.collection('settings').doc('shelter').get();
+  const v = own.exists ? own.get('maxCapacity') : (legacy && legacy.exists ? legacy.get('maxCapacity') : null);
+  return typeof v === 'number' ? v : null;
+}
+
+async function housedCountOf(orgId) {
+  if (!orgId) return 0;
+  const snap = await db.collection('animals').where('organizationId', '==', orgId).get();
+  return snap.docs.filter((d) => rescueAdoption.isCurrentlyHoused(d.data())).length;
+}
+
+// Every 30 minutes: remind the confirmed adopter a day before the pickup
+// window closes; once it has closed, close the request and send the animal
+// to the shelter if it has room, or flag it for referral if the shelter is
+// full (Rescue Details shows a Refer button).
+exports.followUpAdopterPickups = onSchedule('every 30 minutes', async () => {
+  const nowMs = Date.now();
+  const snap = await db.collection('cases')
+    .where('adopterPickup.collectedAt', '==', null)
+    .where('adopterPickup.missedAt', '==', null)
+    .get();
+  for (const doc of snap.docs) {
+    const c = doc.data();
+    const p = c.adopterPickup || {};
+    const step = rescueAdoption.pickupStep({...p, deadlineMs: millisOf(p.deadline) || null}, nowMs);
+    try {
+      if (step === 'remind') {
+        await doc.ref.update({'adopterPickup.reminderSentAt': admin.firestore.FieldValue.serverTimestamp()});
+        await notifyAdopter(p.adopterId, {
+          title: 'Pickup reminder',
+          body: `Please collect the animal at ${p.place || 'the clinic'} within ${rescueAdoption.PICKUP_REMINDER_HOURS} hours, ` +
+            'or your adoption request will be closed.',
+          data: {type: 'rescue_adoption_pickup_reminder', caseId: doc.id},
+        });
+        continue;
+      }
+      if (step !== 'missed') continue;
+
+      const orgId = c.organizationId || null;
+      const incoming = Array.isArray(p.animalIndexes) && p.animalIndexes.length ? p.animalIndexes.length : 1;
+      const outcome = rescueAdoption.missedPickupOutcome({
+        capacity: await shelterCapacityOf(orgId),
+        housed: await housedCountOf(orgId),
+        incoming,
+      });
+      const done = await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists) return false;
+        const fresh = s.data();
+        const fp = fresh.adopterPickup || {};
+        if (rescueAdoption.pickupStep({...fp, deadlineMs: millisOf(fp.deadline) || null}, Date.now()) !== 'missed') return false;
+        const now = admin.firestore.Timestamp.now();
+        const animals = rescueAdoption.animalsAfterMissedPickup(fresh.animals, fp.animalIndexes || null, outcome, now);
+        const line = outcome === 'shelter' ?
+          'The adopter did not collect the animal in time. It goes to the shelter (Intake).' :
+          'The adopter did not collect the animal in time and the shelter is full. Refer the animal to another organization.';
+        tx.update(doc.ref, {
+          'adopterPickup.missedAt': now,
+          'adopterPickup.missedOutcome': outcome,
+          'status': rescueAdoption.caseStatusAfterMissedPickup(animals, outcome),
+          ...(animals.length ? {animals, ...rescueAdoption.stageSummary(animals)} : {}),
+          ...(outcome === 'refer' ? {needsReferral: {reason: 'adopter_pickup_missed_shelter_full', at: now}} : {}),
+          statusHistory: admin.firestore.FieldValue.arrayUnion({status: line, timestamp: now}),
+        });
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'adopter_pickup_missed',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          details: {outcome, applicationId: fp.applicationId || null},
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        if (fp.applicationId) {
+          tx.update(db.collection('adoptions').doc(fp.applicationId), {
+            status: 'withdrawn',
+            withdrawnAt: now,
+            withdrawnBy: 'system',
+            withdrawalReason: `Not collected within the ${rescueAdoption.PICKUP_WINDOW_HOURS}-hour pickup window.`,
+            statusHistory: admin.firestore.FieldValue.arrayUnion({
+              status: 'Closed: the animal was not collected within the pickup window.', timestamp: now,
+            }),
+          });
+        }
+        return true;
+      });
+      if (!done) continue;
+      await notifyAdopter(p.adopterId, {
+        title: 'Adoption request closed',
+        body: `The animal was not collected within ${rescueAdoption.PICKUP_WINDOW_HOURS} hours, so your adoption request was closed.`,
+        data: {type: 'rescue_adoption_closed', caseId: doc.id},
+      });
+      await notifyStaff(await orgStaffUids(orgId), {
+        title: outcome === 'shelter' ? 'Pickup missed: animal goes to the shelter' : 'Pickup missed: shelter full, refer',
+        body: outcome === 'shelter' ?
+          'The adopter did not collect the animal in time. Arrange its intake to the shelter on Intake Details.' :
+          'The adopter did not collect the animal in time and the shelter is full. Refer it from Rescue Details.',
+        data: {type: 'rescue_adoption_pickup_missed', caseId: doc.id},
+      });
+    } catch (e) {
+      console.error('[followUpAdopterPickups] failed for', doc.ref.path, e);
+    }
+  }
+});
+
+// ---- Critical reports left unreviewed ---------------------
+//
+// Every 5 minutes: a Critical report still in review after the threshold
+// (organizations/{orgId}/settings/shelter.criticalEscalationMinutes, default
+// 30) pushes every admin of the organizations covering it, once, suggesting
+// they review it now or refer it. Decisions in critical_escalation_rules.js.
+// Index: cases (urgency, status, createdAt).
+
+const criticalEscalation = require('./critical_escalation_rules');
+
+exports.escalateCriticalReports = onSchedule('every 5 minutes', async () => {
+  const nowMs = Date.now();
+  const snap = await db.collection('cases')
+    .where('urgency', '==', 'Critical')
+    .where('status', 'in', criticalEscalation.REVIEW_STATUSES)
+    .where('createdAt', '<=', admin.firestore.Timestamp.fromMillis(nowMs - 60 * 1000))
+    .get();
+  const thresholds = new Map();
+  async function thresholdOf(orgId) {
+    if (!thresholds.has(orgId)) {
+      const s = await db.collection('organizations').doc(orgId).collection('settings').doc('shelter').get();
+      thresholds.set(orgId, criticalEscalation.escalationMinutes(s.exists ? s.get('criticalEscalationMinutes') : null));
+    }
+    return thresholds.get(orgId);
+  }
+  for (const doc of snap.docs) {
+    const c = doc.data();
+    const orgIds = criticalEscalation.escalationOrgIds(c);
+    if (!orgIds.length) continue;
+    const minutes = Math.min(...(await Promise.all(orgIds.map(thresholdOf))));
+    const createdAtMs = millisOf(c.createdAt);
+    if (!criticalEscalation.escalationDue(c, {createdAtMs, nowMs, thresholdMinutes: minutes})) continue;
+    try {
+      const claimed = await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists || !criticalEscalation.escalationDue(s.data(), {createdAtMs, nowMs, thresholdMinutes: minutes})) {
+          return false;
+        }
+        tx.update(doc.ref, {criticalEscalatedAt: admin.firestore.FieldValue.serverTimestamp()});
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'critical_report_escalated',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          details: {waitedMinutes: Math.round((nowMs - createdAtMs) / 60000), organizationIds: orgIds},
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return true;
+      });
+      if (!claimed) continue;
+      const admins = (await Promise.all(orgIds.map((id) => orgStaffUids(id, {adminsOnly: true})))).flat();
+      await notifyStaff(admins, {
+        title: 'URGENT: critical report not reviewed',
+        body: `A critical rescue report has waited ${Math.round((nowMs - createdAtMs) / 60000)} minutes without review. ` +
+          'Review it now, or refer it to another organization.',
+        data: {type: 'critical_report_escalated', caseId: doc.id},
+      });
+    } catch (e) {
+      console.error('[escalateCriticalReports] failed for', doc.ref.path, e);
+    }
+  }
+});

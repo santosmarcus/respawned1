@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 
@@ -77,7 +78,7 @@ class CaseIntakeRepository {
       'statusHistory': [
         {
           'status':
-              'Medical admission opened for $animalName ($admissionReason).',
+          'Medical admission opened for $animalName ($admissionReason).',
           'timestamp': now,
         },
       ],
@@ -177,15 +178,15 @@ class CaseIntakeRepository {
         .doc(sourceAnimalRecordId)
         .collection('medicalEpisodes')
         .add({
-          'animalId': sourceAnimalRecordId,
-          'sourceCaseId': ref.id,
-          'sourceType': 'adoptionReturn',
-          'reason': 'other',
-          'notes':
-              'Adoption return intake${returnExplanation != null && returnExplanation.isNotEmpty ? ': $returnExplanation' : ''}',
-          'createdAt': FieldValue.serverTimestamp(),
-          if (actorName.isNotEmpty) 'createdBy': actorName,
-        });
+      'animalId': sourceAnimalRecordId,
+      'sourceCaseId': ref.id,
+      'sourceType': 'adoptionReturn',
+      'reason': 'other',
+      'notes':
+      'Adoption return intake${returnExplanation != null && returnExplanation.isNotEmpty ? ': $returnExplanation' : ''}',
+      'createdAt': FieldValue.serverTimestamp(),
+      if (actorName.isNotEmpty) 'createdBy': actorName,
+    });
     await _store.animals.doc(sourceAnimalRecordId).update({
       'currentCaseId': ref.id,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -217,14 +218,14 @@ class CaseIntakeRepository {
   /// freshly-read `animals` array so the caller can mutate it in the same
   /// read without a second round-trip.
   Future<List<Map<String, dynamic>>> _ensureAnimalsEligible(
-    String caseId,
-    List<int>? animalIndexes,
-  ) async {
+      String caseId,
+      List<int>? animalIndexes,
+      ) async {
     final snap = await _store.caseDoc(caseId).get();
     final data = snap.data();
     final animals = List<Map<String, dynamic>>.from(
       (data?['animals'] as List? ?? const []).map(
-        (a) => Map<String, dynamic>.from(a as Map),
+            (a) => Map<String, dynamic>.from(a as Map),
       ),
     );
     if (animals.isEmpty || animalIndexes == null || animalIndexes.isEmpty) {
@@ -298,48 +299,48 @@ class CaseIntakeRepository {
       caseId: caseId,
       statusLine: 'Animal transferred to $targetName ($targetType).',
       fields: {
-        'status': perAnimal
-            ? (RescueCaseStore.deriveCaseStatusOverride(animals) ??
-                  RescueStatus.completed.firestoreValue)
-            : RescueStatus.completed.firestoreValue,
-        'transferType': targetType,
-        'targetName': targetName,
-        // Legacy field names, kept so any existing reader of a
-        // pre-this-round transfer keeps working unmodified. These reflect
-        // the MOST RECENT transfer recorded on the case (this app has no
-        // per-transfer-event subcollection yet); per-animal destination
-        // fields above are the source of truth once several separate
-        // transfers happen for different animals over time.
-        if (targetType == 'organization') 'targetOrganizationName': targetName,
-        if (targetContact != null && targetContact.isNotEmpty)
-          'targetContact': targetContact,
-        if (targetAddress != null && targetAddress.isNotEmpty)
-          'targetAddress': targetAddress,
-        'targetOrganizationId': ?targetOrganizationId,
-        'targetClinicPlaceId': ?targetClinicPlaceId,
-        'targetLat': ?targetLat,
-        'targetLng': ?targetLng,
-        'transferReason': reason,
-        'transferDate': transferDate != null
-            ? Timestamp.fromDate(transferDate)
-            : now,
-        'transferNotes': notes,
-        'transferRequestedAt': now,
-        // TODO(transfer): this is a simplified, one-way record — there is no
-        // receiving-organization/clinic/volunteer acceptance workflow yet.
-        // 'pending' here just means "handed off, not yet acknowledged."
-        'transferStatus': 'pending',
-        if (perAnimal) 'animals': animals,
-        if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
-      },
+    'status': perAnimal
+    ? (RescueCaseStore.deriveCaseStatusOverride(animals) ??
+    RescueStatus.completed.firestoreValue)
+        : RescueStatus.completed.firestoreValue,
+    'transferType': targetType,
+    'targetName': targetName,
+    // Legacy field names, kept so any existing reader of a
+    // pre-this-round transfer keeps working unmodified. These reflect
+    // the MOST RECENT transfer recorded on the case (this app has no
+    // per-transfer-event subcollection yet); per-animal destination
+    // fields above are the source of truth once several separate
+    // transfers happen for different animals over time.
+    if (targetType == 'organization') 'targetOrganizationName': targetName,
+    if (targetContact != null && targetContact.isNotEmpty)
+    'targetContact': targetContact,
+    if (targetAddress != null && targetAddress.isNotEmpty)
+    'targetAddress': targetAddress,
+    'targetOrganizationId': ?targetOrganizationId,
+    'targetClinicPlaceId': ?targetClinicPlaceId,
+    'targetLat': ?targetLat,
+    'targetLng': ?targetLng,
+    'transferReason': reason,
+    'transferDate': transferDate != null
+    ? Timestamp.fromDate(transferDate)
+        : now,
+    'transferNotes': notes,
+    'transferRequestedAt': now,
+    // TODO(transfer): this is a simplified, one-way record — there is no
+    // receiving-organization/clinic/volunteer acceptance workflow yet.
+    // 'pending' here just means "handed off, not yet acknowledged."
+    'transferStatus': 'pending',
+    if (perAnimal) 'animals': animals,
+    if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
+    },
       action: 'transferred_animal',
       actorUid: actorUid,
       actorName: actorName,
       details: {
-        'targetType': targetType,
-        'targetName': targetName,
-        'targetOrganizationId': ?targetOrganizationId,
-      },
+    'targetType': targetType,
+    'targetName': targetName,
+    'targetOrganizationId': ?targetOrganizationId,
+    },
     );
   }
 
@@ -377,7 +378,7 @@ class CaseIntakeRepository {
       fields: {
         'status': perAnimal
             ? (RescueCaseStore.deriveCaseStatusOverride(animals) ??
-                  RescueStatus.completed.firestoreValue)
+            RescueStatus.completed.firestoreValue)
             : RescueStatus.completed.firestoreValue,
         'releasedToReporterId': reporterId,
         'releasedToReporterName': reporterName,
@@ -391,6 +392,167 @@ class CaseIntakeRepository {
       actorName: actorName,
       details: {'reporterId': reporterId, 'reporterName': reporterName},
     );
+  }
+
+  /// Rescue gaps 6/10, step 4: the discharged animal(s) are ready for the
+  /// confirmed adopter. Starts the pickup window ([kAdopterPickupWindow]);
+  /// the adopter is told where and by when (functions/rescue_adoption.js).
+  /// The animals keep `postTreatmentAction: 'release'` without
+  /// `releaseCompletedAt` until [confirmAdopterPickup], so they stay in the
+  /// Treatment queue. Refused unless the case has a confirmed adopter.
+  Future<void> markReadyForAdopterPickup({
+    required String caseId,
+    required String place,
+    required String actorUid,
+    required String actorName,
+    List<int>? animalIndexes,
+  }) async {
+    final snap = await _store.caseDoc(caseId).get();
+    final data = snap.data() ?? const <String, dynamic>{};
+    final request = CaseAdoptionRequest.fromCase(data);
+    if (request == null || !request.isConfirmed) {
+      throw StateError('Release needs a confirmed adopter. The adopter applies from Track Case and you confirm them.');
+    }
+    final current = AdopterPickup.fromCase(data);
+    if (current != null && current.isWaiting) {
+      throw StateError('The animal is already waiting for the adopter to collect it.');
+    }
+    final animals = await _ensureAnimalsEligible(caseId, animalIndexes);
+    final now = DateTime.now();
+    final perAnimal = animals.isNotEmpty && animalIndexes != null && animalIndexes.isNotEmpty;
+    if (perAnimal) {
+      for (final i in animalIndexes) {
+        if (i < 0 || i >= animals.length) continue;
+        animals[i] = {
+          ...animals[i],
+          'postTreatmentAction': 'release',
+          'postTreatmentStartedAt': Timestamp.fromDate(now),
+          'releaseAdopterId': request.adopterId,
+        };
+      }
+    }
+    final deadline = now.add(kAdopterPickupWindow);
+    await _store.recordAction(
+      caseId: caseId,
+      statusLine: 'Ready for pickup by ${request.adopterName} at $place until '
+          '${deadline.month}/${deadline.day}/${deadline.year}.',
+      fields: {
+        'adopterPickup': {
+          'applicationId': request.applicationId,
+          'adopterId': request.adopterId,
+          'adopterName': request.adopterName,
+          'place': place,
+          'readyAt': Timestamp.fromDate(now),
+          'deadline': Timestamp.fromDate(deadline),
+          'animalIndexes': perAnimal ? animalIndexes : null,
+          'reminderSentAt': null,
+          'collectedAt': null,
+          'missedAt': null,
+        },
+        if (perAnimal) 'animals': animals,
+        if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
+        if (perAnimal) 'status': RescueCaseStore.deriveCaseStatusOverride(animals) ?? RescueStatus.treatment.firestoreValue,
+      },
+      action: 'ready_for_adopter_pickup',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'applicationId': request.applicationId, 'deadline': Timestamp.fromDate(deadline)},
+    );
+  }
+
+  /// Rescue gaps 6/10, step 5: the confirmed adopter collected the animal.
+  /// The release is completed on the case, an animal record is created for
+  /// each collected animal (reserved for this adopter, so the existing
+  /// Release Details screen can finish the adoption: printed agreement and
+  /// post-adoption follow-ups), and the request is linked to that record.
+  /// Returns the adoption request id.
+  Future<String> confirmAdopterPickup({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final caseRef = _store.caseDoc(caseId);
+    final snap = await caseRef.get();
+    final data = snap.data() ?? const <String, dynamic>{};
+    final pickup = AdopterPickup.fromCase(data);
+    final request = CaseAdoptionRequest.fromCase(data);
+    if (pickup == null || !pickup.isWaiting || request == null || !request.isConfirmed) {
+      throw StateError('There is no pickup waiting for a confirmed adopter on this case.');
+    }
+    final orgId = (data['organizationId'] as String?) ?? '';
+    final now = Timestamp.now();
+    final animals = List<Map<String, dynamic>>.from(
+      (data['animals'] as List? ?? const []).map((a) => Map<String, dynamic>.from(a as Map)),
+    );
+    final indexes = pickup.animalIndexes ??
+        [for (var i = 0; i < (animals.isEmpty ? 1 : animals.length); i++) i];
+    final perAnimal = animals.isNotEmpty && pickup.animalIndexes != null;
+    if (perAnimal) {
+      for (final i in indexes) {
+        if (i < 0 || i >= animals.length) continue;
+        animals[i] = {...animals[i], 'releaseCompletedAt': now};
+      }
+    }
+
+    final db = _store.db;
+    final batch = db.batch();
+    final recordIds = <String>[];
+    for (final i in indexes) {
+      final a = i < animals.length ? animals[i] : const <String, dynamic>{};
+      final ref = db.collection('animals').doc();
+      recordIds.add(ref.id);
+      final species = (a['species'] ?? data['animalType'] ?? 'Unknown').toString();
+      batch.set(ref, {
+        'name': (a['name'] as String?)?.trim().isNotEmpty == true ? a['name'] : '$species #${caseId.substring(0, 6)}',
+        'species': species,
+        'breed': a['breed'] ?? data['breed'] ?? '',
+        'sex': a['sex'] ?? '',
+        'size': a['size'] ?? '',
+        'organizationId': orgId,
+        'linkedCaseId': caseId,
+        'sourceAnimalIndex': i,
+        'adoptionStatus': 'reserved',
+        'reservedForUserId': request.adopterId,
+        'reservedApplicationId': request.applicationId,
+        'reservedAt': now,
+        'archived': false,
+        'createdVia': 'rescue_adopter_pickup',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    batch.update(db.collection('adoptions').doc(request.applicationId), {
+      'personal.animalRecordId': recordIds.first,
+      'personal.animalId': recordIds.first,
+      if (recordIds.length > 1) 'additionalAnimalRecordIds': recordIds.sublist(1),
+      'reservedAt': now,
+      'collectedAt': now,
+      'statusHistory': FieldValue.arrayUnion([
+        {'status': 'Animal collected by the adopter. Finishing the adoption on Release Details.', 'timestamp': now},
+      ]),
+    });
+    _store.recordActionInBatch(
+      batch,
+      caseId: caseId,
+      statusLine: 'Collected by ${request.adopterName}. Release confirmed.',
+      fields: {
+        'adopterPickup.collectedAt': now,
+        'releasedToReporterId': request.adopterId,
+        'releasedToReporterName': request.adopterName,
+        'releasedAt': now,
+        if (perAnimal) 'animals': animals,
+        if (perAnimal) ...RescueCaseStore.stageSummaryUpdate(animals),
+        'status': perAnimal
+            ? (RescueCaseStore.deriveCaseStatusOverride(animals) ?? RescueStatus.completed.firestoreValue)
+            : RescueStatus.completed.firestoreValue,
+      },
+      action: 'released_to_adopter',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'applicationId': request.applicationId, 'animalRecordIds': recordIds},
+    );
+    await batch.commit();
+    return request.applicationId;
   }
 
   /// Marks the given animals as committed to the Intake path (spec §8/§9)
@@ -412,7 +574,7 @@ class CaseIntakeRepository {
       if (data == null) throw StateError('This case no longer exists.');
       final animals = List<Map<String, dynamic>>.from(
         (data['animals'] as List? ?? const []).map(
-          (a) => Map<String, dynamic>.from(a as Map),
+              (a) => Map<String, dynamic>.from(a as Map),
         ),
       );
       if (animals.isEmpty) return;
@@ -443,7 +605,7 @@ class CaseIntakeRepository {
           'animals': animals,
           ...RescueCaseStore.stageSummaryUpdate(animals),
           'status':
-              RescueCaseStore.deriveCaseStatusOverride(animals) ??
+          RescueCaseStore.deriveCaseStatusOverride(animals) ??
               (data['status'] as String? ??
                   RescueStatus.treatment.firestoreValue),
         },
@@ -473,7 +635,7 @@ class CaseIntakeRepository {
       if (data == null) return;
       final animals = List<Map<String, dynamic>>.from(
         (data['animals'] as List? ?? const []).map(
-          (a) => Map<String, dynamic>.from(a as Map),
+              (a) => Map<String, dynamic>.from(a as Map),
         ),
       );
       if (animals.isEmpty) return;
@@ -499,7 +661,7 @@ class CaseIntakeRepository {
           'animals': animals,
           ...RescueCaseStore.stageSummaryUpdate(animals),
           'status':
-              RescueCaseStore.deriveCaseStatusOverride(animals) ??
+          RescueCaseStore.deriveCaseStatusOverride(animals) ??
               (data['status'] as String? ?? RescueStatus.intake.firestoreValue),
         },
       );
@@ -554,12 +716,12 @@ class CaseIntakeRepository {
       // with no `animals[]` array.
       final animalsRaw = List<Map<String, dynamic>>.from(
         (caseData?['animals'] as List? ?? const []).map(
-          (a) => Map<String, dynamic>.from(a as Map),
+              (a) => Map<String, dynamic>.from(a as Map),
         ),
       );
       final statusOverride =
           RescueCaseStore.deriveCaseStatusOverride(animalsRaw) ??
-          RescueStatus.intake.firestoreValue;
+              RescueStatus.intake.firestoreValue;
 
       final now = Timestamp.now();
       _store.recordActionIn(
@@ -567,22 +729,22 @@ class CaseIntakeRepository {
         caseId: caseId,
         action: 'intake_confirmed',
         statusLine:
-            'Intake confirmed — transport to $destinationName arranged.',
+        'Intake confirmed — transport to $destinationName arranged.',
         details: {'destination': destinationName},
         fields: {
-          'status': statusOverride,
-          'intakeDestinationName': destinationName,
-          'intakeDestinationAddress': destinationAddress,
-          'intakeDestinationPlaceId': destinationPlaceId,
-          'intakeDestinationLat': destinationLat,
-          'intakeDestinationLng': destinationLng,
-          'intakeConfirmedAt': now,
-          if (transporterUid != null) 'currentAssignmentId': assignmentRef.id,
-          'assignedVolunteerId': ?transporterUid,
-          if (transporterUid != null) 'assignedVolunteerName': transporterName,
-          if (transporterUid != null) 'assignedVehicle': transporterVehicle,
-          if (transporterUid != null) 'assignedPlate': transporterPlate,
-        },
+      'status': statusOverride,
+      'intakeDestinationName': destinationName,
+      'intakeDestinationAddress': destinationAddress,
+      'intakeDestinationPlaceId': destinationPlaceId,
+      'intakeDestinationLat': destinationLat,
+      'intakeDestinationLng': destinationLng,
+      'intakeConfirmedAt': now,
+      if (transporterUid != null) 'currentAssignmentId': assignmentRef.id,
+      'assignedVolunteerId': ?transporterUid,
+      if (transporterUid != null) 'assignedVolunteerName': transporterName,
+      if (transporterUid != null) 'assignedVehicle': transporterVehicle,
+      if (transporterUid != null) 'assignedPlate': transporterPlate,
+      },
       );
 
       if (transporterUid != null) {
@@ -740,10 +902,10 @@ class CaseIntakeRepository {
   /// guard against the freshest doc, so calling this redundantly from both
   /// places (or twice in a race) is always harmless.
   Future<void> checkAndCompleteIntakeIfDue(
-    RescueCase c, {
-    required int totalAnimalsExpected,
-    required int completedCount,
-  }) async {
+      RescueCase c, {
+        required int totalAnimalsExpected,
+        required int completedCount,
+      }) async {
     if (c.intakeReceivedAt == null) return;
     if (completedCount < totalAnimalsExpected) return;
     if (c.status == RescueStatus.completed) return;

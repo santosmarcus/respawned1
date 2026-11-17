@@ -475,6 +475,59 @@ describe('adoption readiness gate', () => {
   });
 });
 
+describe('rescue adoption requests (Rescue gaps 6/10)', () => {
+  const agreement = { vetFees: true, obligations: true, pickupWindow: true };
+  const request = (uid, data) => as(uid).collection('adoptions').add({
+    status: 'pending', source: 'rescue_case', caseId: 'ownedA', organizationId: 'orgA',
+    personal: { adopterId: uid }, agreement, ...data,
+  });
+
+  test('only the interested reporter or the willing adopter may ask, with every agreement', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ownedA').update({
+      interestedToAdopt: 'yes', willingAdopterId: 'adopter',
+    }));
+    await assertSucceeds(request('reporter'));
+    await assertSucceeds(request('adopter'));
+    await assertFails(request('stranger'));
+    // Every agreement must be accepted.
+    await assertFails(request('reporter', { agreement: { ...agreement, vetFees: false } }));
+    await assertFails(request('reporter', { agreement: { vetFees: true, obligations: true } }));
+    // It belongs to the case's organization, and can't be pre-approved.
+    await assertFails(request('reporter', { organizationId: 'orgB' }));
+    await assertFails(request('reporter', { status: 'approved' }));
+    // The reporter must have said yes to adopting.
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ownedA').update({ interestedToAdopt: 'no' }));
+    await assertFails(request('reporter'));
+  });
+
+  test('an unowned report gets a request with no organization yet', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/pending1').update({ interestedToAdopt: 'yes' }));
+    await assertSucceeds(as('reporter').collection('adoptions').add({
+      status: 'pending', source: 'rescue_case', caseId: 'pending1',
+      personal: { adopterId: 'reporter' }, agreement,
+    }));
+    // Claiming an organization for an unowned report is refused.
+    await assertFails(request('reporter', { caseId: 'pending1', organizationId: 'orgA' }));
+  });
+
+  test('the adopter cannot rewrite the agreement; the reporter cannot fake a confirmation', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('adoptions/r1').set({
+        status: 'pending', source: 'rescue_case', caseId: 'ownedA', organizationId: 'orgA',
+        personal: { adopterId: 'adopter' }, agreement,
+      });
+    });
+    await assertFails(as('adopter').doc('adoptions/r1').update({ agreement: { vetFees: false } }));
+    await assertSucceeds(as('adopter').doc('adoptions/r1').update({ status: 'withdrawn' }));
+    await assertFails(as('reporter').doc('cases/ownedA').update({
+      adoptionRequest: { applicationId: 'r1', status: 'approved' },
+    }));
+    await assertFails(as('reporter').doc('cases/ownedA').update({ adopterPickup: { collectedAt: 1 } }));
+    await assertSucceeds(as('staffA').doc('adoptions/r1').update({ status: 'approved' }));
+  });
+});
+
 describe('adoptions', () => {
   test('adopters submit pending applications for the right organization', async () => {
     const app = (data) => as('adopter').collection('adoptions').add({

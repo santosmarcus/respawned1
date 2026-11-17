@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/features/rescue/rescue_adoption_form_page.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/core/utils/public_case_status.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -1631,6 +1634,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           _DetailRow('Interest to adopt', data['interestedToAdopt']),
           const SizedBox(height: 12),
 
+          // Rescue gaps 6/10: the interested adopter sends an adoption
+          // request (with the vet-fee, obligations and pickup agreements)
+          // and follows it here.
+          _RescueAdoptionSection(caseId: widget.caseId, data: data),
+
           if (widget.isReporter &&
               data['interestedToAdopt'] == 'yes' &&
               (data['status'] as String?) == 'awaiting_adopter_pickup') ...[
@@ -2007,6 +2015,75 @@ class _DetailRow extends StatelessWidget {
               color: AppColors.textSecondary,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Rescue gaps 6/10 on Track Case, for the interested adopter: send the
+/// adoption request, then see whether it is confirmed and when and where to
+/// collect the animal.
+class _RescueAdoptionSection extends StatelessWidget {
+  const _RescueAdoptionSection({required this.caseId, required this.data});
+  final String caseId;
+  final Map<String, dynamic> data;
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    final request = CaseAdoptionRequest.fromCase(data);
+    final mine = request != null && request.adopterId == uid;
+    final canApply = canRequestRescueAdoption(data, uid) && (request == null || (mine && !request.isOpen));
+    if (!mine && !canApply) return const SizedBox.shrink();
+    final pickup = AdopterPickup.fromCase(data);
+
+    final lines = <String>[
+      if (mine) 'Your adoption request: ${request.status.label}.',
+      if (mine && request.closedReason != null) request.closedReason!,
+      if (mine && request.isConfirmed && (pickup == null || !pickup.isWaiting) && pickup?.collectedAt == null)
+        'You will be told when the animal is ready for pickup.',
+      if (mine && pickup != null && pickup.isWaiting && pickup.deadline != null)
+        'Ready for pickup at ${pickup.place}. Collect it by ${formatDateTime(pickup.deadline!)}, or it goes to the '
+            'shelter or another organization.',
+    ];
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final l in lines)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(l, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            ),
+          if (canApply) ...[
+            Text(
+              'To adopt this animal, send an adoption request. You agree to pay its vet fees, take care of it as its '
+                  'adopter, and collect it within ${kAdopterPickupWindow.inHours} hours once it is ready.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: AppButtons.primary,
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => RescueAdoptionFormPage(caseId: caseId, caseData: data)),
+                ),
+                child: Text('Send Adoption Request', style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
         ],
       ),
     );
