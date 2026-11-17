@@ -1,6 +1,48 @@
 # Handoff
 
-_Latest: Release open issues on `dev` (2026-11-17, uncommitted). Then Dashboard and Analytics gaps, and the defense gap fixes of the same day. The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: System admin console, one-organization scope and referral links on `dev` (2026-11-17, uncommitted; backend and Hosting deployed, app build not yet). Then the release fixes and deploy of the same day (committed `13f36df`). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## System admin console, one-organization scope, referral links (2026-11-17, not checked on a device)
+
+**Deployed 2026-11-17:** all 87 functions (new: the four referral-link callables; `reviewOrganization` changed), Firestore and Storage rules, Hosting (`/referral`). The full functions deploy hit Cloud Run's per-minute read quota (HTTP 429): the CLI retried every function but `evaluateCampaignDeadlines`, which was redeployed on its own. `createReferralShare` and `revokeReferralShare` were then redeployed to check sign-in before looking up the case (a signed-out caller could tell whether a case existed). Smoke test on the live site: a made-up link shows "Link not found"; signed-out create is refused. **Not done:** the app build with these screens, and setting `role: system_admin` on an account.
+
+### System admin console
+
+- New account role `system_admin` (`users/{uid}.role`), **set in the Firebase console only** (`selfRoles` in firestore.rules never lets a client pick it). `main.dart` routes it to `SystemAdminHomeScreen` (`lib/features/systemadmin/`), two tabs:
+  - **Approvals:** the existing `OrganizationReviewPage` (organization sign-ups under review; approve, ask for changes, not approve through `reviewOrganization`). Badge shows the pending count.
+  - **Users:** read-only directory. Organization tab lists each organization with its people and their role there (owner, Admin, Staff, Carer, linked account, inactive), plus organization accounts not on one yet. Transporters (with verification state), Volunteers, General, Admins. Search; tap for details (type, organization and role, transporter state, email, phone, joined, copy ID).
+- **Transporters are still verified by organization staff** (admin drawer → Transporters); the console only shows their state.
+- Access is narrow on purpose: `isSystemAdmin()` in firestore.rules adds `users` reads; organizations and members were already readable by signed-in users; storage.rules lets it read `organizations/{id}/verification/**` (not upload); `reviewOrganization` accepts it. It is **not** platform staff: no cases, animals, medical records, adoptions or money (rules tests check this).
+- The six existing `role: 'admin'` accounts are unchanged and keep the organization tools. To make a system admin, set `role` to `system_admin` on an account in the console (not one of those six, or it loses the org tools).
+
+### One organization for now
+
+`FeatureFlags.multiOrganizationEnabled = false` (`lib/core/constants/feature_flags.dart`) hides: Refer → Another organization, Transfer Animal → Organization (Treatment Details), Transfer Animal Record → Another Organization (the sheet goes straight to a named volunteer), the "Open for transfer" switch on Accept Case, and Organization approvals in the admin drawer (now in the system admin console). Code, data, rules and functions are untouched; flip the flag to bring them back.
+
+### Referral links (shareable web page)
+
+- After an LGU/barangay referral is saved, staff are offered **Share link**; every referral in Referral History (Rescue Details) also has Share link / Share again / Stop sharing. Staff choose whether to include the reporter's name and phone (never for an anonymous report). The share sheet sends a link like `https://respawnd1-45021.web.app/referral/<token>`.
+- The page (`public/referral/index.html`, Hosting rewrite `/referral/**`) works without the app or sign-in: report copy (animals, condition, risks, photos and videos staff attached, address + Open in Google Maps, why it was referred, the organization's call/email/Facebook), the case's status in plain words, and a form: Will handle it / Can't take it / Needs more information, with name, contact and note. `noindex`.
+- Backend `functions/referral_shares.js`: `createReferralShare`, `revokeReferralShare` (staff of the owning organization, or platform staff), `getReferralShare`, `respondToReferralShare` (no sign-in; the token is the key). Stored at `referralShares/{token}` (rules: no client access). The page never reads Firestore. The copy is built by `buildReferralSnapshot` (`functions/referral_share_rules.js`): no notes, verification evidence, status history or rider location. Links expire after 30 days (`SHARE_TTL_DAYS`, pending the organization's confirmation), take at most 20 answers, and a new choice about the reporter's contact replaces the old link.
+- An answer is kept with the link, shown in Referral History ("Answer from …"), added to the case's status history and activity log, and pushed to the organization's staff (`referral_response`, opens the case). On an LGU referral, Will handle it marks it Accepted and Can't take it marks it Declined with the note.
+
+### Deploy, in this order (steps 1–3 done)
+
+1. **Functions:** new `createReferralShare`, `revokeReferralShare`, `getReferralShare`, `respondToReferralShare`; changed `reviewOrganization`. `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions`.
+2. **Rules:** `firebase deploy --only firestore:rules,storage` (`system_admin` reads, `referralShares` locked). Safe for current builds: only adds access.
+3. **Hosting:** `firebase deploy --only hosting` (the `/referral` page and rewrite).
+4. **App build.**
+5. Set `role: system_admin` on the account(s) that should approve sign-ups.
+
+### Checks run
+
+- `flutter analyze`: the same 9 issues as before. `flutter test`: 212 pass (new: `test/features/systemadmin/user_directory_test.dart`, `test/core/models/referral_share_test.dart`). `functions/`: `npm test` 59 pass (7 new in `referral_share_rules.test.js`). `rules-tests`: 146 pass (system admin reads and limits, storage verification reads, `referralShares` locked).
+- The referral page was checked at phone width with sample data in a local preview: layout, answer choice, validation and the thank-you message. Not checked against the deployed functions.
+
+### Check on a device
+
+- Sign in as a `system_admin` account: only Approvals and Users show; Users lists the test organization's members with roles, and the transporters with Pending. Opening an organization's documents in Approvals works.
+- Refer a case to a barangay, choose Share link, open the link on another phone without the app, answer Can't take it with a note: the referral shows Declined with the note, staff get a push, and the case history shows the answer. Stop sharing: the link shows "This link is closed".
 
 ## Deploy status (2026-11-17)
 
