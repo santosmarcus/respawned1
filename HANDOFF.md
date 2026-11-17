@@ -1,6 +1,70 @@
 # Handoff
 
-_Latest: System admin console, one-organization scope and referral links on `dev` (2026-11-17, uncommitted; backend and Hosting deployed, app build not yet). Then the release fixes and deploy of the same day (committed `13f36df`). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: Admin + Staff permissions on `dev` (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Admin + Staff permissions (2026-11-18, deployed, not checked on a device)
+
+**Deployed 2026-11-18:** migration `--step=admins --apply` (Marcus Gabriel Santos, test123@gmail.com and Gabrielle are now Admin members of Respawnd Test Org; the orphaned `PsncBNL0…` profile was skipped), all 88 functions (`setMemberAccess` new, 87 updated), Firestore and Storage rules. **Not done:** the app build is not installed anywhere, and `--step=permissions` waits until it is (deploy step 5 below).
+
+Functions were deployed **by name** (`firebase deploy --only functions:<each export>`): the project has two functions that are in no branch on GitHub, `syncActiveSponsorCount` (asia-southeast1) and `recountActiveSponsors`, deployed by someone from local code; a plain `--only functions` deploy stops because it would delete them. Commit their source, or delete them on purpose, before the next full deploy. The first by-name attempt failed with a one-off upload error; the retry went through.
+
+Until the new build is installed, the team accounts' **Donations** screens in the old build fail to load: as platform `admin` accounts the old build lists donations without the organization filter, which the new rules refuse.
+
+Fixes the money-access gap: money was tied to the org Admin role, and a platform account (`users.role 'admin'`) counted as a financial admin of every organization (interview finding #8).
+
+**Model.** Members are **Admin** (everything, including members, org profile, shelter and care settings, Facebook connection, analytics rebuild) or **Staff** with permissions an Admin picks from a preset and can then tick or untick ("Custom").
+
+| Permission | Covers |
+|---|---|
+| `rescue` | cases, referrals, transport, collar tags |
+| `animals` | animal records, medical, medication plans |
+| `care` | doses, care updates, care rounds, stock |
+| `adoptions` | applications through returns |
+| `campaigns` | fundraising listings, updates, in-kind |
+| `financeView` | donor records, campaign history, transfers, case expenses |
+| `financeManage` | record/allocate/void/refund, approve expenses, settle payments, general expenses and staff pay, resolve expired campaigns (includes `financeView`) |
+| `volunteers` | events, volunteer and transporter applications |
+| `insights` | analytics, audit log |
+| `facebookPublish` | post to Facebook (replaces `members.facebookPublisher`) |
+
+Presets: Full staff (everything but `financeManage` and `facebookPublish`, = old Staff), Rescue coordinator, Animal care (= old Carer), Adoptions officer, Treasurer. One source: `functions/org_permissions.json`, mirrored in `lib/core/models/organization/org_permission.dart` and the lists in `firestore.rules`/`storage.rules`, with sync tests on both sides.
+
+**Legacy fallback** (rules, functions and app agree): role `carer` = Animal care, other Staff without a list = Full staff (+ Facebook if `facebookPublisher`), an account linked by `users.organizationId` with no members doc = Full staff. So nothing breaks before the migration.
+
+**Where it's enforced**
+- `functions/org_access.js`: `effectiveAccess`, `requireOrgPermission`, `orgMemberUids` (notification audiences by permission), `planAccessChange`.
+- `functions/org_members.js`: new `setMemberAccess` callable, the only writer of a member's `role`/`permissions`/`preset` (owner stays Admin, one active Admin must remain, audit entry with old and new values).
+- Callables now check permissions: campaign listings `campaigns`; money callables, `resolveExpiredCampaign` (which also refuses converting a **restricted** campaign to a general fund) and `settleFlaggedPayment` `financeManage`; Facebook connect Admin, publish `facebookPublish`; `rebuildAnalyticsSummaries` Admin; referral links `rescue`; Zoom meetings `adoptions` (were open to any signed-in user). `LISTING_ROLES` is gone: membership decides.
+- `firestore.rules`: `staffWith(orgId, keys)` replaces `isStaffOf`/`isCarerOf`/`isFinanceAdmin`/etc.; every block maps to permissions. Platform `admin`/`ngo_staff` keep non-money platform access and lose donations, payments, transfers, campaign history, case expense writes, `orgExpenses` and settings writes. Clients can no longer write `permissions`/`preset`; only Admins invite (Staff could invite an Admin before); org profile and settings writes are Admin only. Care-only Staff are kept out of the admin-shell data (profiles, unowned animals, budget settings, alert claims).
+- `storage.rules`: same helpers; expense receipts need `financeManage` (any member, carers included, could read org receipts before).
+- App: `OrganizationCapabilities` (permissions, `isAdmin`, `isCareOnly`, `orgHomeFor`), `canManageFinancesProvider`/`canViewFinancesProvider`/`isOrgAdminProvider` (call sites split by intent), drawer shows only usable modules, `main.dart` routes care-only Staff to the care screen and Staff with no permissions to a "No access yet" page, Staff Members uses `MemberAccessEditor` (invite and edit), invitations carry permissions and accepting copies them.
+
+### Deploy, in this order
+
+1. Tests (all passing, see below).
+2. `node scripts/migrate_member_permissions.js --project=respawnd1-45021 --org=RdU4Oc7eUPiRX5iGL6Tu --step=admins` (dry run printed 3 team accounts to add as Admins; the orphaned `PsncBNL0…` profile has no sign-in and is skipped), then `--apply`. Do this **before** step 3, or the team accounts lose money access.
+3. `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions`, then `firebase deploy --only firestore:rules,storage`. Both accept old and new member shapes.
+4. App build.
+5. `--step=permissions` (dry run: the owner stays Admin, 1 pending `carer` invitation to convert), then `--apply`, **only after** everyone has the new build (older builds route by `role == 'carer'`).
+6. Later cleanup: drop the legacy `carer` branches, the client role-write branch in members rules, `facebookSetPublisher`, and the "no members doc = Full staff" fallback.
+
+### What changes for people (tell the organization)
+
+- Staff can no longer invite members or edit the org profile or settings; extending, closing or converting an expired campaign needs Manage money.
+- Platform `admin` accounts see money only as members of the organization.
+- respawnd.mgmt@gmail.com (owner, now `system_admin`) opens the system admin console, so no one uses the org tools as owner until another Admin does.
+- The Donations & funds dashboard card stays with Manage money (it shows general expenses and staff pay).
+
+### Checks run
+
+- `flutter analyze`: the same 9 issues as before. `flutter test`: 230 pass (new: `org_permission_test.dart` incl. the JSON sync, rewritten `organization_capabilities_test.dart`, `member_access_editor_test.dart`).
+- `functions/`: `npm test` 72 pass (new: `org_access.test.js`, `org_permissions_sync.test.js`).
+- `rules-tests`: 167 pass (new `permissions.test.js` per preset, legacy fallbacks and access writes; expression-budget scenarios for same-org Staff without `rescue`; six older tests updated for the intended changes).
+- Migration: dry runs only, on the live project.
+
+### Check on a device
+
+One account per preset: Treasurer sees Donations and approves expenses but not Rescue; Animal care lands on the care-tasks screen; Full staff sees donations but can't record money; Staff can't invite; an Admin edits a member's access and the change shows in the audit log; a platform admin who isn't a member sees no money.
 
 ## System admin console, one-organization scope, referral links (2026-11-17, not checked on a device)
 
