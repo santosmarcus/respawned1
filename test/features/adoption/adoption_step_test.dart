@@ -120,12 +120,16 @@ void main() {
     test('lists unanswered radio questions and agreements', () {
       final form = AdoptionFormController();
       addTearDown(form.dispose);
-      expect(form.missingRequiredAnswers(), hasLength(7));
+      // No current pets: the two current-pet questions aren't asked.
+      expect(form.missingRequiredAnswers(), hasLength(5));
+      form.setHasCurrentPets(true);
+      expect(form.missingRequiredAnswers(), hasLength(8));
       expect(form.allAgreementsAccepted, isFalse);
 
       form
         ..residenceType = 'House'
         ..ownershipStatus = 'Owned'
+        ..currentDogs = 1
         ..petsVaccinated = 'Yes'
         ..petsSpayedNeutered = 'Yes'
         ..hoursAlone = '0-4'

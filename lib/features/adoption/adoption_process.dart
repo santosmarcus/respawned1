@@ -135,7 +135,7 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     }
   }
 
-  static const _maxHomePhotos = 6;
+  static const _maxHomePhotos = kMaxHomePhotos;
 
   /// Adds to the existing selection rather than replacing it — repeated
   /// taps let the applicant keep adding more photos, matching "allow
@@ -280,6 +280,14 @@ class _AdoptionProcessState extends State<AdoptionProcess> {
     if (missingAnswers.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar('Please answer: ${missingAnswers.join(', ')}.', kind: AppMessageKind.error),
+      );
+      return;
+    }
+
+    final missingUploads = _form.missingUploads();
+    if (missingUploads.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        appSnackBar('Please upload: ${missingUploads.join(', ')}.', kind: AppMessageKind.error),
       );
       return;
     }

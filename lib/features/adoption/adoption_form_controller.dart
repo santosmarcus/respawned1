@@ -10,6 +10,9 @@ import 'package:respawnd1/features/adoption/interview_scheduling.dart';
 // reasoning as the rest of this form's radio questions.
 const List<String> kCaregiverOptions = ['Me', 'Family', 'Housekeeper'];
 
+/// Most home photos an application can carry.
+const int kMaxHomePhotos = 6;
+
 /// Everything the applicant enters across the adoption steps (the form, the
 /// uploads, the agreements and the interview appointment). Owned by
 /// `_AdoptionProcessState`, which still rebuilds with `setState`; this class
@@ -33,6 +36,10 @@ class AdoptionFormController {
 
   //Pet Experience
   bool hadPetsBefore = false;
+
+  /// "I currently have pets". The current-pet counts and the vaccinated /
+  /// spayed questions only show, and are only required, when this is on.
+  bool hasCurrentPets = false;
   int currentDogs = 0;
   int currentCats = 0;
   int currentBirds = 0;
@@ -107,9 +114,9 @@ class AdoptionFormController {
     emailCtrl.text = authEmail ?? data['email'] ?? '';
     homeAddressCtrl.text =
         data['homeAddress']?.toString() ??
-        data['address']?.toString() ??
-        data['city']?.toString() ??
-        '';
+            data['address']?.toString() ??
+            data['city']?.toString() ??
+            '';
   }
 
   /// Reloads every saved answer from an `adoptions/{id}` doc.
@@ -130,9 +137,9 @@ class AdoptionFormController {
     phoneCtrl.text = personal['adopterPhone'] as String? ?? '';
     homeAddressCtrl.text =
         personal['homeAddress']?.toString() ??
-        personal['adopterHomeAddress']?.toString() ??
-        personal['adopterCity']?.toString() ??
-        '';
+            personal['adopterHomeAddress']?.toString() ??
+            personal['adopterCity']?.toString() ??
+            '';
 
     // Household & Living Information
     residenceType = household['residenceType'] as String?;
@@ -151,6 +158,8 @@ class AdoptionFormController {
     currentOtherTypeCtrl.text = currentPets['otherType'] as String? ?? '';
     petsVaccinated = petExperience['currentPetsVaccinated'] as String?;
     petsSpayedNeutered = petExperience['currentPetsSpayedNeutered'] as String?;
+    // Older applications have no hasCurrentPets: any counted pet means yes.
+    hasCurrentPets = petExperience['hasCurrentPets'] as bool? ?? totalCurrentPets > 0;
 
     // Lifestyle & Care
     hoursAlone = lifestyle['hoursAlone'] as String?;
@@ -182,8 +191,8 @@ class AdoptionFormController {
     existingHomePhotoUrls = homePhotosRaw is List
         ? homePhotosRaw.whereType<String>().toList()
         : (homePhotosRaw is String && homePhotosRaw.isNotEmpty
-              ? [homePhotosRaw]
-              : []);
+        ? [homePhotosRaw]
+        : []);
 
     // Agreements
     agreeCare = agreement['care'] as bool? ?? false;
@@ -201,24 +210,57 @@ class AdoptionFormController {
     appointmentTime = data['appointmentTime'] as String?;
   }
 
+  int get totalCurrentPets =>
+      currentDogs + currentCats + currentBirds + currentFish + currentReptiles + currentOther;
+
+  /// Turns "I currently have pets" on or off. Off clears the counts and the
+  /// two current-pet answers, so nothing hidden is saved.
+  void setHasCurrentPets(bool value) {
+    hasCurrentPets = value;
+    if (value) return;
+    currentDogs = 0;
+    currentCats = 0;
+    currentBirds = 0;
+    currentFish = 0;
+    currentReptiles = 0;
+    currentOther = 0;
+    currentOtherTypeCtrl.clear();
+    petsVaccinated = null;
+    petsSpayedNeutered = null;
+  }
+
   /// Radio questions and the caregiver dropdown aren't FormFields, so
   /// `formKey.validate()` never sees them — these are the unanswered ones.
+  /// The current-pet questions count only when the applicant has pets.
   List<String> missingRequiredAnswers() => [
     if (residenceType == null) 'Residence Type',
     if (ownershipStatus == null) 'Ownership Status',
-    if (petsVaccinated == null) 'current pets vaccinated status',
-    if (petsSpayedNeutered == null) 'current pets spayed/neutered status',
+    if (hasCurrentPets && totalCurrentPets == 0) 'how many current pets you have',
+    if (hasCurrentPets && currentOther > 0 && currentOtherTypeCtrl.text.trim().isEmpty) 'other pet type',
+    if (hasCurrentPets && petsVaccinated == null) 'current pets vaccinated status',
+    if (hasCurrentPets && petsSpayedNeutered == null) 'current pets spayed/neutered status',
     if (hoursAlone == null) 'hours animal will be left alone',
     if (primaryCaregiver == null) 'Primary Caregiver',
     if (petStayLocation == null) 'where pet will stay',
   ];
 
+  bool get hasGovernmentId => governmentIdFile != null || (governmentIdUrl ?? '').isNotEmpty;
+  bool get hasProofOfAddress => proofOfAddressFile != null || (proofOfAddressUrl ?? '').isNotEmpty;
+  bool get hasHomePhotos => homePhotosFiles.isNotEmpty || existingHomePhotoUrls.isNotEmpty;
+
+  /// The required uploads still missing (all three are marked with a red *).
+  List<String> missingUploads() => [
+    if (!hasGovernmentId) 'Government ID',
+    if (!hasProofOfAddress) 'Proof of Address',
+    if (!hasHomePhotos) 'Home Photos',
+  ];
+
   bool get allAgreementsAccepted =>
       agreeCare &&
-      agreeNoAbandon &&
-      agreeFollowup &&
-      agreeAccurate &&
-      agreeNotGuaranteed;
+          agreeNoAbandon &&
+          agreeFollowup &&
+          agreeAccurate &&
+          agreeNotGuaranteed;
 
   /// Clears every answer back to a blank application (contact details are
   /// kept, as before).
@@ -229,6 +271,7 @@ class AdoptionFormController {
     householdMembers = 0;
 
     hadPetsBefore = false;
+    hasCurrentPets = false;
     currentDogs = 0;
     currentCats = 0;
     currentBirds = 0;

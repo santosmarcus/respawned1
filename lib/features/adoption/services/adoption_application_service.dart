@@ -131,8 +131,9 @@ class AdoptionApplicationService {
       //_uploadFile(_digitalSignatureFile, 'digital_signature', docRef.id),
     ]);
 
-    form.governmentIdUrl = results[0];
-    form.proofOfAddressUrl = results[1];
+    // Nothing newly picked: keep the file uploaded in an earlier session.
+    form.governmentIdUrl = results[0] ?? form.governmentIdUrl;
+    form.proofOfAddressUrl = results[1] ?? form.proofOfAddressUrl;
 
     ///_digitalSignatureUrl = results[2];
 
@@ -184,6 +185,7 @@ class AdoptionApplicationService {
     },
     'petExperience': {
     'hadPetsBefore': form.hadPetsBefore,
+    'hasCurrentPets': form.hasCurrentPets,
     'currentPets': {
     'dogs': form.currentDogs,
     'cats': form.currentCats,
@@ -193,8 +195,9 @@ class AdoptionApplicationService {
     'other': form.currentOther,
     'otherType': form.currentOtherTypeCtrl.text.trim(),
     },
-    'currentPetsVaccinated': form.petsVaccinated,
-    'currentPetsSpayedNeutered': form.petsSpayedNeutered,
+    // No current pets: the two questions weren't asked.
+    'currentPetsVaccinated': form.hasCurrentPets ? form.petsVaccinated : 'Not Applicable',
+    'currentPetsSpayedNeutered': form.hasCurrentPets ? form.petsSpayedNeutered : 'Not Applicable',
     },
     'lifestyle': {
     'hoursAlone': form.hoursAlone,

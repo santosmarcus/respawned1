@@ -183,69 +183,80 @@ class AdoptionIntroStep extends StatelessWidget {
                 value: form.hadPetsBefore,
                 onChanged: (v) => _set(() => form.hadPetsBefore = v!),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Current pets',
-                style: GoogleFonts.zain(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  'I currently have pets',
+                  style: GoogleFonts.zain(fontSize: 14),
                 ),
+                value: form.hasCurrentPets,
+                onChanged: (v) => _set(() => form.setHasCurrentPets(v ?? false)),
               ),
-              const SizedBox(height: 4),
-              AdoptionCounterField(
-                label: 'Dogs',
-                value: form.currentDogs,
-                onChanged: (v) => _set(() => form.currentDogs = v),
-              ),
-              AdoptionCounterField(
-                label: 'Cats',
-                value: form.currentCats,
-                onChanged: (v) => _set(() => form.currentCats = v),
-              ),
-              AdoptionCounterField(
-                label: 'Birds',
-                value: form.currentBirds,
-                onChanged: (v) => _set(() => form.currentBirds = v),
-              ),
-              AdoptionCounterField(
-                label: 'Fish',
-                value: form.currentFish,
-                onChanged: (v) => _set(() => form.currentFish = v),
-              ),
-              AdoptionCounterField(
-                label: 'Reptiles',
-                value: form.currentReptiles,
-                onChanged: (v) => _set(() => form.currentReptiles = v),
-              ),
-              AdoptionCounterField(
-                label: 'Other',
-                value: form.currentOther,
-                onChanged: (v) => _set(() => form.currentOther = v),
-              ),
-              if (form.currentOther > 0) ...[
-                const SizedBox(height: 8),
-                AdoptionFormField(
-                  controller: form.currentOtherTypeCtrl,
-                  label: 'Specify other pet type',
-                  hint: ' ',
+              // Only asked when the applicant has pets now.
+              if (form.hasCurrentPets) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Current pets',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                AdoptionCounterField(
+                  label: 'Dogs',
+                  value: form.currentDogs,
+                  onChanged: (v) => _set(() => form.currentDogs = v),
+                ),
+                AdoptionCounterField(
+                  label: 'Cats',
+                  value: form.currentCats,
+                  onChanged: (v) => _set(() => form.currentCats = v),
+                ),
+                AdoptionCounterField(
+                  label: 'Birds',
+                  value: form.currentBirds,
+                  onChanged: (v) => _set(() => form.currentBirds = v),
+                ),
+                AdoptionCounterField(
+                  label: 'Fish',
+                  value: form.currentFish,
+                  onChanged: (v) => _set(() => form.currentFish = v),
+                ),
+                AdoptionCounterField(
+                  label: 'Reptiles',
+                  value: form.currentReptiles,
+                  onChanged: (v) => _set(() => form.currentReptiles = v),
+                ),
+                AdoptionCounterField(
+                  label: 'Other',
+                  value: form.currentOther,
+                  onChanged: (v) => _set(() => form.currentOther = v),
+                ),
+                if (form.currentOther > 0) ...[
+                  const SizedBox(height: 8),
+                  AdoptionFormField(
+                    controller: form.currentOtherTypeCtrl,
+                    label: 'Specify other pet type',
+                    hint: ' ',
+                  ),
+                ],
+                const SizedBox(height: 16),
+                AdoptionRadioGroup<String>(
+                  label: 'Are all current pets vaccinated?',
+                  value: form.petsVaccinated,
+                  options: const ['Yes', 'Some', 'None'],
+                  onChanged: (v) => _set(() => form.petsVaccinated = v),
+                ),
+                const SizedBox(height: 16),
+                AdoptionRadioGroup<String>(
+                  label: 'Are all current pets spayed/neutered?',
+                  value: form.petsSpayedNeutered,
+                  options: const ['Yes', 'Some', 'None'],
+                  onChanged: (v) => _set(() => form.petsSpayedNeutered = v),
                 ),
               ],
-              const SizedBox(height: 16),
-              AdoptionRadioGroup<String>(
-                label: 'Are all current pets vaccinated?',
-                value: form.petsVaccinated,
-                options: const ['Yes', 'Some', 'None', 'Not Applicable'],
-                onChanged: (v) => _set(() => form.petsVaccinated = v),
-              ),
-              const SizedBox(height: 16),
-              AdoptionRadioGroup<String>(
-                label: 'Are all current pets spayed/neutered?',
-                value: form.petsSpayedNeutered,
-                options: const ['Yes', 'Some', 'None', 'Not Applicable'],
-                onChanged: (v) => _set(() => form.petsSpayedNeutered = v),
-              ),
-
               const SizedBox(height: 22),
 
               // Lifestyle & Care
@@ -324,7 +335,7 @@ class AdoptionIntroStep extends StatelessWidget {
                   const SizedBox(width: 4),
                   const AdoptionInfoTooltip(
                     message:
-                        'According to the McDuffy 2026 Guide, the starter budget for owning a pet in the Philippines is approximately ₱2,400 per month. This covers essential expenses such as food, veterinary care, grooming, supplies, treats, and emergency savings.\n\n'
+                    'According to the McDuffy 2026 Guide, the starter budget for owning a pet in the Philippines is approximately ₱2,400 per month. This covers essential expenses such as food, veterinary care, grooming, supplies, treats, and emergency savings.\n\n'
                         'Estimated monthly costs:\n'
                         '• Food – ₱500\n'
                         '• Vaccines – ₱250\n'
@@ -386,39 +397,35 @@ class AdoptionIntroStep extends StatelessWidget {
 
               // Required Uploads
               AdoptionSectionTitle('Required Uploads'),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  AdoptionUploadBox(
-                    label: 'Government ID',
-                    file: form.governmentIdFile,
-                    isUploading: form.isUploadingGovId,
-                    onTap: () => onPickUploadFile(
-                      onPicked: (f) => _set(() => form.governmentIdFile = f),
-                    ),
-                  ),
-                  AdoptionUploadBox(
-                    label: 'Proof of Address',
-                    file: form.proofOfAddressFile,
-                    isUploading: form.isUploadingProof,
-                    onTap: () => onPickUploadFile(
-                      onPicked: (f) => _set(() => form.proofOfAddressFile = f),
-                    ),
-                  ),
-                  /*AdoptionUploadBox(
-                    label: 'Digital Signature',
-                    file: _digitalSignatureFile,
-                    isUploading: form.isUploadingSignature,
-                    onTap: () => onPickUploadFile(
-                      onPicked: (f) => _set(() => _digitalSignatureFile = f),
-                    ),
-                  ),*/
-                ],
+              const SizedBox(height: 4),
+              // One line per upload, with the red * and a + on the right;
+              // a preview box appears only once a file is picked.
+              AdoptionUploadRow(
+                label: 'Government ID',
+                file: form.governmentIdFile,
+                url: form.governmentIdUrl,
+                isUploading: form.isUploadingGovId,
+                onPick: () => onPickUploadFile(
+                  onPicked: (f) => _set(() => form.governmentIdFile = f),
+                ),
+                onRemove: () => _set(() {
+                  form.governmentIdFile = null;
+                  form.governmentIdUrl = null;
+                }),
               ),
-
-              const SizedBox(height: 18),
+              AdoptionUploadRow(
+                label: 'Proof of Address',
+                file: form.proofOfAddressFile,
+                url: form.proofOfAddressUrl,
+                isUploading: form.isUploadingProof,
+                onPick: () => onPickUploadFile(
+                  onPicked: (f) => _set(() => form.proofOfAddressFile = f),
+                ),
+                onRemove: () => _set(() {
+                  form.proofOfAddressFile = null;
+                  form.proofOfAddressUrl = null;
+                }),
+              ),
 
               // Home Photos — multiple images, not a single fixed slot: add
               // more afterward, remove any one before submitting, every
@@ -433,6 +440,7 @@ class AdoptionIntroStep extends StatelessWidget {
                     _set(() => form.existingHomePhotoUrls.removeAt(i)),
                 onRemoveNew: (i) =>
                     _set(() => form.homePhotosFiles.removeAt(i)),
+                maxPhotos: kMaxHomePhotos,
               ),
 
               const SizedBox(height: 22),
