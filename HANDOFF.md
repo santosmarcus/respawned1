@@ -1,6 +1,46 @@
 # Handoff
 
-_Latest: Dashboard and Analytics gaps on `claude/adoption-gap-fixes` (2026-11-17, uncommitted). Then the defense gap fixes of the same day. The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: Release open issues on `dev` (2026-11-17, uncommitted). Then Dashboard and Analytics gaps, and the defense gap fixes of the same day. The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Deploy status (2026-11-17)
+
+- **Functions:** all 83 deployed from `dev`'s working tree (14 created: `pledgeInKindDonation`, `recordDonationReversal`, `mirrorCampaignHistoryToAudit`, `stampAnimalsIllnessesOrganization`, `syncRescueAdoptionRequest`, `onRescueAdoptionCaseUpdate`, `followUpAdopterPickups`, `escalateCriticalReports`, `scheduleCommunityAdoptionCheckIn`, `sendCommunityAdoptionCheckIns`, `sendDashboardDigest`, `notifyStaffOfSpecializedAssistance`, `writeAnalyticsSummaries`, `rebuildAnalyticsSummaries`; 69 updated). Needed `FUNCTIONS_DISCOVERY_TIMEOUT=60`: the default 10 s load timeout failed once while another deploy was running.
+- **Indexes:** deployed.
+- **Scripts: run 2026-11-17** with a service-account key (`GOOGLE_APPLICATION_CREDENTIALS`), each dry run then `--apply`, in this order: `backfill_organization_ids` (22 docs from evidence; no `--default-org`, so 71 cases stay in the review pool and 4 animals have no organization), `backfill_log_organization_ids` (88), `backfill_public_animals` (11), `backfill_public_cases` (77), `backfill_rider_status` (6 riders), `backfill_volunteer_stats` (none), `backfill_referral_targets` (1), `migrate_shelter_settings --org=RdU4Oc7eUPiRX5iGL6Tu` (Respawnd Test Org, the project's only organization; Loved by the Gapz isn't in this project).
+- **Campaigns have no `organizationId`** (all 7; created by a general user, a platform admin, or nobody). Their 22 donations, 8 payments and 5 allocations stay unstamped, so once the rules are live only platform admins and the donors themselves see them. Assign the campaigns to an organization, then rerun `backfill_log_organization_ids.js`.
+- **Rules (`firestore`, `storage`): deployed 2026-11-17**, before the new app build was out. Phones on older builds lose their staff case lists, Explore map, job board, payment lists, public donor counts and the other screens listed in the release-order notes below until they install the new build.
+- **Hosting:** deployed 2026-11-17 (payment return pages and `/tag`; the previous deploy was 2026-10-15). The first try failed with a one-off Hosting API error; the retry released fine.
+- **App build:** release APK built 2026-11-17 from the uncommitted `dev` working tree (`build/app/outputs/flutter-apk/app-release.apk`, 101 MB). Signed with the debug key (`android/app/build.gradle.kts` has no release signing config), so it installs by sideloading, not through the Play Store. Not installed on a device yet.
+
+## Release open issues (2026-11-17, not checked on a device, not deployed)
+
+The three "Still open" items under Defense gap fixes, now closed.
+
+| Issue | Fix |
+|---|---|
+| `donationPayments` readable by every organization's financial admins | Rule now uses `isFinanceAdminOf(resource.data.organizationId)`: the donor, a platform `admin`, or an Admin member of the owning organization. `paymentAttemptsProvider` queries by `organizationId` (platform admins: everything); Payments to Verify drops its client-side campaign filter. New index `donationPayments (organizationId, createdAt desc)`. `scripts/backfill_log_organization_ids.js` now also stamps older payments from their campaign; until it runs, older payments are hidden from organization admins. |
+| Adopter notifications for no-show, booking reminder and withdrawal opened nothing | Push taps (`notification_service.dart`) and the in-app list (`notifications_screen.dart`, now labelled "Adoption", not "Donation") open the application through the new `adopterPageForAdoption` (`lib/features/adoption/adopter_adoption_route.dart`), which the list's other adoption items now use too. |
+| Multi-animal intakes on separate post-treatment paths needed staff to open the page | `completeDueIntakes` now also runs `completeDueAnimalIntakes`: cases with `activeAnimalStages` containing `intake`; each animal sent to Intake, received and with its record gets `intakeCompletedAt`, with the stage counts and case status recomputed the way `completeIntakeForAnimals` does. Rules in `functions/rescue_timer_rules.js` (`animalsDueForIntakeCompletion`, `stageSummary`, `derivedCaseStatus`) with tests. |
+
+### Deploy, in this order
+
+1. **Functions:** `completeDueIntakes` changed (a full `firebase deploy --only functions` covers it).
+2. **Indexes:** `firebase deploy --only firestore:indexes` (the new `donationPayments` index).
+3. **Script:** `node scripts/backfill_log_organization_ids.js --project=respawnd1-45021`, dry run, then `--apply`.
+4. **App build.**
+5. **Rules:** `firebase deploy --only firestore:rules`. Older builds list payments without the organization filter, which the new rule refuses, so their Payments to Verify and payment-attempt lists go empty.
+
+### Checks run
+
+- `flutter analyze`: the same 9 issues as before. `flutter test`: 201 pass.
+- `functions/`: `npm test` 52 pass (2 new for per-animal intake).
+- `rules-tests`: all pass, including 3 new for payment attempts.
+
+### Check on a device
+
+- As an org Admin, Payments to Verify and the payment-attempt list show only your organization's payments; as a platform admin, all of them.
+- As an applicant, tap a no-show, booking-reminder and withdrawal notification (push and in-app): each opens the application.
+- A two-animal case: send one animal to Intake, receive it and create its record, leave the other in Treatment. Within 30 minutes the first animal's Intake completes without opening the page, and the case stays in Treatment.
 
 ## Dashboard and Analytics gaps (2026-11-17, not checked on a device, not deployed)
 
@@ -107,9 +147,7 @@ From `functions/` (with `functions/.env` and the secrets in place). Merge this b
 
 ### Still open (not done here)
 
-- `donationPayments` is readable by every organization's financial admins. Older payment docs have no `organizationId`, so the new screen filters them by campaign on the client.
-- Adopter-side notifications for no-show, booking reminder and withdrawal are informational: tapping them opens nothing.
-- Intake completion for multi-animal cases on separate post-treatment paths still depends on staff opening the page.
+All three items that were listed here are closed: see Release open issues at the top.
 
 ## Build fix status (2026-11-04)
 
