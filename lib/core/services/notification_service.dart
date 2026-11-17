@@ -11,6 +11,7 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
+import 'package:respawnd1/features/adoption/adopter_adoption_route.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
@@ -267,6 +268,16 @@ class NotificationService {
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
         return PostAdoptionDetailsPage(applicationId: adoptionId);
+
+      // functions/adoptions.js tellApplicant: no-show, booking reminder or
+      // withdrawal of the applicant's own application.
+      case 'adoption_no_show_rebook':
+      case 'adoption_no_show_closed':
+      case 'adoption_booking_reminder':
+      case 'adoption_booking_withdrawn':
+        final adoptionId = data['adoptionId'] as String?;
+        if (adoptionId == null || adoptionId.isEmpty) return null;
+        return adopterPageForAdoption(adoptionId);
 
       // reviewOrganization (functions/index.js): the owner's live status page.
       case 'organization_review':
