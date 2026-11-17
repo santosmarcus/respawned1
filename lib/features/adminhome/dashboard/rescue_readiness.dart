@@ -17,6 +17,7 @@ import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart';
 import 'package:respawnd1/features/donation/models.dart';
+import 'package:respawnd1/features/admin/stock/stock_service.dart';
 
 /// The four transparent readiness states. There is no overall score: the
 /// card names which factors cause a constraint, and the decision to accept
@@ -75,6 +76,7 @@ class RescueReadinessCard extends ConsumerWidget {
     final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
     final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
+    final stock = ref.watch(stockItemsProvider).asData?.value;
 
     return SectionCard(
       icon: Icons.dashboard,
@@ -92,6 +94,7 @@ class RescueReadinessCard extends ConsumerWidget {
             records: records,
             canManage: canManage,
             campaigns: campaigns,
+            stock: stock,
           );
           final limiting = factors
               .where((f) => f.state == ReadinessState.constrained)
@@ -184,6 +187,7 @@ class RescueReadinessCard extends ConsumerWidget {
     required List<AnimalRecord>? records,
     required bool canManage,
     required List<DonationListing>? campaigns,
+    List<StockItem>? stock,
   }) {
     // Space — physical capacity only; the other factors cover care.
     final free = occ.free;
@@ -246,24 +250,36 @@ class RescueReadinessCard extends ConsumerWidget {
     )
         : ReadinessFactor(Icons.local_hospital, 'Vet access', clinics.take(2).join(' & '), ReadinessState.confirmed);
 
-    // Food & medicine — only in-kind pledges are recorded, not stock.
-    double foodKg = 0;
-    for (final c in campaigns ?? const <DonationListing>[]) {
-      for (final i in c.inKindItems) {
-        if (i.category.toLowerCase().contains('food') && (i.unit ?? '').toLowerCase() == 'kg') {
-          foodKg += i.quantityReceived;
-        }
-      }
-    }
+    // Food & medicine — Donation gap 5: the organization's stock list
+    // (received in-kind goods are added to it automatically).
     final perDay = settings.foodPerDayKg;
-    final food = ReadinessFactor(
-      Icons.restaurant,
-      'Food & medicine',
-      foodKg > 0 && perDay != null
-          ? '${foodKg.round()} kg donated ≈ ${(foodKg / perDay).floor()} days · stock not tracked'
-          : 'Stock levels aren’t tracked yet',
-      ReadinessState.incomplete,
-    );
+    final ReadinessFactor food;
+    if (stock == null || stock.isEmpty) {
+      food = const ReadinessFactor(
+        Icons.restaurant,
+        'Food & medicine',
+        'No stock recorded yet',
+        ReadinessState.incomplete,
+      );
+    } else {
+      final low = stock.where((i) => i.isLow).toList();
+      final foodKg = stock.where((i) => i.isFood).fold<double>(0, (s, i) => s + (i.kilograms ?? 0));
+      final days = foodKg > 0 && perDay != null && perDay > 0 ? (foodKg / perDay).floor() : null;
+      final parts = [
+        if (days != null) '${foodKg.round()} kg food ≈ $days days' else if (foodKg > 0) '${foodKg.round()} kg food',
+        if (low.isNotEmpty) 'low: ${low.take(2).map((i) => i.name).join(', ')}${low.length > 2 ? ' +${low.length - 2}' : ''}',
+        if (days == null && foodKg == 0 && low.isEmpty) '${stock.length} stock items, none low',
+      ];
+      // Only food and medicine running low limits the next rescue.
+      final constrained = low.any((i) => i.isFood || i.category.toLowerCase().contains('medicine')) ||
+          (days != null && days < 3);
+      food = ReadinessFactor(
+        Icons.restaurant,
+        'Food & medicine',
+        parts.join(' · '),
+        constrained ? ReadinessState.constrained : ReadinessState.confirmed,
+      );
+    }
 
     // Funds — admins only; general (unrestricted) campaign balances.
     final ReadinessFactor funds;

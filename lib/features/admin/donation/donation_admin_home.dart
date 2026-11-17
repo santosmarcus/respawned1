@@ -12,6 +12,8 @@ import 'donation_admin_providers.dart';
 import 'donation_admin_records.dart';
 import 'donation_admin_search.dart';
 import 'sponsorable_animals.dart';
+import 'expense_oversight_page.dart';
+import 'package:respawnd1/features/admin/stock/stock_page.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 
 /// Lifecycle statuses still "being tracked" (drafts included so admins can
@@ -87,6 +89,24 @@ class DonationAdminHomeScreen extends ConsumerWidget {
                         label: 'Sponsor an\nAnimal',
                         onTap: () => Navigator.push(
                             context, MaterialPageRoute(builder: (_) => const SponsorAnimalPickerPage())),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Donation gaps 5, 6 and 7.
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _ProcessItem(
+                        icon: Icons.inventory_2_outlined,
+                        label: 'In-Kind\nStock',
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StockPage())),
+                      ),
+                      _ProcessItem(
+                        icon: Icons.fact_check_outlined,
+                        label: 'Approvals &\nReceipts',
+                        onTap: () =>
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpenseOversightPage())),
                       ),
                     ],
                   ),

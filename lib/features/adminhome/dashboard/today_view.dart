@@ -22,6 +22,7 @@ import 'package:respawnd1/features/adminhome/dashboard/events_card.dart';
 import 'package:respawnd1/features/adminhome/dashboard/rescue_readiness.dart';
 import 'package:respawnd1/features/adminhome/dashboard/week_schedule.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
+import 'package:respawnd1/features/admin/donation/expense_oversight_page.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
 /// The "Today" tab: what needs action now, whether the shelter can take
@@ -1040,6 +1041,7 @@ class _FundsBody extends ConsumerWidget {
     final campaignsAsync = ref.watch(adminCampaignsProvider);
     final expenses = ref.watch(allCaseExpensesProvider);
     final general = ref.watch(myGeneralExpensesProvider).asData?.value;
+    final settings = ref.watch(shelterSettingsProvider).asData?.value ?? ShelterSettings.empty;
 
     final since = DateTime.now().subtract(const Duration(days: 30));
     final pendingList = payments?.where((p) => p.status == 'needs_review' || p.status == 'pending').toList();
@@ -1140,7 +1142,11 @@ class _FundsBody extends ConsumerWidget {
                     .fold<double>(0, (s, e) => s + e.outstandingAmount);
                 // General (non-case) running costs: utilities, rent, supplies, pay.
                 final running = general?.fold<double>(0, (s, e) => s + e.outstandingAmount);
-                final missing = [...list, ...?general].where((e) => (e.receiptUrl ?? '').isEmpty).length;
+                final everything = [...list, ...?general];
+                final missing = everything.where((e) => (e.receiptUrl ?? '').isEmpty).length;
+                // Donation gaps 6 and 7.
+                final awaiting = expensesAwaitingApproval(everything);
+                final overdue = expensesWithOverdueReceipts(everything, settings.effectiveReceiptDueDays);
                 return [
                   _KvRow(
                     Icons.local_hospital,
@@ -1163,10 +1169,26 @@ class _FundsBody extends ConsumerWidget {
                     'Missing receipts',
                     StatusChip('$missing', tone: missing > 0 ? ChipTone.amber : ChipTone.green),
                   ),
-                  const _KvRow(
-                    Icons.pending_actions,
-                    'Payments awaiting approval',
-                    StatusChip('Not tracked yet', tone: ChipTone.notRecorded),
+                  InkWell(
+                    onTap: () => openExpenseOversight(context),
+                    child: _KvRow(
+                      Icons.assignment_late_outlined,
+                      overdue.isEmpty
+                          ? 'Receipts overdue'
+                          : 'Receipts overdue: ${overdue.take(3).map((e) => e.title).join(', ')}'
+                          '${overdue.length > 3 ? ' +${overdue.length - 3} more' : ''}',
+                      StatusChip('${overdue.length}', tone: overdue.isNotEmpty ? ChipTone.red : ChipTone.green),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => openExpenseOversight(context),
+                    child: _KvRow(
+                      Icons.pending_actions,
+                      'Payments awaiting approval',
+                      settings.expenseApprovalThreshold == null && awaiting.isEmpty
+                          ? const StatusChip('No approval step set', tone: ChipTone.notRecorded)
+                          : StatusChip('${awaiting.length}', tone: awaiting.isNotEmpty ? ChipTone.amber : ChipTone.green),
+                    ),
                   ),
                 ];
               },

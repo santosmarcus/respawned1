@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +17,7 @@ import 'package:respawnd1/core/repos/general_expense_repository.dart';
 import 'package:respawnd1/core/services/expense_funding_service.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/donation/models.dart';
+import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 
 /// Add or edit a single expense record. Returns true if a write actually
 /// happened (caller can rely on the live `expensesProvider` stream to
@@ -34,13 +36,13 @@ import 'package:respawnd1/features/donation/models.dart';
 /// every expense is implicitly case-wide. [initialAnimalIndexes] pre-selects
 /// the currently-viewed animal when opened from a specific-animal context.
 Future<bool> showAddEditExpenseSheet(
-  BuildContext context, {
-  String? caseId,
-  String? organizationId,
-  Expense? existing,
-  List<CaseAnimalOption> animalOptions = const [],
-  Set<int> initialAnimalIndexes = const {},
-}) async {
+    BuildContext context, {
+      String? caseId,
+      String? organizationId,
+      Expense? existing,
+      List<CaseAnimalOption> animalOptions = const [],
+      Set<int> initialAnimalIndexes = const {},
+    }) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -78,7 +80,7 @@ class _AddEditExpenseSheetBody extends ConsumerStatefulWidget {
 class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBody> {
   late final _titleController = TextEditingController(text: widget.existing?.title ?? '');
   late final _amountController =
-      TextEditingController(text: widget.existing != null ? widget.existing!.amount.toStringAsFixed(0) : '');
+  TextEditingController(text: widget.existing != null ? widget.existing!.amount.toStringAsFixed(0) : '');
   late final _notesController = TextEditingController(text: widget.existing?.notes ?? '');
   // Category starts unselected (null) for a new expense — rather than
   // silently defaulting to Other — so "must be selected" is a real,
@@ -133,15 +135,15 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
   /// Campaigns a line can be paid from: this organization's, with money
   /// available, and (for restricted funds) raised for this same case.
   List<DonationListing> _linkableCampaigns(List<DonationListing> all, String? orgId) => [
-        for (final l in all)
-          if (l.organizationId == orgId &&
-              l.type == 'donation' &&
-              !l.isDraft &&
-              !l.isArchived &&
-              l.availableBalance > 0 &&
-              (!l.restricted || (l.linkedCaseId != null && l.linkedCaseId == widget.caseId)))
-            l,
-      ];
+    for (final l in all)
+      if (l.organizationId == orgId &&
+          l.type == 'donation' &&
+          !l.isDraft &&
+          !l.isArchived &&
+          l.availableBalance > 0 &&
+          (!l.restricted || (l.linkedCaseId != null && l.linkedCaseId == widget.caseId)))
+        l,
+  ];
 
   @override
   void initState() {
@@ -239,11 +241,23 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
     if (_uploadingReceipt) return;
     final title = _titleController.text.trim();
     final amount = double.tryParse(_amountController.text.trim());
-    // A legacy expense (already existed with no receipt) is never forced
-    // to retroactively add one just because it's being edited — every
-    // other case (new expense, or an existing expense that already had a
-    // receipt) requires one.
-    final receiptRequired = !_isLegacyWithoutReceipt;
+    // Donation gap 7: a bill can be saved before its receipt arrives. It
+    // then gets a due date (organization setting, default 7 days) and is
+    // listed by name on the dashboard once overdue.
+    final settings = ref.read(shelterSettingsProvider).asData?.value ?? ShelterSettings.empty;
+    final hasReceipt = _receiptUrl != null && _receiptUrl!.isNotEmpty;
+    final receiptDueAt = hasReceipt
+        ? null
+        : (widget.existing?.receiptDueAt ??
+        DateTime.now().add(Duration(days: settings.effectiveReceiptDueDays)));
+
+    // Donation gap 6: above the organization's approval threshold a second
+    // financial admin must approve before any (more) money is put on it.
+    final prev = widget.existing;
+    final approvedCovers = prev != null && prev.isApproved && amount != null &&
+        (prev.approvedAmount ?? prev.amount) + 0.005 >= amount;
+    final needsApproval = amount != null && settings.requiresApproval(amount) && !approvedCovers;
+    final previouslyFunded = prev?.fundedAmount ?? 0;
 
     // Every required field is checked at once (not short-circuited on the
     // first failure) so every problem is visible in one pass.
@@ -251,10 +265,12 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       _titleError = title.isEmpty ? 'Title is required.' : null;
       _categoryError = _category == null ? 'Select a category.' : null;
       _amountError = (amount == null || amount <= 0) ? 'Enter an amount greater than zero.' : null;
-      _fundingError = _validateFundings(amount);
-      _receiptError = (receiptRequired && (_receiptUrl == null || _receiptUrl!.isEmpty))
-          ? 'Attach a receipt before saving.'
-          : null;
+      _fundingError = _validateFundings(amount) ??
+          (needsApproval && _fundedTotal > previouslyFunded + 0.005
+              ? 'Expenses above ${formatPeso(settings.expenseApprovalThreshold!)} need a second financial admin\'s '
+              'approval before they are funded. Save it without new funding lines and ask another admin to approve it.'
+              : null);
+      _receiptError = null;
     });
 
     if (_titleError != null ||
@@ -318,6 +334,20 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       incurredAt: _incurredAt,
       createdBy: widget.existing?.createdBy ?? 'Admin Staff',
       animalIndexes: _animalIndexes.isEmpty ? null : _animalIndexes.toList(),
+      receiptDueAt: receiptDueAt,
+      approvalStatus: needsApproval ? 'pending' : (approvedCovers ? 'approved' : null),
+      approvalRequestedBy: needsApproval
+          ? (prev?.isAwaitingApproval == true ? prev!.approvalRequestedBy : FirebaseAuth.instance.currentUser?.uid)
+          : (approvedCovers ? prev.approvalRequestedBy : null),
+      approvalRequestedByName: needsApproval
+          ? (prev?.isAwaitingApproval == true
+          ? prev!.approvalRequestedByName
+          : FirebaseAuth.instance.currentUser?.displayName)
+          : (approvedCovers ? prev.approvalRequestedByName : null),
+      approvedBy: approvedCovers ? prev.approvedBy : null,
+      approvedByName: approvedCovers ? prev.approvedByName : null,
+      approvedAt: approvedCovers ? prev.approvedAt : null,
+      approvedAmount: approvedCovers ? prev.approvedAmount : null,
     );
 
     try {
@@ -557,7 +587,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                 contentPadding: const EdgeInsets.only(bottom: 8),
                 enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
                 focusedBorder:
-                    const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+                const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
               ),
               style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
             ),
@@ -567,8 +597,8 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
             _Label('Funding'),
             Text(
               'Where the money came from. Leave empty if it isn\'t funded yet — '
-              'anything not covered stays outstanding. Financial admins can link a Fundraiser or '
-              'Donation Fund line to the campaign that paid it.',
+                  'anything not covered stays outstanding. Financial admins can link a Fundraiser or '
+                  'Donation Fund line to the campaign that paid it.',
               style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
             ),
             for (var i = 0; i < _fundingRows.length; i++) _fundingRowEditor(i, canFinance, campaigns),
@@ -586,7 +616,7 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
               final text = amount == null || amount <= 0
                   ? (funded > 0 ? 'Funded ${formatPeso(funded)}' : 'Unfunded')
                   : 'Funded ${formatPeso(funded)} of ${formatPeso(amount)} · '
-                      '${formatPeso((amount - funded).clamp(0, amount))} outstanding';
+                  '${formatPeso((amount - funded).clamp(0, amount))} outstanding';
               return Text(text,
                   style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary));
             }),
@@ -619,12 +649,27 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
             ),
             const SizedBox(height: 14),
 
-            _Label('Receipt', required: !_isLegacyWithoutReceipt),
-            if (_isLegacyWithoutReceipt)
+            _Label('Receipt'),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                _isLegacyWithoutReceipt && widget.existing!.receiptDueAt == null
+                    ? 'Legacy expense — no receipt on file. You may add one, but it is not required to save.'
+                    : (_receiptUrl == null || _receiptUrl!.isEmpty)
+                    ? 'No receipt yet? You can save now. It will be due by '
+                    '${formatDate(widget.existing?.receiptDueAt ?? DateTime.now().add(Duration(days: (ref.watch(shelterSettingsProvider).asData?.value ?? ShelterSettings.empty).effectiveReceiptDueDays)))}'
+                    ' and listed on the dashboard after that.'
+                    : 'Receipt on file.',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+              ),
+            ),
+            if (widget.existing?.isAwaitingApproval ?? false)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
-                child: Text('Legacy expense — no receipt on file. You may add one, but it is not required to save.',
-                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
+                child: Text(
+                  'Waiting for a second financial admin to approve this expense before it can be funded.',
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.warning, fontWeight: FontWeight.w700),
+                ),
               ),
             GestureDetector(
               onTap: _uploadingReceipt ? null : _pickReceipt,
@@ -637,30 +682,30 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                 ),
                 child: _uploadingReceipt
                     ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8),
-                        child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))),
-                      )
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                )
                     : (_receiptUrl != null && _receiptUrl!.isNotEmpty)
-                        ? Row(
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.network(_receiptUrl!,
-                                    width: 48, height: 48, fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) => Container(
-                                        width: 48, height: 48, color: AppColors.tearspwn, child: const Icon(Icons.receipt_long_outlined))),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text('Receipt attached — tap to replace',
-                                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-                              ),
-                              const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 18),
-                            ],
-                          )
-                        : Center(
-                            child: Text('Attach receipt', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                          ),
+                    ? Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(_receiptUrl!,
+                          width: 48, height: 48, fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => Container(
+                              width: 48, height: 48, color: AppColors.tearspwn, child: const Icon(Icons.receipt_long_outlined))),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text('Receipt attached — tap to replace',
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+                    ),
+                    const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 18),
+                  ],
+                )
+                    : Center(
+                  child: Text('Attach receipt', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                ),
               ),
             ),
             if (_receiptError != null) _FieldError(_receiptError!),
@@ -682,11 +727,11 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                 style: AppButtons.primary,
                 child: _saving
                     ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
                     : Text(_isEditing ? 'Save Changes' : 'Add Expense',
-                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
               ),
             ),
           ],
@@ -714,15 +759,15 @@ class _Label extends StatelessWidget {
   const _Label(this.text, {this.required = false});
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
-          children: [
-            Text(text,
-                style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-            if (required) const Text(' *', style: TextStyle(color: AppColors.error, fontSize: 12)),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      children: [
+        Text(text,
+            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+        if (required) const Text(' *', style: TextStyle(color: AppColors.error, fontSize: 12)),
+      ],
+    ),
+  );
 }
 
 /// Shown directly under a field when it fails validation — field-level,
@@ -732,9 +777,9 @@ class _FieldError extends StatelessWidget {
   const _FieldError(this.message);
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(message, style: GoogleFonts.zain(fontSize: 11, color: AppColors.error)),
-      );
+    padding: const EdgeInsets.only(top: 4),
+    child: Text(message, style: GoogleFonts.zain(fontSize: 11, color: AppColors.error)),
+  );
 }
 
 class _Input extends StatelessWidget {
@@ -755,7 +800,7 @@ class _Input extends StatelessWidget {
         contentPadding: const EdgeInsets.only(bottom: 8),
         enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),
         focusedBorder:
-            const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
+        const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary, width: 1.5)),
       ),
       style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
     );
@@ -794,8 +839,8 @@ class _EnumDropdown<T> extends StatelessWidget {
       ),
       items: items
           .map((item) => DropdownMenuItem(
-              value: item,
-              child: Text(labelOf(item), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))))
+          value: item,
+          child: Text(labelOf(item), style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary))))
           .toList(),
       onChanged: onChanged,
     );

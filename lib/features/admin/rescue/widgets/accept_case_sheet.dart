@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/admin/stock/stock_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -98,14 +99,15 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
     final factors = occ == null
         ? const <ReadinessFactor>[]
         : RescueReadinessCard.buildFactors(
-            occ: occ,
-            settings: settings,
-            snap: snap,
-            supply: supply,
-            records: records,
-            canManage: canManage,
-            campaigns: campaigns,
-          );
+      occ: occ,
+      settings: settings,
+      snap: snap,
+      supply: supply,
+      records: records,
+      canManage: canManage,
+      campaigns: campaigns,
+      stock: ref.watch(stockItemsProvider).asData?.value,
+    );
 
     return SafeArea(
       child: SingleChildScrollView(

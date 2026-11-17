@@ -1,9 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../app_theme.dart';
 import 'models.dart';
 import 'donation_summary_inkind.dart';
@@ -27,94 +26,19 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) throw Exception("User not authenticated");
 
-      // Fetch user name for admin record
-      String donorName = "Anonymous";
-      if (!widget.params.isAnonymous) {
-        try {
-          final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-          if (userDoc.exists) {
-            final userData = userDoc.data();
-            final firstName = userData?['firstName'] ?? '';
-            final lastName = userData?['lastName'] ?? '';
-            final fullName = '$firstName $lastName'.trim();
-            donorName = fullName.isNotEmpty ? fullName : (userData?['name'] ?? "User");
-          }
-        } catch (_) {
-          donorName = "User";
-        }
-      }
-
-      final refNumber = 'REF-IK-${DateTime.now().millisecondsSinceEpoch}';
+      // Donation gap 9: the pledge, the donor's history entry and
+      // notification, and the campaign's donor count are written by the
+      // backend (pledgeInKindDonation in functions/campaigns.js), like money.
       final now = DateTime.now();
-      final formattedDate = DateFormat('MMMM d, yyyy').format(now);
-
-      final donationData = {
-        'userId': uid,
-        'donorName': widget.params.isAnonymous ? 'Anonymous' : donorName,
-        'campaignId': widget.params.fundraiserId, // Using campaignId for consistency with monetary donations
-        'organizationName': widget.params.organizationName,
-        'organizer': widget.params.organizationName, // Added for compatibility
+      final result = await FirebaseFunctions.instance.httpsCallable('pledgeInKindDonation').call<Object?>({
+        'campaignId': widget.params.fundraiserId,
         'category': widget.params.category,
         'clarification': widget.params.clarification,
-        'itemDescription': '${widget.params.category}: ${widget.params.clarification}', // Added for compatibility
         'isAnonymous': widget.params.isAnonymous,
         'address': widget.params.address,
-        'timestamp': FieldValue.serverTimestamp(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'date': formattedDate,
-        'refNumber': refNumber,
-        'status': 'inprogress',
-        'type': 'inkind',
-        'amount': 0, // In-kind has no monetary value initially
-        'amountString': 'In-kind: ${widget.params.category}',
-      };
-
-      // Record in global collection (donations)
-      final docRef = await FirebaseFirestore.instance.collection('donations').add(donationData);
-
-      // Record in user history
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('history')
-          .doc(docRef.id)
-          .set(donationData);
-
-      // Shown in Notifications; the organization's confirmation follows later.
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('notifications')
-          .doc('inkind_pledged_${docRef.id}')
-          .set({
-        'title': 'In-Kind Pledge Recorded',
-        'message': 'Your pledge of ${widget.params.category} to ${widget.params.organizationName} was recorded. '
-            'You will be notified once they confirm receiving the items.',
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-        'type': 'inkind_pledged',
-        'donationId': docRef.id,
-        'campaignId': widget.params.fundraiserId,
-      }).catchError((_) {});
-
-      // Update campaign donor count and user donated status
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final campaignRef = FirebaseFirestore.instance.collection('campaigns').doc(widget.params.fundraiserId);
-        final campaignSnap = await transaction.get(campaignRef);
-
-        if (campaignSnap.exists) {
-          transaction.update(campaignRef, {
-            'numdonors': FieldValue.increment(1),
-          });
-        }
-
-        // Compatibility for legacy 'donated' check
-        final donatedRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('donated').doc(widget.params.fundraiserId);
-        transaction.set(donatedRef, {
-          'donationId': widget.params.fundraiserId,
-          'donatedAt': FieldValue.serverTimestamp(),
-        });
       });
+      final data = result.data;
+      final refNumber = data is Map ? (data['refNumber'] as String? ?? '') : '';
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -136,7 +60,8 @@ class _DonationReviewInKindScreenState extends ConsumerState<DonationReviewInKin
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+        final message = e is FirebaseFunctionsException ? (e.message ?? 'The pledge could not be recorded.') : 'Error: $e';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       if (mounted) setState(() => _isProcessing = false);

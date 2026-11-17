@@ -17,20 +17,20 @@ enum ExpenseCategory {
   other;
 
   String get label => switch (this) {
-        ExpenseCategory.consultation => 'Consultation',
-        ExpenseCategory.medication => 'Medication',
-        ExpenseCategory.procedure => 'Procedure',
-        ExpenseCategory.laboratory => 'Laboratory',
-        ExpenseCategory.vaccination => 'Vaccination',
-        ExpenseCategory.confinement => 'Confinement',
-        ExpenseCategory.transport => 'Transport',
-        ExpenseCategory.foodAndSupplies => 'Food and Supplies',
-        ExpenseCategory.utilities => 'Bills and Utilities',
-        ExpenseCategory.rent => 'Rent',
-        ExpenseCategory.staffCompensation => 'Staff Compensation',
-        ExpenseCategory.administrative => 'Administrative',
-        ExpenseCategory.other => 'Other',
-      };
+    ExpenseCategory.consultation => 'Consultation',
+    ExpenseCategory.medication => 'Medication',
+    ExpenseCategory.procedure => 'Procedure',
+    ExpenseCategory.laboratory => 'Laboratory',
+    ExpenseCategory.vaccination => 'Vaccination',
+    ExpenseCategory.confinement => 'Confinement',
+    ExpenseCategory.transport => 'Transport',
+    ExpenseCategory.foodAndSupplies => 'Food and Supplies',
+    ExpenseCategory.utilities => 'Bills and Utilities',
+    ExpenseCategory.rent => 'Rent',
+    ExpenseCategory.staffCompensation => 'Staff Compensation',
+    ExpenseCategory.administrative => 'Administrative',
+    ExpenseCategory.other => 'Other',
+  };
 
   /// Categories offered for a rescue case's bills.
   static const List<ExpenseCategory> forCase = [
@@ -60,19 +60,19 @@ enum ExpenseCategory {
   /// The matching category on a campaign's spending record
   /// (ALLOCATION_CATEGORIES in functions/campaigns.js).
   String get allocationCategory => switch (this) {
-        ExpenseCategory.consultation ||
-        ExpenseCategory.medication ||
-        ExpenseCategory.procedure ||
-        ExpenseCategory.laboratory ||
-        ExpenseCategory.vaccination =>
-          'Medicine and Treatment',
-        ExpenseCategory.confinement || ExpenseCategory.rent => 'Shelter',
-        ExpenseCategory.transport => 'Transport',
-        ExpenseCategory.foodAndSupplies => 'Food',
-        ExpenseCategory.utilities => 'Bills and Utilities',
-        ExpenseCategory.staffCompensation || ExpenseCategory.administrative => 'Administrative',
-        ExpenseCategory.other => 'Other',
-      };
+    ExpenseCategory.consultation ||
+    ExpenseCategory.medication ||
+    ExpenseCategory.procedure ||
+    ExpenseCategory.laboratory ||
+    ExpenseCategory.vaccination =>
+    'Medicine and Treatment',
+    ExpenseCategory.confinement || ExpenseCategory.rent => 'Shelter',
+    ExpenseCategory.transport => 'Transport',
+    ExpenseCategory.foodAndSupplies => 'Food',
+    ExpenseCategory.utilities => 'Bills and Utilities',
+    ExpenseCategory.staffCompensation || ExpenseCategory.administrative => 'Administrative',
+    ExpenseCategory.other => 'Other',
+  };
 
   static ExpenseCategory fromLabel(String? label) =>
       values.firstWhere((c) => c.label == label, orElse: () => ExpenseCategory.other);
@@ -89,12 +89,12 @@ enum FundingSource {
   other;
 
   String get label => switch (this) {
-        FundingSource.unfunded => 'Unfunded',
-        FundingSource.donationFund => 'Donation Fund',
-        FundingSource.organizationBudget => 'Organization Budget',
-        FundingSource.fundraiser => 'Fundraiser',
-        FundingSource.other => 'Other',
-      };
+    FundingSource.unfunded => 'Unfunded',
+    FundingSource.donationFund => 'Donation Fund',
+    FundingSource.organizationBudget => 'Organization Budget',
+    FundingSource.fundraiser => 'Fundraiser',
+    FundingSource.other => 'Other',
+  };
 
   static FundingSource fromLabel(String? label) =>
       values.firstWhere((s) => s.label == label, orElse: () => FundingSource.unfunded);
@@ -129,12 +129,12 @@ class ExpenseFunding {
   bool get isLinked => campaignId != null && campaignId!.isNotEmpty;
 
   ExpenseFunding withAllocation(String id) => ExpenseFunding(
-        source: source,
-        amount: amount,
-        campaignId: campaignId,
-        campaignTitle: campaignTitle,
-        allocationId: id,
-      );
+    source: source,
+    amount: amount,
+    campaignId: campaignId,
+    campaignTitle: campaignTitle,
+    allocationId: id,
+  );
 
   static ExpenseFunding? fromMap(Object? raw) {
     if (raw is! Map) return null;
@@ -151,12 +151,12 @@ class ExpenseFunding {
   }
 
   Map<String, dynamic> toMap() => {
-        'source': source.label,
-        'amount': amount,
-        'campaignId': ?campaignId,
-        'campaignTitle': ?campaignTitle,
-        'allocationId': ?allocationId,
-      };
+  'source': source.label,
+  'amount': amount,
+  'campaignId': ?campaignId,
+  'campaignTitle': ?campaignTitle,
+  'allocationId': ?allocationId,
+};
 }
 
 /// A single doc under `cases/{caseId}/expenses/{expenseId}` — the ledger
@@ -187,6 +187,23 @@ class Expense {
   /// totals are never auto-split across the listed animals.
   final List<int>? animalIndexes;
 
+  /// Donation gap 6: null when no approval was needed; 'pending' while an
+  /// expense above the organization's approval threshold waits for a second
+  /// financial admin; 'approved' once one did. Funding lines can only be
+  /// added to a pending expense after approval.
+  final String? approvalStatus;
+  final String? approvalRequestedBy;
+  final String? approvalRequestedByName;
+  final String? approvedBy;
+  final String? approvedByName;
+  final DateTime? approvedAt;
+
+  /// The amount that was approved. Raising the expense above it asks again.
+  final double? approvedAmount;
+
+  /// Donation gap 7: when a missing receipt becomes overdue.
+  final DateTime? receiptDueAt;
+
   const Expense({
     required this.id,
     required this.caseId,
@@ -200,7 +217,30 @@ class Expense {
     this.createdAt,
     this.createdBy,
     this.animalIndexes,
+    this.approvalStatus,
+    this.approvalRequestedBy,
+    this.approvalRequestedByName,
+    this.approvedBy,
+    this.approvedByName,
+    this.approvedAt,
+    this.approvedAmount,
+    this.receiptDueAt,
   });
+
+  bool get isAwaitingApproval => approvalStatus == 'pending';
+  bool get isApproved => approvalStatus == 'approved';
+  bool get hasReceipt => receiptUrl != null && receiptUrl!.isNotEmpty;
+
+  /// Missing receipt past its due date. Expenses saved before due dates
+  /// existed fall back to [createdAt] + [defaultDays].
+  bool isReceiptOverdue(DateTime now, {int defaultDays = 7}) {
+    if (hasReceipt) return false;
+    final due = receiptDueAt ?? (createdAt ?? incurredAt)?.add(Duration(days: defaultDays));
+    return due != null && now.isAfter(due);
+  }
+
+  DateTime? effectiveReceiptDueAt({int defaultDays = 7}) =>
+      hasReceipt ? null : (receiptDueAt ?? (createdAt ?? incurredAt)?.add(Duration(days: defaultDays)));
 
   /// Covered so far — capped at [amount] so a bad legacy record can never
   /// make the case totals show a negative balance.
@@ -248,6 +288,14 @@ class Expense {
       createdAt: ts('createdAt'),
       createdBy: data['createdBy'] as String?,
       animalIndexes: (data['animalIndexes'] as List?)?.map((e) => (e as num).toInt()).toList(),
+      approvalStatus: data['approvalStatus'] as String?,
+      approvalRequestedBy: data['approvalRequestedBy'] as String?,
+      approvalRequestedByName: data['approvalRequestedByName'] as String?,
+      approvedBy: data['approvedBy'] as String?,
+      approvedByName: data['approvedByName'] as String?,
+      approvedAt: ts('approvedAt'),
+      approvedAmount: (data['approvedAmount'] as num?)?.toDouble(),
+      receiptDueAt: ts('receiptDueAt'),
     );
   }
 
@@ -262,18 +310,26 @@ class Expense {
   }
 
   Map<String, dynamic> toFirestore() => {
-        'title': title,
-        'category': category.label,
-        'amount': amount,
-        'fundings': fundings.map((f) => f.toMap()).toList(),
-        // Kept for anything still reading the old single-source field.
-        'fundingSource': fundings.length == 1 && isFullyFunded
-            ? fundings.single.source.label
-            : (isUnfunded ? FundingSource.unfunded.label : 'Mixed'),
-        if (receiptUrl != null && receiptUrl!.isNotEmpty) 'receiptUrl': receiptUrl,
-        if (notes != null && notes!.isNotEmpty) 'notes': notes,
-        'incurredAt': incurredAt != null ? Timestamp.fromDate(incurredAt!) : Timestamp.now(),
-        'createdBy': createdBy,
-        if (animalIndexes != null && animalIndexes!.isNotEmpty) 'animalIndexes': animalIndexes,
-      };
+    'title': title,
+    'category': category.label,
+    'amount': amount,
+    'fundings': fundings.map((f) => f.toMap()).toList(),
+    // Kept for anything still reading the old single-source field.
+    'fundingSource': fundings.length == 1 && isFullyFunded
+        ? fundings.single.source.label
+        : (isUnfunded ? FundingSource.unfunded.label : 'Mixed'),
+    if (receiptUrl != null && receiptUrl!.isNotEmpty) 'receiptUrl': receiptUrl,
+    if (notes != null && notes!.isNotEmpty) 'notes': notes,
+    'incurredAt': incurredAt != null ? Timestamp.fromDate(incurredAt!) : Timestamp.now(),
+    'createdBy': createdBy,
+    if (animalIndexes != null && animalIndexes!.isNotEmpty) 'animalIndexes': animalIndexes,
+    'approvalStatus': approvalStatus,
+    'approvalRequestedBy': approvalRequestedBy,
+    'approvalRequestedByName': approvalRequestedByName,
+    'approvedBy': approvedBy,
+    'approvedByName': approvedByName,
+    'approvedAt': approvedAt != null ? Timestamp.fromDate(approvedAt!) : null,
+    'approvedAmount': approvedAmount,
+    'receiptDueAt': hasReceipt || receiptDueAt == null ? null : Timestamp.fromDate(receiptDueAt!),
+  };
 }
