@@ -176,6 +176,18 @@ service cloud.firestore {
       );
     }
 
+    // Financial admin of one organization: mirrors loadFinanceActorFor in
+    // functions/paymongo.js (a platform 'admin', or an Admin member of
+    // `orgId` whose account points at it).
+    function isFinanceAdminOf(orgId) {
+      return signedIn() && (
+        myRole() == 'admin' ||
+        (orgId is string && orgId != '' && myOrgId() == orgId &&
+          exists(memberPath(orgId, request.auth.uid)) &&
+          get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin')
+      );
+    }
+
     // ---- Organizations -----------------------------------------------------
 
     // Anyone signed in can read profiles. Only the organization's own staff
@@ -559,9 +571,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // PayMongo attempts
+    // PayMongo attempts. Readable by the donor and by the financial admins of
+    // the organization that owns the campaign (stamped by
+    // createDonationCheckout; older docs: scripts/backfill_log_organization_ids.js).
+    // Staff lists query by organizationId; platform admins list everything.
     match /donationPayments/{paymentId} {
-      allow read: if signedIn() && (resource.data.donorId == request.auth.uid || isFinanceAdmin());
+      allow read: if signedIn() && (
+        resource.data.get('donorId', '') == request.auth.uid ||
+        isFinanceAdminOf(resource.data.get('organizationId', ''))
+      );
       allow write: if false;
     }
 

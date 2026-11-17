@@ -196,3 +196,37 @@ describe('dashboard records across animals and cases', () => {
     await assertFails(as('staffA').collectionGroup('expenses').get());
   });
 });
+
+describe('PayMongo payment attempts', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('donationPayments/pA').set({ donorId: 'adopter', campaignId: 'c1', organizationId: 'orgA', status: 'needs_review', createdAt: 1 });
+      await db.doc('donationPayments/pD').set({ donorId: 'stranger', campaignId: 'c9', organizationId: 'orgD', status: 'paid', createdAt: 2 });
+      await db.doc('donationPayments/legacy').set({ donorId: 'stranger', campaignId: 'c1', status: 'paid', createdAt: 3 });
+    });
+  });
+
+  test("an organization's financial admins list only its own attempts", async () => {
+    await assertSucceeds(as('ownerA').collection('donationPayments').where('organizationId', '==', 'orgA').get());
+    await assertSucceeds(as('ownerA').doc('donationPayments/pA').get());
+    await assertFails(as('ownerA').collection('donationPayments').get());
+    await assertFails(as('ownerA').collection('donationPayments').where('organizationId', '==', 'orgD').get());
+    await assertFails(as('ownerA').doc('donationPayments/pD').get());
+    // Older attempts with no organizationId wait for the backfill.
+    await assertFails(as('ownerA').doc('donationPayments/legacy').get());
+    // Another organization's Admin can't read orgA's.
+    await assertFails(as('draftOwner').doc('donationPayments/pA').get());
+  });
+
+  test('non-admin staff and carers cannot read them', async () => {
+    await assertFails(as('staffA').collection('donationPayments').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('carerA').doc('donationPayments/pA').get());
+  });
+
+  test('platform admins list every attempt; donors read their own', async () => {
+    await assertSucceeds(as('admin').collection('donationPayments').get());
+    await assertSucceeds(as('adopter').doc('donationPayments/pA').get());
+    await assertFails(as('adopter').doc('donationPayments/pD').get());
+  });
+});
