@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/adoption/adoption_fit_assessment.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
 
 /// Single source of truth for the delivery-attempt cap, shared by the
@@ -231,6 +232,15 @@ class AdoptionApplication {
   /// a meeting created for it.
   Map<String, dynamic>? get zoom => raw['zoom'] as Map<String, dynamic>?;
   bool get hasActiveZoomMeeting => zoom != null && zoom!['zoomMeetingStatus'] == 'active';
+
+  /// The Fit Assessment saved when staff accepted or rejected this
+  /// application (AdoptionApplicationRepository.accept / reject), or null
+  /// for an undecided application or one decided before it was saved.
+  FitAtDecision? get fitAtDecision {
+    final m = raw['fitAtDecision'];
+    final at = m is Map && m['decidedAt'] is Timestamp ? (m['decidedAt'] as Timestamp).toDate() : null;
+    return FitAtDecision.fromMap(m, decidedAt: at);
+  }
 
   factory AdoptionApplication.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};

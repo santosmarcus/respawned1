@@ -476,6 +476,9 @@ describe('adoptions', () => {
   test('adopters can withdraw but not approve', async () => {
     await assertFails(as('adopter').doc('adoptions/appA').update({ status: 'approved' }));
     await assertSucceeds(as('adopter').doc('adoptions/appA').update({ status: 'withdrawn' }));
+    // The fit score saved with the staff decision is staff-only.
+    await assertFails(as('adopter').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
+    await assertSucceeds(as('staffA').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
   });
 
   test("the owning organization's staff decide", async () => {

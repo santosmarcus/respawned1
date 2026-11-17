@@ -1123,8 +1123,9 @@ service cloud.firestore {
       }
 
       function adopterUpdate() {
+        // fitAtDecision is the score staff saved with their decision.
         return isAdopterOf(resource.data) &&
-          !changedAny(['personal', 'organizationId']) &&
+          !changedAny(['personal', 'organizationId', 'fitAtDecision']) &&
           (!changedAny(['status']) || request.resource.data.status == 'withdrawn');
       }
 
