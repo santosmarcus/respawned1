@@ -42,7 +42,42 @@ test('a case admitted from an existing record already has it', () => {
   assert.strictEqual(intakeCompletionDue(c, []), true);
 });
 
-test('per-animal paths are left to the app', () => {
+test('per-animal paths are not whole-case completions', () => {
   const c = {status: 'intake', intakeReceivedAt: received, animals: [{postTreatmentAction: 'intake'}]};
   assert.strictEqual(intakeCompletionDue(c, [0]), false);
+});
+
+const {animalsDueForIntakeCompletion, stageSummary, derivedCaseStatus} = require('./rescue_timer_rules');
+
+test('per-animal intake: received animals sent to Intake with a record', () => {
+  const c = {
+    status: 'in_treatment',
+    animals: [
+      {postTreatmentAction: 'intake', receivedAt: received}, // due
+      {postTreatmentAction: 'intake'}, // not received yet
+      {}, // still in treatment
+      {postTreatmentAction: 'intake', receivedAt: received, intakeCompletedAt: received}, // done
+      {postTreatmentAction: 'transfer', receivedAt: received},
+    ],
+  };
+  assert.deepStrictEqual(animalsDueForIntakeCompletion(c, [0, 1, 2, 3, 4]), [0]);
+  // No record for animal 0 yet.
+  assert.deepStrictEqual(animalsDueForIntakeCompletion(c, [1]), []);
+  // Admitted from an existing record: no linked record needed.
+  assert.deepStrictEqual(animalsDueForIntakeCompletion({...c, sourceAnimalRecordId: 'a1'}, []), [0]);
+  assert.deepStrictEqual(animalsDueForIntakeCompletion({status: 'intake', intakeReceivedAt: received}, [0]), []);
+});
+
+test('stage counts and case status follow the animals', () => {
+  const done = {postTreatmentAction: 'intake', intakeCompletedAt: received};
+  const treating = {};
+  const intake = {postTreatmentAction: 'intake'};
+  assert.deepStrictEqual(stageSummary([treating, intake]),
+    {activeAnimalStages: ['in_treatment', 'intake'], animalStageCounts: {in_treatment: 1, intake: 1}});
+  assert.strictEqual(derivedCaseStatus([treating, done]), 'in_treatment');
+  assert.strictEqual(derivedCaseStatus([intake, done]), 'intake');
+  assert.strictEqual(derivedCaseStatus([done, {postTreatmentAction: 'transfer'}, {outcome: 'deceased'}]), 'completed');
+  // Waiting for the adopter to collect it still counts as Treatment.
+  assert.strictEqual(derivedCaseStatus([done, {postTreatmentAction: 'release'}]), 'in_treatment');
+  assert.deepStrictEqual(stageSummary([done]), {activeAnimalStages: [], animalStageCounts: {}});
 });

@@ -1514,7 +1514,13 @@ exports.followUpCaseReferrals = onSchedule('every 60 minutes', async () => {
 //     status 'completed' + intakeCompletedAt with the same status line and
 //     activity-log entry. Cases whose animals follow separate
 //     post-treatment paths are completed per animal in the app.
-const {quarantineDue, intakeCompletionDue} = require('./rescue_timer_rules');
+const {
+  quarantineDue,
+  intakeCompletionDue,
+  animalsDueForIntakeCompletion,
+  stageSummary,
+  derivedCaseStatus,
+} = require('./rescue_timer_rules');
 
 const QUARANTINE_AUTO_REASON = 'Automatic — scheduled duration elapsed.';
 
@@ -1602,7 +1608,60 @@ exports.completeDueIntakes = onSchedule('every 30 minutes', async () => {
       console.error('[completeDueIntakes] failed for', doc.ref.path, e);
     }
   }
+  await completeDueAnimalIntakes();
 });
+
+async function linkedRecordIndexes(caseId) {
+  const records = await db.collection('animals').where('linkedCaseId', '==', caseId).get();
+  return records.docs
+    .map((r) => r.get('sourceAnimalIndex'))
+    .filter((i) => typeof i === 'number')
+    .map((i) => Math.trunc(i));
+}
+
+// Multi-animal cases whose animals took separate post-treatment paths: each
+// animal sent to Intake is completed once it was received and has its
+// record, with the same writes as CaseIntakeRepository.completeIntakeForAnimals.
+// The case may still read in_treatment while another animal is in
+// treatment, so these are found by their Intake stage, not their status.
+async function completeDueAnimalIntakes() {
+  const snap = await db.collection('cases').where('activeAnimalStages', 'array-contains', 'intake').get();
+  for (const doc of snap.docs) {
+    try {
+      const indexes = await linkedRecordIndexes(doc.id);
+      if (!animalsDueForIntakeCompletion(doc.data(), indexes).length) continue;
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists) return;
+        const c = s.data();
+        const due = animalsDueForIntakeCompletion(c, indexes);
+        if (!due.length) return;
+        const now = admin.firestore.Timestamp.now();
+        const animals = c.animals.map((a, i) => (due.includes(i) ? {...a, intakeCompletedAt: now} : a));
+        const update = {
+          animals,
+          ...stageSummary(animals),
+          status: derivedCaseStatus(animals) || c.status || 'intake',
+          statusHistory: admin.firestore.FieldValue.arrayUnion({
+            status: 'Intake completed for the selected animal(s).',
+            timestamp: now,
+          }),
+        };
+        tx.update(doc.ref, update);
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'intake_completed',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          details: {animalIndexes: due},
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (e) {
+      console.error('[completeDueAnimalIntakes] failed for', doc.ref.path, e);
+    }
+  }
+}
 
 const REPORTER_RESPONSE_TIMEOUT_HOURS = 48;
 
