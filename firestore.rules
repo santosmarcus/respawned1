@@ -80,16 +80,9 @@ service cloud.firestore {
       return signedIn() && myRole() == 'system_admin';
     }
 
-    // Staff of an approved organization, or platform staff — the pool that
-    // may pick up unowned (pending/referred) cases and read staff-only data.
-    function isOrgStaff() {
-      return isPlatformStaff() ||
-        (signedIn() && myOrgId() != '' && isApprovedStaffOf(myOrgId()));
-    }
-
     // ---- Organization membership helpers -----------------------------------
     //
-    // Mirrors functions/facebook.js: the org's ownerId always counts, a
+    // Mirrors functions/org_access.js: the org's ownerId always counts, a
     // members doc counts while its status isn't inactive/removed/disabled
     // (missing status = active, for docs that predate the field).
 
@@ -109,98 +102,131 @@ service cloud.firestore {
       return signedIn() && orgOwnerId(orgId) == request.auth.uid;
     }
 
+    function inactiveStatuses() {
+      return ['inactive', 'removed', 'disabled'];
+    }
+
     function isActiveMember(orgId) {
       return signedIn() &&
         exists(memberPath(orgId, request.auth.uid)) &&
-        !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']);
+        !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in inactiveStatuses());
     }
 
+    // The owner, or an active Admin member: members, invitations, the org
+    // profile and its settings.
     function isOrgAdmin(orgId) {
       return isOrgOwner(orgId) ||
         (isActiveMember(orgId) && get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin');
-    }
-
-    // An account acts for the organization its users/{uid}.organizationId
-    // points at (as OrgMembershipService.resolveCapabilities does), unless
-    // its members doc there is inactive. No members doc = an account linked
-    // before members docs existed; users.organizationId is only writable
-    // through a real membership now, so that link can't be forged. Checking
-    // the link first keeps this cheap for everyone else — Firestore denies a
-    // request once it has evaluated 1,000 expressions.
-    function isStaffOf(orgId) {
-      return signedIn() && orgId is string && orgId != '' && myOrgId() == orgId && (
-        !exists(memberPath(orgId, request.auth.uid)) ||
-        !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']) ||
-        isOrgOwner(orgId)
-      ) && !isCarerMember(orgId);
-    }
-
-    // Carers (organization role 'carer') give care and record doses; they are
-    // not staff. Every staff check above excludes them, so they cannot touch
-    // cases, records, adoptions or finance.
-    function isCarerMember(orgId) {
-      return exists(memberPath(orgId, request.auth.uid)) &&
-        get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'carer' &&
-        !isOrgOwner(orgId);
-    }
-
-    function isCarerOf(orgId) {
-      return signedIn() && orgId is string && orgId != '' && myOrgId() == orgId &&
-        isCarerMember(orgId) && isOrgApproved(orgId) &&
-        !(get(memberPath(orgId, request.auth.uid)).data.get('status', 'active') in ['inactive', 'removed', 'disabled']);
     }
 
     function isOrgApproved(orgId) {
       return get(orgPath(orgId)).data.get('verificationStatus', 'approved') == 'approved';
     }
 
-    function isApprovedStaffOf(orgId) {
-      return isStaffOf(orgId) && isOrgApproved(orgId);
+    // ---- Organization permissions ------------------------------------------
+    //
+    // Admins (and the owner) can do everything; Staff what members/{uid}
+    // .permissions allow, set by an Admin through the setMemberAccess
+    // callable (clients can't write it, see members/{uid}). The lists below
+    // are copied from functions/org_permissions.json
+    // (functions/org_permissions_sync.test.js keeps them in step).
+    //
+    // Members docs from before permissions keep working (same fallback as
+    // functions/org_access.js and the app): role 'carer' is Animal care, any
+    // other Staff is Full staff (+ Facebook posting with the old
+    // facebookPublisher flag), and an account linked through
+    // users.organizationId with no members doc is Full staff.
+    //
+    // An account acts only for the organization users/{uid}.organizationId
+    // points at. That check comes first so everyone else stops before any
+    // organization or member read: Firestore denies a request once it has
+    // evaluated 1,000 expressions (rules-tests expression-budget.test.js).
+
+    function allPermKeys() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'financeManage', 'volunteers', 'insights', 'facebookPublish'];
     }
 
-    // May act on a record owned by `orgId` ('' = not owned by anyone yet).
-    function canStaffRecordOf(orgId) {
+    function fullStaffPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'];
+    }
+
+    // Everything that works in the admin shell; daily care (and Facebook
+    // posting) alone is the care-tasks screen, which needs none of the
+    // dashboard, people or budget data these guard.
+    function opsKeys() {
+      return ['rescue', 'animals', 'adoptions', 'campaigns', 'financeView', 'financeManage', 'volunteers', 'insights'];
+    }
+
+    function permsOf(m) {
+      return m.get('permissions',
+        m.get('role', '') == 'carer' ? ['care'] :
+          (m.get('facebookPublisher', false) == true ? fullStaffPerms().concat(['facebookPublish']) : fullStaffPerms()));
+    }
+
+    function memberHasAny(orgId, keys) {
+      let mp = memberPath(orgId, request.auth.uid);
+      let org = get(orgPath(orgId)).data;
+      return org.get('verificationStatus', 'approved') == 'approved' && (
+        org.get('ownerId', '') == request.auth.uid ||
+        (!exists(mp) && fullStaffPerms().hasAny(keys)) ||
+        (exists(mp) &&
+          !(get(mp).data.get('status', 'active') in inactiveStatuses()) &&
+          (get(mp).data.get('role', '') == 'admin' || permsOf(get(mp).data).hasAny(keys)))
+      );
+    }
+
+    // Active member of `orgId` (their own organization) with any of `keys`.
+    function staffWith(orgId, keys) {
+      return signedIn() && orgId is string && orgId != '' && myOrgId() == orgId && memberHasAny(orgId, keys);
+    }
+
+    // The same, for the caller's own organization.
+    function myStaffWith(keys) {
+      return signedIn() && myOrgId() != '' && memberHasAny(myOrgId(), keys);
+    }
+
+    // Any active member with at least one permission (Admins included).
+    function isMemberOf(orgId) {
+      return staffWith(orgId, allPermKeys());
+    }
+
+    // May act on a record owned by `orgId` ('' = not owned by anyone yet,
+    // the shared review pool) with any of `keys`; platform staff always.
+    function canRecordOf(orgId, keys) {
       return isPlatformStaff() ||
-        (orgId != '' && isApprovedStaffOf(orgId)) ||
-        (orgId == '' && isOrgStaff());
+        (orgId != '' && staffWith(orgId, keys)) ||
+        (orgId == '' && myStaffWith(keys));
     }
 
     // A staff write may only (re)assign a record to an organization the
-    // writer belongs to.
-    function orgStampOk() {
+    // writer belongs to, with the same permission.
+    function orgStampOk(keys) {
       return !changedAny(['organizationId']) ||
         isPlatformStaff() ||
-        isApprovedStaffOf(request.resource.data.get('organizationId', ''));
+        staffWith(request.resource.data.get('organizationId', ''), keys);
     }
 
-    // Mirrors loadActor({finance: true}) in functions/campaigns.js.
-    function isFinanceAdmin() {
-      let u = userDoc();
-      let orgId = u.get('organizationId', '');
-      return signedIn() && (
-        u.get('role', '') == 'admin' ||
-        (orgId != '' &&
-          exists(memberPath(orgId, request.auth.uid)) &&
-          get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin')
-      );
+    // Money. financeManage includes viewing. Platform roles grant nothing:
+    // only the organization's own people see or move its money.
+    function canViewFinance(orgId) {
+      return staffWith(orgId, ['financeView', 'financeManage']);
     }
 
-    // Financial admin of one organization: mirrors loadFinanceActorFor in
-    // functions/paymongo.js (a platform 'admin', or an Admin member of
-    // `orgId` whose account points at it).
-    function isFinanceAdminOf(orgId) {
-      return signedIn() && (
-        myRole() == 'admin' ||
-        (orgId is string && orgId != '' && myOrgId() == orgId &&
-          exists(memberPath(orgId, request.auth.uid)) &&
-          get(memberPath(orgId, request.auth.uid)).data.get('role', '') == 'admin')
-      );
+    function canManageFinance(orgId) {
+      return staffWith(orgId, ['financeManage']);
+    }
+
+    // For records saved without an organization (older campaigns and
+    // transfers): finance viewers of the caller's own organization.
+    function canViewFinanceOrUnowned(orgId) {
+      return (orgId is string && orgId != '' && canViewFinance(orgId)) ||
+        (!(orgId is string && orgId != '') && myStaffWith(['financeView', 'financeManage']));
     }
 
     // ---- Organizations -----------------------------------------------------
 
     // Anyone signed in can read profiles. Only the organization's own staff
-    // edit them, and ownerId is fixed: it must be the creator on create and
+    // Admins edit them, and ownerId is fixed: it must be the creator on create and
     // can never change afterwards, since the owner gets admin rights over the
     // members subcollection.
     //
@@ -240,27 +266,28 @@ service cloud.firestore {
           !('bootstrapped' in request.resource.data)
         ));
       allow update: if request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '') &&
-        (platformStaffUpdateOk() || (isStaffOf(orgId) && verificationOk()));
+        (platformStaffUpdateOk() || (isOrgAdmin(orgId) && verificationOk()));
       allow delete: if false;
     }
 
     // organizations/{orgId}/settings/{docId}: the organization's own
     // settings (settings/shelter: safe capacity, isolation spots, monthly
     // care budget, daily food use, riders wanted free; shelter_settings.dart).
-    // Its staff read them (the dashboard); only its admins change them.
-    // settings/care (care_rounds.dart: areas, round tasks, shifts, weekly
-    // roster) is read by its carers too: they tick the rounds it lists.
+    // Its members read them (the dashboard; settings/care lists the rounds
+    // care staff tick); only its Admins change them.
     match /organizations/{orgId}/settings/{docId} {
-      allow read: if isStaffOf(orgId) || isPlatformStaff() || (docId == 'care' && isCarerOf(orgId));
-      allow write: if isOrgAdmin(orgId) || (isPlatformStaff() && myRole() == 'admin');
+      allow read: if isPlatformStaff() ||
+        (docId == 'care' && isMemberOf(orgId)) ||
+        (docId != 'care' && staffWith(orgId, opsKeys()));
+      allow write: if isOrgAdmin(orgId);
     }
 
     // Dashboard gap 2: each day's care-round ticks (careRounds/{yyyy-MM-dd},
-    // field done.<area>__<task> = who and when). The organization's staff
-    // and carers tick and untick; nobody deletes a day.
+    // field done.<area>__<task> = who and when). Staff with daily care or
+    // animal records tick and untick; nobody deletes a day.
     match /organizations/{orgId}/careRounds/{day} {
-      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId) || isCarerOf(orgId);
-      allow create, update: if (isApprovedStaffOf(orgId) || isCarerOf(orgId)) &&
+      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow create, update: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('organizationId', '') == orgId;
       allow delete: if false;
     }
@@ -269,27 +296,30 @@ service cloud.firestore {
     // for themselves (and may take over a claim); they release their own,
     // admins release anyone's. sendDashboardDigest deletes lapsed ones.
     match /organizations/{orgId}/alertClaims/{key} {
-      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId);
-      allow create, update: if (isPlatformStaff() || isApprovedStaffOf(orgId)) &&
+      allow read: if isPlatformStaff() || staffWith(orgId, opsKeys());
+      allow create, update: if (isPlatformStaff() || staffWith(orgId, opsKeys())) &&
         request.resource.data.get('byUid', '') == request.auth.uid &&
         request.resource.data.get('organizationId', '') == orgId;
-      allow delete: if (isPlatformStaff() || isApprovedStaffOf(orgId)) &&
+      allow delete: if (isPlatformStaff() || staffWith(orgId, opsKeys())) &&
         (resource.data.get('byUid', '') == request.auth.uid || isOrgAdmin(orgId));
     }
 
     // Analytics gap 6: monthly summaries, written only by
     // writeAnalyticsSummaries / rebuildAnalyticsSummaries (dashboard_ops.js).
     match /organizations/{orgId}/analyticsSummaries/{month} {
-      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId);
+      allow read: if isPlatformStaff() || staffWith(orgId, ['insights']);
       allow write: if false;
     }
 
     // organizations/{orgId}/members/{uid}
     //   - Only the owner or an active admin adds, edits, or removes members.
-    //   - An invited person may create only their own doc, with the role
-    //     their pending invitation names.
-    //   - Nobody writes facebookPublisher* from the client; the
-    //     facebookSetPublisher callable owns those fields.
+    //   - An invited person may create only their own doc, with the role,
+    //     preset and permissions their pending invitation names.
+    //   - Nobody writes permissions, preset or facebookPublisher* from the
+    //     client: the setMemberAccess callable (functions/org_members.js)
+    //     changes a member's access, with the last-Admin check and an audit
+    //     entry. Admins may still change `role` directly (older app builds)
+    //     until that path is removed.
     //   - Only the owner may change the owner's own membership, and it can
     //     never be deleted.
     // Reads stay open to signed-in users (Staff Members list, duplicate-email
@@ -299,8 +329,16 @@ service cloud.firestore {
         return ['facebookPublisher', 'facebookPublisherGrantedBy', 'facebookPublisherGrantedAt'];
       }
 
+      function accessKeys() {
+        return ['permissions', 'preset', 'accessUpdatedBy', 'accessUpdatedAt'];
+      }
+
       function noFbPublisherFields() {
         return !request.resource.data.keys().hasAny(fbPublisherKeys());
+      }
+
+      function noAccessFields() {
+        return !request.resource.data.keys().hasAny(accessKeys());
       }
 
       // getAfter so the bootstrap transaction (org doc + owner's member doc
@@ -327,16 +365,21 @@ service cloud.firestore {
           invitation.organizationId == orgId &&
           invitation.normalizedEmail == normalizedEmail() &&
           invitation.status == 'pending' &&
-          request.resource.data.get('role', 'staff') == invitation.get('role', 'staff');
+          request.resource.data.get('role', 'staff') == invitation.get('role', 'staff') &&
+          request.resource.data.get('permissions', null) == invitation.get('permissions', null) &&
+          request.resource.data.get('preset', null) == invitation.get('preset', null);
       }
 
       allow read: if signedIn();
 
-      allow create: if noFbPublisherFields() &&
-        (isOrgAdmin(orgId) || isOwnerAfter() || creatingOwnersAdminDoc() || acceptingOwnValidInvitation());
+      allow create: if noFbPublisherFields() && (
+        ((isOrgAdmin(orgId) || isOwnerAfter() || creatingOwnersAdminDoc()) && noAccessFields()) ||
+        acceptingOwnValidInvitation());
 
       allow update: if isOrgAdmin(orgId) &&
         !changedAny(fbPublisherKeys()) &&
+        !changedAny(accessKeys()) &&
+        request.resource.data.get('role', 'staff') in ['admin', 'staff', 'carer'] &&
         !changedAny(['uid', 'organizationId']) &&
         (uid != orgOwnerId(orgId) || isOrgOwner(orgId) || !changedAny(['role', 'status']));
 
@@ -357,15 +400,15 @@ service cloud.firestore {
     // record usage, purchases and low-stock levels. Every change is a
     // movement row that names who made it and is never edited.
     match /organizations/{orgId}/stock/{itemId} {
-      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId) || isCarerOf(orgId);
-      allow create, update: if (isApprovedStaffOf(orgId) || isCarerOf(orgId)) &&
+      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow create, update: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('quantity', 0) is number &&
         request.resource.data.get('quantity', 0) >= 0;
       allow delete: if false;
     }
     match /organizations/{orgId}/stockMovements/{moveId} {
-      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId) || isCarerOf(orgId);
-      allow create: if (isApprovedStaffOf(orgId) || isCarerOf(orgId)) &&
+      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow create: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('byUid', '') == request.auth.uid;
       allow update, delete: if false;
     }
@@ -380,30 +423,38 @@ service cloud.firestore {
     // ---- Organization invitations ------------------------------------------
 
     match /organizationInvitations/{invitationId} {
-      // Carers are members but not staff: they must not invite anyone, or
-      // they could invite an account of their own as an admin.
+      // Only the owner or an Admin invites: Staff could otherwise invite an
+      // account of their own as an Admin.
       function managesOrg(orgId) {
-        return (isActiveMember(orgId) && !isCarerMember(orgId)) || isOrgOwner(orgId);
+        return isOrgAdmin(orgId);
       }
 
-      // Staff Members is an equal-access module in this phase, so any active
-      // member may manage invitations; the invited person may read and act
-      // on invitations addressed to their own email.
+      // An invitation names a role and, for Staff, the permissions to copy
+      // onto the member on acceptance ('carer' only from older app builds).
+      function invitationAccessOk(data) {
+        return data.get('role', 'staff') in ['admin', 'staff', 'carer'] &&
+          (!('permissions' in data) || (data.permissions is list && data.permissions.hasOnly(allPermKeys())));
+      }
+
+      // The invited person may read and act on invitations addressed to
+      // their own email.
       allow read: if signedIn() &&
         (resource.data.normalizedEmail == normalizedEmail() || managesOrg(resource.data.organizationId));
 
-      allow create: if managesOrg(request.resource.data.organizationId);
+      allow create: if managesOrg(request.resource.data.organizationId) && invitationAccessOk(request.resource.data);
 
       // The invited person may only flip their own pending invitation to
       // accepted/rejected without touching org, email, or role.
-      allow update: if managesOrg(resource.data.organizationId) ||
+      allow update: if (managesOrg(resource.data.organizationId) && invitationAccessOk(request.resource.data)) ||
         (
           resource.data.normalizedEmail == normalizedEmail() &&
           resource.data.status == 'pending' &&
           request.resource.data.status in ['accepted', 'rejected'] &&
           request.resource.data.organizationId == resource.data.organizationId &&
           request.resource.data.email == resource.data.email &&
-          request.resource.data.role == resource.data.role
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.get('permissions', null) == resource.data.get('permissions', null) &&
+          request.resource.data.get('preset', null) == resource.data.get('preset', null)
         );
 
       allow delete: if false;
@@ -419,7 +470,7 @@ service cloud.firestore {
 
     match /events/{eventId} {
       function managesEventOrg(orgId) {
-        return isActiveMember(orgId) || isOrgOwner(orgId);
+        return staffWith(orgId, ['volunteers']);
       }
 
       function registrationPath(uid) {
@@ -520,9 +571,10 @@ service cloud.firestore {
         allow read: if signedIn();
         allow write: if false;
       }
-      // Audit trail: staff only.
+      // Audit trail: the campaign organization's finance viewers.
       match /history/{entryId} {
-        allow read: if isOrgStaff();
+        allow read: if canViewFinanceOrUnowned(
+          get(/databases/$(database)/documents/campaigns/$(campaignId)).data.get('organizationId', ''));
         allow write: if false;
       }
     }
@@ -568,8 +620,7 @@ service cloud.firestore {
       // (where organizationId == theirs) can be proven.
       allow read: if signedIn() && (
         resource.data.userId == request.auth.uid ||
-        isPlatformStaff() ||
-        isApprovedStaffOf(resource.data.organizationId)
+        canViewFinance(resource.data.organizationId)
       );
       // Every record, in-kind pledges included (pledgeInKindDonation,
       // Donation gap 9), is created by the backend.
@@ -580,21 +631,21 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // PayMongo attempts. Readable by the donor and by the financial admins of
-    // the organization that owns the campaign (stamped by
+    // PayMongo attempts. Readable by the donor and by the people who manage
+    // the money of the organization that owns the campaign (stamped by
     // createDonationCheckout; older docs: scripts/backfill_log_organization_ids.js).
-    // Staff lists query by organizationId; platform admins list everything.
+    // Staff lists query by organizationId.
     match /donationPayments/{paymentId} {
       allow read: if signedIn() && (
         resource.data.get('donorId', '') == request.auth.uid ||
-        isFinanceAdminOf(resource.data.get('organizationId', ''))
+        canManageFinance(resource.data.get('organizationId', ''))
       );
       allow write: if false;
     }
 
-    // Reallocation audit records.
+    // Reallocation audit records: the organization's finance viewers.
     match /fundTransfers/{transferId} {
-      allow read: if isOrgStaff();
+      allow read: if canViewFinanceOrUnowned(resource.data.get('organizationId', ''));
       allow write: if false;
     }
 
@@ -667,12 +718,12 @@ service cloud.firestore {
         );
       }
 
-      // TransporterApplicationRepository.review — approved organization
-      // staff (not carers) decide a pet transporter's verification, only for
+      // TransporterApplicationRepository.review — organization staff with
+      // the volunteers permission (and platform staff) decide a pet transporter's verification, only for
       // an account that actually applied, and only those two fields.
       function staffTransporterReview() {
         let data = request.resource.data;
-        return isOrgStaff() &&
+        return (isPlatformStaff() || myStaffWith(['volunteers'])) &&
           resource.data.get('role', '') == 'pet_transporter' &&
           exists(/databases/$(database)/documents/transporterApplications/$(uid)) &&
           changedOnly(['isVerified', 'transporterVerificationStatus']) &&
@@ -688,7 +739,7 @@ service cloud.firestore {
       // of the same organization (team pages before approval). The
       // organization comparison reads the field directly so a query that
       // doesn't filter on it is denied rather than matched against ''.
-      allow read: if isSelf(uid) || isOrgStaff() || isSystemAdmin() ||
+      allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(opsKeys()) || isSystemAdmin() ||
         (signedIn() && myOrgId() != '' && resource.data.organizationId == myOrgId());
       allow create: if isSelf(uid) && selfFieldsOk(request.resource.data);
       allow update: if (isSelf(uid) && selfUpdateOk()) ||
@@ -719,7 +770,7 @@ service cloud.firestore {
       match /volunteerRegistrations/{eventId} {
         function managesThisEvent() {
           let orgId = get(/databases/$(database)/documents/events/$(eventId)).data.get('organizationId', '');
-          return orgId != '' && (isActiveMember(orgId) || isOrgOwner(orgId));
+          return orgId != '' && staffWith(orgId, ['volunteers']);
         }
         function attendanceFields() {
           return ['attended', 'attendanceMarkedAt', 'attendanceMarkedBy'];
@@ -732,7 +783,7 @@ service cloud.firestore {
       // The owner's copy of each collar tag; staff toggle QR codes on it
       // (admin_qr.dart).
       match /collarTags/{tagId} {
-        allow read, write: if isSelf(uid) || isOrgStaff();
+        allow read, write: if isSelf(uid) || isPlatformStaff() || myStaffWith(['rescue']);
       }
       match /history/{itemId} {
         allow read: if isSelf(uid);
@@ -782,11 +833,11 @@ service cloud.firestore {
       return data.get('status', '') == 'referred' &&
         data.get('referredToOrgId', '') != '' &&
         data.get('referredToOrgId', '') == myOrgId() &&
-        isOrgStaff();
+        (isPlatformStaff() || myStaffWith(['rescue']));
     }
 
     function canStaffCase(data) {
-      return canStaffRecordOf(data.get('organizationId', '')) ||
+      return canRecordOf(data.get('organizationId', ''), ['rescue']) ||
         isReferralTarget(data);
     }
 
@@ -838,14 +889,10 @@ service cloud.firestore {
     }
 
     // Mirrors loadActor({finance: true}) plus assertSameOrg in
-    // functions/campaigns.js: a platform 'admin', or an Admin member of the
-    // approved organization that owns the record.
+    // functions/campaigns.js: people who manage the money of the
+    // organization that owns the case.
     function canFinanceCase(data) {
-      let orgId = data.get('organizationId', '');
-      return isFinanceAdmin() && (
-        myRole() == 'admin' ||
-        (orgId is string && orgId != '' && orgId == myOrgId() && isApprovedStaffOf(orgId))
-      );
+      return canManageFinance(data.get('organizationId', ''));
     }
 
     // Donation gap 6: an expense above the organization's approval
@@ -990,11 +1037,9 @@ service cloud.firestore {
         isAssignedTransporter(resource.data) ||
         resource.data.get('verification', {}).get('riderId', '') == request.auth.uid ||
         isCommunityAdoptable(resource.data) ||
-        (isOrgStaff() && (
-          isPlatformStaff() ||
-          (resource.data.referredToOrgId == myOrgId() && myOrgId() != '') ||
-          canStaffRecordOf(resource.data.organizationId)
-        )) ||
+        isPlatformStaff() ||
+        (resource.data.get('referredToOrgId', '') == myOrgId() && myOrgId() != '' && myStaffWith(['rescue'])) ||
+        canRecordOf(resource.data.organizationId, ['rescue', 'adoptions', 'animals']) ||
         isVerifiedResponder() ||
         isOfferedTransporter(caseId, resource.data)
       );
@@ -1003,7 +1048,7 @@ service cloud.firestore {
       allow create: if signedIn() && (
         (request.resource.data.get('reporterId', '') == request.auth.uid &&
           request.resource.data.get('organizationId', '') == '') ||
-        canStaffRecordOf(request.resource.data.get('organizationId', ''))
+        canRecordOf(request.resource.data.get('organizationId', ''), ['rescue'])
       );
       // The cheap, document-only checks run first so the ones with lookups
       // stay inside Firestore's 1,000-expression budget
@@ -1011,7 +1056,7 @@ service cloud.firestore {
       allow update: if signedIn() && (
         communityClaimUpdate() ||
         clearOfferPointer() ||
-        (canStaffCase(resource.data) && orgStampOk()) ||
+        (canStaffCase(resource.data) && orgStampOk(['rescue'])) ||
         reporterUpdate() ||
         transporterUpdate() ||
         willingAdopterUpdate() ||
@@ -1058,11 +1103,12 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      // Case expenses are finance: the case's staff read them (treatment
-      // cost totals), and only financial administrators of the owning
-      // organization (or a platform 'admin') record, edit or delete them.
+      // Case expenses are finance: the case's rescue staff and finance
+      // viewers read them (treatment cost totals); only people who manage
+      // the owning organization's money record, edit or delete them.
       match /expenses/{expenseId} {
-        allow read: if canStaffCase(get(casePath(caseId)).data);
+        allow read: if canStaffCase(get(casePath(caseId)).data) ||
+          canViewFinance(get(casePath(caseId)).data.get('organizationId', ''));
         allow create: if canFinanceCase(get(casePath(caseId)).data) && expenseApprovalCreateOk();
         allow update: if canFinanceCase(get(casePath(caseId)).data) && expenseApprovalUpdateOk();
         allow delete: if canFinanceCase(get(casePath(caseId)).data);
@@ -1091,13 +1137,21 @@ service cloud.firestore {
       return /databases/$(database)/documents/animals/$(animalId);
     }
 
+    // Animal records are edited by rescue (intake), animal records and
+    // adoption (reservation, adoption) staff.
     function canStaffAnimal(data) {
-      return canStaffRecordOf(data.get('organizationId', ''));
+      return canRecordOf(data.get('organizationId', ''), ['rescue', 'animals', 'adoptions']);
     }
 
     function canReadAnimalMedical(animalId) {
       let data = get(animalPath(animalId)).data;
-      return canStaffAnimal(data) || isCarerOf(data.get('organizationId', ''));
+      return canRecordOf(data.get('organizationId', ''), ['rescue', 'animals', 'adoptions']) ||
+        staffWith(data.get('organizationId', ''), ['care']);
+    }
+
+    // Daily care staff of the animal's organization.
+    function canCareFor(animalId) {
+      return staffWith(get(animalPath(animalId)).data.get('organizationId', ''), ['care']);
     }
 
     // Adoption readiness gate: an animal only becomes adoptable with the
@@ -1132,34 +1186,36 @@ service cloud.firestore {
         isPlatformStaff() ||
         data.get('reservedForUserId', '') == request.auth.uid ||
         data.get('adoptedByUserId', '') == request.auth.uid ||
-        canStaffRecordOf(data.organizationId) ||
-        isCarerOf(data.organizationId));
+        canRecordOf(data.organizationId, ['rescue', 'animals', 'adoptions']) ||
+        staffWith(data.organizationId, ['care']));
     }
 
     match /animals/{animalId} {
       allow read: if canReadAnimal(resource.data);
-      allow create: if canStaffRecordOf(request.resource.data.get('organizationId', '')) && readinessOnCreateOk();
-      allow update: if canStaffAnimal(resource.data) && orgStampOk() && readinessOnUpdateOk();
+      allow create: if canRecordOf(request.resource.data.get('organizationId', ''), ['rescue', 'animals', 'adoptions']) &&
+        readinessOnCreateOk();
+      allow update: if canStaffAnimal(resource.data) && orgStampOk(['rescue', 'animals', 'adoptions']) &&
+        readinessOnUpdateOk();
       allow delete: if isPlatformStaff();
 
-      // Dose records: carers of the owning org record the doses they give
-      // (givenBy must be themselves); staff can record any dose.
+      // Dose records: daily care staff of the owning org record the doses
+      // they give (givenBy must be themselves); records staff any dose.
       match /medicationDoses/{doseId} {
         allow read: if canReadAnimalMedical(animalId);
         allow create: if canStaffAnimal(get(animalPath(animalId)).data) || (
-          isCarerOf(get(animalPath(animalId)).data.get('organizationId', '')) &&
+          canCareFor(animalId) &&
           request.resource.data.get('givenBy', '') == request.auth.uid
         );
-        // A carer may only rewrite their own record, never another carer's.
+        // Care staff may only rewrite their own record, never someone else's.
         allow update: if canStaffAnimal(get(animalPath(animalId)).data) || (
-          isCarerOf(get(animalPath(animalId)).data.get('organizationId', '')) &&
+          canCareFor(animalId) &&
           resource.data.get('givenBy', '') == request.auth.uid &&
           request.resource.data.get('givenBy', '') == request.auth.uid
         );
         allow delete: if false;
       }
 
-      // Care updates: carers of the owning org and staff add their own
+      // Care updates: care and records staff of the owning org add their own
       // (authorId must be themselves, stamped now); nobody rewrites one.
       match /careUpdates/{updateId} {
         allow read: if canReadAnimalMedical(animalId);
@@ -1168,8 +1224,7 @@ service cloud.firestore {
           request.resource.data.get('createdAt', null) == request.time &&
           request.resource.data.get('note', '') is string &&
           request.resource.data.get('note', '').size() > 0 &&
-          (canStaffAnimal(get(animalPath(animalId)).data) ||
-            isCarerOf(get(animalPath(animalId)).data.get('organizationId', '')));
+          (canStaffAnimal(get(animalPath(animalId)).data) || canCareFor(animalId));
         allow update: if false;
         allow delete: if canStaffAnimal(get(animalPath(animalId)).data);
       }
@@ -1221,7 +1276,7 @@ service cloud.firestore {
     }
 
     function canStaffAdoption(data) {
-      return canStaffRecordOf(data.get('organizationId', ''));
+      return canRecordOf(data.get('organizationId', ''), ['adoptions']);
     }
 
     match /adoptions/{adoptionId} {
@@ -1252,7 +1307,7 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource.data.personal.adopterId == request.auth.uid ||
         isPlatformStaff() ||
-        isApprovedStaffOf(resource.data.organizationId)
+        staffWith(resource.data.organizationId, ['adoptions'])
       );
       // Rescue gaps 6/10: an adoption request for a rescued animal, from the
       // reporter who said they want to adopt it or the user who registered
@@ -1280,7 +1335,7 @@ service cloud.firestore {
           ? rescueRequestOk(request.resource.data)
           : orgMatchesAnimal(request.resource.data));
       allow update: if signedIn() && (
-        (canStaffAdoption(resource.data) && orgStampOk()) ||
+        (canStaffAdoption(resource.data) && orgStampOk(['adoptions'])) ||
         adopterUpdate()
       );
       allow delete: if false;
@@ -1306,10 +1361,10 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isOrgStaff();
+      allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(['volunteers']);
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
-        isOrgStaff() &&
+        (isPlatformStaff() || myStaffWith(['volunteers'])) &&
         changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
         request.resource.data.status in ['approved', 'rejected'] &&
         request.resource.data.get('reviewedBy', '') == request.auth.uid
@@ -1334,10 +1389,10 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isOrgStaff();
+      allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(['volunteers']);
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
-        isOrgStaff() &&
+        (isPlatformStaff() || myStaffWith(['volunteers'])) &&
         changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
         request.resource.data.status in ['approved', 'rejected'] &&
         request.resource.data.get('reviewedBy', '') == request.auth.uid
@@ -1357,7 +1412,7 @@ service cloud.firestore {
       // functions/audit_logs.js), through a query that filters on it. Each
       // rider's busy status for every organization is on their user doc
       // (transportStatus, functions/rider_status.js).
-      allow read: if canReadOrgRecord(false) || resource.data.get('riderId', '') == request.auth.uid;
+      allow read: if canReadOrgRecord(['rescue']) || resource.data.get('riderId', '') == request.auth.uid;
     }
 
     // Vaccinations, care records, medication orders and doses (animals) and
@@ -1365,39 +1420,42 @@ service cloud.firestore {
     // stamp*Organization functions in functions/audit_logs.js). These
     // collection-group matches also apply to direct reads, so they must be
     // as narrow as the per-parent rules: the owning organization's staff
-    // (and, for animal records, its carers) and platform staff. Dashboard
-    // queries filter on organizationId so the rule can be proven.
-    function canReadOrgRecord(withCarers) {
+    // with any of `keys`, and platform staff. Dashboard queries filter on
+    // organizationId so the rule can be proven.
+    function canReadOrgRecord(keys) {
       let orgId = resource.data.get('organizationId', '');
-      return isPlatformStaff() ||
-        (orgId != '' && (isApprovedStaffOf(orgId) || (withCarers && isCarerOf(orgId))));
+      return isPlatformStaff() || (orgId != '' && staffWith(orgId, keys));
+    }
+
+    function medicalKeys() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'insights'];
     }
 
     // Dashboard: vaccine status, overdue deworming, flea & tick and vet
     // checkups, missed medication doses.
     match /{path=**}/vaccinations/{docId} {
-      allow read: if canReadOrgRecord(true);
+      allow read: if canReadOrgRecord(medicalKeys());
     }
 
     match /{path=**}/careRecords/{docId} {
-      allow read: if canReadOrgRecord(true);
+      allow read: if canReadOrgRecord(medicalKeys());
     }
 
     // Analytics gap 5: the Medical tab's illness log, counted on Analytics.
     match /{path=**}/illnesses/{docId} {
-      allow read: if canReadOrgRecord(true);
+      allow read: if canReadOrgRecord(medicalKeys());
     }
 
     match /{path=**}/medications/{docId} {
-      allow read: if canReadOrgRecord(true);
+      allow read: if canReadOrgRecord(medicalKeys());
     }
 
     match /{path=**}/medicationDoses/{docId} {
-      allow read: if canReadOrgRecord(true);
+      allow read: if canReadOrgRecord(medicalKeys());
     }
 
     match /{path=**}/expenses/{docId} {
-      allow read: if canReadOrgRecord(false);
+      allow read: if canReadOrgRecord(['rescue', 'financeView', 'financeManage']);
     }
 
     // Audit page, Records and Rescue tabs. stampAnimalLogOrganization /
@@ -1407,7 +1465,7 @@ service cloud.firestore {
     function canReadOrgLog() {
       return isPlatformStaff() ||
         (resource.data.get('organizationId', '') != '' &&
-          isApprovedStaffOf(resource.data.get('organizationId', '')));
+          staffWith(resource.data.get('organizationId', ''), ['insights', 'rescue', 'animals']));
     }
 
     match /{path=**}/managementLogs/{docId} {
@@ -1428,17 +1486,17 @@ service cloud.firestore {
     // adoption by functions/audit_logs.js). The adopter reads through the
     // per-adoption rule.
     match /{path=**}/followUps/{docId} {
-      allow read: if canReadOrgRecord(false);
+      allow read: if canReadOrgRecord(['adoptions']);
     }
 
     // ---- General expenses ----------------------------------------------------
     //
     // orgExpenses: the organization's running costs (utilities, rent, staff
-    // pay). Only its financial admins read or write them, and only for their
-    // own organization; queries filter on organizationId.
+    // pay). Only the people who manage its money read or write them, and
+    // only for their own organization; queries filter on organizationId.
     match /orgExpenses/{expenseId} {
       function financeOf(orgId) {
-        return isFinanceAdmin() && (myRole() == 'admin' || (orgId is string && orgId == myOrgId()));
+        return canManageFinance(orgId);
       }
       allow read, delete: if financeOf(resource.data.get('organizationId', ''));
       allow create: if financeOf(request.resource.data.get('organizationId', '')) &&
@@ -1459,11 +1517,11 @@ service cloud.firestore {
     // expenses); the backend adds donation entries. Only the organization's
     // staff (not carers) and platform staff read them; the Audit page always
     // filters on organizationId, which is what lets this rule be proven.
-    // Nobody edits or deletes an entry.
+    // Staff need the insights permission. Nobody edits or deletes an entry.
     match /auditLogs/{entryId} {
       allow read: if isPlatformStaff() ||
         (resource.data.get('organizationId', '') != '' &&
-          isApprovedStaffOf(resource.data.get('organizationId', '')));
+          staffWith(resource.data.get('organizationId', ''), ['insights']));
       allow create: if signedIn() &&
         request.resource.data.get('actorId', request.auth.uid) == request.auth.uid &&
         request.resource.data.get('category', null) is string &&
@@ -1485,7 +1543,7 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource.data.get('adopterId', '') == request.auth.uid ||
         isPlatformStaff() ||
-        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && isApprovedStaffOf(myOrgId()))
+        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && myStaffWith(['adoptions']))
       );
       allow update: if signedIn() &&
         resource.data.get('adopterId', '') == request.auth.uid &&

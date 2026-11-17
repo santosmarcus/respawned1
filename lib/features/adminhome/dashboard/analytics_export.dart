@@ -239,7 +239,7 @@ Future<void> runAnalyticsExport(BuildContext context, WidgetRef ref, String kind
   final container = ProviderScope.containerOf(context, listen: false);
   messenger.showSnackBar(const SnackBar(content: Text('Preparing export…'), duration: Duration(seconds: 2)));
   try {
-    final canManage = await _first(container, canManageFinancesProvider.future);
+    final canManage = await _first(container, canViewFinancesProvider.future);
     final data = await _load(container, withDonations: canManage);
     final range = container.read(analyticsPeriodProvider);
     final now = DateTime.now();

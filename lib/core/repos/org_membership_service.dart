@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 
@@ -19,7 +20,37 @@ class OrgMembership {
   final String organizationId;
   final OrgRole role;
   final String? status;
-  const OrgMembership({required this.organizationId, required this.role, this.status});
+
+  /// What a Staff member may do (every permission for an Admin), with the
+  /// legacy fallback for docs written before permissions existed.
+  final Set<OrgPermission> permissions;
+  final OrgPreset? preset;
+
+  /// The stored role, which may still be the legacy 'carer'.
+  final String rawRole;
+
+  const OrgMembership({
+    required this.organizationId,
+    required this.role,
+    this.status,
+    this.permissions = const {},
+    this.preset,
+    this.rawRole = '',
+  });
+
+  /// From a members doc's data. Pure (tested in org_permission_test.dart).
+  factory OrgMembership.fromMemberData(String organizationId, Map<String, dynamic> data) {
+    final role = OrgRole.fromName(data['role'] as String?);
+    final perms = role == OrgRole.admin ? OrgPermission.values.toSet() : staffPermissionsFrom(data);
+    return OrgMembership(
+      organizationId: organizationId,
+      role: role,
+      status: data['status'] as String?,
+      permissions: perms,
+      preset: role == OrgRole.admin ? null : OrgPreset.matching(perms),
+      rawRole: (data['role'] as String?) ?? '',
+    );
+  }
 
   static const _inactiveStatuses = {'inactive', 'removed', 'disabled'};
   bool get isActive => status == null || !_inactiveStatuses.contains(status);
@@ -43,12 +74,11 @@ class OrgMembership {
 ///   - Organization-owned cases, animals and adoptions are writable by that
 ///     organization's staff (owner, active member, or a legacy account
 ///     linked through `organizationId` with no members doc yet).
-/// An org-linked account with no members doc therefore still works as
-/// staff (fail open, matching the rules), but gets none of the owner/admin-
-/// only capabilities ([_resolveCapabilities] passes
-/// `confirmedMembership: false`), which the rules and facebook.js also deny.
-/// Remaining gap: Admin-only case actions (merge, refer) are enforced in the
-/// app only; the rules treat every staff member of the organization alike.
+/// An org-linked account with no members doc works as Full staff (fail open,
+/// matching the rules and functions/org_access.js) and gets none of the
+/// Admin-only areas. Staff access beyond that is per permission
+/// (lib/core/models/organization/org_permission.dart), set by an Admin
+/// through the setMemberAccess callable.
 class OrgMembershipService {
   OrgMembershipService({FirebaseFirestore? firestore})
       : _db = firestore ?? FirebaseFirestore.instance;
@@ -79,11 +109,7 @@ class OrgMembershipService {
         await _db.collection('organizations').doc(orgId).collection('members').doc(uid).get();
     if (!memberDoc.exists) return null;
 
-    return OrgMembership(
-      organizationId: orgId,
-      role: OrgRole.fromName(memberDoc.data()?['role'] as String?),
-      status: memberDoc.data()?['status'] as String?,
-    );
+    return OrgMembership.fromMemberData(orgId, memberDoc.data() ?? const {});
   }
 
   /// One-shot equivalent of [streamCapabilities], for the several existing
@@ -113,13 +139,8 @@ class OrgMembershipService {
           .collection('members')
           .doc(uid)
           .snapshots()
-          .map((memberDoc) => memberDoc.exists
-              ? OrgMembership(
-                  organizationId: orgId,
-                  role: OrgRole.fromName(memberDoc.data()?['role'] as String?),
-                  status: memberDoc.data()?['status'] as String?,
-                )
-              : null);
+          .map((memberDoc) =>
+              memberDoc.exists ? OrgMembership.fromMemberData(orgId, memberDoc.data() ?? const {}) : null);
     });
   }
 
@@ -145,26 +166,13 @@ class OrgMembershipService {
     required DocumentSnapshot<Map<String, dynamic>> orgDoc,
     required DocumentSnapshot<Map<String, dynamic>> memberDoc,
   }) {
-    final isOwner = orgDoc.exists && orgDoc.data()?['ownerId'] == uid;
-    if (isOwner) return OrganizationCapabilities.forRole(ResolvedOrgRole.owner);
-
-    if (!memberDoc.exists) {
-      // No membership subdoc yet for a (legacy) org-linked account — staff
-      // access, as firestore.rules' isStaffOf allows. Owner/admin-only
-      // actions stay off: facebook.js and the rules' isOrgAdmin both fail
-      // closed on a missing membership doc.
-      return OrganizationCapabilities.forRole(ResolvedOrgRole.admin, confirmedMembership: false);
-    }
-
-    final membership = OrgMembership(
-      organizationId: orgDoc.id,
-      role: OrgRole.fromName(memberDoc.data()?['role'] as String?),
-      status: memberDoc.data()?['status'] as String?,
-    );
-    if (!membership.isActive) return OrganizationCapabilities.none;
-    return OrganizationCapabilities.forRole(
-      resolvedRoleFromOrgRole(membership.role),
-      facebookPublisher: memberDoc.data()?['facebookPublisher'] == true,
+    // Owner → Admin; no members doc (a legacy linked account) → Full staff,
+    // as firestore.rules and functions/org_access.js treat it; inactive →
+    // none; otherwise the members doc's role and permissions.
+    return capabilitiesFrom(
+      uid: uid,
+      ownerId: orgDoc.exists ? (orgDoc.data()?['ownerId'] as String?) : null,
+      member: memberDoc.exists ? (memberDoc.data() ?? const {}) : null,
     );
   }
 

@@ -4,9 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/audit_log_repository.dart';
-import 'package:respawnd1/core/repos/org_membership_service.dart';
 
 enum InvitationStatus {
   pending,
@@ -26,6 +26,15 @@ class OrganizationInvitation {
   final String email;
   final String normalizedEmail;
   final OrgRole role;
+
+  /// What the invited Staff member will be able to do (every permission
+  /// for an Admin). Older invitations without a list fall back by role
+  /// (staffPermissionsFrom), like members docs.
+  final Set<OrgPermission> permissions;
+  final OrgPreset? preset;
+
+  /// The stored role, which may be the legacy 'carer'.
+  final String rawRole;
   final InvitationStatus status;
   final String invitedBy;
   final String invitedByName;
@@ -44,6 +53,9 @@ class OrganizationInvitation {
     required this.email,
     required this.normalizedEmail,
     required this.role,
+    this.permissions = const {},
+    this.preset,
+    this.rawRole = '',
     required this.status,
     required this.invitedBy,
     required this.invitedByName,
@@ -57,6 +69,10 @@ class OrganizationInvitation {
   });
 
   bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
+
+  /// "Organization Admin" or "Staff · Treasurer".
+  String get accessLabel =>
+      role == OrgRole.admin ? OrgRole.admin.memberTitle : 'Staff · ${(preset ?? OrgPreset.custom).label}';
 
   factory OrganizationInvitation.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -73,6 +89,13 @@ class OrganizationInvitation {
       // match/display those legacy documents.
       normalizedEmail: (data['normalizedEmail'] as String?) ?? email.trim().toLowerCase(),
       role: OrgRole.fromName(data['role'] as String?),
+      permissions: OrgRole.fromName(data['role'] as String?) == OrgRole.admin
+          ? OrgPermission.values.toSet()
+          : staffPermissionsFrom(data),
+      preset: OrgRole.fromName(data['role'] as String?) == OrgRole.admin
+          ? null
+          : OrgPreset.matching(staffPermissionsFrom(data)),
+      rawRole: data['role'] as String? ?? '',
       status: InvitationStatus.fromName(data['status'] as String?),
       invitedBy: data['invitedBy'] as String? ?? '',
       invitedByName: data['invitedByName'] as String? ?? '',
@@ -190,6 +213,7 @@ class OrganizationInvitationRepository {
     required String organizationName,
     required String email,
     required OrgRole role,
+    Set<OrgPermission> permissions = const {},
     required String invitedBy,
     String invitedByName = '',
   }) async {
@@ -212,6 +236,7 @@ class OrganizationInvitationRepository {
         'email': email.trim(),
         'normalizedEmail': normalizedEmail,
         'role': role.name,
+        ..._accessFields(role, permissions),
         'status': InvitationStatus.pending.name,
         'invitedBy': invitedBy,
         'invitedByName': invitedByName,
@@ -238,8 +263,21 @@ class OrganizationInvitationRepository {
     });
   }
 
-  Future<void> changeInvitationRole(String invitationId, OrgRole role) async {
-    await _invitations.doc(invitationId).update({'role': role.name});
+  /// The permissions an invitation carries: a Staff list and its preset;
+  /// none for an Admin. Accepting copies them onto the member exactly
+  /// (firestore.rules checks they match).
+  static Map<String, dynamic> _accessFields(OrgRole role, Set<OrgPermission> permissions) {
+    if (role == OrgRole.admin) return const {};
+    final perms = normalizePermissions(permissions);
+    return {'permissions': permissionKeys(perms), 'preset': OrgPreset.matching(perms).name};
+  }
+
+  Future<void> changeInvitationAccess(String invitationId, OrgRole role, Set<OrgPermission> permissions) async {
+    await _invitations.doc(invitationId).update({
+      'role': role.name,
+      'permissions': role == OrgRole.admin ? FieldValue.delete() : permissionKeys(normalizePermissions(permissions)),
+      'preset': role == OrgRole.admin ? FieldValue.delete() : OrgPreset.matching(normalizePermissions(permissions)).name,
+    });
   }
 
   Future<void> revokeInvitation(String invitationId) async {
@@ -267,7 +305,8 @@ class OrganizationInvitationRepository {
     bool preserveAccountRole = false,
   }) async {
     final ref = _invitations.doc(invitationId);
-    late OrgRole grantedRole;
+    late String grantedRole;
+    Object? grantedPermissions;
     late String organizationId;
 
     await _db.runTransaction((tx) async {
@@ -304,7 +343,10 @@ class OrganizationInvitationRepository {
       final memberRef = _organizations.doc(organizationId).collection('members').doc(uid);
       final existingMemberSnap = await tx.get(memberRef);
 
-      grantedRole = OrgRole.fromName(data['role'] as String?);
+      // Copied exactly as the invitation names them (firestore.rules
+      // compares role, permissions and preset with the invitation).
+      grantedRole = (data['role'] as String?) ?? OrgRole.staff.name;
+      grantedPermissions = data['permissions'];
       final normalizedSignedInEmail = signedInEmail.trim().toLowerCase();
       final displayName = userSnap.data()?['name'] as String?;
 
@@ -313,7 +355,9 @@ class OrganizationInvitationRepository {
         tx.set(memberRef, {
           'uid': uid,
           'organizationId': organizationId,
-          'role': grantedRole.name,
+          'role': grantedRole,
+          if (data.containsKey('permissions')) 'permissions': data['permissions'],
+          if (data.containsKey('preset')) 'preset': data['preset'],
           'email': signedInEmail.trim(),
           'normalizedEmail': normalizedSignedInEmail,
           if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
@@ -336,7 +380,7 @@ class OrganizationInvitationRepository {
       organizationId: organizationId,
       targetType: 'OrgMember',
       targetId: uid,
-      newValues: {'role': grantedRole.name},
+      newValues: {'role': grantedRole, 'permissions': ?grantedPermissions},
     );
   }
 
@@ -397,26 +441,6 @@ class OrganizationInvitationRepository {
       organizationId: organizationId,
       targetType: 'OrgMember',
       targetId: uid,
-    );
-  }
-
-  Future<void> changeMemberRole({
-    required String organizationId,
-    required String uid,
-    required OrgRole role,
-    String? actorId,
-    String? actorName,
-  }) async {
-    await OrgMembershipService(firestore: _db).setMember(organizationId: organizationId, uid: uid, role: role);
-    await _auditLog.log(
-      category: AuditCategory.organizationStaff,
-      action: 'Staff role changed',
-      actorId: actorId,
-      actorName: actorName,
-      organizationId: organizationId,
-      targetType: 'OrgMember',
-      targetId: uid,
-      newValues: {'role': role.name},
     );
   }
 }

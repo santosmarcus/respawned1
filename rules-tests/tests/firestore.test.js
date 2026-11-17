@@ -108,10 +108,11 @@ describe('organizations', () => {
     await assertSucceeds(batch.commit());
   });
 
-  test("only the organization's staff edit its profile", async () => {
+  test("only the organization's admins edit its profile", async () => {
     await assertFails(as('stranger').doc('organizations/orgA').update({ name: 'Hijacked' }));
     await assertFails(as('staffB').doc('organizations/orgA').update({ name: 'Hijacked' }));
-    await assertSucceeds(as('staffA').doc('organizations/orgA').update({ shelterName: 'Main shelter' }));
+    await assertFails(as('staffA').doc('organizations/orgA').update({ shelterName: 'Main shelter' }));
+    await assertSucceeds(as('ownerA').doc('organizations/orgA').update({ shelterName: 'Main shelter' }));
   });
 
   test("shelter settings: the organization's staff read, its admins write", async () => {

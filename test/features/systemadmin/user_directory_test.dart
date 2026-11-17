@@ -91,7 +91,9 @@ void main() {
     test('labels the role there', () {
       final byUid = {for (final e in roster) e.uid: e};
       expect(byUid['owner']!.roleLabel, 'Owner · Admin');
-      expect(byUid['carer']!.role, OrgRole.carer);
+      // A legacy carer reads as Staff with the Animal care preset.
+      expect(byUid['carer']!.role, OrgRole.staff);
+      expect(byUid['carer']!.roleLabel, 'Staff · Animal care');
       expect(byUid['linked']!.roleLabel, 'Linked account');
       expect(byUid['gone']!.inactive, isTrue);
       // A members doc with no profile is still listed.

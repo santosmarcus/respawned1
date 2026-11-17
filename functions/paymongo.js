@@ -12,6 +12,7 @@ const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {defineSecret, defineString} = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
+const {requireOrgPermission} = require('./org_access');
 const {completedCampaignFields, certificateBenefit, issueCertificate, formatPeso} = require('./donation_common');
 
 // index.js calls admin.initializeApp() before requiring this module.
@@ -617,31 +618,20 @@ exports.cancelDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (r
 // Both accept and void take the payment out of needs_review, which clears
 // the dashboard alert.
 
-function actorName(u) {
-  const full = `${u.firstName || ''} ${u.lastName || ''}`.trim();
-  return full || u.name || 'Admin';
-}
-
-// Financial administrator (same test as loadActor({finance: true}) in
-// campaigns.js) of `organizationId`: a platform 'admin', or an Admin member
-// of that organization. Anyone else is refused.
+// Someone who manages the money (financeManage) of `organizationId`, the
+// organization that owns the payment's campaign (functions/org_access.js).
+// Platform roles grant nothing here.
 async function loadFinanceActorFor(request, organizationId) {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
-  const uid = request.auth.uid;
-  const userSnap = await db.collection('users').doc(uid).get();
-  const u = userSnap.exists ? userSnap.data() : {};
-  const role = typeof u.role === 'string' ? u.role : '';
-  const actor = {uid, name: actorName(u), role};
-  if (role === 'admin') return actor;
-  const userOrg = typeof u.organizationId === 'string' ? u.organizationId : '';
-  if (!organizationId || userOrg !== organizationId) {
-    throw new HttpsError('permission-denied', 'Only financial administrators of the organization that owns this campaign can do this.');
+  if (!organizationId) {
+    throw new HttpsError('permission-denied', 'This payment has no organization, so it cannot be settled here.');
   }
-  const m = await db.collection('organizations').doc(organizationId).collection('members').doc(uid).get();
-  if (!m.exists || m.data().role !== 'admin') {
-    throw new HttpsError('permission-denied', 'Only financial administrators of the organization that owns this campaign can do this.');
-  }
-  return actor;
+  const a = await requireOrgPermission(db, request, {
+    organizationId,
+    anyOf: ['financeManage'],
+    message: 'Only people who manage the money of the organization that owns this campaign can do this.',
+  });
+  return {uid: a.uid, name: a.name, role: a.role};
 }
 
 exports.settleFlaggedPayment = onCall({secrets: [paymongoSecretKey]}, async (request) => {

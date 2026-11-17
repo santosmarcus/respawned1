@@ -8,7 +8,6 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/medication.dart';
-import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/animal_medication_repository.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -59,13 +58,11 @@ final missedDosesByAnimalProvider = StreamProvider.autoDispose<Map<String, int>>
   }
 });
 
-/// Carers record doses only. Staff (and platform admins with an org) plan
-/// medication and see missed doses.
+/// Daily-care-only Staff record doses only. Staff with animal records (and
+/// Admins) plan medication and see missed doses.
 final _medicationRoleProvider = Provider.autoDispose<({bool isCarer, bool canPlan})>((ref) {
-  final membership = ref.watch(currentOrgMembershipProvider).asData?.value;
   final caps = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value ?? OrganizationCapabilities.none;
-  final isCarer = membership?.role == OrgRole.carer;
-  return (isCarer: isCarer, canPlan: !isCarer && caps.canManageRecords);
+  return (isCarer: caps.isCareOnly, canPlan: caps.canManageRecords);
 });
 
 // ---- Section -----------------------------------------------------------------

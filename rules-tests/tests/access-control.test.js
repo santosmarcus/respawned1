@@ -85,7 +85,8 @@ describe('donation records', () => {
     await assertSucceeds(as('staffA').doc('donations/manual').get());
     await assertSucceeds(as('staffA').collection('donations')
       .where('organizationId', '==', 'orgA').orderBy('createdAt', 'desc').limit(10).get());
-    await assertSucceeds(as('admin').collection('donations').where('campaignId', '==', 'c1').get());
+    // Platform admins see no money: only the organization's own people do.
+    await assertFails(as('admin').collection('donations').where('campaignId', '==', 'c1').get());
     await assertFails(as('staffB').doc('donations/manual').get());
     await assertFails(as('staffA').collection('donations').orderBy('createdAt', 'desc').limit(10).get());
     await assertFails(as('staffB').collection('donations').where('organizationId', '==', 'orgA').get());
@@ -95,9 +96,9 @@ describe('donation records', () => {
 describe('case expenses', () => {
   const expense = { title: 'X-ray', amount: 800, receiptUrl: 'https://example.com/r.jpg' };
 
-  test("only the owning org's financial admins and platform admins write them", async () => {
+  test("only people who manage the owning org's money write them", async () => {
     await assertSucceeds(as('ownerA').collection('cases/ownedA/expenses').add(expense));
-    await assertSucceeds(as('admin').collection('cases/ownedA/expenses').add(expense));
+    await assertFails(as('admin').collection('cases/ownedA/expenses').add(expense));
     await assertSucceeds(as('ownerA').doc('cases/ownedA/expenses/e1').update({ amount: 600 }));
     await assertSucceeds(as('ownerA').doc('cases/ownedA/expenses/e1').delete());
   });
@@ -224,8 +225,9 @@ describe('PayMongo payment attempts', () => {
     await assertFails(as('carerA').doc('donationPayments/pA').get());
   });
 
-  test('platform admins list every attempt; donors read their own', async () => {
-    await assertSucceeds(as('admin').collection('donationPayments').get());
+  test('platform admins see none; donors read their own', async () => {
+    await assertFails(as('admin').collection('donationPayments').get());
+    await assertFails(as('admin').doc('donationPayments/pA').get());
     await assertSucceeds(as('adopter').doc('donationPayments/pA').get());
     await assertFails(as('adopter').doc('donationPayments/pD').get());
   });

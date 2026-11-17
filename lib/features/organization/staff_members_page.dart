@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
-import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
+import 'package:respawnd1/core/repos/org_member_access_repository.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/repos/organization_invitation_repository.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/organization/widgets/member_access_editor.dart';
 
 /// Staff Members + Invitations. Active members are read straight from
 /// `organizations/{orgId}/members` — the existing OrgMembershipService
@@ -59,13 +61,13 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
           ? Stream<List<OrganizationInvitation>>.value(const [])
           : _repo.streamInvitationsForEmail(_signedInEmail);
 
-  /// Spec's invitation-creation restriction: only an authenticated
-  /// organization Admin (checked against *this* organization specifically,
-  /// via the existing OrgMembershipService — never a second membership
-  /// lookup) may invite another account. A Member who somehow reaches this
-  /// page (or an unrelated account) sees Staff Members read-only, with no
-  /// Add Member action.
+  /// Only the organization's owner or an active Admin invites, edits and
+  /// removes members (firestore.rules and the setMemberAccess callable
+  /// enforce it). Staff see the list read-only.
   bool _isOrgAdmin = false;
+
+  /// The organization's owner: always an Admin, never edited or removed.
+  String? _ownerId;
 
   // Guards double-tap on the SAME invitation's Accept/Reject — a different
   // invitation's buttons stay usable while one is in flight.
@@ -82,8 +84,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
   // stored organizationName (legacy docs) — spec §15's fallback chain.
   final Map<String, String?> _resolvedOrgNames = {};
   final Set<String> _resolvingOrgIds = {};
-  // Owner/Admin only — unlike _isOrgAdmin, not part of the equal-access
-  // phase. Gates role changes, removal, and the Facebook sharing grant.
+  // Owner/Admin only: access changes and removal.
   bool _canManageMembers = false;
 
   @override
@@ -92,34 +93,17 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     if (widget.organizationId != null) _loadIsOrgAdmin();
   }
 
-  // Temporary Organization Admin/Member Access Model spec — Staff Members
-  // and invitations is an equal-access module during this phase, resolved
-  // via the centralized capability model instead of a direct admin-role
-  // comparison, so Owner/Admin/Member all get parity managing staff here.
   Future<void> _loadIsOrgAdmin() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final capabilities = await OrgMembershipService().resolveCapabilities(uid);
+    final org = await FirebaseFirestore.instance.collection('organizations').doc(widget.organizationId).get();
     if (mounted) {
       setState(() {
         _isOrgAdmin = capabilities.canManageTeam;
         _canManageMembers = capabilities.canManageMembers;
+        _ownerId = org.data()?['ownerId'] as String?;
       });
-    }
-  }
-
-  Future<void> _setFacebookPublisher(String uid, bool enabled) async {
-    final organizationId = widget.organizationId;
-    if (organizationId == null) return;
-    try {
-      await FacebookIntegrationRepository().setPublisher(
-        organizationId: organizationId,
-        memberUid: uid,
-        enabled: enabled,
-      );
-      _snack(enabled ? 'This member can now share to Facebook.' : 'Facebook sharing removed for this member.');
-    } on FacebookOperationException catch (e) {
-      _snack(e.message, error: true);
     }
   }
 
@@ -167,91 +151,19 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
 
   Future<void> _openAddMemberSheet() async {
     if (!_isOrgAdmin) return;
-    final emailController = TextEditingController();
-    OrgRole role = OrgRole.staff;
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setSheetState) => Padding(
-          padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 20 + MediaQuery.of(sheetContext).viewInsets.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Invite Staff Member', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-              const SizedBox(height: 16),
-              Text('Email', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              const SizedBox(height: 6),
-              TextField(controller: emailController, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(hintText: 'name@example.com')),
-              const SizedBox(height: 16),
-              Text('Role', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              const SizedBox(height: 6),
-              // Organization Invitations spec §1/§2/§14 — any number of
-              // Admins and any number of Members may coexist; this picker
-              // simply states the intended role, it never checks (and
-              // never should check) whether that role is already "taken".
-              Wrap(
-                spacing: 8,
-                children: [
-                  ChoiceChip(
-                    label: const Text('Organization Admin'),
-                    selected: role == OrgRole.admin,
-                    selectedColor: AppColors.yellowrspwn,
-                    onSelected: (_) => setSheetState(() => role = OrgRole.admin),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Organization Member'),
-                    selected: role == OrgRole.staff,
-                    selectedColor: AppColors.yellowrspwn,
-                    onSelected: (_) => setSheetState(() => role = OrgRole.staff),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Carer'),
-                    selected: role == OrgRole.carer,
-                    selectedColor: AppColors.yellowrspwn,
-                    onSelected: (_) => setSheetState(() => role = OrgRole.carer),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(sheetContext, false), child: const Text('Cancel'))),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        final emailError = AppValidators.email(emailController.text);
-                        if (emailError != null) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(appSnackBar(
-                            emailError,
-                            kind: AppMessageKind.error,
-                          ));
-                          return;
-                        }
-                        Navigator.pop(sheetContext, true);
-                        await _submitInvite(emailController.text.trim(), role);
-                      },
-                      style: AppButtons.primary,
-                      child: const Text('Add Member'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+    final result = await showMemberAccessSheet(
+      context,
+      title: 'Invite Staff Member',
+      initial: MemberAccess(OrgRole.staff, {...OrgPreset.fullStaff.permissions}),
+      confirmLabel: 'Send Invitation',
+      askEmail: true,
+      validateEmail: AppValidators.email,
     );
-    if (result != null) {
-      // handled inline above via _submitInvite
-    }
+    if (result == null || !mounted) return;
+    await _submitInvite(result.email, result.access);
   }
 
-  Future<void> _submitInvite(String email, OrgRole role) async {
+  Future<void> _submitInvite(String email, MemberAccess access) async {
     final organizationId = widget.organizationId;
     if (organizationId == null || !_isOrgAdmin) {
       _snack('You do not have permission to add members.', error: true);
@@ -292,7 +204,8 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
         organizationId: organizationId,
         organizationName: orgName,
         email: email,
-        role: role,
+        role: access.role,
+        permissions: access.permissions,
         invitedBy: uid,
         invitedByName: inviterName,
       );
@@ -311,69 +224,51 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     ));
   }
 
-  Future<void> _editMemberRole(String uid, OrgRole current) async {
+  Future<void> _editMemberAccess(String uid, Map<String, dynamic> data) async {
     final organizationId = widget.organizationId;
     if (organizationId == null) return;
-    final role = await showDialog<OrgRole>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        backgroundColor: AppColors.background,
-        title: Text('Edit Role', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-        children: [
-          RadioGroup<OrgRole>(
-            groupValue: current,
-            onChanged: (v) => Navigator.pop(ctx, v),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final r in OrgRole.values)
-                  RadioListTile<OrgRole>(
-                    value: r,
-                    title: Text(r.memberTitle),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    final current = OrgMembership.fromMemberData(organizationId, data);
+    final result = await showMemberAccessSheet(
+      context,
+      title: 'What can this member do?',
+      initial: MemberAccess(current.role, current.permissions),
+      confirmLabel: 'Save',
+      roleLocked: uid == _ownerId,
     );
-    if (role == null || role == current || !mounted) return;
-    // Demoting the organization's only Admin away from Admin would leave it
-    // with none — same protection _removeMember already has for outright
-    // removal, applied here too since a role change can cause the exact
-    // same admin-less state. Multiple admins are fully supported (spec
-    // §2/§13) — this only blocks the LAST one.
-    if (current == OrgRole.admin && role != OrgRole.admin) {
+    if (result == null || !mounted) return;
+    final next = result.access;
+    if (current.role == OrgRole.admin && next.role != OrgRole.admin) {
       final confirmed = await showConfirmActionDialog(
         context,
-        title: 'Change this member\'s role?',
-        message: 'They will become a ${role == OrgRole.admin ? 'Organization Admin' : 'Organization Member'}.',
-        confirmLabel: 'Confirm',
+        title: "Change this Admin to Staff?",
+        message: 'They will only be able to do what is ticked, and can no longer manage members or settings.',
+        confirmLabel: 'Change',
       );
       if (confirmed != true) return;
-      if (await _repo.isFinalAdmin(organizationId: organizationId, uid: uid)) {
-        _snack('This is the only Admin on this organization and cannot be demoted.', error: true);
-        return;
-      }
     }
     try {
-      await _repo.changeMemberRole(
+      // The callable checks the owner stays an Admin and that an active
+      // Admin remains, and writes the audit entry.
+      await OrgMemberAccessRepository().setAccess(
         organizationId: organizationId,
-        uid: uid,
-        role: role,
-        actorId: FirebaseAuth.instance.currentUser?.uid,
-        actorName: FirebaseAuth.instance.currentUser?.displayName,
+        memberUid: uid,
+        role: next.role,
+        permissions: next.permissions,
       );
-      _snack('Role updated.');
+      _snack('Access updated.');
     } catch (e) {
-      debugPrint('[StaffMembersPage] changeMemberRole failed: $e');
-      _snack('Could not update role.', error: true);
+      debugPrint('[StaffMembersPage] setMemberAccess failed: $e');
+      _snack(OrgMemberAccessRepository.errorMessage(e), error: true);
     }
   }
 
   Future<void> _removeMember(String uid) async {
     final organizationId = widget.organizationId;
     if (organizationId == null) return;
+    if (uid == _ownerId) {
+      _snack("The organization's owner can't be removed.", error: true);
+      return;
+    }
     if (await _repo.isFinalAdmin(organizationId: organizationId, uid: uid)) {
       _snack('This is the only Admin on this organization and cannot be removed.', error: true);
       return;
@@ -524,14 +419,12 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                         return _MemberRow(
                           displayName: data['displayName'] as String?,
                           email: email,
-                          role: OrgRole.fromName(data['role'] as String?),
+                          membership: OrgMembership.fromMemberData(widget.organizationId!, data),
+                          isOwner: uid == _ownerId,
                           status: data['status'] as String? ?? 'active',
                           isSelf: uid == currentUid,
-                          facebookPublisher: data['facebookPublisher'] == true,
                           canManage: _canManageMembers,
-                          onToggleFacebookPublisher: () =>
-                              _setFacebookPublisher(uid, data['facebookPublisher'] != true),
-                          onEditRole: () => _editMemberRole(uid, OrgRole.fromName(data['role'] as String?)),
+                          onEditAccess: () => _editMemberAccess(uid, data),
                           onRemove: () => _removeMember(uid),
                         );
                       }),
@@ -585,33 +478,15 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                           _snack('Invitation resent.');
                         },
                         onChangeRole: () async {
-                          final role = await showDialog<OrgRole>(
-                            context: context,
-                            builder: (ctx) => SimpleDialog(
-                              backgroundColor: AppColors.background,
-                              title: const Text('Change Role'),
-                              children: [
-                                RadioGroup<OrgRole>(
-                                  groupValue: invite.role,
-                                  onChanged: (v) => Navigator.pop(ctx, v),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      for (final r in OrgRole.values)
-                                        RadioListTile<OrgRole>(
-                                          value: r,
-                                          title: Text(r.memberTitle),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
+                          final result = await showMemberAccessSheet(
+                            context,
+                            title: 'Change invitation access',
+                            initial: MemberAccess(invite.role, invite.permissions),
+                            confirmLabel: 'Save',
                           );
-                          if (role != null && role != invite.role) {
-                            await _repo.changeInvitationRole(invite.id, role);
-                            _snack('Invitation role updated.');
-                          }
+                          if (result == null) return;
+                          await _repo.changeInvitationAccess(invite.id, result.access.role, result.access.permissions);
+                          _snack('Invitation updated.');
                         },
                         onRevoke: () async {
                           await _repo.revokeInvitation(invite.id);
@@ -670,24 +545,22 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
 class _MemberRow extends StatelessWidget {
   final String? displayName;
   final String? email;
-  final OrgRole role;
+  final OrgMembership membership;
+  final bool isOwner;
   final String status;
   final bool isSelf;
-  final bool facebookPublisher;
   final bool canManage;
-  final VoidCallback onToggleFacebookPublisher;
-  final VoidCallback onEditRole;
+  final VoidCallback onEditAccess;
   final VoidCallback onRemove;
   const _MemberRow({
     required this.displayName,
     required this.email,
-    required this.role,
+    required this.membership,
+    required this.isOwner,
     required this.status,
     required this.isSelf,
-    required this.facebookPublisher,
     required this.canManage,
-    required this.onToggleFacebookPublisher,
-    required this.onEditRole,
+    required this.onEditAccess,
     required this.onRemove,
   });
 
@@ -695,11 +568,18 @@ class _MemberRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasName = displayName != null && displayName!.trim().isNotEmpty;
     final primaryLabel = hasName ? displayName! : (email ?? 'Email unavailable');
+    final isAdmin = isOwner || membership.role == OrgRole.admin;
+    final accessLabel = isOwner
+        ? 'Owner · Organization Admin'
+        : isAdmin
+            ? OrgRole.admin.memberTitle
+            : 'Staff · ${(membership.preset ?? OrgPreset.custom).label}';
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Column(
@@ -722,34 +602,41 @@ class _MemberRow extends StatelessWidget {
                 ),
                 if (hasName && email != null)
                   Text(email!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                Text(
-                  role == OrgRole.admin ? 'Organization Admin' : 'Organization Member',
-                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                ),
-                // Admins can always publish, so the grant only shows for Members.
-                if (role == OrgRole.staff && facebookPublisher)
-                  Text('Can share to Facebook', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                Text(accessLabel, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                if (!isAdmin)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: membership.permissions.isEmpty
+                        ? Text('No permissions', style: GoogleFonts.zain(fontSize: 12, color: AppColors.error))
+                        : Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: [
+                              for (final p in OrgPermission.values.where(membership.permissions.contains))
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.tearspwn,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(p.label,
+                                      style: GoogleFonts.zain(fontSize: 11, color: AppColors.textPrimary)),
+                                ),
+                            ],
+                          ),
+                  ),
                 if (status != 'active')
                   Text(status[0].toUpperCase() + status.substring(1),
                       style: GoogleFonts.zain(fontSize: 11, color: AppColors.error, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
-          if (canManage)
+          if (canManage && !isOwner)
             PopupMenuButton<String>(
-              onSelected: (v) => switch (v) {
-                'edit' => onEditRole(),
-                'facebook' => onToggleFacebookPublisher(),
-                _ => onRemove(),
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(value: 'edit', child: Text('Edit Role')),
-                if (role == OrgRole.staff)
-                  PopupMenuItem(
-                    value: 'facebook',
-                    child: Text(facebookPublisher ? 'Stop Facebook Sharing' : 'Allow Facebook Sharing'),
-                  ),
-                const PopupMenuItem(value: 'remove', child: Text('Remove')),
+              onSelected: (v) => v == 'edit' ? onEditAccess() : onRemove(),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit access')),
+                PopupMenuItem(value: 'remove', child: Text('Remove')),
               ],
             ),
         ],
@@ -789,7 +676,7 @@ class _InvitationRow extends StatelessWidget {
                   children: [
                     Text(invitation.email, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     Text(
-                        'Invited as ${invitation.role.memberTitle} · Sent $sentLabel',
+                        'Invited as ${invitation.accessLabel} · Sent $sentLabel',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                     if (invitation.invitedByName.isNotEmpty)
                       Text('Invited by ${invitation.invitedByName}',
@@ -816,7 +703,7 @@ class _InvitationRow extends StatelessWidget {
             spacing: 8,
             children: [
               OutlinedButton(onPressed: onResend, child: const Text('Resend')),
-              OutlinedButton(onPressed: onChangeRole, child: const Text('Change Role')),
+              OutlinedButton(onPressed: onChangeRole, child: const Text('Change Access')),
               OutlinedButton(
                 onPressed: onRevoke,
                 style: AppButtons.dangerOutline,
@@ -857,7 +744,7 @@ class _MyInvitationCard extends StatelessWidget {
         children: [
           Text(organizationName, style: GoogleFonts.tiltWarp(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
           const SizedBox(height: 4),
-          Text('Invited as ${invitation.role == OrgRole.admin ? 'Organization Admin' : 'Organization Member'}',
+          Text('Invited as ${invitation.accessLabel}',
               style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
           if (invitation.invitedByName.isNotEmpty)
             Text('Invited by ${invitation.invitedByName}', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),

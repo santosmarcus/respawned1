@@ -74,7 +74,9 @@ class RescueReadinessCard extends ConsumerWidget {
     final snap = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
     final supply = ref.watch(transportSupplyProvider).asData?.value;
     final records = ref.watch(allAnimalRecordsProvider).asData?.value;
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    // Funds: anyone who sees the money; the shelter pin: Admins.
+    final canManage = ref.watch(canViewFinancesProvider).asData?.value ?? false;
+    final isAdmin = ref.watch(isOrgAdminProvider).asData?.value ?? false;
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
     final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
     final stock = ref.watch(stockItemsProvider).asData?.value;
@@ -112,7 +114,7 @@ class RescueReadinessCard extends ConsumerWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (orgId != null) ShelterPinPrompt(organizationId: orgId, canSet: canManage),
+              if (orgId != null) ShelterPinPrompt(organizationId: orgId, canSet: isAdmin),
               if (!settings.isConfigured)
                 _SetupPrompt(onTap: () => showShelterSetupSheet(context))
               else
@@ -314,7 +316,7 @@ class RescueReadinessCard extends ConsumerWidget {
     // Funds — admins only; general (unrestricted) campaign balances.
     final ReadinessFactor funds;
     if (!canManage) {
-      funds = const ReadinessFactor(Icons.lock, 'Funds', 'Visible to organization admins', ReadinessState.adminAssess);
+      funds = const ReadinessFactor(Icons.lock, 'Funds', 'Visible to people who handle money', ReadinessState.adminAssess);
     } else if (campaigns == null) {
       funds = const ReadinessFactor(Icons.account_balance_wallet, 'Funds', 'Loading…', ReadinessState.incomplete);
     } else {

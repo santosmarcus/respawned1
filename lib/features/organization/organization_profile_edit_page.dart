@@ -212,12 +212,9 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     // without ever touching `ownerId` itself or duplicating the doc.
     await _repo.ensureOwnerMembership(orgId);
 
-    // Shelter Capacity is admin-only to edit (spec §8) — resolved via the
-    // existing OrgMembershipService, never a second membership model.
-    // Temporary Organization Admin/Member Access Model spec — Organization
-    // Profile is an equal-access module during this phase; resolved via the
-    // centralized capability model instead of a direct admin-role check so
-    // Owner/Admin/Member all get parity here.
+    // Editing the profile (and shelter capacity) is for the organization's
+    // Admins; Staff see it read-only (firestore.rules organizations/{orgId}
+    // update). Resolved through the shared capability model.
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       final capabilities = await OrgMembershipService().resolveCapabilities(uid);
@@ -637,7 +634,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.background), onPressed: () => Navigator.pop(context)),
         title: Text('Organization Profile', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
         actions: [
-          if (!_isBootstrapping && !_loading)
+          if (!_isBootstrapping && !_loading && (_isOrgAdmin || _editing))
             _editing
                 ? TextButton(
                     onPressed: _saving ? null : _cancelEditing,

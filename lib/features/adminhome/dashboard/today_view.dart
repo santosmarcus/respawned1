@@ -706,7 +706,8 @@ class ShelterCareCard extends ConsumerWidget {
     final vaxAsync = ref.watch(vaccinationsByAnimalProvider);
     final vax = vaxAsync.asData?.value;
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    // Editing the care roster and round tasks is an Admin setting.
+    final isAdmin = ref.watch(isOrgAdminProvider).asData?.value ?? false;
 
     final inCare = (recordsAsync.asData?.value ?? const <AnimalRecord>[]).where(isInCare).toList();
     final statuses = {for (final a in inCare) a.id: vax == null ? null : healthStatusOf(vax[a.id])};
@@ -740,7 +741,7 @@ class ShelterCareCard extends ConsumerWidget {
               // Dashboard gaps 2 and 3: the rounds carers tick off, and who
               // is on shift today.
               if (orgId != null)
-                CareRoundsChecklist(organizationId: orgId, compact: true, canEditSetup: canManage)
+                CareRoundsChecklist(organizationId: orgId, compact: true, canEditSetup: isAdmin)
               else
                 const _NotTrackedRow(
                   icon: Icons.restaurant,
@@ -1076,14 +1077,14 @@ class DonationsFundsCard extends ConsumerWidget {
       trailing: canManage
           ? const Padding(
         padding: EdgeInsets.only(right: 6),
-        child: StatusChip('Admins only', tone: ChipTone.ink, icon: Icons.lock),
+        child: StatusChip('Money managers', tone: ChipTone.ink, icon: Icons.lock),
       )
           : null,
       child: canManageAsync.isLoading
           ? const DashLoading()
           : (!canManage
           ? const RestrictedNotice(
-        'Fund balances, donation records and bills are visible to authorized admins only.',
+        'Fund balances, donation records and bills are visible to the people who manage money.',
       )
           : const _FundsBody()),
     );
@@ -1366,7 +1367,7 @@ class RecentActivityCard extends ConsumerWidget {
         ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.approved))).asData?.value ?? const [];
     final adopted =
         ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.adopted))).asData?.value ?? const [];
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canManage = ref.watch(canViewFinancesProvider).asData?.value ?? false;
     final donations = canManage ? ref.watch(recentDonationsProvider).asData?.value : null;
 
     String animalOf(RescueCase c) => c.speciesSummary.isEmpty ? 'Animal' : c.speciesSummary;

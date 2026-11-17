@@ -95,7 +95,7 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
     final snap = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
     final supply = ref.watch(transportSupplyProvider).asData?.value;
     final records = ref.watch(allAnimalRecordsProvider).asData?.value;
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canManage = ref.watch(canViewFinancesProvider).asData?.value ?? false;
     final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
     final careSetup = orgId == null ? null : ref.watch(careSetupProvider(orgId)).asData?.value;

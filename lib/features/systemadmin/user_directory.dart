@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 
 /// Account role of a system administrator (`users/{uid}.role`). Set in the
@@ -119,7 +120,14 @@ String transporterStatusLabel(String status) => switch (status) {
 /// One person on an organization's roster: their profile (null when the
 /// profile can't be found) and their role there.
 class OrgRosterEntry {
-  const OrgRosterEntry({required this.uid, this.user, this.role, this.isOwner = false, this.inactive = false});
+  const OrgRosterEntry({
+    required this.uid,
+    this.user,
+    this.role,
+    this.preset,
+    this.isOwner = false,
+    this.inactive = false,
+  });
 
   final String uid;
   final DirectoryUser? user;
@@ -127,18 +135,23 @@ class OrgRosterEntry {
   /// Null for an account linked to the organization with no members doc
   /// (created before membership records existed).
   final OrgRole? role;
+
+  /// A Staff member's preset (or Custom); null for Admins and linked
+  /// accounts.
+  final OrgPreset? preset;
   final bool isOwner;
   final bool inactive;
 
   String get roleLabel {
-    if (isOwner) return 'Owner · ${role?.label ?? OrgRole.admin.label}';
+    if (isOwner) return 'Owner · ${OrgRole.admin.label}';
+    if (role == OrgRole.staff) return 'Staff · ${preset?.label ?? OrgPreset.fullStaff.label}';
     return role?.memberTitle ?? 'Linked account';
   }
 }
 
 /// An organization's roster: its members docs, plus any account whose
 /// `organizationId` points at it without a members doc. Owner first, then
-/// Admins, Staff and Carers, inactive members last, each by name.
+/// Admins, Staff, care-only Staff, inactive members last, each by name.
 List<OrgRosterEntry> buildOrgRoster({
   required String organizationId,
   required String ownerId,
@@ -148,10 +161,12 @@ List<OrgRosterEntry> buildOrgRoster({
   final entries = <OrgRosterEntry>[];
   members.forEach((uid, m) {
     final status = m['status'] is String ? m['status'] as String : 'active';
+    final role = OrgRole.fromName(m['role'] as String?);
     entries.add(OrgRosterEntry(
       uid: uid,
       user: usersById[uid],
-      role: OrgRole.fromName(m['role'] as String?),
+      role: role,
+      preset: role == OrgRole.staff ? OrgPreset.matching(staffPermissionsFrom(m)) : null,
       isOwner: uid == ownerId,
       inactive: const ['inactive', 'removed', 'disabled'].contains(status),
     ));
@@ -165,8 +180,7 @@ List<OrgRosterEntry> buildOrgRoster({
     if (e.isOwner) return 0;
     return switch (e.role) {
       OrgRole.admin => 1,
-      OrgRole.staff => 2,
-      OrgRole.carer => 3,
+      OrgRole.staff => e.preset == OrgPreset.animalCare ? 3 : 2,
       null => 4,
     };
   }

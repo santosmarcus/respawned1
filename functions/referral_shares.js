@@ -25,6 +25,7 @@ const {
   buildReferralSnapshot,
   validateResponse,
 } = require('./referral_share_rules');
+const {loadOrgAccess} = require('./org_access');
 
 // index.js calls admin.initializeApp() before requiring this module.
 const db = admin.firestore();
@@ -56,14 +57,9 @@ async function loadCaseStaff(request, caseOrgId) {
   const orgId = typeof u.organizationId === 'string' ? u.organizationId : '';
   const denied = () => new HttpsError('permission-denied', 'Only staff of the organization handling this case can share it.');
   if (!orgId || (caseOrgId && caseOrgId !== orgId)) throw denied();
-  const orgRef = db.collection('organizations').doc(orgId);
-  const [org, member] = await Promise.all([orgRef.get(), orgRef.collection('members').doc(uid).get()]);
-  if (!org.exists || (org.get('verificationStatus') || 'approved') !== 'approved') throw denied();
-  const isOwner = org.get('ownerId') === uid;
-  if (!isOwner && member.exists) {
-    const m = member.data();
-    if (m.role === 'carer' || ['inactive', 'removed', 'disabled'].includes(m.status)) throw denied();
-  }
+  // Staff who handle rescues there (functions/org_access.js).
+  const access = await loadOrgAccess(db, uid, orgId, u);
+  if (!access.active || !access.has('rescue')) throw denied();
   return actor;
 }
 
@@ -252,7 +248,7 @@ module.exports = ({notifyStaff, orgStaffUids}) => {
 
     const {s, label} = result;
     try {
-      const uids = s.organizationId ? await orgStaffUids(s.organizationId) : [s.createdByUid];
+      const uids = s.organizationId ? await orgStaffUids(s.organizationId, {anyOf: ['rescue']}) : [s.createdByUid];
       await notifyStaff(uids, {
         title: 'Referral answered',
         body: `${answer.name}: ${label}${answer.note ? ` — ${answer.note}` : ''}`.slice(0, 180),

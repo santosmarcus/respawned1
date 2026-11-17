@@ -30,6 +30,7 @@ const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const {completedCampaignFields, certificateBenefit, issueCertificate} = require('./donation_common');
 const donationRules = require('./donation_rules');
+const {requireOrgPermission} = require('./org_access');
 
 // index.js calls admin.initializeApp() before requiring this module.
 const db = admin.firestore();
@@ -39,7 +40,6 @@ const CAMPAIGN_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9]{20}$/; // Firestore auto-id format
 
 // users/{uid}.role values main.dart routes into the admin shell.
-const LISTING_ROLES = ['admin', 'ngo_staff', 'organization'];
 
 const TYPES = ['donation', 'sponsorship'];
 const FUND_KINDS = ['campaign', 'animal', 'medical', 'shelter_resource', 'general'];
@@ -155,39 +155,38 @@ function historyEntry(tx, campaignRef, actor, type, details) {
 }
 
 // ── Authorization ───────────────────────────────────────────────────────────
-// Listing managers: users/{uid}.role in LISTING_ROLES (the existing admin
-// shell roles). Financial administrators: users/{uid}.role == 'admin', or an
-// Admin member of their organization (organizations/{orgId}/members/{uid},
-// see lib/core/repos/org_membership_service.dart). ngo_staff can manage
-// listings but not money.
+// Organization permissions (functions/org_access.js): running listings needs
+// `campaigns`; anything that moves or records money needs `financeManage`.
+// Admins and the owner have both. Platform roles grant nothing here: money
+// is managed only by the organization's own people.
 async function loadActor(request, {finance = false} = {}) {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
-  const uid = request.auth.uid;
-  const userSnap = await db.collection('users').doc(uid).get();
-  const u = userSnap.exists ? userSnap.data() : {};
-  const role = typeof u.role === 'string' ? u.role : '';
-  if (!LISTING_ROLES.includes(role)) throw new HttpsError('permission-denied', 'Only organization staff can do this.');
-
-  const organizationId = typeof u.organizationId === 'string' && u.organizationId ? u.organizationId : null;
-  let memberRole = null;
-  if (organizationId) {
-    const m = await db.collection('organizations').doc(organizationId).collection('members').doc(uid).get();
-    memberRole = m.exists ? m.data().role : null;
-  }
-  const canManageFinances = role === 'admin' || memberRole === 'admin';
-  if (finance && !canManageFinances) {
-    throw new HttpsError('permission-denied', 'Only financial administrators can do this.');
-  }
-  return {uid, name: displayName(u), role, organizationId, canManageFinances};
+  const a = await requireOrgPermission(db, request, {
+    anyOf: [finance ? 'financeManage' : 'campaigns'],
+    message: finance ?
+      "Only people who manage this organization's money can do this." :
+      "You don't have permission to manage fundraising campaigns.",
+  });
+  return {
+    uid: a.uid,
+    name: a.name,
+    role: a.role,
+    organizationId: a.organizationId,
+    canManageFinances: a.access.has('financeManage'),
+  };
 }
 
-// A campaign tied to an organization can only be managed by that
-// organization's staff. Legacy campaigns / accounts without an organization
-// stay manageable, matching the fail-open testing phase documented in
-// org_membership_service.dart.
+// A listing belongs to one organization; only its own people manage it.
+// Older listings saved without an organization are left to the people who
+// manage money.
 function assertSameOrg(actor, c) {
-  if (c.organizationId && actor.organizationId && c.organizationId !== actor.organizationId) {
-    throw new HttpsError('permission-denied', 'This listing belongs to another organization.');
+  if (c.organizationId) {
+    if (c.organizationId !== actor.organizationId) {
+      throw new HttpsError('permission-denied', 'This listing belongs to another organization.');
+    }
+    return;
+  }
+  if (!actor.canManageFinances) {
+    throw new HttpsError('permission-denied', 'This older listing has no organization; only people who manage money can change it.');
   }
 }
 
@@ -566,8 +565,9 @@ exports.setCampaignStatus = onCall(async (request) => {
 // After the deadline: decision 'extend' | 'close' | 'convert_to_general'.
 // 'relaunch' reopens a closed or goal-not-met campaign with a new deadline.
 // Never touches collectedAmount or donation records.
+// Deciding what happens to an ended campaign's money is a money decision.
 exports.resolveExpiredCampaign = onCall(async (request) => {
-  const actor = await loadActor(request);
+  const actor = await loadActor(request, {finance: true});
   const {campaignId, decision, newDeadlineMs, reason} = request.data || {};
   requireCampaignId(campaignId);
   const why = requireString(reason, 'Reason', {max: 500, optional: decision === 'close'});
@@ -622,6 +622,10 @@ exports.resolveExpiredCampaign = onCall(async (request) => {
 
     if (decision === 'convert_to_general') {
       if (!['goal_not_met', 'closed'].includes(status)) throw new HttpsError('failed-precondition', 'Only ended campaigns can be converted to a general fund.');
+      // Money raised for a specific animal or treatment stays with that purpose.
+      if (c.restricted === true) {
+        throw new HttpsError('failed-precondition', "This campaign's funds are restricted to their original purpose, so it can't become a general fund.");
+      }
       tx.update(ref, {
         fundKind: 'general',
         date: null,

@@ -37,7 +37,6 @@ import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
-import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart' show canManageFinancesProvider;
 import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
 import 'package:respawnd1/core/geofence/geofence_config.dart';
@@ -1058,7 +1057,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             if (c.raw['shelterLocationMissing'] is Map && (c.organizationId ?? '').isNotEmpty)
               ShelterPinPrompt(
                 organizationId: c.organizationId!,
-                canSet: ref.watch(canManageFinancesProvider).asData?.value ?? false,
+                canSet: ref.watch(isOrgAdminProvider).asData?.value ?? false,
                 message: 'The transporter cannot take this animal to the shelter: your organization has no '
                     'shelter location saved. Set it, then the transporter can continue.',
               ),

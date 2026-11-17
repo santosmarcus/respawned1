@@ -5,10 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/core/utils/stream_combine.dart';
-import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 
@@ -244,7 +244,7 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canManage = ref.watch(isOrgAdminProvider).asData?.value ?? false;
     final current = ref.watch(shelterSettingsProvider).asData?.value;
     if (current != null) _seed(current);
 

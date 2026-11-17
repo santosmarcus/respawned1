@@ -24,6 +24,7 @@ const admin = require('firebase-admin');
 
 const digest = require('./dashboard_digest_rules');
 const summaries = require('./analytics_summary_rules');
+const {requireOrgPermission} = require('./org_access');
 
 const SUMMARY_BACKFILL_MONTHS = 12;
 
@@ -92,7 +93,7 @@ module.exports = function dashboardOps({db, orgStaffUids, notifyStaff, openFollo
     const orgId = after.organizationId;
     if (!orgId) return;
     const reason = after.endReason ? ` (${after.endReason})` : '';
-    await notifyStaff(await orgStaffUids(orgId), {
+    await notifyStaff(await orgStaffUids(orgId, {anyOf: ['rescue']}), {
       title: 'Rescue needs specialized assistance',
       body: `The transporter could not safely handle the animal${reason}. ` +
         'Arrange a specialized handler, re-assign or refer the case.',
@@ -156,16 +157,13 @@ module.exports = function dashboardOps({db, orgStaffUids, notifyStaff, openFollo
   );
 
   const rebuildAnalyticsSummaries = onCall({timeoutSeconds: 300}, async (request) => {
-    const uid = request.auth && request.auth.uid;
-    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
-    const user = (await db.collection('users').doc(uid).get()).data() || {};
-    const orgId = (request.data && request.data.organizationId) || user.organizationId;
-    if (!orgId) throw new HttpsError('failed-precondition', 'Your account is not linked to an organization.');
-    const isPlatformAdmin = user.role === 'admin';
-    const admins = await orgStaffUids(orgId, {adminsOnly: true});
-    if (!isPlatformAdmin && !admins.includes(uid)) {
-      throw new HttpsError('permission-denied', 'Only the organization\'s admins can rebuild its summaries.');
-    }
+    // Admins of the organization only (functions/org_access.js).
+    const actor = await requireOrgPermission(db, request, {
+      organizationId: (request.data && request.data.organizationId) || undefined,
+      adminOnly: true,
+      message: 'Only the organization\'s admins can rebuild its summaries.',
+    });
+    const orgId = actor.organizationId;
     const keys = summaries.previousMonthKeys(Date.now(), SUMMARY_BACKFILL_MONTHS);
     const written = await writeSummaries(orgId, keys, {overwrite: true});
     return {written};

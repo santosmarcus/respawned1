@@ -1,12 +1,13 @@
 rules_version = '2';
 
 // Cloud Storage rules. Paths mirror the app's upload call sites; anything
-// not listed is denied. Staff and ownership checks read Firestore
-// (firestore.get/exists), the same documents firestore.rules uses:
-//   - staff = users/{uid}.role 'admin'/'ngo_staff', or an account linked to
-//     an organization (users.organizationId is only writable through a real
-//     membership — see firestore.rules users/{uid});
-//   - a case's reporter, assigned transporter and staff may add its media.
+// not listed is denied. Staff checks read Firestore (firestore.get/exists),
+// the same documents and the same organization permissions as
+// firestore.rules (Admins and the owner can do everything; Staff what
+// members/{uid}.permissions allow, with the same legacy fallback):
+//   - platform staff = users/{uid}.role 'admin'/'ngo_staff' (no money);
+//   - an account acts only for the organization users/{uid}.organizationId
+//     points at.
 //
 // Downloads in the app go through tokenized download URLs, which bypass
 // these rules; read rules here govern getDownloadURL/list from the SDK.
@@ -27,30 +28,71 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Platform staff, or staff of an approved organization whose membership
-    // is still active (mirrors isApprovedStaffOf in firestore.rules).
-    function isStaff() {
-      return signedIn() && (
-        userData().get('role', '') in ['admin', 'ngo_staff'] ||
-        isApprovedOrgStaff()
+    function myOrg() {
+      return userData().get('organizationId', '');
+    }
+
+    function isPlatform() {
+      return signedIn() && userData().get('role', '') in ['admin', 'ngo_staff'];
+    }
+
+    // ---- Organization permissions (see firestore.rules) ---------------------
+
+    function orgData(orgId) {
+      return firestore.get(/databases/(default)/documents/organizations/$(orgId)).data;
+    }
+
+    function hasMemberDoc(orgId) {
+      return firestore.exists(/databases/(default)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+
+    function memberData(orgId) {
+      return firestore.get(/databases/(default)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data;
+    }
+
+    function fullStaffPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'];
+    }
+
+    function permsOf(m) {
+      return m.get('permissions',
+        m.get('role', '') == 'carer' ? ['care'] :
+          (m.get('facebookPublisher', false) == true ? fullStaffPerms().concat(['facebookPublish']) : fullStaffPerms()));
+    }
+
+    function memberHasAny(orgId, keys) {
+      return orgData(orgId).get('verificationStatus', 'approved') == 'approved' && (
+        orgData(orgId).get('ownerId', '') == request.auth.uid ||
+        (!hasMemberDoc(orgId) && fullStaffPerms().hasAny(keys)) ||
+        (hasMemberDoc(orgId) &&
+          !(memberData(orgId).get('status', 'active') in ['inactive', 'removed', 'disabled']) &&
+          (memberData(orgId).get('role', '') == 'admin' || permsOf(memberData(orgId)).hasAny(keys)))
       );
     }
 
-    function isApprovedOrgStaff() {
-      return userData().get('organizationId', '') != '' &&
-        firestore.get(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))).data
-          .get('verificationStatus', 'approved') == 'approved' &&
-        (
-          !firestore.exists(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))/members/$(request.auth.uid)) ||
-          !(firestore.get(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))/members/$(request.auth.uid)).data
-            .get('status', 'active') in ['inactive', 'removed', 'disabled']) ||
-          firestore.get(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))).data
-            .get('ownerId', '') == request.auth.uid
-        ) &&
-        // Carers are not staff (matches isStaffOf in firestore.rules).
-        !(firestore.exists(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))/members/$(request.auth.uid)) &&
-          firestore.get(/databases/(default)/documents/organizations/$(userData().get('organizationId', ''))/members/$(request.auth.uid)).data
-            .get('role', '') == 'carer');
+    // Active member of `orgId` (their own organization) with any of `keys`.
+    function staffWith(orgId, keys) {
+      return signedIn() && orgId is string && orgId != '' && myOrg() == orgId && memberHasAny(orgId, keys);
+    }
+
+    function myStaffWith(keys) {
+      return signedIn() && myOrg() != '' && memberHasAny(myOrg(), keys);
+    }
+
+    // A record owned by `orgId` ('' = not owned yet): platform staff, or
+    // that organization's staff with any of `keys` (the caller's own for '').
+    function recordStaff(orgId, keys) {
+      return isPlatform() || (orgId != '' && staffWith(orgId, keys)) || (orgId == '' && myStaffWith(keys));
+    }
+
+    // The owner, or an active Admin member.
+    function isOrgAdminOf(orgId) {
+      return signedIn() && (
+        orgData(orgId).get('ownerId', '') == request.auth.uid ||
+        (hasMemberDoc(orgId) &&
+          memberData(orgId).get('role', '') == 'admin' &&
+          !(memberData(orgId).get('status', 'active') in ['inactive', 'removed', 'disabled']))
+      );
     }
 
     // Uploads are capped at 100 MB (rescue videos are the largest). The app's
@@ -69,9 +111,10 @@ service firebase.storage {
       allow write: if isSelf(uid) && mediaUpload();
     }
 
-    // transporter_verification_screen.dart — ID and vehicle documents.
+    // transporter_verification_screen.dart — ID and vehicle documents, read
+    // by the staff who verify transporters.
     match /transporter_verifications/{uid}/{file=**} {
-      allow read: if isSelf(uid) || isStaff();
+      allow read: if isSelf(uid) || isPlatform() || myStaffWith(['volunteers']);
       allow write: if isSelf(uid) && mediaUpload();
     }
 
@@ -86,6 +129,10 @@ service firebase.storage {
     match /cases/{caseId} {
       function caseData() {
         return firestore.get(/databases/(default)/documents/cases/$(caseId)).data;
+      }
+
+      function caseOrg() {
+        return caseData().get('organizationId', '');
       }
 
       function isReporter() {
@@ -109,7 +156,7 @@ service firebase.storage {
       match /{file} {
         allow read: if signedIn();
         allow write: if signedIn() && mediaUpload() &&
-          (isReporter() || isAssignedTransporter() || isVerifyingRider() || isStaff());
+          (isReporter() || isAssignedTransporter() || isVerifyingRider() || recordStaff(caseOrg(), ['rescue']));
       }
 
       // community_report_section.dart — anyone can attach a sighting photo.
@@ -118,14 +165,19 @@ service firebase.storage {
         allow write: if signedIn() && mediaUpload();
       }
 
-      // treatment_detail_page.dart, add_edit_expense_sheet.dart
+      // treatment_detail_page.dart
       match /treatmentUpdates/{file=**} {
         allow read: if signedIn();
-        allow write: if mediaUpload() && (isStaff() || isAssignedTransporter());
+        allow write: if mediaUpload() && (recordStaff(caseOrg(), ['rescue', 'animals']) || isAssignedTransporter());
       }
+
+      // add_edit_expense_sheet.dart — receipts are money: the case's rescue
+      // staff and finance viewers read them, people who manage money upload.
       match /expenseReceipts/{file} {
-        allow read: if isStaff();
-        allow write: if isStaff() && mediaUpload();
+        allow read: if staffWith(caseOrg(), ['rescue', 'financeView', 'financeManage']) ||
+          (caseOrg() == '' && myStaffWith(['rescue', 'financeView', 'financeManage']));
+        allow write: if mediaUpload() &&
+          (staffWith(caseOrg(), ['financeManage']) || (caseOrg() == '' && myStaffWith(['financeManage'])));
       }
     }
 
@@ -140,46 +192,27 @@ service firebase.storage {
 
     // Animal files, by folder:
     //   images/       profile photos (create_animal_record_page.dart): any
-    //                 signed-in user reads, staff upload — the animal doc may
-    //                 not exist yet while a new record is being created.
+    //                 signed-in user reads; rescue, records and adoption staff
+    //                 upload — the animal doc may not exist yet while a new
+    //                 record is being created, so the caller's own
+    //                 organization counts.
     //   medicalDocs/  care and vaccine records, medication documents
-    //   careUpdates/  photos on carer updates
+    //   careUpdates/  photos on care updates
     //   doseMedia/    dose proof
     // Everything but images/ is readable only by the owning organization's
-    // staff and carers and platform staff (firestore.rules canReadAnimalMedical).
-    // careUpdates/ and doseMedia/ also take uploads from the animal's carers.
+    // staff (firestore.rules canReadAnimalMedical) and platform staff.
+    // careUpdates/ and doseMedia/ also take uploads from daily care staff.
     match /animalRecords/{animalId}/{folder}/{file=**} {
       function animalOrgId() {
         return firestore.get(/databases/(default)/documents/animals/$(animalId)).data.get('organizationId', '');
       }
 
-      function isStaffForAnimal() {
-        return signedIn() && (
-          userData().get('role', '') in ['admin', 'ngo_staff'] ||
-          (isApprovedOrgStaff() &&
-            (animalOrgId() == '' || userData().get('organizationId', '') == animalOrgId()))
-        );
-      }
-
-      function isCarerForAnimal() {
-        return signedIn() &&
-          userData().get('organizationId', '') != '' &&
-          userData().get('organizationId', '') == animalOrgId() &&
-          firestore.exists(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)) &&
-          firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)).data
-            .get('role', '') == 'carer' &&
-          !(firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())/members/$(request.auth.uid)).data
-            .get('status', 'active') in ['inactive', 'removed', 'disabled']) &&
-          firestore.get(/databases/(default)/documents/organizations/$(animalOrgId())).data
-            .get('verificationStatus', 'approved') == 'approved';
-      }
-
       allow read: if (folder == 'images' && signedIn()) ||
-        (folder != 'images' && (isStaffForAnimal() || isCarerForAnimal()));
+        (folder != 'images' && (recordStaff(animalOrgId(), ['rescue', 'animals', 'adoptions']) || staffWith(animalOrgId(), ['care'])));
       allow write: if mediaUpload() && (
-        (folder == 'images' && isStaff()) ||
-        (folder in ['careUpdates', 'doseMedia'] && (isStaffForAnimal() || isCarerForAnimal())) ||
-        (!(folder in ['images', 'careUpdates', 'doseMedia']) && isStaffForAnimal())
+        (folder == 'images' && (isPlatform() || myStaffWith(['rescue', 'animals', 'adoptions']))) ||
+        (folder in ['careUpdates', 'doseMedia'] && recordStaff(animalOrgId(), ['care', 'animals'])) ||
+        (!(folder in ['images', 'careUpdates', 'doseMedia']) && recordStaff(animalOrgId(), ['rescue', 'animals']))
       );
     }
 
@@ -188,51 +221,50 @@ service firebase.storage {
     // adoption_application_service.dart uploads the government ID, proof of
     // address and home photos BEFORE the application doc exists, so a new
     // application's folder is open to its uploader until the doc is created;
-    // after that only the adopter and staff can touch it.
+    // after that only the adopter and adoption staff can touch it.
     match /adoptions/{adoptionId}/{file=**} {
+      function appData() {
+        return firestore.get(/databases/(default)/documents/adoptions/$(adoptionId)).data;
+      }
+
       function appExists() {
         return firestore.exists(/databases/(default)/documents/adoptions/$(adoptionId));
       }
 
       function isAdopter() {
-        return firestore.get(/databases/(default)/documents/adoptions/$(adoptionId))
-          .data.get('personal', {}).get('adopterId', '') == request.auth.uid;
+        return appData().get('personal', {}).get('adopterId', '') == request.auth.uid;
       }
 
-      allow read: if signedIn() && (!appExists() || isAdopter() || isStaff());
-      allow write: if signedIn() && mediaUpload() && (!appExists() || isAdopter() || isStaff());
+      function isAdoptionStaff() {
+        return recordStaff(appData().get('organizationId', ''), ['adoptions']);
+      }
+
+      allow read: if signedIn() && (!appExists() || isAdopter() || isAdoptionStaff());
+      allow write: if signedIn() && mediaUpload() && (!appExists() || isAdopter() || isAdoptionStaff());
     }
 
     // ---- Organizations ---------------------------------------------------------
 
     match /organizations/{orgId} {
-      function isOrgStaff() {
-        return signedIn() && (
-          userData().get('role', '') in ['admin', 'ngo_staff'] ||
-          userData().get('organizationId', '') == orgId ||
-          firestore.get(/databases/(default)/documents/organizations/$(orgId)).data.get('ownerId', '') == request.auth.uid
-        );
-      }
-
-      // organization_profile_edit_page.dart
+      // organization_profile_edit_page.dart — the org's Admins (and platform
+      // staff, who may edit org profiles).
       match /profile/{file=**} {
         allow read: if signedIn();
-        allow write: if isOrgStaff() && mediaUpload();
+        allow write: if (isOrgAdminOf(orgId) || isPlatform()) && mediaUpload();
       }
 
       // organization_verification_screen.dart — registration papers and
-      // permits.
-      // System admins read them to approve the sign-up.
+      // permits. System admins read them to approve the sign-up.
       match /verification/{file=**} {
-        allow read: if isOrgStaff() || (signedIn() && userData().get('role', '') == 'system_admin');
-        allow write: if isOrgStaff() && mediaUpload();
+        allow read: if isOrgAdminOf(orgId) || (signedIn() && userData().get('role', '') == 'system_admin');
+        allow write: if isOrgAdminOf(orgId) && mediaUpload();
       }
 
-      // Receipts for general expenses (general_expenses_page.dart). The
-      // expense records themselves are financial-admin only in Firestore.
+      // Receipts for general expenses (general_expenses_page.dart), which
+      // include staff pay: only people who manage the money.
       match /expenseReceipts/{file} {
-        allow read: if isOrgStaff();
-        allow write: if isOrgStaff() && mediaUpload();
+        allow read: if staffWith(orgId, ['financeManage']);
+        allow write: if staffWith(orgId, ['financeManage']) && mediaUpload();
       }
     }
 
@@ -240,27 +272,24 @@ service firebase.storage {
 
     // event_form_page.dart (VolunteerEventRepository.uploadCoverImage) —
     // event cover photos, keyed by the owning organization so a new event's
-    // cover can be uploaded before its Firestore doc exists. Staff (not
-    // carers) of that organization, or platform staff.
+    // cover can be uploaded before its Firestore doc exists. Staff of that
+    // organization who handle volunteers and events, or platform staff.
     match /events/{orgId}/{file} {
       allow read: if signedIn();
-      allow write: if isStaff() && mediaUpload() && (
-        userData().get('role', '') in ['admin', 'ngo_staff'] ||
-        userData().get('organizationId', '') == orgId
-      );
+      allow write: if mediaUpload() && (isPlatform() || staffWith(orgId, ['volunteers']));
     }
 
     // ---- Donations ---------------------------------------------------------------
 
-    // donation_admin_service.dart — campaign cover images and offline-payment
-    // receipts.
+    // donation_admin_service.dart — campaign cover images (campaign staff)
+    // and offline-payment receipts (money).
     match /campaigns/{file} {
       allow read: if signedIn();
-      allow write: if isStaff() && mediaUpload();
+      allow write: if myStaffWith(['campaigns', 'financeManage']) && mediaUpload();
     }
     match /receipts/{file} {
-      allow read: if isStaff();
-      allow write: if isStaff() && mediaUpload();
+      allow read: if myStaffWith(['financeView', 'financeManage']);
+      allow write: if myStaffWith(['financeManage']) && mediaUpload();
     }
   }
 }

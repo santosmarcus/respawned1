@@ -5,6 +5,7 @@ const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
+const {orgMemberUids, requireOrgPermission} = require('./org_access');
 const db = admin.firestore();
 
 exports.getOrCreateRescueSession = onCall(async (request) => {
@@ -336,7 +337,6 @@ async function notifyNearbyUsers({
 // contains it, and that organization's staff are notified directly.
 // Cases outside every coverage area are flagged for admins (they can be
 // referred to the LGU from the case page).
-const ORG_STAFF_ROLES = ['organization', 'ngo_staff', 'admin'];
 
 function orgCoversPoint(org, lat, lng) {
   const areas = Array.isArray(org.serviceAreas) ? org.serviceAreas : [];
@@ -375,18 +375,19 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
     return;
   }
 
-  // Firestore `in` accepts at most 30 values.
+  // Staff of the matched organizations who handle rescues.
+  const uids = new Set();
+  for (const orgId of matched) {
+    for (const uid of await orgMemberUids(db, orgId, {anyOf: ['rescue']})) uids.add(uid);
+  }
+  uids.delete(c.reporterId);
   const tokens = new Set();
-  for (let i = 0; i < matched.length; i += 30) {
-    const staffSnap = await db
-      .collection('users')
-      .where('organizationId', 'in', matched.slice(i, i + 30))
-      .get();
-    staffSnap.forEach((u) => {
-      const d = u.data();
-      if (u.id === c.reporterId) return;
-      if (!ORG_STAFF_ROLES.includes(d.role)) return;
-      if (!d.fcmToken || !userWantsCategory(d, NOTIFY_CATEGORY.newCase)) return;
+  const refs = [...uids].map((uid) => db.collection('users').doc(uid));
+  for (let i = 0; i < refs.length; i += 100) {
+    const docs = await db.getAll(...refs.slice(i, i + 100));
+    docs.forEach((u) => {
+      const d = u.exists ? u.data() : null;
+      if (!d || !d.fcmToken || !userWantsCategory(d, NOTIFY_CATEGORY.newCase)) return;
       tokens.add(d.fcmToken);
     });
   }
@@ -849,39 +850,12 @@ exports.expireTransportOffers = onSchedule('every 1 minutes', async () => {
   }
 });
 
-// Staff of an organization, as accounts: role in ORG_STAFF_ROLES and
-// users.organizationId == orgId, minus carers and inactive members (same
-// rule as isStaffOf in firestore.rules). With adminsOnly, only the owner
-// and Admin members.
-async function orgStaffUids(orgId, {adminsOnly = false} = {}) {
-  if (!orgId) return [];
-  const orgRef = db.collection('organizations').doc(orgId);
-  const [orgSnap, usersSnap, membersSnap] = await Promise.all([
-    orgRef.get(),
-    db.collection('users').where('organizationId', '==', orgId).get(),
-    orgRef.collection('members').get(),
-  ]);
-  const ownerId = orgSnap.exists ? orgSnap.get('ownerId') : null;
-  const members = new Map(membersSnap.docs.map((m) => [m.id, m.data()]));
-  const uids = [];
-  usersSnap.forEach((u) => {
-    if (!ORG_STAFF_ROLES.includes(u.get('role'))) return;
-    const m = members.get(u.id);
-    const isOwner = u.id === ownerId;
-    const active = !m || !['inactive', 'removed', 'disabled'].includes(m.status);
-    if (!isOwner && (!active || (m && m.role === 'carer'))) return;
-    if (adminsOnly && !isOwner && !(m && m.role === 'admin')) return;
-    uids.push(u.id);
-  });
-  if (ownerId && !uids.includes(ownerId)) uids.push(ownerId);
-  if (adminsOnly) {
-    // Admin members whose account isn't linked to the organization yet.
-    members.forEach((m, uid) => {
-      const active = !['inactive', 'removed', 'disabled'].includes(m.status);
-      if (active && m.role === 'admin' && !uids.includes(uid)) uids.push(uid);
-    });
-  }
-  return uids;
+// Who to tell in an organization (functions/org_access.js orgMemberUids):
+// the owner, active Admins, and active Staff holding any of [anyOf] (every
+// active member when [anyOf] is empty). With adminsOnly, the owner and
+// active Admins only.
+async function orgStaffUids(orgId, {adminsOnly = false, anyOf = []} = {}) {
+  return orgMemberUids(db, orgId, {adminsOnly, anyOf});
 }
 
 // Push plus in-app notification to each uid, once.
@@ -957,7 +931,7 @@ exports.notifyStaffOfOfferOutcome = onDocumentUpdated(
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    const recipients = [after.offeredBy, ...(await orgStaffUids(c.organizationId))];
+    const recipients = [after.offeredBy, ...(await orgStaffUids(c.organizationId, {anyOf: ['rescue']}))];
     let {title, body} = copy;
 
     if (c.urgency === 'Critical') {
@@ -1039,7 +1013,7 @@ exports.notifyStaffOfTransitEnd = onDocumentUpdated(
       resolved: false,
     });
 
-    await notifyStaff(await orgStaffUids(after.organizationId), {
+    await notifyStaff(await orgStaffUids(after.organizationId, {anyOf: ['rescue']}), {
       title: copy.staffTitle,
       body: `${copy.staffBody}${reasonNote}`,
       data: {type: 'transit_ended_staff', caseId, kind: after.endReasonKind},
@@ -1082,7 +1056,7 @@ exports.notifyStaffOfMissingShelterPin = onDocumentUpdated(
       resolved: false,
     });
     const recipients = [
-      ...(await orgStaffUids(orgId)),
+      ...(await orgStaffUids(orgId, {anyOf: ['rescue']})),
       ...(await orgStaffUids(orgId, {adminsOnly: true})),
     ];
     await notifyStaff(recipients, {
@@ -1316,7 +1290,7 @@ exports.sendFollowUpReminders = onSchedule(
             resolved: false,
           });
           const adopter = personal.adopterName || 'The adopter';
-          await notifyStaff(await orgStaffUids(app.organizationId), {
+          await notifyStaff(await orgStaffUids(app.organizationId, {anyOf: ['adoptions']}), {
             title: 'Adoption follow-up overdue',
             body: `${adopter} has not sent the check-in for ${personal.animalName || 'their adopted animal'} `
               + 'for over a week. Contact them or record the follow-up.',
@@ -1358,7 +1332,7 @@ exports.notifyCaseReferralCreated = onDocumentCreated(
     if (!r || r.type !== 'anotherOrganization' || !r.targetOrgId) return;
     const {caseId, referralId} = event.params;
     const from = r.fromOrgName || 'Another organization';
-    await notifyStaff(await orgStaffUids(r.targetOrgId), {
+    await notifyStaff(await orgStaffUids(r.targetOrgId, {anyOf: ['rescue']}), {
       title: 'New case referral',
       body: `${from} referred a rescue case to your organization. Open it to accept or decline.`,
       data: {type: 'case_referral', caseId, referralId},
@@ -1394,7 +1368,7 @@ exports.notifyCaseReferralOutcome = onDocumentUpdated(
     if (!copyFor) return;
     const {caseId, referralId} = event.params;
     const {title, body} = copyFor(after);
-    const recipients = [after.createdByUid, ...(await orgStaffUids(after.fromOrgId))];
+    const recipients = [after.createdByUid, ...(await orgStaffUids(after.fromOrgId, {anyOf: ['rescue']}))];
     await notifyStaff(recipients, {
       title,
       body,
@@ -1437,7 +1411,7 @@ exports.followUpCaseReferrals = onSchedule('every 60 minutes', async () => {
           return true;
         });
         if (!claimed) continue;
-        await notifyStaff(await orgStaffUids(c.referredToOrgId), {
+        await notifyStaff(await orgStaffUids(c.referredToOrgId, {anyOf: ['rescue']}), {
           title: 'Referral waiting for your answer',
           body: `${r.fromOrgName || 'Another organization'} referred a case to you ${REFERRAL_REMINDER_HOURS} hours ago. `
             + `Accept or decline it; with no answer it goes back to them after ${REFERRAL_RETURN_HOURS} hours.`,
@@ -1561,7 +1535,7 @@ exports.completeDueQuarantines = onSchedule('every 30 minutes', async () => {
         return c;
       });
       if (!ended) continue;
-      await notifyStaff(await orgStaffUids(ended.organizationId), {
+      await notifyStaff(await orgStaffUids(ended.organizationId, {anyOf: ['rescue', 'animals', 'care']}), {
         title: 'Quarantine ended',
         body: `${caseAnimalLabel(ended)} finished the scheduled quarantine. Check on them and plan the next step.`,
         data: {type: 'quarantine_ended', caseId: doc.id},
@@ -1761,6 +1735,11 @@ exports.createOrUpdateZoomMeeting = onCall(
     if (!appSnap.exists) {
       throw new HttpsError('not-found', 'Application not found.');
     }
+    // Staff who handle adoptions for the application's organization.
+    await requireOrgPermission(db, request, {
+      organizationId: appSnap.get('organizationId') || undefined,
+      anyOf: ['adoptions'],
+    });
     const existing = appSnap.data().zoom;
 
     if (existing && existing.appointmentRevision === appointmentRevision && existing.zoomMeetingId) {
@@ -1870,6 +1849,11 @@ exports.cancelZoomMeeting = onCall({secrets: [zoomAccountId, zoomClientId, zoomC
   }
   const appRef = db.collection('adoptions').doc(applicationId);
   const appSnap = await appRef.get();
+  if (!appSnap.exists) return {cancelled: false};
+  await requireOrgPermission(db, request, {
+    organizationId: appSnap.get('organizationId') || undefined,
+    anyOf: ['adoptions'],
+  });
   const existing = appSnap.data()?.zoom;
   if (!existing || !existing.zoomMeetingId || existing.zoomMeetingStatus === 'cancelled') {
     return {cancelled: false};
@@ -1919,6 +1903,8 @@ Object.assign(exports, require('./campaigns'));
 Object.assign(exports, require('./adoptions'));
 // Organization stamp on case/animal logs for the Audit page — see functions/audit_logs.js.
 Object.assign(exports, require('./audit_logs'));
+// Member access (Admin/Staff and permissions) — see functions/org_members.js.
+Object.assign(exports, require('./org_members'));
 // Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
@@ -2114,7 +2100,7 @@ exports.syncRescueAdoptionRequest = onDocumentWritten('adoptions/{adoptionId}', 
 
   const data = {type: 'rescue_adoption_request', caseId: app.caseId};
   if (mirror.status === 'pending' && !before) {
-    await notifyStaff(await orgStaffUids(caseStaffOrgId(caseData)), {
+    await notifyStaff(await orgStaffUids(caseStaffOrgId(caseData), {anyOf: ['adoptions', 'rescue']}), {
       title: 'New adoption request',
       body: `${mirror.adopterName} wants to adopt a rescued animal and accepted the vet-fee and pickup agreements. ` +
         'Review it on Rescue Details.',
@@ -2267,7 +2253,7 @@ exports.followUpAdopterPickups = onSchedule('every 30 minutes', async () => {
         body: `The animal was not collected within ${rescueAdoption.PICKUP_WINDOW_HOURS} hours, so your adoption request was closed.`,
         data: {type: 'rescue_adoption_closed', caseId: doc.id},
       });
-      await notifyStaff(await orgStaffUids(orgId), {
+      await notifyStaff(await orgStaffUids(orgId, {anyOf: ['adoptions', 'rescue']}), {
         title: outcome === 'shelter' ? 'Pickup missed: animal goes to the shelter' : 'Pickup missed: shelter full, refer',
         body: outcome === 'shelter' ?
           'The adopter did not collect the animal in time. Arrange its intake to the shelter on Intake Details.' :

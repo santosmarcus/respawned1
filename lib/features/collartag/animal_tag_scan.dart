@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
@@ -73,6 +74,13 @@ Future<bool> _isStaffOf(String? orgId) async {
   final db = FirebaseFirestore.instance;
   final user = await db.collection('users').doc(uid).get();
   if (user.data()?['organizationId'] != orgId) return false;
+  final org = await db.collection('organizations').doc(orgId).get();
   final member = await db.collection('organizations').doc(orgId).collection('members').doc(uid).get();
-  return member.data()?['role'] != 'carer';
+  // Rescue or animal records staff (Admins have both).
+  final caps = capabilitiesFrom(
+    uid: uid,
+    ownerId: org.data()?['ownerId'] as String?,
+    member: member.exists ? (member.data() ?? const {}) : null,
+  );
+  return caps.canManageRescues || caps.canManageRecords;
 }

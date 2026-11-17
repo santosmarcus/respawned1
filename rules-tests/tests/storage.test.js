@@ -15,7 +15,10 @@ describe('storage', () => {
   test('case media: reporter, assigned transporter and staff', async () => {
     await assertSucceeds(upload('reporter', 'cases/pending1/media_0.jpg'));
     await assertSucceeds(upload('rider', 'cases/assigned/pickup_verify_0.jpg'));
-    await assertSucceeds(upload('staffA', 'cases/ownedA/expenseReceipts/1.jpg'));
+    await assertSucceeds(upload('staffA', 'cases/ownedA/media_9.jpg'));
+    // Expense receipts are money: people who manage it upload.
+    await assertSucceeds(upload('ownerA', 'cases/ownedA/expenseReceipts/1.jpg'));
+    await assertFails(upload('staffA', 'cases/ownedA/expenseReceipts/1.jpg'));
     await assertFails(upload('stranger', 'cases/pending1/media_0.jpg'));
     await assertFails(upload('stranger', 'cases/ownedA/expenseReceipts/1.jpg'));
   });
@@ -57,8 +60,11 @@ describe('storage', () => {
     await assertFails(upload('stranger', 'organizations/orgD/verification/permits/p.pdf'));
   });
 
-  test('donation receipts and campaign images: staff only', async () => {
-    await assertSucceeds(upload('staffA', 'receipts/1.jpg'));
+  test('donation receipts: people who manage money; campaign images: campaign staff', async () => {
+    await assertSucceeds(upload('ownerA', 'receipts/1.jpg'));
+    await assertFails(upload('staffA', 'receipts/1.jpg'));
+    await assertSucceeds(upload('staffA', 'campaigns/1.jpg'));
+    await assertFails(upload('carerA', 'campaigns/1.jpg'));
     await assertFails(upload('stranger', 'receipts/1.jpg'));
     await assertFails(upload('stranger', 'campaigns/1.jpg'));
   });

@@ -21,6 +21,7 @@ const {onCall, HttpsError} = require('firebase-functions/v2/https');
 const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');
+const {loadOrgAccess, memberPermissions, presetFor} = require('./org_access');
 
 const fbAppId = defineSecret('FB_APP_ID');
 const fbAppSecret = defineSecret('FB_APP_SECRET');
@@ -127,27 +128,14 @@ function pendingPagesSecretId(requestId) {
 
 // ---- Authorization (never trusts client-provided role/isAdmin/etc) -------
 
+// Connecting the Page and choosing who may post: the owner or an active
+// Admin (functions/org_access.js).
 async function requireOwnerOrActiveAdmin(uid, organizationId) {
   if (!organizationId) {
     throw new HttpsError('invalid-argument', 'organizationId is required.');
   }
-  const orgSnap = await db().collection('organizations').doc(organizationId).get();
-  if (!orgSnap.exists) {
-    throw new HttpsError('not-found', 'Organization not found.');
-  }
-  if (orgSnap.data().ownerId === uid) return; // legacy-owner-safe: no membership doc required
-
-  const memberSnap = await db()
-      .collection('organizations')
-      .doc(organizationId)
-      .collection('members')
-      .doc(uid)
-      .get();
-  const member = memberSnap.data();
-  const status = member && member.status;
-  const isActive = !status || !['inactive', 'removed', 'disabled'].includes(status);
-  if (memberSnap.exists && isActive && member.role === 'admin') return;
-
+  const access = await loadOrgAccess(db(), uid, organizationId);
+  if (access.active && access.isAdmin) return;
   throw new HttpsError(
       'permission-denied',
       'Only the organization owner or an active Organization Admin can manage Facebook Page publishing.',
@@ -155,30 +143,16 @@ async function requireOwnerOrActiveAdmin(uid, organizationId) {
 }
 
 /// Publishing is wider than managing the connection: the owner, an active
-/// admin, or an active member an admin granted `facebookPublisher` to. The
-/// grant is an app-level permission only — posts go out as the Page via the
-/// stored Page token, so the member needs no Facebook role on the Page.
+/// Admin, or Staff with the facebookPublish permission (the old
+/// facebookPublisher flag counts until the member is migrated). Posts go out
+/// as the Page via the stored Page token, so the member needs no Facebook
+/// role on the Page.
 async function requireFacebookPublisher(uid, organizationId) {
   if (!organizationId) {
     throw new HttpsError('invalid-argument', 'organizationId is required.');
   }
-  const orgSnap = await db().collection('organizations').doc(organizationId).get();
-  if (!orgSnap.exists) {
-    throw new HttpsError('not-found', 'Organization not found.');
-  }
-  if (orgSnap.data().ownerId === uid) return;
-
-  const memberSnap = await db()
-      .collection('organizations')
-      .doc(organizationId)
-      .collection('members')
-      .doc(uid)
-      .get();
-  const member = memberSnap.data();
-  const status = member && member.status;
-  const isActive = !status || !['inactive', 'removed', 'disabled'].includes(status);
-  if (memberSnap.exists && isActive && (member.role === 'admin' || member.facebookPublisher === true)) return;
-
+  const access = await loadOrgAccess(db(), uid, organizationId);
+  if (access.active && access.has('facebookPublish')) return;
   throw new HttpsError(
       'permission-denied',
       'Only the organization owner, an Organization Admin, or a member allowed to share to Facebook can publish to the Page.',
@@ -634,12 +608,24 @@ exports.facebookSetPublisher = onCall(async (request) => {
     throw new HttpsError('not-found', 'That person is not a member of this organization.');
   }
 
-  await memberRef.update({
+  // Kept for older app builds; newer ones set facebookPublish through
+  // setMemberAccess. A member already on permissions gets the permission
+  // toggled too, so both views agree.
+  const member = memberSnap.data();
+  const update = {
     facebookPublisher: enabled,
     facebookPublisherGrantedBy: enabled ? uid : null,
     facebookPublisherGrantedAt: enabled ? admin.firestore.FieldValue.serverTimestamp() : null,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  };
+  if (Array.isArray(member.permissions) && member.role !== 'admin') {
+    const perms = memberPermissions(member).filter((k) => k !== 'facebookPublish');
+    if (enabled) perms.push('facebookPublish');
+    const ordered = memberPermissions({permissions: perms});
+    update.permissions = ordered;
+    update.preset = presetFor(ordered);
+  }
+  await memberRef.update(update);
 
   await writeOrgAuditLog({
     action: enabled ? 'Facebook sharing granted to member' : 'Facebook sharing revoked from member',

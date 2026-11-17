@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
+import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
@@ -185,6 +187,16 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     final header = ref.watch(currentOrganizationHeaderProvider).asData?.value;
     final orgName = header?.name ?? 'Organization';
     final avatarUrl = header?.avatarUrl;
+    // Modules follow the member's permissions. Platform staff with no
+    // organization of their own keep the operational modules (never money).
+    final caps = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value ?? OrganizationCapabilities.none;
+    final platform = ref.watch(isPlatformStaffProvider).asData?.value ?? false;
+    bool show(bool allowed) => allowed || (platform && !caps.isActive);
+    final roleLine = !caps.isActive
+        ? (platform ? 'Platform staff' : 'Staff')
+        : caps.isAdmin
+            ? 'Admin'
+            : 'Staff · ${(caps.preset ?? OrgPreset.custom).label}';
     return Drawer(
       backgroundColor: AppColors.textPrimary,
       child: SafeArea(
@@ -214,7 +226,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.background)),
-                        Text('Admin Staff', style: GoogleFonts.zain(fontSize: 12, color: AppColors.background.withValues(alpha: 0.7))),
+                        Text(roleLine, style: GoogleFonts.zain(fontSize: 12, color: AppColors.background.withValues(alpha: 0.7))),
                       ],
                     ),
                   ),
@@ -247,12 +259,12 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                 rootNavigator.popUntil((route) => route.isFirst);
               },
             ),
-            _DrawerItem(
+            if (show(caps.canManageRescues)) _DrawerItem(
               label: 'Rescue',
               selected: widget.active == AdminModule.rescue,
               onTap: () => _openModule(context, (_) => const RescueReportsPage()),
             ),
-            _DrawerItem(
+            if (show(caps.canManageAdoptions)) _DrawerItem(
               label: 'Adoptions',
               selected: widget.active == AdminModule.adoptions,
               // Straight to the tabbed Adoption Applications page — the
@@ -260,37 +272,37 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
               // landing page for Adoptions.
               onTap: () => _openModule(context, (_) => const AdoptionApplicationReviewPage()),
             ),
-            _DrawerItem(
+            if (caps.canViewFinances || caps.canRunCampaigns) _DrawerItem(
               label: 'Donations',
               selected: widget.active == AdminModule.donations,
               onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
             ),
-            _DrawerItem(
+            if (show(caps.canManageRecords || caps.canGiveCare || caps.canManageAdoptions)) _DrawerItem(
               label: 'Records',
               selected: widget.active == AdminModule.records,
               onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
             ),
-            _DrawerItem(
+            if (show(caps.canManageVolunteers)) _DrawerItem(
               label: 'Events',
               selected: widget.active == AdminModule.events,
               onTap: () => _openModule(context, (_) => const AdminEventsPage()),
             ),
-            _DrawerItem(
+            if (show(caps.canManageVolunteers)) _DrawerItem(
               label: 'Volunteers',
               selected: widget.active == AdminModule.volunteers,
               onTap: () => _openModule(context, (_) => const VolunteersPage()),
             ),
-            _DrawerItem(
+            if (show(caps.canManageVolunteers)) _DrawerItem(
               label: 'Transporters',
               selected: widget.active == AdminModule.transporters,
               onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
             ),
-            _DrawerItem(
+            if (show(caps.canManageRescues)) _DrawerItem(
               label: 'Collar Tags',
               selected: widget.active == AdminModule.collarTags,
               onTap: () => _openModule(context, (_) => const AdminCollarTagScreen()),
             ),
-            _DrawerItem(
+            if (show(caps.canViewAudits)) _DrawerItem(
               label: 'Audit',
               selected: widget.active == AdminModule.audit,
               onTap: () => _openModule(context, (_) => const AuditPage()),

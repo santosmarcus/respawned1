@@ -71,6 +71,20 @@ final currentOrganizationCapabilitiesProvider = StreamProvider.autoDispose<Organ
   return ref.watch(orgMembershipServiceProvider).streamCapabilities(uid);
 });
 
+/// One value derived from the signed-in account's organization access
+/// (false-y [pick] of [OrganizationCapabilities.none] while signed out).
+Stream<T> watchMyCapabilities<T>(Ref ref, T Function(OrganizationCapabilities c) pick) {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return Stream.value(pick(OrganizationCapabilities.none));
+  return ref.watch(orgMembershipServiceProvider).streamCapabilities(uid).map(pick);
+}
+
+/// Owner or Admin of the signed-in account's organization: members, the org
+/// profile, shelter and care settings, rebuilding analytics.
+final isOrgAdminProvider = StreamProvider.autoDispose<bool>(
+  (ref) => watchMyCapabilities(ref, (c) => c.isActive && c.isAdmin),
+);
+
 /// Platform staff (users/{uid}.role 'admin' or 'ngo_staff', the same check
 /// as firestore.rules isPlatformStaff): they review organizations. False
 /// while signed out or loading.

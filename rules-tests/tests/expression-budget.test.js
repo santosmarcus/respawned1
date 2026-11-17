@@ -62,3 +62,24 @@ test("a rider's verification result fits the budget", async () => {
     statusHistory: FieldValue.arrayUnion({ status: 'not found' }),
   }));
 });
+
+// Same-organization Staff without the rescue permission run every member
+// lookup (org, members doc, permissions) and then the non-staff branches.
+for (const uid of ['careA', 'treasurerA', 'carerA']) {
+  test(`same-org staff without rescue (${uid}) claiming a community adoption fits the budget`, async () => {
+    await seedAdoptable();
+    await assertSucceeds(as(uid).doc('cases/adoptable').update({
+      communityAdoptionIds: FieldValue.arrayUnion(`ca-${uid}`),
+      claimedAnimalIndexes: [0],
+      statusHistory: FieldValue.arrayUnion({ status: 'claimed' }),
+    }));
+  });
+}
+
+test('legacy staff and explicit Full staff rescue updates fit the budget', async () => {
+  for (const uid of ['staffA', 'fullA', 'rescueA']) {
+    await assertSucceeds(as(uid).doc('cases/ownedA').update({
+      statusHistory: FieldValue.arrayUnion({ status: `checked by ${uid}` }),
+    }));
+  }
+});

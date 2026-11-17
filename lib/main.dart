@@ -5,6 +5,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 //import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/core/repos/org_membership_service.dart';
+import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
@@ -318,8 +320,10 @@ class OrganizationRoleRouter extends StatelessWidget {
   }
 }
 
-/// Carers (organization role `carer`) get the care-tasks screen, everyone
-/// else on an approved organization gets the admin shell.
+/// An approved organization's member: daily-care-only Staff (and legacy
+/// carers) get the care-tasks screen, Staff with no permissions a short
+/// "ask an Admin" page, everyone else the admin shell. Live, so a change an
+/// Admin makes applies without signing out.
 class _ApprovedOrgHome extends StatelessWidget {
   final String organizationId;
   const _ApprovedOrgHome({required this.organizationId});
@@ -328,22 +332,55 @@ class _ApprovedOrgHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const AdminHomeScreen();
-    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(organizationId)
-          .collection('members')
-          .doc(uid)
-          .get(),
+    return StreamBuilder<OrganizationCapabilities>(
+      stream: OrgMembershipService().streamCapabilities(uid),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        final caps = snapshot.data;
+        if (caps == null) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        if (snapshot.data?.data()?['role'] == 'carer') {
-          return CarerHomeScreen(organizationId: organizationId);
-        }
-        return const AdminHomeScreen();
+        return switch (orgHomeFor(caps)) {
+          OrgHome.care => CarerHomeScreen(organizationId: organizationId),
+          OrgHome.noAccess => const _NoOrgAccessScreen(),
+          OrgHome.admin => const AdminHomeScreen(),
+        };
       },
+    );
+  }
+}
+
+class _NoOrgAccessScreen extends StatelessWidget {
+  const _NoOrgAccessScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline, size: 48),
+                const SizedBox(height: 12),
+                const Text('No access yet', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                const Text(
+                  "Your organization's Admin hasn't given your account any permissions yet. "
+                  'Ask them to choose what you can do from Staff Members.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: () => authService.value.signOut(),
+                  child: const Text('Log out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

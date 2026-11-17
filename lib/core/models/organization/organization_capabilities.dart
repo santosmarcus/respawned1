@@ -1,122 +1,126 @@
-import 'package:respawnd1/core/models/rescue/org_role.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 
-/// The caller's resolved position within an organization for capability
-/// purposes — distinct from [OrgRole] (which only stores admin/staff on the
-/// membership doc). `owner` is never stored as a role value; it's derived at
-/// resolution time from `organizations/{orgId}.ownerId` so a legacy owner
-/// with no membership subdoc, or one whose stored role is `admin`, is still
-/// recognized correctly (Facebook Publishing Compatibility spec — owner
-/// must never be blocked just because the backend/frontend only checks for
-/// an explicit `admin` membership).
+/// The caller's resolved position within an organization: the owner (from
+/// `organizations/{orgId}.ownerId`, never stored as a role), an Admin, or a
+/// Staff member.
 enum ResolvedOrgRole { owner, admin, member }
 
-/// Temporary Organization Admin/Member Access Model spec — a single
-/// centralized place every screen and (eventually) callable function
-/// resolves operational access from, instead of scattering
-/// `membership.role == OrgRole.admin` checks across widgets and
-/// repositories. For the current phase, Owner/Admin/Member get identical
-/// operational capabilities; only the Facebook capabilities are narrower
-/// since those are the actions with an actual backend authorization
-/// boundary (functions/facebook.js). Future role restrictions should be introduced by
-/// changing [OrganizationCapabilities.forRole] alone, not by editing every
-/// call site again.
+/// What the signed-in account may do in its organization — the one place
+/// screens read access from. Admins and the owner can do everything; Staff
+/// can do what their [permissions] allow (members/{uid}.permissions, or the
+/// legacy fallback in [staffPermissionsFrom]). firestore.rules,
+/// storage.rules and functions/org_access.js enforce the same thing; this is
+/// for deciding what to show.
 class OrganizationCapabilities {
   final bool isActive;
   final ResolvedOrgRole? role;
 
-  final bool canViewDashboard;
-  final bool canManageRescues;
-  final bool canRejectCases;
-  final bool canManageRecords;
-  final bool canManageAdoptions;
-  final bool canViewAnalytics;
-  final bool canViewAudits;
-  final bool canManageTeam;
+  /// Owner or Admin: everything, including the Admin-only areas (members,
+  /// org profile, shelter and care settings, Facebook connection).
+  final bool isAdmin;
+  final Set<OrgPermission> permissions;
 
-  /// Change member roles, remove members. Owner and active Admin with a
-  /// confirmed membership only — firestore.rules denies these writes to
-  /// everyone else, so the UI must not offer them.
-  final bool canManageMembers;
-
-  /// Connect/reconnect/disconnect the org's Facebook Page and grant or
-  /// revoke [canPublishToFacebook] for members. Owner and active Admin only.
-  final bool canManageFacebookConnection;
-
-  /// Publish Animal Records to the connected Page. Owner, active Admin, or
-  /// a Member granted `facebookPublisher` on their membership doc — that
-  /// grant adds nothing else, they keep Member privileges everywhere.
-  /// UI convenience only; functions/facebook.js re-checks server-side.
-  final bool canPublishToFacebook;
+  /// The Staff member's preset, or null for Admins.
+  final OrgPreset? preset;
 
   const OrganizationCapabilities._({
     required this.isActive,
     required this.role,
-    required this.canViewDashboard,
-    required this.canManageRescues,
-    required this.canRejectCases,
-    required this.canManageRecords,
-    required this.canManageAdoptions,
-    required this.canViewAnalytics,
-    required this.canViewAudits,
-    required this.canManageTeam,
-    required this.canManageMembers,
-    required this.canManageFacebookConnection,
-    required this.canPublishToFacebook,
+    required this.isAdmin,
+    required this.permissions,
+    required this.preset,
   });
 
-  /// No active organization relationship — a regular authenticated user, a
-  /// pending invitee, or an inactive/removed member. Every capability is
-  /// false; this must never gate or affect community/user-side access,
-  /// which is resolved entirely independently of this model.
+  /// No active organization relationship — a regular user, a pending
+  /// invitee, or an inactive/removed member.
   static const OrganizationCapabilities none = OrganizationCapabilities._(
     isActive: false,
     role: null,
-    canViewDashboard: false,
-    canManageRescues: false,
-    canRejectCases: false,
-    canManageRecords: false,
-    canManageAdoptions: false,
-    canViewAnalytics: false,
-    canViewAudits: false,
-    canManageTeam: false,
-    canManageMembers: false,
-    canManageFacebookConnection: false,
-    canPublishToFacebook: false,
+    isAdmin: false,
+    permissions: {},
+    preset: null,
   );
 
-  /// [facebookPublisher] is the member doc's grant; it only matters for
-  /// [ResolvedOrgRole.member] since Owner/Admin can always publish.
-  /// [confirmedMembership] false is the fail-open no-membership-doc case:
-  /// the app treats it as Admin, but the backend and firestore.rules don't,
-  /// so it gets none of the owner/admin-only capabilities.
-  factory OrganizationCapabilities.forRole(
-    ResolvedOrgRole role, {
-    bool facebookPublisher = false,
-    bool confirmedMembership = true,
-  }) {
-    final isOwnerOrAdmin =
-        confirmedMembership && (role == ResolvedOrgRole.owner || role == ResolvedOrgRole.admin);
-    final canPublishToFacebook = isOwnerOrAdmin || (confirmedMembership && facebookPublisher);
+  /// [permissions] only matter for Staff ([ResolvedOrgRole.member]); the
+  /// owner and Admins get every permission.
+  factory OrganizationCapabilities.forAccess(ResolvedOrgRole role, {Set<OrgPermission> permissions = const {}}) {
+    final admin = role != ResolvedOrgRole.member;
+    final perms = admin ? OrgPermission.values.toSet() : normalizePermissions(permissions);
     return OrganizationCapabilities._(
       isActive: true,
       role: role,
-      canViewDashboard: true,
-      canManageRescues: true,
-      canRejectCases: true,
-      canManageRecords: true,
-      canManageAdoptions: true,
-      canViewAnalytics: true,
-      canViewAudits: true,
-      canManageTeam: true,
-      canManageMembers: isOwnerOrAdmin,
-      canManageFacebookConnection: isOwnerOrAdmin,
-      canPublishToFacebook: canPublishToFacebook,
+      isAdmin: admin,
+      permissions: perms,
+      preset: admin ? null : OrgPreset.matching(perms),
     );
   }
+
+  bool has(OrgPermission p) => isActive && permissions.contains(p);
+
+  bool get canViewDashboard => isActive;
+  bool get canManageRescues => has(OrgPermission.rescue);
+  bool get canRejectCases => has(OrgPermission.rescue);
+  bool get canManageRecords => has(OrgPermission.animals);
+  bool get canGiveCare => has(OrgPermission.care) || has(OrgPermission.animals);
+  bool get canManageAdoptions => has(OrgPermission.adoptions);
+  bool get canRunCampaigns => has(OrgPermission.campaigns);
+  bool get canViewFinances => has(OrgPermission.financeView) || has(OrgPermission.financeManage);
+  bool get canManageFinances => has(OrgPermission.financeManage);
+  bool get canManageVolunteers => has(OrgPermission.volunteers);
+  bool get canViewAnalytics => has(OrgPermission.insights);
+  bool get canViewAudits => has(OrgPermission.insights);
+
+  /// Invite, edit and remove members; org profile; shelter and care
+  /// settings. Admin only.
+  bool get canManageTeam => isActive && isAdmin;
+  bool get canManageMembers => isActive && isAdmin;
+  bool get canManageOrgSettings => isActive && isAdmin;
+  bool get canManageFacebookConnection => isActive && isAdmin;
+  bool get canPublishToFacebook => has(OrgPermission.facebookPublish);
+
+  /// Staff whose only permission is daily care: they get the care-tasks
+  /// screen instead of the admin shell.
+  bool get isCareOnly =>
+      isActive && !isAdmin && permissions.length == 1 && permissions.contains(OrgPermission.care);
+
+  /// Staff an Admin gave no permissions at all.
+  bool get hasNoAccess => isActive && !isAdmin && permissions.isEmpty;
 }
 
-/// Maps a raw stored [OrgRole] (admin/staff) to the display-facing
-/// [ResolvedOrgRole] used by [OrganizationCapabilities] — never stored
-/// itself, so no Firestore field/enum rename is needed.
-ResolvedOrgRole resolvedRoleFromOrgRole(OrgRole role) =>
-    role == OrgRole.admin ? ResolvedOrgRole.admin : ResolvedOrgRole.member;
+/// Capabilities from an organization's owner id and the account's members
+/// doc (null when it has none). Pure, shared by the service and tests:
+/// owner → Admin; no members doc (a legacy linked account) → Full staff;
+/// inactive → none; role 'admin' → Admin; anything else → Staff with
+/// [staffPermissionsFrom].
+OrganizationCapabilities capabilitiesFrom({
+  required String uid,
+  required String? ownerId,
+  required Map<String, dynamic>? member,
+}) {
+  if (ownerId != null && ownerId == uid) return OrganizationCapabilities.forAccess(ResolvedOrgRole.owner);
+  if (member == null) {
+    return OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: staffPermissionsFrom(null));
+  }
+  final status = member['status'] as String?;
+  if (const {'inactive', 'removed', 'disabled'}.contains(status)) return OrganizationCapabilities.none;
+  if (member['role'] == 'admin') return OrganizationCapabilities.forAccess(ResolvedOrgRole.admin);
+  return OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: staffPermissionsFrom(member));
+}
+
+/// Which home an approved organization's member opens (lib/main.dart).
+enum OrgHome {
+  /// The admin shell (dashboard and modules).
+  admin,
+
+  /// The care-tasks screen: Staff whose only permission is daily care.
+  care,
+
+  /// Staff an Admin gave no permissions, or an inactive member.
+  noAccess,
+}
+
+OrgHome orgHomeFor(OrganizationCapabilities c) {
+  if (!c.isActive || c.hasNoAccess) return OrgHome.noAccess;
+  if (c.isCareOnly) return OrgHome.care;
+  return OrgHome.admin;
+}

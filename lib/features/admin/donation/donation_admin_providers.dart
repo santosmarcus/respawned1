@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/utils/org_list_scope.dart';
@@ -68,6 +67,7 @@ final recentDonationsProvider = StreamProvider.autoDispose<List<DonationHistoryR
   return OrgListScope.watch(
     _db.collection('donations').orderBy('createdAt', descending: true).limit(10),
     empty: const <DonationHistoryRecord>[],
+    money: true,
     (s) => s.docs.map(DonationHistoryRecord.fromFirestore).toList(),
   );
 });
@@ -77,13 +77,14 @@ final allDonationsProvider = StreamProvider.autoDispose<List<DonationHistoryReco
   return OrgListScope.watch(
     _db.collection('donations').orderBy('createdAt', descending: true).limit(500),
     empty: const <DonationHistoryRecord>[],
+    money: true,
     (s) => s.docs.map(DonationHistoryRecord.fromFirestore).toList(),
   );
 });
 
 final campaignDonationsProvider = StreamProvider.autoDispose.family<List<DonationHistoryRecord>, String>((ref, id) {
   return OrgListScope.watch(_db.collection('donations').where('campaignId', isEqualTo: id),
-      empty: const <DonationHistoryRecord>[], (s) {
+      empty: const <DonationHistoryRecord>[], money: true, (s) {
     final list = s.docs.map(DonationHistoryRecord.fromFirestore).toList();
     final epoch = DateTime.fromMillisecondsSinceEpoch(0);
     list.sort((a, b) => (b.when ?? epoch).compareTo(a.when ?? epoch));
@@ -144,14 +145,18 @@ final campaignHistoryProvider = StreamProvider.autoDispose.family<List<CampaignH
 });
 
 /// PayMongo attempts, any status, for the signed-in staff member's
-/// organization. firestore.rules lets an organization's financial admins
-/// read only its own attempts (by `organizationId`); an account with no
-/// organization (a platform admin) lists every organization's.
+/// organization. firestore.rules lets only the people who manage an
+/// organization's money read its attempts (by `organizationId`); an account
+/// with no organization sees none.
 final paymentAttemptsProvider = StreamProvider.autoDispose<List<PaymentAttempt>>((ref) async* {
   final orgId = await ref.watch(currentOrganizationIdProvider.future);
-  Query<Map<String, dynamic>> q = _db.collection('donationPayments');
-  if (orgId != null && orgId.isNotEmpty) q = q.where('organizationId', isEqualTo: orgId);
-  yield* q
+  if (orgId == null || orgId.isEmpty) {
+    yield const [];
+    return;
+  }
+  yield* _db
+      .collection('donationPayments')
+      .where('organizationId', isEqualTo: orgId)
       .orderBy('createdAt', descending: true)
       .limit(100)
       .snapshots()
@@ -185,15 +190,20 @@ final myGeneralExpensesProvider = StreamProvider.autoDispose<List<Expense>>((ref
   yield* GeneralExpenseRepository().watch(orgId);
 });
 
-/// UI-only hint mirroring loadActor() in functions/campaigns.js: financial
-/// actions are shown to users.role == 'admin' or org Admin members. The
-/// backend makes the real decision.
+/// Record, allocate, refund and approve money; payments to verify; general
+/// expenses and staff pay (the financeManage permission; Admins have it).
+/// UI only: functions/campaigns.js and firestore.rules decide.
 final canManageFinancesProvider = StreamProvider.autoDispose<bool>((ref) {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return Stream.value(false);
-  final membership = ref.watch(currentOrgMembershipProvider).asData?.value;
-  return _db.collection('users').doc(uid).snapshots().map((doc) {
-    final role = doc.data()?['role'] as String?;
-    return role == 'admin' || membership?.role.name == 'admin';
-  });
+  return watchMyCapabilities(ref, (c) => c.canManageFinances);
+});
+
+/// See donor records, fund transfers and donation reports (financeView or
+/// financeManage).
+final canViewFinancesProvider = StreamProvider.autoDispose<bool>((ref) {
+  return watchMyCapabilities(ref, (c) => c.canViewFinances);
+});
+
+/// Create and edit fundraising listings (the campaigns permission).
+final canRunCampaignsProvider = StreamProvider.autoDispose<bool>((ref) {
+  return watchMyCapabilities(ref, (c) => c.canRunCampaigns);
 });

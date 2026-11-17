@@ -779,7 +779,7 @@ class _DonationReportState extends ConsumerState<_DonationReport> {
 
   @override
   Widget build(BuildContext context) {
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canManage = ref.watch(canViewFinancesProvider).asData?.value ?? false;
     if (!canManage) {
       return const RestrictedNotice('Donation figures are visible to finance admins only.');
     }

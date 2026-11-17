@@ -14,7 +14,6 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_export.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_range.dart';
@@ -1310,7 +1309,7 @@ class _EndOfCareCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canManage = ref.watch(isOrgAdminProvider).asData?.value ?? false;
     final total = cur.deaths.length;
     final documented = cur.deaths.where((d) => (d.cause ?? '').trim().isNotEmpty).length;
     return SectionCard(
@@ -1435,7 +1434,7 @@ class _MonthlyTrendCardState extends ConsumerState<_MonthlyTrendCard> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(analyticsSummariesProvider);
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canManage = ref.watch(isOrgAdminProvider).asData?.value ?? false;
     final now = DateTime.now();
     // The current month is always live.
     final thisMonth = AnalyticsRange.month(now.year, now.month).period(now);
@@ -1674,7 +1673,7 @@ class _FocusAreasCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final areasAsync = ref.watch(focusAreasProvider);
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canManage = ref.watch(isOrgAdminProvider).asData?.value ?? false;
     final areas = areasAsync.asData?.value ?? const <FocusArea>[];
     final canEdit = orgId != null && canManage;
 

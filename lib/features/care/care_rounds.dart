@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
+
 /// Dashboard gaps 2 and 3: daily care rounds and the carer roster.
 ///
 /// Setup (areas, round tasks, shifts and the weekly roster) lives in
@@ -339,10 +341,13 @@ final rosterCandidatesProvider = FutureProvider.autoDispose.family<List<({Roster
       final email = (m['email'] as String?)?.trim();
       out.add((
         entry: RosterEntry(d.id, (name?.isNotEmpty ?? false) ? name! : (email?.isNotEmpty ?? false) ? email! : 'Member'),
-        role: (m['role'] as String?) ?? 'staff',
+        role: m['role'] == 'admin'
+            ? 'admin'
+            : (OrgPreset.matching(staffPermissionsFrom(m)) == OrgPreset.animalCare ? 'care' : 'staff'),
       ));
     }
-    int rank(String r) => r == 'carer' ? 0 : (r == 'staff' ? 1 : 2);
+    // Daily-care staff first, then other Staff, then Admins.
+    int rank(String r) => r == 'care' ? 0 : (r == 'staff' ? 1 : 2);
     out.sort((a, b) {
       final c = rank(a.role).compareTo(rank(b.role));
       return c != 0 ? c : a.entry.name.toLowerCase().compareTo(b.entry.name.toLowerCase());
