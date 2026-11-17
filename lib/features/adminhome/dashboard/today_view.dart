@@ -212,7 +212,7 @@ class GlanceCard extends ConsumerWidget {
                 n(toVerify),
                 'Donations to verify',
                 tone: warnIf(toVerify),
-                onTap: () => openDonationsAdmin(context),
+                onTap: () => openFlaggedPayments(context),
               )
                   : const _Tile(Icons.lock, '—', 'Donations to verify (admins)'),
               _Tile(

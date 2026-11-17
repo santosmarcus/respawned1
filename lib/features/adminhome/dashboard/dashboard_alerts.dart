@@ -596,10 +596,10 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         title: '${plural(review2.length, 'donation')} to verify',
         status: '${formatPeso(total)} · payment needs review',
         timing: oldest == null ? null : 'Oldest ${elapsedSince(oldest)}',
-        action: 'Confirm the payment before counting it as received',
+        action: 'Accept it for the amount paid, or void it with a reason',
         area: AlertArea.funds,
-        button: 'Verify',
-        open: (context, _) => openDonationsAdmin(context),
+        button: 'Review',
+        open: (context, _) => openFlaggedPayments(context),
       ),
     );
   }

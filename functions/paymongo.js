@@ -142,7 +142,12 @@ async function markIfStillOpen(paymentRef, newStatus, extra = {}) {
 // Idempotent: webhook + sync racing each other credit the campaign once,
 // because the status check and every write share one transaction.
 // Returns {outcome: 'paid'|'needs_review'|'not_paid'|'mismatch', goal?}.
-async function finalizePaidDonation(paymentRef, session) {
+//
+// `settle` ({actor}) is settleFlaggedPayment accepting a needs_review payment
+// for the amount PayMongo actually received: the same writes as a verified
+// payment, but for the paid amount, plus a campaign history entry and an
+// auditLogs entry for the decision.
+async function finalizePaidDonation(paymentRef, session, settle = null) {
   const paid = findPaidPayment(session);
   if (!paid) return {outcome: 'not_paid'};
 
@@ -151,7 +156,11 @@ async function finalizePaidDonation(paymentRef, session) {
     const snap = await tx.get(paymentRef);
     if (!snap.exists) return {outcome: 'mismatch'};
     const p = snap.data();
-    if (p.status === 'paid' || p.status === 'needs_review') return {outcome: p.status};
+    // A voided flagged payment stays voided: a later webhook or sync must
+    // never credit it.
+    if (p.status === 'paid' || p.status === 'voided') return {outcome: p.status};
+    if (p.status === 'needs_review' && !settle) return {outcome: p.status};
+    if (settle && p.status !== 'needs_review') return {outcome: p.status};
     if (p.checkoutSessionId !== session.id ||
         session.attributes.reference_number !== paymentRef.id) {
       return {outcome: 'mismatch'};
@@ -173,16 +182,27 @@ async function finalizePaidDonation(paymentRef, session) {
     const now = FieldValue.serverTimestamp();
     const paidAmount = paid.attributes.amount;
     const paidCurrency = String(paid.attributes.currency || '').toUpperCase();
-    if (paidAmount !== p.amountCentavos || paidCurrency !== p.currency) {
-      // Money moved, but not for the amount priced here — a human must look.
+    if (settle) {
+      if (paidCurrency !== p.currency || !Number.isInteger(paidAmount) || paidAmount <= 0) {
+        return {outcome: 'mismatch'};
+      }
+    } else if (paidAmount !== p.amountCentavos || paidCurrency !== p.currency) {
+      // Money moved, but not for the amount priced here — a human must look
+      // (settleFlaggedPayment: accept for the paid amount, or void).
       tx.update(paymentRef, {
         status: 'needs_review',
         reviewReason: 'amount_mismatch',
         paymongoPaymentId: paid.id,
+        paidAmountCentavos: Number.isInteger(paidAmount) ? paidAmount : null,
+        paidCurrency,
+        flaggedAt: now,
         updatedAt: now,
       });
       return {outcome: 'needs_review'};
     }
+    // What is credited: the priced amount, or what was actually paid when a
+    // flagged payment is accepted.
+    const amount = settle ? paidAmount / 100 : p.amount;
 
     const methodType = session.attributes.payment_method_used ||
       (paid.attributes.source && paid.attributes.source.type) || p.paymentMethod;
@@ -198,8 +218,8 @@ async function finalizePaidDonation(paymentRef, session) {
       donorName: p.isAnonymous ? 'Anonymous' : donorDisplayName(userSnap.data()),
       campaignId: p.campaignId,
       campaignName: p.campaignName,
-      amount: p.amount,
-      amountString: `₱${p.amount.toFixed(2)}`,
+      amount,
+      amountString: `₱${amount.toFixed(2)}`,
       method: methodLabel,
       donationMethod: methodLabel,
       isAnonymous: p.isAnonymous === true,
@@ -232,6 +252,17 @@ async function finalizePaidDonation(paymentRef, session) {
       paymentMethodType: methodType,
       livemode: session.attributes.livemode === true,
       lastPaymentError: FieldValue.delete(),
+      ...(settle ? {
+        amountCreditedCentavos: paidAmount,
+        reviewResolution: {
+          action: 'accepted',
+          pricedAmount: p.amount,
+          paidAmount: amount,
+          byUid: settle.actor.uid,
+          byName: settle.actor.name,
+          at: now,
+        },
+      } : {}),
     });
     // Doc id = paymentId, so the app's local HistoryItem (id = paymentId)
     // and this history doc merge in historyProvider instead of duplicating.
@@ -253,10 +284,10 @@ async function finalizePaidDonation(paymentRef, session) {
       const before = Number(c.collectedAmount) || 0;
       const target = Number(c.targetAmount) || 0;
       const campaignUpdate = {
-        collectedAmount: FieldValue.increment(p.amount),
+        collectedAmount: FieldValue.increment(amount),
         numdonors: FieldValue.increment(1),
       };
-      if (target > 0 && before < target && before + p.amount >= target) {
+      if (target > 0 && before < target && before + amount >= target) {
         goal = {campaignId: p.campaignId, title: c.title || 'this campaign'};
         // This payment completed the goal: stop taking donations now (the
         // general view moves it to Past Campaigns) and tell the donor's app.
@@ -273,18 +304,45 @@ async function finalizePaidDonation(paymentRef, session) {
         tx.update(paymentRef, {completedCampaign: true});
       }
       tx.update(campaignRef, campaignUpdate);
+      if (settle) {
+        tx.set(campaignRef.collection('history').doc(), {
+          type: 'flagged_payment_accepted',
+          paymentId: paymentRef.id,
+          amount,
+          pricedAmount: p.amount,
+          byUid: settle.actor.uid,
+          byName: settle.actor.name,
+          at: now,
+        });
+      }
+    }
+    if (settle) {
+      tx.set(db.collection('auditLogs').doc(), {
+        category: 'donations',
+        action: 'Flagged payment accepted for the amount paid',
+        actorId: settle.actor.uid,
+        actorName: settle.actor.name,
+        actorRole: settle.actor.role,
+        ...(c.organizationId ? {organizationId: c.organizationId} : {}),
+        targetType: 'DonationPayment',
+        targetId: paymentRef.id,
+        oldValues: {status: 'needs_review', pricedAmount: p.amount},
+        newValues: {status: 'paid', creditedAmount: amount},
+        metadata: {campaignId: p.campaignId, paymongoPaymentId: paid.id, checkoutSessionId: p.checkoutSessionId || null},
+        createdAt: now,
+      });
     }
     const benefit = certificateBenefit(c, p.campaignName);
     issueCertificate(tx, {
       notification: isSponsorship ? {
         type: 'sponsorship_confirmed',
         title: 'Sponsorship Confirmed',
-        message: `Your ${formatPeso(p.amount)} sponsorship for ${benefit} was received. Thank you! ` +
+        message: `Your ${formatPeso(amount)} sponsorship for ${benefit} was received. Thank you! ` +
           'Your certificate is in Profile → Certificates.',
       } : {
         type: 'donation_confirmed',
         title: 'Donation Confirmed',
-        message: `Your ${formatPeso(p.amount)} donation to ${p.campaignName || benefit} was received. Thank you! ` +
+        message: `Your ${formatPeso(amount)} donation to ${p.campaignName || benefit} was received. Thank you! ` +
           'Your certificate is in Profile → Certificates.',
       },
             details: isSponsorship ? {
@@ -296,7 +354,7 @@ async function finalizePaidDonation(paymentRef, session) {
             type: isSponsorship ? 'sponsorship' : 'donation',
       recipientName: donorDisplayName(userSnap.data()),
       organizationName: p.organizer,
-      contribution: formatPeso(p.amount),
+      contribution: formatPeso(amount),
       benefit,
       campaignId: p.campaignId,
       campaignTitle: p.campaignName,
@@ -442,6 +500,7 @@ exports.createDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (r
       campaignType,
       itemDescription,
       organizer,
+      organizationId: c.organizationId || null,
       amount: pesos,
       amountCentavos,
       currency: CURRENCY,
@@ -541,6 +600,139 @@ exports.cancelDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (r
 });
 
 // ── Webhook ─────────────────────────────────────────────────────────────────
+// ── Flagged payments (needs_review) ─────────────────────────────────────────
+//
+// A PayMongo payment whose paid amount differs from the amount priced here is
+// marked needs_review and not credited (finalizePaidDonation). A financial
+// admin of the organization that owns the campaign settles it from the
+// dashboard's "donation to verify" alert:
+//   check  — fetch the session from PayMongo and store the paid amount on the
+//            payment (older flags didn't record it); nothing is credited.
+//   accept — credit the amount PayMongo actually received, through
+//            finalizePaidDonation (same donation, history, campaign total and
+//            certificate writes as a verified payment), plus a campaign
+//            history entry and an auditLogs entry.
+//   void   — close it without crediting anything, with a required reason
+//            and an auditLogs entry (any refund happens in PayMongo).
+// Both accept and void take the payment out of needs_review, which clears
+// the dashboard alert.
+
+function actorName(u) {
+  const full = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+  return full || u.name || 'Admin';
+}
+
+// Financial administrator (same test as loadActor({finance: true}) in
+// campaigns.js) of `organizationId`: a platform 'admin', or an Admin member
+// of that organization. Anyone else is refused.
+async function loadFinanceActorFor(request, organizationId) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const uid = request.auth.uid;
+  const userSnap = await db.collection('users').doc(uid).get();
+  const u = userSnap.exists ? userSnap.data() : {};
+  const role = typeof u.role === 'string' ? u.role : '';
+  const actor = {uid, name: actorName(u), role};
+  if (role === 'admin') return actor;
+  const userOrg = typeof u.organizationId === 'string' ? u.organizationId : '';
+  if (!organizationId || userOrg !== organizationId) {
+    throw new HttpsError('permission-denied', 'Only financial administrators of the organization that owns this campaign can do this.');
+  }
+  const m = await db.collection('organizations').doc(organizationId).collection('members').doc(uid).get();
+  if (!m.exists || m.data().role !== 'admin') {
+    throw new HttpsError('permission-denied', 'Only financial administrators of the organization that owns this campaign can do this.');
+  }
+  return actor;
+}
+
+exports.settleFlaggedPayment = onCall({secrets: [paymongoSecretKey]}, async (request) => {
+  const {paymentId, action, reason} = request.data || {};
+  if (typeof paymentId !== 'string' || !PAYMENT_ID_PATTERN.test(paymentId)) {
+    throw new HttpsError('invalid-argument', 'A valid paymentId is required.');
+  }
+  if (!['check', 'accept', 'void'].includes(action)) throw new HttpsError('invalid-argument', 'Unknown action.');
+  const ref = paymentsCol().doc(paymentId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Payment not found.');
+  const p = snap.data();
+  let organizationId = p.organizationId || null;
+  if (!organizationId && typeof p.campaignId === 'string' && CAMPAIGN_ID_PATTERN.test(p.campaignId)) {
+    const c = await db.collection('campaigns').doc(p.campaignId).get();
+    organizationId = c.exists ? (c.data().organizationId || null) : null;
+  }
+  const actor = await loadFinanceActorFor(request, organizationId);
+  if (p.status !== 'needs_review') {
+    throw new HttpsError('failed-precondition', `This payment is no longer waiting for review (it is ${p.status}).`);
+  }
+
+  if (action === 'void') {
+    const why = typeof reason === 'string' ? reason.trim() : '';
+    if (!why) throw new HttpsError('invalid-argument', 'Give a reason for voiding this payment.');
+    if (why.length > 500) throw new HttpsError('invalid-argument', 'Reason is too long (max 500).');
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      if (!s.exists || s.data().status !== 'needs_review') {
+        throw new HttpsError('failed-precondition', 'This payment is no longer waiting for review.');
+      }
+      const now = FieldValue.serverTimestamp();
+      tx.update(ref, {
+        status: 'voided',
+        reviewResolution: {action: 'voided', reason: why, byUid: actor.uid, byName: actor.name, at: now},
+        updatedAt: now,
+      });
+      tx.set(db.collection('auditLogs').doc(), {
+        category: 'donations',
+        action: 'Flagged payment voided',
+        actorId: actor.uid,
+        actorName: actor.name,
+        actorRole: actor.role,
+        ...(organizationId ? {organizationId} : {}),
+        targetType: 'DonationPayment',
+        targetId: paymentId,
+        oldValues: {status: 'needs_review', pricedAmount: p.amount},
+        newValues: {status: 'voided', reason: why},
+        metadata: {
+          campaignId: p.campaignId || null,
+          paidAmount: Number.isInteger(p.paidAmountCentavos) ? p.paidAmountCentavos / 100 : null,
+          paymongoPaymentId: p.paymongoPaymentId || null,
+          checkoutSessionId: p.checkoutSessionId || null,
+        },
+        createdAt: now,
+      });
+    });
+    return {status: 'voided'};
+  }
+
+  if (!p.checkoutSessionId) throw new HttpsError('failed-precondition', 'This payment has no PayMongo checkout to check.');
+  let session;
+  try {
+    session = await retrieveCheckoutSession(p.checkoutSessionId);
+  } catch (e) {
+    logPaymongoError('settleFlaggedPayment retrieve', paymentId, e);
+    throw new HttpsError('unavailable', 'Could not reach PayMongo. Please try again.');
+  }
+  const paid = findPaidPayment(session);
+  if (!paid) throw new HttpsError('failed-precondition', 'PayMongo shows no completed payment for this checkout.');
+  const paidAmountCentavos = paid.attributes.amount;
+
+  if (action === 'check') {
+    await ref.update({
+      paidAmountCentavos: Number.isInteger(paidAmountCentavos) ? paidAmountCentavos : null,
+      paidCurrency: String(paid.attributes.currency || '').toUpperCase(),
+      paymongoPaymentId: paid.id,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return {status: 'needs_review', paidAmount: paidAmountCentavos / 100};
+  }
+
+  const result = await finalizePaidDonation(ref, session, {actor});
+  if (result.outcome !== 'paid') {
+    throw new HttpsError('failed-precondition', result.outcome === 'mismatch' ?
+      'The PayMongo payment doesn\'t match this record (different checkout or currency). It was not credited.' :
+      'This payment could not be accepted.');
+  }
+  return {status: 'paid', creditedAmount: paidAmountCentavos / 100};
+});
+
 function verifyPaymongoSignature(header, rawBody) {
   if (typeof header !== 'string' || !rawBody) return false;
   const parts = {};
