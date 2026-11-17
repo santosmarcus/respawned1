@@ -18,6 +18,7 @@ class ReferralHistorySection extends ConsumerWidget {
         ReferralStatus.referredPending => 'Pending',
         ReferralStatus.accepted => 'Accepted',
         ReferralStatus.declined => 'Declined',
+        ReferralStatus.expired => 'No answer (returned)',
         ReferralStatus.notified => 'Notified',
       };
 
@@ -72,6 +73,11 @@ class ReferralHistorySection extends ConsumerWidget {
                                     '  ${_dateLabel(r.createdAt)} · ${_statusLabel(r.status)}',
                                 style: GoogleFonts.zain(
                                     fontSize: 11, color: AppColors.textSecondary)),
+                            if (r.declineReason != null && r.declineReason!.isNotEmpty)
+                              TextSpan(
+                                  text: '\nReason: ${r.declineReason}',
+                                  style: GoogleFonts.zain(
+                                      fontSize: 11, color: AppColors.textSecondary)),
                           ],
                         ),
                       ),

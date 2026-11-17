@@ -678,7 +678,8 @@ service cloud.firestore {
     //
     // Read by anyone signed in (public map, transporter job board). Writers:
     //   - staff of the owning organization (or any approved organization's
-    //     staff while the case is unowned or referred), who may only stamp
+    //     staff while the case is unowned; the staff of the organization a
+    //     case is referred to), who may only stamp
     //     their own organizationId;
     //   - the reporter, for their own report (never ownership/assignment
     //     fields);
@@ -692,9 +693,19 @@ service cloud.firestore {
       return /databases/$(database)/documents/cases/$(caseId);
     }
 
+    // A case referred to another organization (CaseReferralRepository)
+    // records the target in referredToOrgId; that organization's staff work
+    // it (accept or decline) until it is answered.
+    function isReferralTarget(data) {
+      return data.get('status', '') == 'referred' &&
+        data.get('referredToOrgId', '') != '' &&
+        data.get('referredToOrgId', '') == myOrgId() &&
+        isOrgStaff();
+    }
+
     function canStaffCase(data) {
       return canStaffRecordOf(data.get('organizationId', '')) ||
-        (data.get('status', '') == 'referred' && isOrgStaff());
+        isReferralTarget(data);
     }
 
     function isTransporterRole() {
@@ -847,9 +858,9 @@ service cloud.firestore {
       // The full report (reporter's name and phone, verification evidence,
       // the rider's location, notes, status history): platform staff; staff
       // of the organization that owns it; any approved organization's staff
-      // while it isn't owned yet (organizationId == '', the review pool) or
-      // is referred (referrals are shared — the target isn't recorded on
-      // the case); the reporter, the willing adopter, the
+      // while it isn't owned yet (organizationId == '', the review pool);
+      // the organization a case is referred to (referredToOrgId); the
+      // reporter, the willing adopter, the
       // transporter holding or offered it, the rider sent to verify it,
       // verified transporters and approved volunteers (the job board), and
       // anyone for a report open to Community Adoption. Everyone else reads
@@ -857,9 +868,10 @@ service cloud.firestore {
       // the document or compares a field to the caller's uid, so queries
       // that filter on reporterId / assignedVolunteerId / riderId /
       // verification.riderId / willingAdopterId can be proven.
-      // organizationId and status are read directly (no default) so a staff
-      // query must filter on organizationId == theirs / '' or status ==
-      // 'referred' (RescueCaseQueryRepository.watchScopedCaseDocs).
+      // organizationId and referredToOrgId are read directly (no default)
+      // so a staff query must filter on organizationId == theirs / '' or
+      // referredToOrgId == theirs (RescueCaseQueryRepository.
+      // watchScopedCaseDocs).
       allow read: if signedIn() && (
         // Document-only checks first, so the lookups below stay inside
         // Firestore's 1,000-expression budget.
@@ -870,7 +882,7 @@ service cloud.firestore {
         isCommunityAdoptable(resource.data) ||
         (isOrgStaff() && (
           isPlatformStaff() ||
-          resource.data.status == 'referred' ||
+          (resource.data.referredToOrgId == myOrgId() && myOrgId() != '') ||
           canStaffRecordOf(resource.data.organizationId)
         )) ||
         isVerifiedResponder() ||

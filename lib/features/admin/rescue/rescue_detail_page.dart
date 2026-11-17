@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
+import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -427,6 +428,75 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       );
     }
   }
+
+  /// The receiving organization accepts a referral: it becomes the owner and
+  /// the case enters its Rescue Review.
+  Future<void> _acceptReferral(RescueCase c) async {
+    if (_isLoading) return;
+    final from = _referralInfo(c)['fromOrgName'] as String?;
+    final ok = await showConfirmActionDialog(
+      context,
+      title: 'Accept referral?',
+      message: 'Your organization takes over this case${from == null || from.isEmpty ? '' : ' from $from'}. '
+          'It moves to your Rescue Review.',
+      confirmLabel: 'Accept',
+    );
+    if (!ok || !mounted) return;
+    await _runReferralAnswer(
+      () => ref.read(rescueCaseRepositoryProvider).acceptReferral(
+            caseId: c.id,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          ),
+      done: 'Referral accepted. The case is in your Rescue Review.',
+    );
+  }
+
+  /// The receiving organization declines a referral with a reason; the case
+  /// goes back to the referring organization's Rescue Review.
+  Future<void> _declineReferral(RescueCase c) async {
+    if (_isLoading) return;
+    final reason = await showTextInputDialog(
+      context,
+      title: 'Decline referral',
+      message: 'The case goes back to the referring organization with your reason.',
+      label: 'Reason',
+      hint: 'e.g. no space for this species, outside our area',
+      confirmLabel: 'Decline',
+      required: true,
+      destructive: true,
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+    await _runReferralAnswer(
+      () => ref.read(rescueCaseRepositoryProvider).declineReferral(
+            caseId: c.id,
+            reason: reason,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          ),
+      done: 'Referral declined. The referring organization has been told.',
+    );
+  }
+
+  Future<void> _runReferralAnswer(Future<void> Function() action, {required String done}) async {
+    setState(() => _isLoading = true);
+    try {
+      await action();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(appSnackBar(done));
+    } catch (e) {
+      if (mounted) {
+        final msg = e is StateError ? e.message : '$e';
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not answer the referral: $msg', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  static Map<String, dynamic> _referralInfo(RescueCase c) =>
+      c.raw['referral'] is Map ? Map<String, dynamic>.from(c.raw['referral'] as Map) : const {};
 
   Future<void> _mergeDuplicate(RescueCase c) async {
     final acted = await showPossibleDuplicateSheet(
@@ -952,7 +1022,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
 
             const SizedBox(height: 24),
 
-            if (c.status == RescueStatus.pendingReview || c.status == RescueStatus.verifying) ...[
+            if (c.status == RescueStatus.pendingReview) _ReferralOutcomeBanner(rescueCase: c),
+
+            if (c.status == RescueStatus.referred) ...[
+              _ReferralPanel(
+                rescueCase: c,
+                myOrganizationId: ref.watch(currentOrganizationIdProvider).asData?.value,
+                busy: _isLoading,
+                onAccept: () => _acceptReferral(c),
+                onDecline: () => _declineReferral(c),
+              ),
+            ] else if (c.status == RescueStatus.pendingReview || c.status == RescueStatus.verifying) ...[
               Row(
                 children: [
                   Expanded(
@@ -2320,6 +2400,115 @@ class _ServiceAreaGeofenceNote extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A case referred to another organization. The receiving organization's
+/// staff accept or decline it; everyone else sees who it is waiting on.
+class _ReferralPanel extends StatelessWidget {
+  final RescueCase rescueCase;
+  final String? myOrganizationId;
+  final bool busy;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  const _ReferralPanel({
+    required this.rescueCase,
+    required this.myOrganizationId,
+    required this.busy,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final r = rescueCase.raw['referral'] is Map
+        ? Map<String, dynamic>.from(rescueCase.raw['referral'] as Map)
+        : const <String, dynamic>{};
+    final target = rescueCase.raw['referredToOrgId'] as String? ?? '';
+    final targetName = (r['targetOrgName'] as String?) ?? 'another organization';
+    final fromName = (r['fromOrgName'] as String?) ?? '';
+    final note = (r['note'] as String?)?.trim() ?? '';
+    final at = r['referredAt'] is Timestamp ? (r['referredAt'] as Timestamp).toDate() : null;
+    final isTarget = target.isNotEmpty && target == myOrganizationId;
+    final muted = GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary);
+
+    if (target.isEmpty) {
+      return SectionCard(
+        child: Text('This case is referred. No further action is needed here.', style: muted),
+      );
+    }
+    return SectionCard(
+      title: isTarget ? 'Referral to your organization' : 'Waiting on $targetName',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            isTarget
+                ? '${fromName.isEmpty ? 'Another organization' : fromName} referred this case to you'
+                    '${at == null ? '' : ' on ${formatDateTime(at)}'}. Accept to take it into your Rescue Review, '
+                    'or decline with a reason to send it back.'
+                : 'Referred to $targetName${at == null ? '' : ' on ${formatDateTime(at)}'}. They are reminded after '
+                    '$kReferralReminderHours hours; with no answer after $kReferralReturnHours hours the case comes '
+                    'back to your Rescue Review.',
+            style: muted,
+          ),
+          if (note.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Note: $note', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+          ],
+          if (isTarget) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: busy ? null : onDecline,
+                    style: AppButtons.dangerOutline,
+                    child: Text('Decline', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.error)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: busy ? null : onAccept,
+                    style: AppButtons.primary,
+                    child: Text('Accept', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// On a case back in Rescue Review after a referral: who declined it and
+/// why, or that nobody answered in time.
+class _ReferralOutcomeBanner extends StatelessWidget {
+  final RescueCase rescueCase;
+  const _ReferralOutcomeBanner({required this.rescueCase});
+
+  @override
+  Widget build(BuildContext context) {
+    final o = rescueCase.raw['referralOutcome'];
+    if (o is! Map) return const SizedBox.shrink();
+    final status = o['status'] as String?;
+    if (status != 'declined' && status != 'expired') return const SizedBox.shrink();
+    final name = (o['targetOrgName'] as String?) ?? 'The receiving organization';
+    final reason = (o['reason'] as String?)?.trim() ?? '';
+    final text = status == 'declined'
+        ? '$name declined the referral.${reason.isEmpty ? '' : ' Reason: $reason'}'
+        : '$name did not answer the referral within $kReferralReturnHours hours, so it came back to you.';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SectionCard(
+        title: 'Referral returned',
+        child: Text(text, style: GoogleFonts.zain(fontSize: 13, color: AppColors.warning)),
       ),
     );
   }

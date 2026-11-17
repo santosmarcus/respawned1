@@ -142,8 +142,9 @@ describe('who reads full rescue reports', () => {
     // Staff: the unowned pool, their own organization's, and referrals.
     await assertSucceeds(as('staffB').collection('cases').where('organizationId', '==', '').where('status', 'in', ['pending', 'verifying']).get());
     await assertSucceeds(as('staffA').collection('cases').where('organizationId', '==', 'orgA').where('status', 'in', ['accepted', 'assigned']).get());
-    await assertSucceeds(as('staffB').collection('cases').where('status', '==', 'referred').get());
-    await assertFails(as('staffB').collection('cases').where('status', 'in', ['pending', 'referred']).get());
+    await assertSucceeds(as('staffB').collection('cases').where('referredToOrgId', '==', 'orgB').get());
+    await assertFails(as('staffB').collection('cases').where('referredToOrgId', '==', 'orgA').get());
+    await assertFails(as('staffB').collection('cases').where('status', '==', 'referred').get());
     await assertFails(as('staffB').collection('cases').where('organizationId', '==', 'orgA').get());
     await assertFails(as('reporter').collection('cases').where('status', '==', 'pending').get());
   });
@@ -186,13 +187,20 @@ describe('staff stay inside their own organization', () => {
       const db = ctx.firestore();
       await db.doc('cases/offered/transportAssignments/as1').update({ organizationId: 'orgA' });
       await db.doc('adoptions/appA/followUps/f1').set({ organizationId: 'orgA', status: 'scheduled' });
-      await db.doc('cases/referredA').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA' });
+      await db.doc('cases/referredA').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA', referredToOrgId: 'orgB' });
+      await db.doc('cases/referredElsewhere').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA', referredToOrgId: 'orgC' });
     });
     // Owned case.
     await assertSucceeds(as('staffA').doc('cases/ownedA').get());
     await assertFails(as('staffB').doc('cases/ownedA').get());
-    // A referred case is shared.
+    // A referred case: the organization it is referred to, and nobody else.
     await assertSucceeds(as('staffB').doc('cases/referredA').get());
+    await assertFails(as('staffB').doc('cases/referredElsewhere').get());
+    // The target accepts it (takes ownership) or declines it.
+    await assertSucceeds(as('staffB').doc('cases/referredA').update({
+      status: 'pending', organizationId: 'orgB', referredToOrgId: FieldValue.delete(),
+    }));
+    await assertFails(as('staffB').doc('cases/referredElsewhere').update({ status: 'pending' }));
     // The unowned pool is shared.
     await assertSucceeds(as('staffB').doc('cases/pending1').get());
     // Offers.

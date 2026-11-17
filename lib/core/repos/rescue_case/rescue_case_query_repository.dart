@@ -29,8 +29,10 @@ class RescueCaseQueryRepository {
   /// Case documents staff may list (firestore.rules): platform staff get
   /// every case; organization staff their own organization's, the unowned
   /// review pool (organizationId == ''), and — when [includeReferred] —
-  /// every referred case, since referrals are shared. Each is its own
-  /// query, merged and de-duplicated by id.
+  /// cases referred to their organization (referredToOrgId). Each is its
+  /// own query, merged and de-duplicated by id. A case referred elsewhere
+  /// that is still in the unowned pool (referred by platform staff) is left
+  /// out: only the target organization answers it.
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> watchScopedCaseDocs(
     Query<Map<String, dynamic>> Function(Query<Map<String, dynamic>> q) refine, {
     bool includeReferred = false,
@@ -44,10 +46,17 @@ class RescueCaseQueryRepository {
       yield const [];
       return;
     }
+    final myOrgId = scope is OneOrganization ? scope.organizationId : '';
     final streams = [
       refine(scope.apply(_store.cases)).snapshots().map((s) => s.docs),
-      refine(_store.cases.where('organizationId', isEqualTo: '')).snapshots().map((s) => s.docs),
-      if (includeReferred) _store.cases.where('status', isEqualTo: 'referred').snapshots().map((s) => s.docs),
+      refine(_store.cases.where('organizationId', isEqualTo: '')).snapshots().map(
+            (s) => s.docs.where((d) {
+              final target = d.data()['referredToOrgId'] as String? ?? '';
+              return target.isEmpty || target == myOrgId;
+            }).toList(),
+          ),
+      if (includeReferred && myOrgId.isNotEmpty)
+        _store.cases.where('referredToOrgId', isEqualTo: myOrgId).snapshots().map((s) => s.docs),
     ];
     yield* combineLatest(streams).map((lists) {
       final byId = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
