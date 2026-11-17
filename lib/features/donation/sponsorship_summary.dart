@@ -4,10 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import '../../app_theme.dart';
 import '../generalhome/history_provider.dart';
-import 'cancel_dialog.dart';
 import 'models.dart';
-import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'refund_request.dart';
 
 final donationSummaryProvider = ChangeNotifierProvider.autoDispose.family<DonationSummaryNotifier, DonationSummaryParams>((ref, params) {
   return DonationSummaryNotifier(
@@ -28,6 +27,10 @@ class DonationSummaryParams {
   final DateTime timestamp;
   final HistoryItem? historyItem;
 
+  /// Opened to view an existing record (History, or "View Current
+  /// Sponsorship"): the top-left button goes back instead of home.
+  final bool fromHistory;
+
   DonationSummaryParams({
     required this.charityName,
     required this.donationMethod,
@@ -35,6 +38,7 @@ class DonationSummaryParams {
     required this.referenceNumber,
     required this.timestamp,
     this.historyItem,
+    this.fromHistory = false,
   });
 }
 
@@ -116,7 +120,7 @@ class DonationSummaryScreen extends ConsumerWidget {
     final donation = ref.watch(donationSummaryProvider(params));
     // Watch history to react to cancellation
     final history = ref.watch(historyProvider);
-    final currentHistoryItem = donation.historyItem != null 
+    final currentHistoryItem = donation.historyItem != null
         ? history.firstWhere((item) => item.id == donation.historyItem!.id, orElse: () => donation.historyItem!)
         : null;
 
@@ -124,16 +128,20 @@ class DonationSummaryScreen extends ConsumerWidget {
     final isInactive = currentHistoryItem?.sponsorshipStatus == 'inactive';
 
     return PopScope(
-      canPop: false,
+      canPop: params.fromHistory,
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.close, color: AppColors.textPrimary),
+            icon: Icon(params.fromHistory ? Icons.arrow_back : Icons.close, color: AppColors.textPrimary),
             onPressed: () {
-              Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+              if (params.fromHistory) {
+                Navigator.of(context).pop();
+              } else {
+                Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+              }
             },
           ),
           title: Text(
@@ -156,9 +164,9 @@ class DonationSummaryScreen extends ConsumerWidget {
                   child: Column(
                     children: [
                       Icon(
-                        currentHistoryItem?.sponsorshipStatus == 'inactive' ? Icons.cancel_outlined : Icons.check_circle, 
-                        color: currentHistoryItem?.sponsorshipStatus == 'inactive' ? AppColors.error : AppColors.greenrspwn, 
-                        size: 80
+                          currentHistoryItem?.sponsorshipStatus == 'inactive' ? Icons.cancel_outlined : Icons.check_circle,
+                          color: currentHistoryItem?.sponsorshipStatus == 'inactive' ? AppColors.error : AppColors.greenrspwn,
+                          size: 80
                       ),
                       const SizedBox(height: 12),
                       Text(
@@ -166,9 +174,9 @@ class DonationSummaryScreen extends ConsumerWidget {
                         style: GoogleFonts.tiltWarp(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                       ),
                       Text(
-                        currentHistoryItem?.sponsorshipStatus == 'active' 
-                          ? 'Your sponsorship is active.' 
-                          : currentHistoryItem?.sponsorshipStatus == 'cancelled'
+                        currentHistoryItem?.sponsorshipStatus == 'active'
+                            ? 'Your sponsorship is active.'
+                            : currentHistoryItem?.sponsorshipStatus == 'cancelled'
                             ? 'This sponsorship will end soon.'
                             : 'This sponsorship has ended.',
                         style: GoogleFonts.zain(fontSize: 18, color: AppColors.textPrimary),
@@ -177,7 +185,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 30),
-                
+
                 if (isSponsorship && currentHistoryItem?.pet != null) ...[
                   DonationSummarySectionCard(
                     title: 'Sponsored Pet',
@@ -214,7 +222,7 @@ class DonationSummaryScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 18),
                 ],
-  
+
                 DonationSummarySectionCard(
                   title: 'Organization',
                   icon: Icons.volunteer_activism_outlined,
@@ -261,9 +269,9 @@ class DonationSummaryScreen extends ConsumerWidget {
                           Text(
                             currentHistoryItem?.sponsorshipStatus == 'active' ? 'Active' : 'Cancelled',
                             style: GoogleFonts.zain(
-                              fontSize: 15, 
-                              fontWeight: FontWeight.bold, 
-                              color: currentHistoryItem?.sponsorshipStatus == 'active' ? AppColors.greenrspwn : AppColors.error
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: currentHistoryItem?.sponsorshipStatus == 'active' ? AppColors.greenrspwn : AppColors.error
                             ),
                           ),
                         ],
@@ -279,9 +287,9 @@ class DonationSummaryScreen extends ConsumerWidget {
                           Text(
                             formatDate(currentHistoryItem!.nextChargeDate!),
                             style: GoogleFonts.zain(
-                              fontSize: 15, 
-                              fontWeight: FontWeight.bold, 
-                              color: isInactive ? AppColors.error : AppColors.greenrspwn
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: isInactive ? AppColors.error : AppColors.greenrspwn
                             ),
                           ),
                         ],
@@ -361,50 +369,14 @@ class DonationSummaryScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
-                
-                if (isSponsorship) ...[
-                  const SizedBox(height: 24),
-                  if (currentHistoryItem?.sponsorshipStatus == 'active')
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: () {
-                          _showCancelDialog(context, ref, currentHistoryItem!);
-                        },
-                        style: AppButtons.dangerOutline,
-                        child: Text(
-                          'Cancel Sponsorship',
-                          style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    )
-                  else if (currentHistoryItem?.sponsorshipStatus == 'cancelled')
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          ref.read(historyProvider.notifier).unCancelSponsorship(currentHistoryItem!.id);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            appSnackBar('Sponsorship reactivated successfully.'),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.greenrspwn,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14.0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                          ),
-                          elevation: 0,
-                        ),
-                        child: Text(
-                          'Reactivate Sponsorship',
-                          style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                ],
-  
+
+                // Stopping or reactivating a sponsorship is done from the
+                // "Your sponsorship" card on Sponsorship Details; this page
+                // is only the summary.
+                // Refund request flow: the request's status, or "Request
+                // refund" while the donor can still ask (from History only).
+                if (params.fromHistory && currentHistoryItem != null)
+                  RefundRequestSection(donationId: currentHistoryItem.id),
                 const SizedBox(height: 25),
                 Row(
                   children: <Widget>[
@@ -446,20 +418,4 @@ class DonationSummaryScreen extends ConsumerWidget {
 
   }
 
-  void _showCancelDialog(BuildContext context, WidgetRef ref, HistoryItem item) {
-    final expiryDate = item.nextChargeDate != null 
-        ? formatDate(item.nextChargeDate!)
-        : 'the end of your current period';
-    showCancelDialog(
-      context: context,
-      title: 'Are You Sure?',
-      message: 'You are about to cancel your sponsorship. It will remain active until $expiryDate.',
-      onConfirm: () {
-        ref.read(historyProvider.notifier).cancelSponsorship(item.id);
-        ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Sponsorship cancelled successfully.'),
-        );
-      },
-    );
-  }
 }

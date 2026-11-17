@@ -1896,6 +1896,9 @@ exports.facebookSetPublisher = facebook.facebookSetPublisher;
 // PayMongo donations & sponsorships — see functions/paymongo.js.
 Object.assign(exports, require('./paymongo'));
 
+// Active sponsor count on each sponsorship listing — see functions/sponsor_counts.js.
+//Object.assign(exports, require('./sponsor_counts'));
+
 // Admin campaign/sponsorship management, allocations & reallocation — see functions/campaigns.js.
 Object.assign(exports, require('./campaigns'));
 

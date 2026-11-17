@@ -1,19 +1,32 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/image_source_sheet.dart';
+import 'package:respawnd1/features/adoption/adoption_form_controller.dart' show kCaregiverOptions;
+import 'package:respawnd1/features/adoption/widgets/adoption_form_widgets.dart';
+import 'package:respawnd1/features/adoption/widgets/adoption_upload_widgets.dart';
 
 /// Rescue gaps 6/10, step 1: the adoption request for a rescued animal, from
 /// the reporter who said they want to adopt it or the user who registered
 /// interest on Track Case. Saves `adoptions/{id}` with
 /// `source: 'rescue_case'` and status pending; the organization confirms it
-/// on Rescue Details. All three agreements (vet fees, adopter obligations,
-/// pickup window) must be accepted.
+/// on Rescue Details. Every agreement in [kRescueAdoptionAgreements] must be
+/// accepted.
+///
+/// Like the shelter adoption form, it also asks about pet experience,
+/// lifestyle and what the adopter can afford, and needs a Government ID.
+/// Those answers are saved as `petExperience`, `lifestyle` and
+/// `uploads.governmentId`, in the same shape the adoption form saves them.
 class RescueAdoptionFormPage extends StatefulWidget {
   const RescueAdoptionFormPage({super.key, required this.caseId, required this.caseData});
 
@@ -34,6 +47,31 @@ class _RescueAdoptionFormPageState extends State<RescueAdoptionFormPage> {
   final _caretaker = TextEditingController();
   String? _homeType;
   bool _landlordAllowsPets = false;
+
+  // Pet Experience (same questions as the adoption form).
+  bool _hadPetsBefore = false;
+  bool _hasCurrentPets = false;
+  final Map<String, int> _currentPets = {'dogs': 0, 'cats': 0, 'birds': 0, 'fish': 0, 'reptiles': 0, 'other': 0};
+  final _otherPetType = TextEditingController();
+  String? _petsVaccinated;
+  String? _petsSpayedNeutered;
+
+  // Lifestyle & Care (same questions as the adoption form).
+  String? _hoursAlone;
+  String? _primaryCaregiver;
+  String? _petStayLocation;
+  final Map<String, bool> _canAfford = {
+    'food': false,
+    'vaccinations': false,
+    'vetVisits': false,
+    'emergencyMedicalCare': false,
+    'grooming': false,
+    'careSupplies': false,
+  };
+
+  // Required upload.
+  final _picker = ImagePicker();
+  File? _governmentIdFile;
   final Map<String, bool> _agreed = {for (final (k, _, _) in kRescueAdoptionAgreements) k: false};
   bool _saving = false;
 
@@ -60,7 +98,7 @@ class _RescueAdoptionFormPageState extends State<RescueAdoptionFormPage> {
 
   @override
   void dispose() {
-    for (final c in [_name, _phone, _email, _address, _otherPets, _caretaker]) {
+    for (final c in [_name, _phone, _email, _address, _otherPets, _caretaker, _otherPetType]) {
       c.dispose();
     }
     super.dispose();
@@ -68,11 +106,50 @@ class _RescueAdoptionFormPageState extends State<RescueAdoptionFormPage> {
 
   bool get _allAgreed => _agreed.values.every((v) => v);
 
+  int get _totalCurrentPets => _currentPets.values.fold(0, (a, b) => a + b);
+
+  /// The added questions that aren't form fields, still unanswered.
+  List<String> _missingAnswers() => [
+    if (_hasCurrentPets && _totalCurrentPets == 0) 'how many current pets you have',
+    if (_hasCurrentPets && _currentPets['other']! > 0 && _otherPetType.text.trim().isEmpty) 'other pet type',
+    if (_hasCurrentPets && _petsVaccinated == null) 'current pets vaccinated status',
+    if (_hasCurrentPets && _petsSpayedNeutered == null) 'current pets spayed/neutered status',
+    if (_hoursAlone == null) 'hours animal will be left alone',
+    if (_primaryCaregiver == null) 'Primary Caregiver',
+    if (_petStayLocation == null) 'where pet will stay',
+  ];
+
+  void _setHasCurrentPets(bool value) => setState(() {
+    _hasCurrentPets = value;
+    if (value) return;
+    // Unticked: nothing hidden is saved.
+    _currentPets.updateAll((_, _) => 0);
+    _otherPetType.clear();
+    _petsVaccinated = null;
+    _petsSpayedNeutered = null;
+  });
+
+  Future<void> _pickGovernmentId() async {
+    final picked = await pickImageWithSource(context, _picker, maxWidth: 1280);
+    if (picked != null && mounted) setState(() => _governmentIdFile = File(picked.path));
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    final missing = _missingAnswers();
+    if (missing.isNotEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(appSnackBar('Please answer: ${missing.join(', ')}.', kind: AppMessageKind.error));
+      return;
+    }
+    if (_governmentIdFile == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(appSnackBar('Please upload your Government ID.', kind: AppMessageKind.error));
+      return;
+    }
     if (!_allAgreed) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(appSnackBar('Accept all three agreements to send your request.', kind: AppMessageKind.error));
+          .showSnackBar(appSnackBar('Accept all the agreements to send your request.', kind: AppMessageKind.error));
       return;
     }
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -87,7 +164,13 @@ class _RescueAdoptionFormPageState extends State<RescueAdoptionFormPage> {
           'Rescued animal')
           .toString();
       final now = Timestamp.now();
-      await FirebaseFirestore.instance.collection('adoptions').add({
+      final docRef = FirebaseFirestore.instance.collection('adoptions').doc();
+      // Same storage path as the adoption form; storage.rules allows the
+      // upload before the request document exists.
+      final idRef = FirebaseStorage.instance.ref('adoptions/${docRef.id}/government_id.jpg');
+      await idRef.putFile(_governmentIdFile!);
+      final governmentIdUrl = await idRef.getDownloadURL();
+      await docRef.set({
         'source': kRescueAdoptionSource,
         'caseId': widget.caseId,
         // Unowned report: stamped when an organization accepts the case
@@ -109,6 +192,21 @@ class _RescueAdoptionFormPageState extends State<RescueAdoptionFormPage> {
           'caretaker': _caretaker.text.trim(),
           'role': c['reporterId'] == uid ? 'reporter' : 'interested user',
         },
+        // Same shape as the adoption form saves.
+        'petExperience': {
+          'hadPetsBefore': _hadPetsBefore,
+          'hasCurrentPets': _hasCurrentPets,
+          'currentPets': {..._currentPets, 'otherType': _otherPetType.text.trim()},
+          'currentPetsVaccinated': _hasCurrentPets ? _petsVaccinated : 'Not Applicable',
+          'currentPetsSpayedNeutered': _hasCurrentPets ? _petsSpayedNeutered : 'Not Applicable',
+        },
+        'lifestyle': {
+          'hoursAlone': _hoursAlone,
+          'primaryCaregiver': _primaryCaregiver,
+          'petStayLocation': _petStayLocation,
+          'canAfford': Map<String, bool>.from(_canAfford),
+        },
+        'uploads': {'governmentId': governmentIdUrl},
         'agreement': {
           for (final (k, _, _) in kRescueAdoptionAgreements) k: true,
           'acceptedAt': now,
@@ -191,6 +289,123 @@ class _RescueAdoptionFormPageState extends State<RescueAdoptionFormPage> {
                 validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null),
             TextFormField(controller: _caretaker, decoration: _dec('Who will mainly care for the animal'),
                 validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null),
+            const SizedBox(height: 18),
+
+            // Pet Experience
+            Text('Pet Experience', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Owned pets before?', style: GoogleFonts.zain(fontSize: 14)),
+              value: _hadPetsBefore,
+              onChanged: (v) => setState(() => _hadPetsBefore = v ?? false),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('I currently have pets', style: GoogleFonts.zain(fontSize: 14)),
+              value: _hasCurrentPets,
+              onChanged: (v) => _setHasCurrentPets(v ?? false),
+            ),
+            if (_hasCurrentPets) ...[
+              for (final (key, label) in const [
+                ('dogs', 'Dogs'),
+                ('cats', 'Cats'),
+                ('birds', 'Birds'),
+                ('fish', 'Fish'),
+                ('reptiles', 'Reptiles'),
+                ('other', 'Other'),
+              ])
+                AdoptionCounterField(
+                  label: label,
+                  value: _currentPets[key]!,
+                  onChanged: (v) => setState(() => _currentPets[key] = v),
+                ),
+              if (_currentPets['other']! > 0)
+                TextFormField(controller: _otherPetType, decoration: _dec('Specify other pet type')),
+              const SizedBox(height: 12),
+              AdoptionRadioGroup<String>(
+                label: 'Are all current pets vaccinated?',
+                value: _petsVaccinated,
+                options: const ['Yes', 'Some', 'None'],
+                onChanged: (v) => setState(() => _petsVaccinated = v),
+              ),
+              const SizedBox(height: 12),
+              AdoptionRadioGroup<String>(
+                label: 'Are all current pets spayed/neutered?',
+                value: _petsSpayedNeutered,
+                options: const ['Yes', 'Some', 'None'],
+                onChanged: (v) => setState(() => _petsSpayedNeutered = v),
+              ),
+            ],
+            const SizedBox(height: 18),
+
+            // Lifestyle & Care
+            Text('Lifestyle & Care', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            AdoptionRadioGroup<String>(
+              label: 'Hours animal will be left alone',
+              value: _hoursAlone,
+              options: const ['Less than 2 hours', '2-4', '5-8', 'More than 8 hours'],
+              onChanged: (v) => setState(() => _hoursAlone = v),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _primaryCaregiver,
+              decoration: _dec('Primary Caregiver'),
+              items: [for (final o in kCaregiverOptions) DropdownMenuItem(value: o, child: Text(o))],
+              onChanged: (v) => setState(() => _primaryCaregiver = v),
+            ),
+            const SizedBox(height: 12),
+            AdoptionRadioGroup<String>(
+              label: 'Where will pet stay?',
+              value: _petStayLocation,
+              options: const ['Indoors', 'Outdoors', 'Mixed'],
+              onChanged: (v) => setState(() => _petStayLocation = v),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Text('Can you afford? (check all that apply)',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                const SizedBox(width: 4),
+                const AdoptionInfoTooltip(
+                  message:
+                  'According to the McDuffy 2026 Guide, the starter budget for owning a pet in the Philippines is approximately ₱2,400 per month. This covers essential expenses such as food, veterinary care, grooming, supplies, treats, and emergency savings.\n\n'
+                      'Estimated monthly costs:\n'
+                      '• Food – ₱500\n'
+                      '• Vaccines – ₱250\n'
+                      '• Flea & Tick Prevention – ₱500\n'
+                      '• Grooming – ₱250\n'
+                      '• Supplies & Replacements – ₱300\n'
+                      '• Treats – ₱200\n'
+                      '• Emergency Fund – ₱250\n'
+                      '• Miscellaneous – ₱150',
+                ),
+              ],
+            ),
+            for (final (key, label) in const [
+              ('food', 'Food'),
+              ('vaccinations', 'Vaccinations'),
+              ('vetVisits', 'Vet Visits'),
+              ('emergencyMedicalCare', 'Emergency Medical Care'),
+              ('grooming', 'Grooming'),
+              ('careSupplies', 'Care Supplies'),
+            ])
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(label),
+                value: _canAfford[key],
+                onChanged: (v) => setState(() => _canAfford[key] = v ?? false),
+              ),
+            const SizedBox(height: 18),
+
+            // Required upload
+            Text('Required Upload', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            AdoptionUploadRow(
+              label: 'Government ID',
+              file: _governmentIdFile,
+              onPick: _pickGovernmentId,
+              onRemove: () => setState(() => _governmentIdFile = null),
+            ),
             const SizedBox(height: 18),
             Text('Agreements', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
             for (final (key, title, body) in kRescueAdoptionAgreements)

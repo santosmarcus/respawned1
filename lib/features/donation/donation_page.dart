@@ -64,7 +64,9 @@ class _DonationPageState extends State<DonationPage> {
         for (var s in sponsorships) {
           // A sponsorship is active if it's "active" OR if it's "inactive" but before next charge date
           final isActiveStatus = s.sponsorshipStatus == 'active';
-          final isStillValid = isActiveStatus || (s.nextChargeDate != null && s.nextChargeDate!.isAfter(now));
+          // A refunded sponsorship (refund request flow) never counts.
+          final isStillValid = s.sponsorshipStatus != 'refunded' &&
+              (isActiveStatus || (s.nextChargeDate != null && s.nextChargeDate!.isAfter(now)));
 
           if (isStillValid && s.campaignId != null) {
             activeMap[s.campaignId!] = s;

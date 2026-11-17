@@ -11,6 +11,7 @@ const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {defineSecret, defineString} = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
+const {recountActiveSponsors, recountAllSponsorships} = require('./sponsor_counts');
 const admin = require('firebase-admin');
 const {requireOrgPermission} = require('./org_access');
 const {completedCampaignFields, certificateBenefit, issueCertificate, formatPeso} = require('./donation_common');
@@ -233,6 +234,7 @@ async function finalizePaidDonation(paymentRef, session, settle = null) {
       itemDescription: p.itemDescription,
       paymentId: paymentRef.id,
       paymongoPaymentId: paid.id,
+      refundTermsVersion: p.refundTermsVersion || null,
     };
     if (isSponsorship) {
       record.lastPaymentTime = Timestamp.now();
@@ -361,8 +363,14 @@ async function finalizePaidDonation(paymentRef, session, settle = null) {
       campaignTitle: p.campaignName,
       refNumber,
     });
-    return {outcome: 'paid', goal};
+    return {outcome: 'paid', goal, sponsorshipCampaignId: isSponsorship ? p.campaignId : null};
   });
+
+  // A new sponsor (or a renewal) changes "N people sponsoring".
+  if (result.sponsorshipCampaignId) {
+    await recountActiveSponsors(result.sponsorshipCampaignId).catch((e) =>
+      logger.warn('recountActiveSponsors failed', {campaignId: result.sponsorshipCampaignId, message: e.message}));
+  }
 
   if (result.goal) {
     await notifyGoalReached(result.goal.campaignId, result.goal.title).catch((e) =>
@@ -442,7 +450,7 @@ function resumeExisting(snap, uid) {
 exports.createDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
   const uid = request.auth.uid;
-  const {paymentId, campaignId, amount, paymentMethod, isAnonymous} = request.data || {};
+  const {paymentId, campaignId, amount, paymentMethod, isAnonymous, refundTermsVersion} = request.data || {};
 
   if (typeof paymentId !== 'string' || !PAYMENT_ID_PATTERN.test(paymentId)) {
     throw new HttpsError('invalid-argument', 'A valid paymentId is required.');
@@ -508,6 +516,9 @@ exports.createDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (r
       paymentMethod,
       paymentMethodLabel: PAYMENT_METHOD_LABELS[paymentMethod],
       isAnonymous: isAnonymous === true,
+      // The refund policy the donor accepted before paying.
+      refundTermsVersion: typeof refundTermsVersion === 'string' ? refundTermsVersion.slice(0, 40) : null,
+      refundTermsAcceptedAt: typeof refundTermsVersion === 'string' ? FieldValue.serverTimestamp() : null,
       provider: 'paymongo',
       livemode: isLiveMode(),
       status: 'creating',
@@ -863,6 +874,25 @@ exports.expireStaleDonationCheckouts = onSchedule(
 // period: renewalReminderFor records the nextChargeDate it was sent for.
 // Index: donations (type, sponsorshipStatus, nextChargeDate).
 const RENEWAL_NOTICE_DAYS = 3;
+
+// Also a phone push for the renewal reminder and the end notice, so the
+// sponsor hears about it before the date without opening the app. Best
+// effort: the in-app notification is written either way.
+async function pushToUser(uid, {title, body, data}) {
+  try {
+    const u = await db.collection('users').doc(uid).get();
+    const token = u.exists ? u.get('fcmToken') : null;
+    if (!token) return;
+    await admin.messaging().send({
+      token,
+      notification: {title, body},
+      data: Object.fromEntries(Object.entries(data).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])),
+    });
+  } catch (e) {
+    logger.warn('sponsorship push failed', {uid, message: e.message});
+  }
+}
+
 exports.remindSponsorshipRenewals = onSchedule('every 24 hours', async () => {
   const now = Date.now();
   const due = await db.collection('donations')
@@ -894,6 +924,12 @@ exports.remindSponsorshipRenewals = onSchedule('every 24 hours', async () => {
     });
     batch.update(doc.ref, {renewalReminderFor: dueMs});
     await batch.commit();
+    await pushToUser(d.userId, {
+      title: 'Renew your sponsorship?',
+      body: `Your sponsorship of ${name} ends on ${formatManilaDate(d.nextChargeDate.toDate())}. ` +
+        'Open the app to continue or stop it.',
+      data: {type: 'sponsorship_renewal', donationId: doc.id, campaignId: d.campaignId || null},
+    });
   }
 });
 
@@ -926,5 +962,15 @@ exports.lapseExpiredSponsorships = onSchedule('every 24 hours', async () => {
       });
     }
     await batch.commit();
+    if (typeof uid === 'string') {
+      await pushToUser(uid, {
+        title: 'Sponsorship Ended',
+        body: `Your 30-day sponsorship of ${doc.data().campaignName || 'your sponsored animal'} has ended.`,
+        data: {type: 'sponsorship_lapsed', donationId: doc.id, campaignId: doc.data().campaignId || null},
+      });
+    }
   }
+  // Keep "N people sponsoring" right once sponsorships run out, are
+  // stopped or refunded (sponsor_counts.js).
+  await recountAllSponsorships();
 });

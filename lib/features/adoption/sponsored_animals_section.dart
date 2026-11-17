@@ -9,9 +9,14 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/repos/sponsorship_repository.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/animal_page.dart';
+import 'package:respawnd1/features/donation/models.dart';
+import 'package:respawnd1/features/donation/sponsorship_detail.dart';
 
 /// Home screen "Sponsored Animals" — the animals the SIGNED-IN user is
-/// currently (actively) sponsoring, shown right under Post Adoption.
+/// currently (actively) sponsoring, shown right under Post Adoption. A card
+/// opens the same Sponsorship Details as the sponsorship card in
+/// Donation/Sponsorship (status, next charge date, where the funds went and
+/// how many people sponsor the animal).
 class SponsoredAnimalsSection extends StatelessWidget {
   const SponsoredAnimalsSection({super.key});
 
@@ -52,16 +57,16 @@ class SponsoredAnimalsSection extends StatelessWidget {
   }
 
   Widget _message(String text) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-          decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(14), boxShadow: [
-            BoxShadow(color: AppColors.slaterspwn, blurRadius: 1, offset: const Offset(0, 3)),
-          ]),
-          child: Text(text, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(14), boxShadow: [
+        BoxShadow(color: AppColors.slaterspwn, blurRadius: 1, offset: const Offset(0, 3)),
+      ]),
+      child: Text(text, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+    ),
+  );
 }
 
 class _SponsoredAnimalTile extends StatelessWidget {
@@ -83,11 +88,7 @@ class _SponsoredAnimalTile extends StatelessWidget {
         final photoUrl = (record?.photoUrls.isNotEmpty ?? false) ? record!.photoUrls.first : null;
 
         return GestureDetector(
-          onTap: () {
-            if (record == null) return;
-            final animal = animalRecordToCard(record, 0);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => AnimalPage(animal: animal, onFavoriteToggle: () {})));
-          },
+          onTap: () => _open(context, record),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(14), boxShadow: [
@@ -139,10 +140,62 @@ class _SponsoredAnimalTile extends StatelessWidget {
     );
   }
 
-  Widget _placeholder() => Container(
-        width: 48,
-        height: 48,
-        color: AppColors.tearspwn,
-        child: const Icon(Icons.pets, size: 22, color: AppColors.textPrimary),
+  /// Sponsorship Details for this listing. Falls back to the animal's
+  /// profile when the listing can't be read.
+  Future<void> _open(BuildContext context, AnimalRecord? record) async {
+    DonationListing? listing;
+    if (sponsorship.campaignId.isNotEmpty) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('campaigns').doc(sponsorship.campaignId).get();
+        if (doc.exists) {
+          listing = DonationListing.fromFirestore(doc);
+          final uid = FirebaseAuth.instance.currentUser?.uid;
+          if (uid != null) {
+            listing.favorited = (await FirebaseFirestore.instance
+                .collection('users')
+                .doc(uid)
+                .collection('donationFavorites')
+                .doc(listing.id)
+                .get())
+                .exists;
+          }
+        }
+      } catch (_) {
+        // Fall through to the animal profile.
+      }
+    }
+    if (!context.mounted) return;
+    if (listing != null) {
+      final l = listing;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => SponsorshipDetail(sponsorship: l, onFavorite: () => _toggleFavorite(l))),
       );
+      return;
+    }
+    if (record == null) return;
+    final animal = animalRecordToCard(record, 0);
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => AnimalPage(animal: animal, onFavoriteToggle: () {})));
+  }
+
+  /// Same favourites list as Donation/Sponsorship (users/{uid}/donationFavorites).
+  /// The heart updates at once; the save follows.
+  Future<void> _toggleFavorite(DonationListing l) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    l.favorited = !l.favorited;
+    final doc = FirebaseFirestore.instance.collection('users').doc(uid).collection('donationFavorites').doc(l.id);
+    if (l.favorited) {
+      await doc.set({'donationId': l.id, 'title': l.title, 'savedAt': FieldValue.serverTimestamp()});
+    } else {
+      await doc.delete();
+    }
+  }
+
+  Widget _placeholder() => Container(
+    width: 48,
+    height: 48,
+    color: AppColors.tearspwn,
+    child: const Icon(Icons.pets, size: 22, color: AppColors.textPrimary),
+  );
 }

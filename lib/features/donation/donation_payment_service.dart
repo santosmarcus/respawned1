@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:respawnd1/core/models/donation/refund_policy.dart';
+
 /// A PayMongo payment method offered in the donation/sponsorship sheets.
 class DonationPaymentMethod {
   final String label;
@@ -66,6 +68,8 @@ class DonationPaymentService {
       'amount': amount,
       'paymentMethod': paymentMethod,
       'isAnonymous': isAnonymous,
+      // The refund policy accepted in showRefundPolicyConfirmation.
+      'refundTermsVersion': kRefundTermsVersion,
     });
     final data = Map<String, dynamic>.from(result.data as Map);
     return DonationCheckout(

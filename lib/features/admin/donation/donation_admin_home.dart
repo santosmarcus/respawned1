@@ -13,6 +13,7 @@ import 'donation_admin_records.dart';
 import 'donation_admin_search.dart';
 import 'sponsorable_animals.dart';
 import 'expense_oversight_page.dart';
+import 'refund_requests_page.dart';
 import 'package:respawnd1/features/admin/stock/stock_page.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 
@@ -56,6 +57,9 @@ class DonationAdminHomeScreen extends ConsumerWidget {
     final campaigns = ref.watch(adminCampaignsProvider);
     final recent = ref.watch(recentDonationsProvider);
     final needsDecision = ref.watch(campaignsNeedingDecisionProvider).asData?.value ?? const [];
+    final openRefunds = (ref.watch(allDonationsProvider).asData?.value ?? const [])
+        .where((d) => d.refundRequest?.isOpen ?? false)
+        .length;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -107,6 +111,18 @@ class DonationAdminHomeScreen extends ConsumerWidget {
                         label: 'Approvals &\nReceipts',
                         onTap: () =>
                             Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpenseOversightPage())),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Refund request flow.
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _ProcessItem(
+                        icon: Icons.undo,
+                        label: openRefunds == 0 ? 'Refund\nRequests' : 'Refund\nRequests ($openRefunds)',
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RefundRequestsPage())),
                       ),
                     ],
                   ),

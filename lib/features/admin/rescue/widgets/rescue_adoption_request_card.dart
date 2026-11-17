@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
 import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -261,6 +262,17 @@ class _RequestDetails extends StatelessWidget {
         final personal = (d['personal'] as Map?) ?? const {};
         final answers = (d['rescueApplication'] as Map?) ?? const {};
         final agreement = (d['agreement'] as Map?) ?? const {};
+        // Pet Experience and Lifestyle & Care, read the same way as on
+        // Adoption Details. Requests sent before these were asked have none.
+        const added = {'Pet Experience', 'Lifestyle & Care'};
+        final sections = d['petExperience'] is Map
+            ? buildAdoptionResponseSections(d).where((s) => added.contains(s.title)).toList()
+            : const <ResponseSection>[];
+        final governmentId = ((d['uploads'] as Map?) ?? const {})['governmentId'] as String?;
+        Widget heading(String t) => Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 2),
+          child: Text(t, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w800)),
+        );
         Widget row(String k, Object? v) => Padding(
           padding: const EdgeInsets.only(top: 3),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -282,14 +294,38 @@ class _RequestDetails extends StatelessWidget {
             if (answers['homeType'] == 'Renting') row('Landlord allows pets', answers['landlordAllowsPets'] == true ? 'Yes' : 'No'),
             row('Other pets', answers['otherPets']),
             row('Main caretaker', answers['caretaker']),
+            for (final s in sections) ...[
+              heading(s.title),
+              for (final item in s.items) row(item.label, item.answer),
+            ],
+            if (governmentId != null && governmentId.isNotEmpty) ...[
+              heading('Government ID'),
+              GestureDetector(
+                onTap: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => Dialog(child: InteractiveViewer(child: Image.network(governmentId))),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.network(governmentId,
+                      width: 120,
+                      height: 90,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const Icon(Icons.insert_drive_file_outlined)),
+                ),
+              ),
+            ],
             const SizedBox(height: 6),
+            // Only the agreements this request was sent with (older
+            // requests had three).
             for (final (key, title, _) in kRescueAdoptionAgreements)
-              Row(children: [
-                Icon(agreement[key] == true ? Icons.check_circle : Icons.cancel_outlined,
-                    size: 16, color: agreement[key] == true ? AppColors.success : AppColors.error),
-                const SizedBox(width: 6),
-                Expanded(child: Text(title, style: GoogleFonts.zain(fontSize: 12))),
-              ]),
+              if (agreement.containsKey(key))
+                Row(children: [
+                  Icon(agreement[key] == true ? Icons.check_circle : Icons.cancel_outlined,
+                      size: 16, color: agreement[key] == true ? AppColors.success : AppColors.error),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(title, style: GoogleFonts.zain(fontSize: 12))),
+                ]),
           ],
         );
       },

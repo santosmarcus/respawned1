@@ -72,6 +72,7 @@ class SponsorshipRepository {
         organizationName: current['organizer'] as String? ?? campaign?['organizer'] as String? ?? '',
         animalRecordId: campaign?['animalId'] as String? ?? '',
         animalName: campaign?['animalName'] as String? ?? current['campaignName'] as String? ?? '',
+        campaignId: entry.key,
         status: SponsorshipStatus.active,
         startDate: since,
         nextContributionDate: ts(current['nextChargeDate']),

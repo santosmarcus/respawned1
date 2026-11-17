@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/donation/refund_policy.dart';
 
 /// Admin-side models for the donation module. Listings themselves use the
 /// general view's [DonationListing] (lib/features/donation/models.dart) so
@@ -90,6 +91,10 @@ class DonationHistoryRecord {
   final String? reversalReason;
   final String? reversalReference;
   final String? reversedByName;
+
+  /// Refund request flow: `refundRequest` as sent by the donor and decided
+  /// by the organization. Null when the donor never asked.
+  final RefundRequestInfo? refundRequest;
   final DateTime? reversedAt;
 
   const DonationHistoryRecord({
@@ -125,6 +130,7 @@ class DonationHistoryRecord {
     this.reversalReference,
     this.reversedByName,
     this.reversedAt,
+    this.refundRequest,
   });
 
   bool get isReversed => status == 'reversed';
@@ -183,6 +189,7 @@ class DonationHistoryRecord {
       reversalReference: data['reversalReference'] as String?,
       reversedByName: data['reversedByName'] as String?,
       reversedAt: ts('reversedAt'),
+      refundRequest: RefundRequestInfo.fromMap(data['refundRequest']),
     );
   }
 }

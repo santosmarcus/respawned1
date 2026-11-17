@@ -517,6 +517,7 @@ class _DonationHistoryCard extends ConsumerWidget {
                   referenceNumber: item.refNumber,
                   timestamp: item.dateTime,
                   historyItem: item,
+                  fromHistory: true,
                 ),
               ),
             ),
@@ -557,6 +558,7 @@ class _DonationHistoryCard extends ConsumerWidget {
                   referenceNumber: item.refNumber,
                   timestamp: item.dateTime,
                   historyItem: item,
+                  fromHistory: true,
                 ),
               ),
             ),
@@ -673,6 +675,7 @@ class _DonationHistoryCard extends ConsumerWidget {
           'renewed' => 'Renewed',
           'cancelled' => 'Cancelled',
           'inactive' => 'Ended',
+          'refunded' => 'Refunded',
           _ => 'Completed',
         };
       case HistoryType.donation:

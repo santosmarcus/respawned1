@@ -36,7 +36,10 @@ const Duration kAdopterPickupWindow = Duration(hours: 72);
 const Duration kAdopterPickupReminder = Duration(hours: 24);
 
 /// The agreements the adopter must accept, in the order shown, keyed as
-/// stored under `agreement` on the request.
+/// stored under `agreement` on the request. The last three are the
+/// adoption form's own (same keys), without its post-adoption follow-up
+/// and "approval is not guaranteed" agreements. firestore.rules requires
+/// all six.
 const List<(String key, String title, String body)> kRescueAdoptionAgreements = [
   (
   'vetFees',
@@ -56,6 +59,9 @@ const List<(String key, String title, String body)> kRescueAdoptionAgreements = 
   'Once the organization tells me the animal is ready, I will collect it within 72 hours. If I do not, my request '
       'is closed and the animal goes to the shelter, or to another organization if the shelter is full.',
   ),
+  ('care', 'I will provide proper care', 'Food, water, shelter, grooming and veterinary care for the animal\'s whole life.'),
+  ('noAbandon', 'I will not abandon the animal', 'If I can no longer keep it, I will contact the organization.'),
+  ('infoAccurate', 'Information provided is accurate', 'Everything I entered in this request is true and complete.'),
 ];
 
 /// Request state as mirrored on the case (`cases/{id}.adoptionRequest`).

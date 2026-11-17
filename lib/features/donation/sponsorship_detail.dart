@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../app_theme.dart';
@@ -9,10 +10,11 @@ import 'models.dart';
 import 'donation_payment_service.dart';
 import 'donation_review.dart';
 import 'fund_tracking_section.dart';
-import 'sponsorship_summary.dart';
+import 'cancel_dialog.dart';
+import 'package:respawnd1/features/generalhome/history_provider.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
-class SponsorshipDetail extends StatefulWidget {
+class SponsorshipDetail extends ConsumerStatefulWidget {
   final DonationListing sponsorship;
   final VoidCallback onFavorite;
 
@@ -23,13 +25,18 @@ class SponsorshipDetail extends StatefulWidget {
   });
 
   @override
-  State<SponsorshipDetail> createState() => _SponsorshipDetailState();
+  ConsumerState<SponsorshipDetail> createState() => _SponsorshipDetailState();
 }
 
-class _SponsorshipDetailState extends State<SponsorshipDetail> {
+class _SponsorshipDetailState extends ConsumerState<SponsorshipDetail> {
   final TextEditingController _amountController = TextEditingController();
   HistoryItem? _activeSponsorship;
   bool _isLoading = true;
+
+  /// Everything this user has paid for this animal's sponsorship (refunds
+  /// left out), across renewals.
+  double _myTotal = 0;
+  int _myPayments = 0;
 
   @override
   void initState() {
@@ -51,12 +58,32 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
           .where('type', isEqualTo: 'sponsorship')
           .get();
 
+      var total = 0.0;
+      var payments = 0;
+      for (final doc in snapshot.docs) {
+        final d = doc.data();
+        if (d['status'] == 'reversed') continue;
+        final amount = d['amount'];
+        if (amount is num && amount > 0) {
+          total += amount.toDouble();
+          payments++;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _myTotal = total;
+          _myPayments = payments;
+        });
+      }
+
       if (snapshot.docs.isNotEmpty) {
         final now = DateTime.now();
         for (var doc in snapshot.docs) {
           final s = HistoryItem.fromFirestore(doc);
           final isActiveStatus = s.sponsorshipStatus == 'active';
-          final isStillValid = isActiveStatus || (s.nextChargeDate != null && s.nextChargeDate!.isAfter(now));
+          // A refunded sponsorship (refund request flow) never counts.
+          final isStillValid = s.sponsorshipStatus != 'refunded' &&
+              (isActiveStatus || (s.nextChargeDate != null && s.nextChargeDate!.isAfter(now)));
 
           if (isStillValid) {
             if (mounted) {
@@ -196,6 +223,23 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
 
             const SizedBox(height: 24),
 
+            // How many people sponsor this animal now (kept on the listing
+            // by functions/sponsor_counts.js).
+            _SponsorCount(campaignId: sponsorship.id),
+            const SizedBox(height: 16),
+
+            if (_activeSponsorship != null) ...[
+              _YourSponsorshipCard(
+                sponsorship: _activeSponsorship!,
+                myTotal: _myTotal,
+                myPayments: _myPayments,
+                collected: sponsorship.collected,
+                onStop: _stopSponsorship,
+                onReactivate: _reactivateSponsorship,
+              ),
+              const SizedBox(height: 24),
+            ],
+
             if (_activeSponsorship == null && !sponsorship.isEnded) ...[
               Text('Monthly Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
               const SizedBox(height: 12),
@@ -229,16 +273,18 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
               width: double.infinity,
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
-                  : (sponsorship.isEnded && _activeSponsorship == null)
+              // Already sponsoring: everything is in "Your sponsorship"
+              // above (the summary opens from History).
+                  : _activeSponsorship != null
+                  ? const SizedBox.shrink()
+                  : sponsorship.isEnded
                   ? Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(color: AppColors.textPrimary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(30)),
                 child: Text('This sponsorship campaign has ended.', textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary.withValues(alpha: 0.6))),
               )
                   : ElevatedButton(
-                onPressed: _activeSponsorship != null
-                    ? _redirectToSummary
-                    : () {
+                onPressed: () {
                   final amount = double.tryParse(_amountController.text);
                   if (amount == null || amount <= 0) {
                     ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Please enter a valid amount'));
@@ -247,14 +293,14 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
                   _openSponsorshipSheet(context, amount);
                 },
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: _activeSponsorship != null ? AppColors.greenrspwn : AppColors.yellowrspwn,
-                    foregroundColor: _activeSponsorship != null ? Colors.white : AppColors.textPrimary,
+                    backgroundColor: AppColors.yellowrspwn,
+                    foregroundColor: AppColors.textPrimary,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     elevation: 0
                 ),
                 child: Text(
-                    _activeSponsorship != null ? 'View Current Sponsorship' : 'Continue',
+                    'Continue',
                     style: GoogleFonts.tiltWarp(fontSize: 18, fontWeight: FontWeight.bold)
                 ),
               ),
@@ -283,26 +329,173 @@ class _SponsorshipDetailState extends State<SponsorshipDetail> {
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => SponsorshipReviewSheet(sponsorship: widget.sponsorship, amount: amount));
   }
 
-  void _redirectToSummary() {
-    if (_activeSponsorship == null) return;
+  /// Stop: the sponsorship still covers the animal until its end date,
+  /// then ends (no new payment). Same as History's old Cancel Sponsorship.
+  void _stopSponsorship() {
+    final s = _activeSponsorship;
+    if (s == null) return;
+    final until = s.nextChargeDate != null ? _date(s.nextChargeDate!) : 'the end of your current period';
+    showCancelDialog(
+      context: context,
+      title: 'Are You Sure?',
+      message: 'You are about to cancel your sponsorship. It will remain active until $until.',
+      onConfirm: () {
+        ref.read(historyProvider.notifier).cancelSponsorship(s.id);
+        setState(() => _activeSponsorship = s.copyWith(sponsorshipStatus: 'cancelled'));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Sponsorship cancelled successfully.'));
+      },
+    );
+  }
 
-    final s = _activeSponsorship!;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DonationSummaryScreen(
-          params: DonationSummaryParams(
-            charityName: s.organizer,
-            donationMethod: s.donationMethod ?? 'Unknown',
-            item: DonationItem(
-              description: s.itemDescription ?? 'Monthly Sponsorship',
-              amount: s.amount ?? 0,
+  void _reactivateSponsorship() {
+    final s = _activeSponsorship;
+    if (s == null) return;
+    ref.read(historyProvider.notifier).unCancelSponsorship(s.id);
+    setState(() => _activeSponsorship = s.copyWith(sponsorshipStatus: 'active'));
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Sponsorship reactivated successfully.'));
+  }
+
+}
+
+String _date(DateTime d) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return '${months[d.month - 1]} ${d.day}, ${d.year}';
+}
+
+String _peso(double v) {
+  final parts = v.toStringAsFixed(2).split('.');
+  final whole = parts[0].replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+  return '₱$whole.${parts[1]}';
+}
+
+/// "N people are sponsoring right now".
+class _SponsorCount extends StatelessWidget {
+  const _SponsorCount({required this.campaignId});
+  final String campaignId;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('campaigns').doc(campaignId).snapshots(),
+      builder: (context, snap) {
+        final n = snap.data?.data()?['activeSponsorCount'];
+        if (n is! num) return const SizedBox.shrink();
+        final count = n.toInt();
+        return Row(
+          children: [
+            const Icon(Icons.groups, size: 20, color: AppColors.greenrspwn),
+            const SizedBox(width: 8),
+            Text(
+              count == 0
+                  ? 'No one is sponsoring right now'
+                  : '$count ${count == 1 ? 'person is' : 'people are'} sponsoring right now',
+              style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
             ),
-            referenceNumber: s.refNumber,
-            timestamp: s.dateTime,
-            historyItem: s,
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// The signed-in sponsor's own sponsorship: status, next charge date and
+/// amount, and their share of what this animal's sponsors have given.
+class _YourSponsorshipCard extends StatelessWidget {
+  const _YourSponsorshipCard({
+    required this.sponsorship,
+    required this.myTotal,
+    required this.myPayments,
+    required this.collected,
+    required this.onStop,
+    required this.onReactivate,
+  });
+
+  final VoidCallback onStop;
+  final VoidCallback onReactivate;
+
+  final HistoryItem sponsorship;
+  final double myTotal;
+  final int myPayments;
+
+  /// Everything collected for this animal, from every sponsor.
+  final double collected;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = sponsorship;
+    final stopped = s.sponsorshipStatus == 'cancelled';
+    final next = s.nextChargeDate;
+    final nextAmount = s.nextChargeAmount ?? s.amount;
+    final share = collected > 0 ? (myTotal / collected).clamp(0.0, 1.0) : null;
+
+    Widget row(String k, String v, {Color? color}) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 130, child: Text(k, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary))),
+          Expanded(
+            child: Text(v,
+                style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: color ?? AppColors.textPrimary)),
           ),
-        ),
+        ],
+      ),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.greenrspwn.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.greenrspwn.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Your sponsorship', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          row('Status', stopped ? 'Stopped' : 'Active', color: stopped ? AppColors.error : AppColors.greenrspwn),
+          if (next != null) row(stopped ? 'Ends on' : 'Next charge date', _date(next)),
+          if (!stopped && nextAmount != null) row('Next amount', _peso(nextAmount)),
+          if (myPayments > 0) row('You have given', '${_peso(myTotal)} in ${myPayments == 1 ? '1 payment' : '$myPayments payments'}'),
+          if (share != null && myPayments > 0)
+            row('Of all funds', '${(share * 100).toStringAsFixed(share < 0.1 ? 1 : 0)}% of ${_peso(collected)} collected'),
+          const SizedBox(height: 6),
+          Text(
+            stopped
+                ? 'You stopped this sponsorship. It covers the animal until the date above, then ends.'
+                : 'You will be notified 3 days before the next charge date to continue or stop. If it is not '
+                'renewed by then, the sponsorship ends.',
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Below: how the funds from you and the other sponsors were used.',
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: stopped
+                ? ElevatedButton(
+              onPressed: onReactivate,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.greenrspwn,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                elevation: 0,
+              ),
+              child: Text('Reactivate Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold)),
+            )
+                : OutlinedButton(
+              onPressed: onStop,
+              style: AppButtons.dangerOutline,
+              child: Text('Cancel Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
       ),
     );
   }

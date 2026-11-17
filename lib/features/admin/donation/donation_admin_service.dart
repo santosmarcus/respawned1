@@ -135,6 +135,22 @@ class DonationAdminService {
         if (reference != null && reference.isNotEmpty) 'reference': reference,
       });
 
+  /// Refund request flow: approve the donor's request. Refunds through
+  /// PayMongo when it can; otherwise refund by hand first and pass the
+  /// [reference]. Returns {status, method, paymongoRefundId}.
+  static Future<Map<String, dynamic>> approveRefund(String donationId, {required String note, String? reference}) =>
+      _call('recordDonationReversal', {
+        'donationId': donationId,
+        'action': 'approve',
+        'reason': note,
+        if (reference != null && reference.isNotEmpty) 'reference': reference,
+      });
+
+  /// Refund request flow: decline the donor's request; [reason] is shown to
+  /// the donor.
+  static Future<Map<String, dynamic>> declineRefund(String donationId, {required String reason}) =>
+      _call('recordDonationReversal', {'donationId': donationId, 'action': 'decline', 'reason': reason});
+
   /// action: received | cancel | follow_up. Returns {status, donorNotified, donorName}.
   static Future<Map<String, dynamic>> manageInKind(String donationId, String action,
       {int? itemIndex, int? quantityReceived, String? notes}) =>

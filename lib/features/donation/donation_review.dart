@@ -11,6 +11,7 @@ import 'models.dart';
 import 'donation_summary.dart';
 import 'campaign_completed_page.dart';
 import 'donation_payment_service.dart';
+import 'refund_request.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 
 final donationReviewProvider = ChangeNotifierProvider.autoDispose.family<DonationReviewNotifier, DonationReviewParams>((ref, params) {
@@ -610,6 +611,10 @@ class DonationReviewScreen extends ConsumerWidget {
                       onPressed: donation.isProcessing
                           ? null
                           : () async {
+                        // The refund policy, read and agreed to before every
+                        // payment (refund request flow).
+                        final agreed = await showRefundPolicyConfirmation(context, isSponsorship: donation.isSponsorship);
+                        if (!agreed || !context.mounted) return;
                         final notifier = ref.read(donationReviewProvider(params).notifier);
                         final result = await notifier.processPayment();
 

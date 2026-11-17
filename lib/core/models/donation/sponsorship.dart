@@ -14,10 +14,10 @@ enum SponsorshipStatus {
       SponsorshipStatus.values.firstWhere((v) => v.name == value, orElse: () => SponsorshipStatus.active);
 
   String get label => switch (this) {
-        SponsorshipStatus.active => 'Active',
-        SponsorshipStatus.cancelled => 'Cancelled',
-        SponsorshipStatus.expired => 'Expired',
-      };
+    SponsorshipStatus.active => 'Active',
+    SponsorshipStatus.cancelled => 'Cancelled',
+    SponsorshipStatus.expired => 'Expired',
+  };
 }
 
 /// One `sponsors/{id}` document — the SAME collection `_SponsorsRow`
@@ -38,6 +38,10 @@ class Sponsorship {
   final String organizationName;
   final String animalRecordId;
   final String animalName;
+
+  /// The sponsorship listing (`campaigns/{id}`) this record belongs to;
+  /// Home opens its Sponsorship Details. Empty when unknown.
+  final String campaignId;
   final SponsorshipStatus status;
   final DateTime? startDate;
   final DateTime? nextContributionDate;
@@ -51,6 +55,7 @@ class Sponsorship {
     required this.organizationName,
     required this.animalRecordId,
     required this.animalName,
+    this.campaignId = '',
     required this.status,
     this.startDate,
     this.nextContributionDate,
@@ -68,6 +73,7 @@ class Sponsorship {
       organizationName: data['organizationName'] as String? ?? '',
       animalRecordId: data['animalRecordId'] as String? ?? '',
       animalName: data['animalName'] as String? ?? '',
+      campaignId: data['campaignId'] as String? ?? '',
       status: SponsorshipStatus.fromName(data['status'] as String?),
       startDate: ts(data['startDate']),
       nextContributionDate: ts(data['nextContributionDate']),

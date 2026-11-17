@@ -610,6 +610,29 @@ service cloud.firestore {
             || (request.resource.data.nextChargeAmount is number && request.resource.data.nextChargeAmount > 0));
     }
 
+    // Refund request flow: the donor asks once, for a paid donation or
+    // sponsorship, within the time allowed (7 days; 60 for an unauthorized
+    // payment), after accepting the refund terms. Only the backend
+    // (recordDonationReversal) approves, declines or refunds. Keep the
+    // reasons and days equal to functions/refund_rules.js.
+    function donorRefundRequest() {
+      let rr = request.resource.data.refundRequest;
+      let days = rr.get('reason', '') == 'unauthorized' ? 60 : 7;
+      return changedOnly(['refundRequest'])
+        && !('refundRequest' in resource.data)
+        && resource.data.get('type', '') in ['donation', 'sponsorship']
+        && resource.data.get('status', '') != 'reversed'
+        && resource.data.get('amount', 0) is number && resource.data.get('amount', 0) > 0
+        && rr.keys().hasOnly(['status', 'reason', 'details', 'requestedAt', 'termsVersion', 'termsAcceptedAt'])
+        && rr.get('status', '') == 'requested'
+        && rr.get('reason', '') in ['duplicate', 'wrong_amount', 'unauthorized', 'campaign_closed', 'animal_outcome']
+        && rr.get('details', '') is string && rr.get('details', '').size() <= 1000
+        && rr.get('termsVersion', '') is string && rr.get('termsVersion', '').size() > 0
+        && rr.get('requestedAt', null) == request.time
+        && rr.get('termsAcceptedAt', null) == request.time
+        && request.time < resource.data.get('timestamp', request.time) + duration.value(days, 'd');
+    }
+
     match /donations/{donationId} {
       // Donor records (names, notes, addresses, receipts): the donor, and
       // staff (not carers) of the organization that runs the campaign —
@@ -627,7 +650,7 @@ service cloud.firestore {
       allow create: if false;
       allow update: if signedIn()
         && resource.data.userId == request.auth.uid
-        && (donorSelfServiceEdit() || inKindCancel() || sponsorshipEdit());
+        && (donorSelfServiceEdit() || inKindCancel() || sponsorshipEdit() || donorRefundRequest());
       allow delete: if false;
     }
 
@@ -1325,7 +1348,10 @@ service cloud.firestore {
           data.get('organizationId', '') == c.get('organizationId', '') &&
           agreement.get('vetFees', false) == true &&
           agreement.get('obligations', false) == true &&
-          agreement.get('pickupWindow', false) == true;
+          agreement.get('pickupWindow', false) == true &&
+          agreement.get('care', false) == true &&
+          agreement.get('noAbandon', false) == true &&
+          agreement.get('infoAccurate', false) == true;
       }
 
       allow create: if signedIn() &&

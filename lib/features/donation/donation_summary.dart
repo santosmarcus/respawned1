@@ -12,6 +12,7 @@ import 'donation_page.dart';
 import 'models.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'refund_request.dart';
 
 final donationSummaryProvider = ChangeNotifierProvider.autoDispose.family<DonationSummaryNotifier, DonationSummaryParams>((ref, params) {
   return DonationSummaryNotifier(
@@ -32,6 +33,10 @@ class DonationSummaryParams {
   final DateTime timestamp;
   final HistoryItem? historyItem;
 
+  /// Opened to view an existing record (History, or "View Current
+  /// Sponsorship"): the top-left button goes back instead of home.
+  final bool fromHistory;
+
   DonationSummaryParams({
     required this.charityName,
     required this.donationMethod,
@@ -39,6 +44,7 @@ class DonationSummaryParams {
     required this.referenceNumber,
     required this.timestamp,
     this.historyItem,
+    this.fromHistory = false,
   });
 }
 
@@ -132,7 +138,7 @@ class DonationSummaryScreen extends ConsumerWidget {
         DateTime.now().isBefore(currentHistoryItem!.nextChargeDate!);
 
     return PopScope(
-      canPop: false,
+      canPop: params.fromHistory,
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
@@ -140,9 +146,13 @@ class DonationSummaryScreen extends ConsumerWidget {
           elevation: 0,
           automaticallyImplyLeading: false,
           leading: IconButton(
-            icon: const Icon(Icons.close, color: AppColors.textPrimary),
+            icon: Icon(params.fromHistory ? Icons.arrow_back : Icons.close, color: AppColors.textPrimary),
             onPressed: () {
-              Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+              if (params.fromHistory) {
+                Navigator.of(context).pop();
+              } else {
+                Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
+              }
             },
           ),
           title: Text(
@@ -454,6 +464,10 @@ class DonationSummaryScreen extends ConsumerWidget {
                   ),
                 ],
 
+                // Refund request flow: the request's status, or "Request
+                // refund" while the donor can still ask (from History only).
+                if (params.fromHistory && currentHistoryItem != null)
+                  RefundRequestSection(donationId: currentHistoryItem.id),
                 const SizedBox(height: 25),
                 Row(
                   children: <Widget>[

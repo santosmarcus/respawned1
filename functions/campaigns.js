@@ -31,6 +31,14 @@ const admin = require('firebase-admin');
 const {completedCampaignFields, certificateBenefit, issueCertificate} = require('./donation_common');
 const donationRules = require('./donation_rules');
 const {requireOrgPermission} = require('./org_access');
+const refundRules = require('./refund_rules');
+const {createPaymongoRefund, PaymongoRefundError} = require('./paymongo_refunds');
+const {recountActiveSponsors} = require('./sponsor_counts');
+const {defineSecret} = require('firebase-functions/params');
+
+// Same secret paymongo.js uses; recordDonationReversal needs it to refund
+// through PayMongo.
+const paymongoSecretKey = defineSecret('PAYMONGO_SECRET_KEY');
 
 // index.js calls admin.initializeApp() before requiring this module.
 const db = admin.firestore();
@@ -1263,20 +1271,171 @@ exports.pledgeInKindDonation = onCall(async (request) => {
 // and donor count go down, the donor's certificate is voided and they are
 // told. Refused while the money is already spent: void a spending record
 // first. Repeating the call for a refunded donation changes nothing.
-exports.recordDonationReversal = onCall(async (request) => {
+// action (default 'record'):
+//   record   staff record a refund made outside the app (no request needed).
+//   approve  approve the donor's refund request (donations/{id}.refundRequest):
+//            refunds through PayMongo when it can (refund_rules.refundRoute),
+//            otherwise needs `reference` for a refund made by hand.
+//   decline  decline the donor's request, with `reason` shown to the donor.
+exports.recordDonationReversal = onCall({secrets: [paymongoSecretKey]}, async (request) => {
   const actor = await loadActor(request, {finance: true});
   const d = request.data || {};
   if (typeof d.donationId !== 'string' || !CAMPAIGN_ID_PATTERN.test(d.donationId)) {
     throw new HttpsError('invalid-argument', 'A valid donationId is required.');
   }
+  const action = d.action || 'record';
+  if (!['record', 'approve', 'decline'].includes(action)) throw new HttpsError('invalid-argument', 'Unknown action.');
   const reason = requireString(d.reason, 'Reason', {max: 1000});
   const reference = requireString(d.reference, 'Refund reference', {max: 120, optional: true});
   const donationRef = db.collection('donations').doc(d.donationId);
 
+  if (action === 'decline') return declineRefundRequest(actor, donationRef, reason);
+  if (action === 'record') {
+    const out = await reverseDonation(actor, donationRef, {reason, reference});
+    await afterReversal(out);
+    return {status: out.status, duplicate: out.duplicate};
+  }
+
+  // approve
+  const snap = await donationRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Donation not found.');
+  const r = snap.data();
+  const rr = r.refundRequest || null;
+  if (!rr || !['requested', 'failed'].includes(rr.status)) {
+    throw new HttpsError('failed-precondition', 'There is no open refund request for this donation.');
+  }
+  const campaignSnap = typeof r.campaignId === 'string' && CAMPAIGN_ID_PATTERN.test(r.campaignId) ?
+    await campaignsCol().doc(r.campaignId).get() : null;
+  const c = campaignSnap && campaignSnap.exists ? campaignSnap.data() : null;
+  assertSameOrg(actor, c || r);
+  // Refuse before any money moves when it is already spent.
+  const blocker = donationRules.reversalBlocker(r, c ? moneyOf(c) : null, centavos(num(r.amount)));
+  if (blocker) throw new HttpsError('failed-precondition', blocker);
+
+  let refundId = rr.paymongoRefundId || null;
+  let refundStatus = rr.paymongoRefundStatus || null;
+  let method = 'manual';
+  if (!refundId) {
+    const paymentSnap = await db.collection('donationPayments').doc(d.donationId).get();
+    const payment = paymentSnap.exists ? paymentSnap.data() : null;
+    const route = refundRules.refundRoute(payment && {
+      ...payment,
+      paidAtMs: payment.paidAt instanceof Timestamp ? payment.paidAt.toMillis() : null,
+    }, {nowMs: Date.now()});
+    if (route.route === 'paymongo' && !reference) {
+      try {
+        const refund = await createPaymongoRefund(paymongoSecretKey.value(), {
+          paymentId: payment.paymongoPaymentId,
+          amountCentavos: Number.isInteger(payment.amountCreditedCentavos) ? payment.amountCreditedCentavos : centavos(num(r.amount)),
+          reason: refundRules.REASONS[rr.reason] || 'others',
+          notes: `ResPAWnd refund request ${d.donationId}`,
+        });
+        refundId = refund.id;
+        refundStatus = refund.status;
+        method = 'paymongo';
+        // Saved before the records change, so a retry never refunds twice.
+        await donationRef.update({
+          'refundRequest.paymongoRefundId': refundId,
+          'refundRequest.paymongoRefundStatus': refundStatus,
+          'refundRequest.status': 'processing',
+        });
+      } catch (e) {
+        const codes = e instanceof PaymongoRefundError ? e.codes : [];
+        logger.error('PayMongo refund failed', {donationId: d.donationId, httpStatus: e.httpStatus || null, codes});
+        await donationRef.update({
+          'refundRequest.status': 'failed',
+          'refundRequest.failCodes': codes,
+          'refundRequest.failedAt': FieldValue.serverTimestamp(),
+        });
+        throw new HttpsError('failed-precondition',
+            `PayMongo could not refund this payment${codes.length ? ` (${codes.join(', ')})` : ''}. ` +
+            'Refund it by hand, then approve again with the reference number.');
+      }
+    } else if (!reference) {
+      throw new HttpsError('failed-precondition',
+          `${route.why} Refund it by hand (e.g. GCash or bank transfer), then approve with the reference number.`);
+    }
+  } else {
+    method = 'paymongo';
+  }
+
+  const out = await reverseDonation(actor, donationRef, {
+    reason: `Refund request approved (${rr.reason}). ${reason}`,
+    reference: refundId || reference,
+    refundRequest: {
+      status: 'refunded',
+      method,
+      paymongoRefundId: refundId,
+      paymongoRefundStatus: refundStatus,
+      manualReference: method === 'manual' ? reference : null,
+    },
+  });
+  await afterReversal(out);
+  return {status: 'reversed', method, paymongoRefundId: refundId};
+});
+
+async function declineRefundRequest(actor, donationRef, reason) {
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(donationRef);
     if (!snap.exists) throw new HttpsError('not-found', 'Donation not found.');
     const r = snap.data();
+    const rr = r.refundRequest || null;
+    if (!rr || !['requested', 'failed'].includes(rr.status)) {
+      throw new HttpsError('failed-precondition', 'There is no open refund request for this donation.');
+    }
+    const campaignSnap = typeof r.campaignId === 'string' && CAMPAIGN_ID_PATTERN.test(r.campaignId) ?
+      await tx.get(campaignsCol().doc(r.campaignId)) : null;
+    const c = campaignSnap && campaignSnap.exists ? campaignSnap.data() : null;
+    assertSameOrg(actor, c || r);
+    const now = FieldValue.serverTimestamp();
+    tx.update(donationRef, {
+      'refundRequest.status': 'declined',
+      'refundRequest.declineReason': reason,
+      'refundRequest.decidedAt': now,
+      'refundRequest.decidedBy': actor.uid,
+      'refundRequest.decidedByName': actor.name,
+    });
+    if (typeof r.userId === 'string' && r.userId) {
+      tx.set(db.collection('users').doc(r.userId).collection('notifications').doc(`refund_declined_${snap.id}`), {
+        title: 'Refund Request Declined',
+        message: `Your refund request for ${r.amountString || 'your donation'} to ${r.campaignName || 'a campaign'} ` +
+          `was declined. Reason: ${reason}`,
+        timestamp: now,
+        isRead: false,
+        type: 'refund_declined',
+        donationId: snap.id,
+      });
+    }
+    auditEntry(tx, actor, {
+      category: 'donations',
+      action: 'Refund request declined',
+      organizationId: (c && c.organizationId) || r.organizationId || actor.organizationId,
+      targetType: 'Donation',
+      targetId: snap.id,
+      oldValues: {refundRequest: rr.status},
+      newValues: {refundRequest: 'declined', reason},
+      metadata: {campaignId: r.campaignId || null, requestReason: rr.reason || null},
+    });
+    return {status: 'declined'};
+  });
+}
+
+async function afterReversal(out) {
+  if (out && out.sponsorshipCampaignId) {
+    await recountActiveSponsors(out.sponsorshipCampaignId).catch((e) =>
+      logger.warn('recountActiveSponsors failed', {campaignId: out.sponsorshipCampaignId, message: e.message}));
+  }
+}
+
+// The records side of a refund: donation marked reversed, campaign total
+// and donor count lowered, certificate voided, donor told, history and
+// audit entries. Refused while the money is already spent.
+async function reverseDonation(actor, donationRef, {reason, reference, refundRequest}) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(donationRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'Donation not found.');
+    const r = snap.data();
+    const donationId = snap.id;
     if (r.status === 'reversed') return {status: 'reversed', duplicate: true};
     const campaignRef = typeof r.campaignId === 'string' && CAMPAIGN_ID_PATTERN.test(r.campaignId) ?
       campaignsCol().doc(r.campaignId) : null;
@@ -1288,30 +1447,47 @@ exports.recordDonationReversal = onCall(async (request) => {
     if (blocker) throw new HttpsError('failed-precondition', blocker);
 
     const now = FieldValue.serverTimestamp();
+    const isSponsorship = r.type === 'sponsorship';
     tx.update(donationRef, {
       status: 'reversed',
       statusBeforeReversal: r.status || null,
+      // A refunded sponsorship no longer covers the animal.
+      ...(isSponsorship ? {sponsorshipStatus: 'refunded'} : {}),
       reversedAt: now,
       reversedBy: actor.uid,
       reversedByName: actor.name,
       reversalReason: reason,
       reversalReference: reference,
+      ...(refundRequest ? {
+        'refundRequest.status': refundRequest.status,
+        'refundRequest.method': refundRequest.method,
+        'refundRequest.paymongoRefundId': refundRequest.paymongoRefundId || null,
+        'refundRequest.paymongoRefundStatus': refundRequest.paymongoRefundStatus || null,
+        'refundRequest.manualReference': refundRequest.manualReference || null,
+        'refundRequest.decidedAt': now,
+        'refundRequest.decidedBy': actor.uid,
+        'refundRequest.decidedByName': actor.name,
+      } : {}),
     });
     if (typeof r.userId === 'string' && r.userId) {
       const userRef = db.collection('users').doc(r.userId);
-      tx.set(userRef.collection('history').doc(d.donationId), {status: 'reversed'}, {merge: true});
+      tx.set(userRef.collection('history').doc(donationId),
+          {status: 'reversed', ...(isSponsorship ? {sponsorshipStatus: 'refunded'} : {})}, {merge: true});
       // Certificates use the payment id (online) or the donation id; both
       // are this record's id, see paymongo.js and issueCertificate().
-      tx.set(userRef.collection('certificates').doc(d.donationId),
+      tx.set(userRef.collection('certificates').doc(donationId),
           {voided: true, voidedAt: now, voidReason: reason}, {merge: true});
-      tx.set(userRef.collection('notifications').doc(`donation_reversed_${d.donationId}`), {
+      const viaPaymongo = refundRequest && refundRequest.method === 'paymongo';
+      tx.set(userRef.collection('notifications').doc(`donation_reversed_${donationId}`), {
         title: 'Donation Refunded',
-        message: `Your ${r.amountString || `₱${amount.toFixed(2)}`} donation to ${r.campaignName || 'a campaign'} ` +
-          'was refunded. Its certificate is no longer valid.',
+        message: `Your ${r.amountString || `₱${amount.toFixed(2)}`} ${isSponsorship ? 'sponsorship' : 'donation'} to ` +
+          `${r.campaignName || 'a campaign'} was refunded` +
+          (viaPaymongo ? ' through PayMongo to your original payment method.' : '.') +
+          ' Its certificate is no longer valid.',
         timestamp: now,
         isRead: false,
         type: 'donation_reversed',
-        donationId: d.donationId,
+        donationId,
       });
     }
     if (c) {
@@ -1320,21 +1496,21 @@ exports.recordDonationReversal = onCall(async (request) => {
         numdonors: FieldValue.increment(donationRules.donorCountChange(c.numdonors)),
         updatedAt: now,
       });
-      historyEntry(tx, campaignRef, actor, 'donation_reversed', {donationId: d.donationId, amount, reason, reference});
+      historyEntry(tx, campaignRef, actor, 'donation_reversed', {donationId, amount, reason, reference});
     }
     auditEntry(tx, actor, {
       category: 'donations',
-      action: 'Donation refunded',
+      action: refundRequest ? 'Refund request approved' : 'Donation refunded',
       organizationId: (c && c.organizationId) || r.organizationId || actor.organizationId,
       targetType: 'Donation',
-      targetId: d.donationId,
+      targetId: donationId,
       oldValues: {status: r.status || null, amount},
-      newValues: {status: 'reversed', reason, reference},
+      newValues: {status: 'reversed', reason, reference, method: refundRequest ? refundRequest.method : 'recorded'},
       metadata: {campaignId: r.campaignId || null, campaignTitle: (c && c.title) || r.campaignName || null, source: r.source || 'paymongo'},
     });
-    return {status: 'reversed', duplicate: false};
+    return {status: 'reversed', duplicate: false, sponsorshipCampaignId: isSponsorship ? r.campaignId : null};
   });
-});
+}
 
 // ── Donation audit trail (Donation gap 4) ───────────────────────────────────
 // Every money and listing action above already writes campaigns/{id}/history

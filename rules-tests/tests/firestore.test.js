@@ -477,7 +477,9 @@ describe('adoption readiness gate', () => {
 });
 
 describe('rescue adoption requests (Rescue gaps 6/10)', () => {
-  const agreement = { vetFees: true, obligations: true, pickupWindow: true };
+  const agreement = {
+    vetFees: true, obligations: true, pickupWindow: true, care: true, noAbandon: true, infoAccurate: true,
+  };
   const request = (uid, data) => as(uid).collection('adoptions').add({
     status: 'pending', source: 'rescue_case', caseId: 'ownedA', organizationId: 'orgA',
     personal: { adopterId: uid }, agreement, ...data,
@@ -493,6 +495,9 @@ describe('rescue adoption requests (Rescue gaps 6/10)', () => {
     // Every agreement must be accepted.
     await assertFails(request('reporter', { agreement: { ...agreement, vetFees: false } }));
     await assertFails(request('reporter', { agreement: { vetFees: true, obligations: true } }));
+    // The adoption form's agreements are required too.
+    await assertFails(request('reporter', { agreement: { ...agreement, noAbandon: false } }));
+    await assertFails(request('reporter', { agreement: { vetFees: true, obligations: true, pickupWindow: true } }));
     // It belongs to the case's organization, and can't be pre-approved.
     await assertFails(request('reporter', { organizationId: 'orgB' }));
     await assertFails(request('reporter', { status: 'approved' }));
@@ -917,6 +922,45 @@ describe('donation gaps: approvals, stock and backend-only pledges', () => {
       await ctx.firestore().doc('donations/p1').set(pledge);
     });
     await assertSucceeds(as('adopter').doc('donations/p1').update({ status: 'cancelled' }));
+  });
+});
+
+describe('refund requests', () => {
+  const ask = (extra = {}) => ({
+    refundRequest: {
+      status: 'requested', reason: 'duplicate', details: 'Paid twice', termsVersion: '2026-11-18',
+      requestedAt: FieldValue.serverTimestamp(), termsAcceptedAt: FieldValue.serverTimestamp(), ...extra,
+    },
+  });
+  async function seedDonation(id, data) {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc(`donations/${id}`).set({
+      userId: 'adopter', type: 'donation', amount: 500, status: 'paid', organizationId: 'orgA',
+      timestamp: firebase.firestore.Timestamp.now(), ...data,
+    }));
+  }
+
+  test('the donor asks once, with a listed reason, after accepting the terms', async () => {
+    await seedDonation('d1', {});
+    await assertFails(as('stranger').doc('donations/d1').update(ask()));
+    await assertFails(as('adopter').doc('donations/d1').update(ask({ reason: 'changed_mind' })));
+    await assertFails(as('adopter').doc('donations/d1').update(ask({ termsVersion: '' })));
+    await assertFails(as('adopter').doc('donations/d1').update(ask({ status: 'approved' })));
+    await assertFails(as('adopter').doc('donations/d1').update({ ...ask(), amount: 1 }));
+    await assertSucceeds(as('adopter').doc('donations/d1').update(ask()));
+    // Only once, and the donor can't change the decision.
+    await assertFails(as('adopter').doc('donations/d1').update(ask({ reason: 'wrong_amount' })));
+    await assertFails(as('adopter').doc('donations/d1').update({ 'refundRequest.status': 'refunded' }));
+  });
+
+  test('only within the time allowed, and not for in-kind or refunded records', async () => {
+    const old = firebase.firestore.Timestamp.fromMillis(Date.now() - 10 * 86400000);
+    await seedDonation('d2', { timestamp: old });
+    await assertFails(as('adopter').doc('donations/d2').update(ask()));
+    await assertSucceeds(as('adopter').doc('donations/d2').update(ask({ reason: 'unauthorized' })));
+    await seedDonation('d3', { type: 'inkind', amount: 0 });
+    await assertFails(as('adopter').doc('donations/d3').update(ask()));
+    await seedDonation('d4', { status: 'reversed' });
+    await assertFails(as('adopter').doc('donations/d4').update(ask()));
   });
 });
 
