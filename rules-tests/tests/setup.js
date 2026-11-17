@@ -19,8 +19,10 @@ export async function createEnv() {
 //   staffB      member of approved orgB         draftOwner  owner of draft orgD
 //   reporter / stranger / adopter  general users
 //   rider / rider2  pet transporters
+//   sysadmin   system admin (approvals and user directory only)
 export const users = {
   admin: { role: 'admin' },
+  sysadmin: { role: 'system_admin' },
   ownerA: { role: 'organization', organizationId: 'orgA' },
   staffA: { role: 'organization_member', organizationId: 'orgA' },
   staffB: { role: 'organization_member', organizationId: 'orgB' },

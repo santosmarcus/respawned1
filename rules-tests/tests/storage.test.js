@@ -43,6 +43,15 @@ describe('storage', () => {
     await assertFails(upload('stranger', 'adoptions/appA/government_id.jpg'));
   });
 
+  test('organization verification papers: system admins read them, never upload', async () => {
+    const path = 'organizations/orgD/verification/permits/p.pdf';
+    await assertSucceeds(upload('draftOwner', path));
+    const meta = (uid) => env.authenticatedContext(uid).storage().ref(path).getMetadata();
+    await assertSucceeds(meta('sysadmin'));
+    await assertFails(meta('stranger'));
+    await assertFails(upload('sysadmin', path));
+  });
+
   test('organization verification papers: that organization only', async () => {
     await assertSucceeds(upload('draftOwner', 'organizations/orgD/verification/permits/p.pdf'));
     await assertFails(upload('stranger', 'organizations/orgD/verification/permits/p.pdf'));

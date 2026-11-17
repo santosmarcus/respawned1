@@ -15,10 +15,22 @@ import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 /// verification documents. Decisions are only possible while an
 /// organization is "Under review"; they run in the reviewOrganization
 /// callable, which also notifies the owner.
+///
+/// Pushed from the admin drawer (back arrow), or a tab of the system admin
+/// console ([showBackButton] false, with the console's [menuActions]).
 class OrganizationReviewPage extends StatefulWidget {
-  const OrganizationReviewPage({super.key, this.repository});
+  const OrganizationReviewPage({
+    super.key,
+    this.repository,
+    this.showBackButton = true,
+    this.title = 'Organization approvals',
+    this.menuActions = const [],
+  });
 
   final OrganizationRepository? repository;
+  final bool showBackButton;
+  final String title;
+  final List<AdminMenuAction> menuActions;
 
   @override
   State<OrganizationReviewPage> createState() => _OrganizationReviewPageState();
@@ -139,8 +151,10 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AdminAppBar(
-        title: 'Organization approvals',
+        title: widget.title,
         showDrawerButton: false,
+        showLeading: widget.showBackButton,
+        menuActions: widget.menuActions,
         bottom: AdminTabBar(
           tabs: [for (final (_, l) in _tabs) AdminTab(l)],
           selectedIndex: _tab,

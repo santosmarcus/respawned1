@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/features/admin/rescue/widgets/referral_share_flow.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
@@ -97,7 +98,7 @@ class _ReferToLguSheetBodyState extends State<_ReferToLguSheetBody> {
 
     setState(() => _sending = true);
     try {
-      await widget.caseRepository.referToLgu(
+      final referralId = await widget.caseRepository.referToLgu(
         caseId: widget.rescueCase.id,
         barangay: _barangayController.text.trim(),
         reason: _reason!,
@@ -106,6 +107,25 @@ class _ReferToLguSheetBodyState extends State<_ReferToLguSheetBody> {
         actorUid: widget.actorUid,
         actorName: widget.actorName,
       );
+      if (!mounted) return;
+      // The barangay isn't in the app: offer the web link to send them.
+      final barangay = _barangayController.text.trim();
+      final share = await showConfirmActionDialog(
+        context,
+        title: 'Send it to $barangay?',
+        message: 'Share a link to this report by Messenger, SMS or email. '
+            'They can open it without the app and answer you from the page.',
+        confirmLabel: 'Share link',
+        cancelLabel: 'Later',
+      );
+      if (share && mounted) {
+        await shareReferralLink(
+          context,
+          caseId: widget.rescueCase.id,
+          referralId: referralId,
+          recipientLabel: barangay,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {

@@ -1919,12 +1919,15 @@ Object.assign(exports, require('./campaigns'));
 Object.assign(exports, require('./adoptions'));
 // Organization stamp on case/animal logs for the Audit page — see functions/audit_logs.js.
 Object.assign(exports, require('./audit_logs'));
+// Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
+Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
 
 // ---- Organization verification review ------------------------------------
 //
-// Platform staff (users/{uid}.role 'admin' or 'ngo_staff') approve, reject or
+// Platform staff (users/{uid}.role 'admin' or 'ngo_staff') and system admins
+// ('system_admin', the approvals console) approve, reject or
 // ask for changes on an organization that submitted its documents
 // (verificationStatus 'pending'). firestore.rules blocks every client from
 // setting these fields, so each decision goes through here, is logged to
@@ -1949,7 +1952,7 @@ exports.reviewOrganization = onCall(async (request) => {
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const reviewer = await db.collection('users').doc(uid).get();
   const reviewerData = reviewer.exists ? reviewer.data() : {};
-  if (!['admin', 'ngo_staff'].includes(reviewerData.role)) {
+  if (!['admin', 'ngo_staff', 'system_admin'].includes(reviewerData.role)) {
     throw new HttpsError('permission-denied', 'Only platform staff can review organizations.');
   }
 

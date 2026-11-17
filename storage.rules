@@ -222,8 +222,9 @@ service firebase.storage {
 
       // organization_verification_screen.dart — registration papers and
       // permits.
+      // System admins read them to approve the sign-up.
       match /verification/{file=**} {
-        allow read: if isOrgStaff();
+        allow read: if isOrgStaff() || (signedIn() && userData().get('role', '') == 'system_admin');
         allow write: if isOrgStaff() && mediaUpload();
       }
 

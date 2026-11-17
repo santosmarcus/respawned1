@@ -31,6 +31,10 @@
       {
         "source": "/tag/**",
         "destination": "/tag/index.html"
+      },
+      {
+        "source": "/referral/**",
+        "destination": "/referral/index.html"
       }
     ],
     "headers": [
