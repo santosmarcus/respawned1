@@ -1056,6 +1056,44 @@ exports.notifyStaffOfTransitEnd = onDocumentUpdated(
   },
 );
 
+// ---- Shelter leg blocked: no shelter pin ------------------------------------
+//
+// TransitCaseService (transporter app) stops before the shelter leg when the
+// organization has no saved shelter location (there is no default shelter)
+// and stamps cases/{id}.shelterLocationMissing. Each new stamp alerts the
+// organization's staff and admins once, with an adminAlerts entry, so an
+// admin sets the pin in Organization Profile and the transporter can go on.
+exports.notifyStaffOfMissingShelterPin = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after) return;
+    const at = millisOf((after.shelterLocationMissing || {}).at);
+    if (!at || at === millisOf((before.shelterLocationMissing || {}).at)) return;
+    const caseId = event.params.caseId;
+    const orgId = after.organizationId || null;
+
+    await db.collection('adminAlerts').add({
+      type: 'shelter_location_missing',
+      caseId,
+      organizationId: orgId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      resolved: false,
+    });
+    const recipients = [
+      ...(await orgStaffUids(orgId)),
+      ...(await orgStaffUids(orgId, {adminsOnly: true})),
+    ];
+    await notifyStaff(recipients, {
+      title: 'Set your shelter location',
+      body: 'A transporter can\'t take an animal to the shelter because your organization has no shelter '
+        + 'location saved. An admin needs to set it in Organization Profile, then the transporter can continue.',
+      data: {type: 'shelter_location_missing', caseId},
+    });
+  },
+);
+
 // ---- Report verification ------------------------------------------------
 //
 // Before a report is accepted, staff may ask the reporter for a fresh photo
@@ -1291,6 +1329,280 @@ exports.sendFollowUpReminders = onSchedule(
     }
   },
 );
+
+// ---- Referrals to another organization ------------------------------------
+//
+// CaseReferralRepository (the app) refers a case: status 'referred', the
+// target in cases/{id}.referredToOrgId and a summary in `referral`, plus a
+// cases/{id}/referrals/{rid} record. Only the target organization's staff
+// see and answer it (firestore.rules isReferralTarget). Accept makes them
+// the owner (case to their Rescue Review); Decline sends it back to the
+// referring organization's Rescue Review with the reason.
+//
+// notifyCaseReferralCreated tells the target's staff a referral arrived;
+// notifyCaseReferralOutcome tells the referring organization's staff (and
+// whoever sent it) when it is accepted, declined or returned unanswered.
+// followUpCaseReferrals (hourly) reminds the target once at 24 hours and
+// returns the case to the referring organization at 48 hours (timings in
+// referral_rules.js, pending the organization's confirmation). Each step is
+// claimed in a transaction that re-checks the case still waits on the same
+// referral, so a retry or an answer in the meantime never double-sends or
+// undoes it. LGU/barangay referrals are one-way notifications and are left
+// alone (they have no referredToOrgId).
+const {referralStepDue, REFERRAL_REMINDER_HOURS, REFERRAL_RETURN_HOURS} = require('./referral_rules');
+
+exports.notifyCaseReferralCreated = onDocumentCreated(
+  'cases/{caseId}/referrals/{referralId}',
+  async (event) => {
+    const r = event.data && event.data.data();
+    if (!r || r.type !== 'anotherOrganization' || !r.targetOrgId) return;
+    const {caseId, referralId} = event.params;
+    const from = r.fromOrgName || 'Another organization';
+    await notifyStaff(await orgStaffUids(r.targetOrgId), {
+      title: 'New case referral',
+      body: `${from} referred a rescue case to your organization. Open it to accept or decline.`,
+      data: {type: 'case_referral', caseId, referralId},
+    });
+  },
+);
+
+const REFERRAL_OUTCOME_COPY = {
+  accepted: (r) => ({
+    title: 'Referral accepted',
+    body: `${r.targetOrgName || 'The organization'} accepted your referral and took over the case.`,
+  }),
+  declined: (r) => ({
+    title: 'Referral declined',
+    body: `${r.targetOrgName || 'The organization'} declined your referral`
+      + `${r.declineReason ? `: ${r.declineReason}` : '.'} The case is back in your Rescue Review.`,
+  }),
+  expired: (r) => ({
+    title: 'Referral not answered',
+    body: `${r.targetOrgName || 'The organization'} did not answer your referral within `
+      + `${REFERRAL_RETURN_HOURS} hours. The case is back in your Rescue Review.`,
+  }),
+};
+
+exports.notifyCaseReferralOutcome = onDocumentUpdated(
+  'cases/{caseId}/referrals/{referralId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after || before.status === after.status) return;
+    if (before.status !== 'referredPending' || after.type !== 'anotherOrganization') return;
+    const copyFor = REFERRAL_OUTCOME_COPY[after.status];
+    if (!copyFor) return;
+    const {caseId, referralId} = event.params;
+    const {title, body} = copyFor(after);
+    const recipients = [after.createdByUid, ...(await orgStaffUids(after.fromOrgId))];
+    await notifyStaff(recipients, {
+      title,
+      body,
+      data: {type: 'case_referral', caseId, referralId, status: after.status},
+    });
+  },
+);
+
+// Re-reads the case inside the transaction: still referred, to the same
+// organization, for the same referral.
+function stillWaitingOn(snap, c) {
+  if (!snap.exists) return null;
+  const d = snap.data();
+  const r = d.referral || {};
+  if (d.status !== 'referred' || d.referredToOrgId !== c.referredToOrgId) return null;
+  if (!r.referralId || r.referralId !== (c.referral || {}).referralId) return null;
+  return d;
+}
+
+exports.followUpCaseReferrals = onSchedule('every 60 minutes', async () => {
+  const nowMs = Date.now();
+  const snap = await db.collection('cases').where('status', '==', 'referred').get();
+  for (const doc of snap.docs) {
+    const c = doc.data();
+    const r = c.referral || {};
+    if (!c.referredToOrgId || !r.referralId) continue; // LGU or older referrals
+    try {
+      const step = referralStepDue({
+        referredAtMs: r.referredAt ? millisOf(r.referredAt) : undefined,
+        nowMs,
+        reminded: Boolean(r.reminderSentAt),
+      });
+      if (!step) continue;
+
+      if (step === 'remind') {
+        const claimed = await db.runTransaction(async (tx) => {
+          const d = stillWaitingOn(await tx.get(doc.ref), c);
+          if (!d || d.referral.reminderSentAt) return false;
+          tx.update(doc.ref, {'referral.reminderSentAt': admin.firestore.Timestamp.fromMillis(nowMs)});
+          return true;
+        });
+        if (!claimed) continue;
+        await notifyStaff(await orgStaffUids(c.referredToOrgId), {
+          title: 'Referral waiting for your answer',
+          body: `${r.fromOrgName || 'Another organization'} referred a case to you ${REFERRAL_REMINDER_HOURS} hours ago. `
+            + `Accept or decline it; with no answer it goes back to them after ${REFERRAL_RETURN_HOURS} hours.`,
+          data: {type: 'case_referral', caseId: doc.id, referralId: r.referralId},
+        });
+        continue;
+      }
+
+      // step === 'return': same writes as a decline, marked 'expired'.
+      await db.runTransaction(async (tx) => {
+        const d = stillWaitingOn(await tx.get(doc.ref), c);
+        if (!d) return;
+        const referralRef = doc.ref.collection('referrals').doc(r.referralId);
+        const referralSnap = await tx.get(referralRef);
+        const now = admin.firestore.Timestamp.fromMillis(nowMs);
+        const target = r.targetOrgName || 'The receiving organization';
+        const from = r.fromOrgName || 'the referring organization';
+        tx.update(doc.ref, {
+          status: 'pending',
+          referredToOrgId: admin.firestore.FieldValue.delete(),
+          referralOutcome: {
+            status: 'expired',
+            referralId: r.referralId,
+            targetOrgId: c.referredToOrgId,
+            targetOrgName: r.targetOrgName || null,
+            fromOrgId: r.fromOrgId || null,
+            fromOrgName: r.fromOrgName || null,
+            reason: `No answer within ${REFERRAL_RETURN_HOURS} hours`,
+            byUid: null,
+            byName: 'System',
+            at: now,
+          },
+          statusHistory: admin.firestore.FieldValue.arrayUnion({
+            status: `${target} did not answer the referral in time. The case is back with ${from} for review.`,
+            timestamp: now,
+          }),
+        });
+        if (referralSnap.exists && referralSnap.get('status') === 'referredPending') {
+          tx.update(referralRef, {status: 'expired', respondedAt: now, respondedByName: 'System'});
+        }
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'referral_expired',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          details: {
+            referralId: r.referralId,
+            targetOrgId: c.referredToOrgId,
+            targetOrgName: r.targetOrgName || null,
+            hours: REFERRAL_RETURN_HOURS,
+          },
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (e) {
+      console.error('[followUpCaseReferrals] failed for', doc.ref.path, e);
+    }
+  }
+});
+
+// ---- Rescue timers: quarantine end and intake completion ------------------
+//
+// These used to happen only when staff opened the case
+// (CaseIntakeRepository.checkAndCompleteQuarantineIfDue and
+// checkAndCompleteIntakeIfDue, which stay as the in-app fallback). Every 30
+// minutes the server makes the same writes, each re-checked inside a
+// transaction so a run never repeats or undoes what the app already did.
+// Decisions in rescue_timer_rules.js.
+//   - Quarantine: quarantineStatus 'completed', quarantineEndedAt = the
+//     scheduled end, the same automatic reason; plus an activity-log entry,
+//     and the organization's staff are told (push + in-app notification).
+//     Needs the cases (quarantineStatus, quarantineScheduledEndAt) index.
+//   - Intake: once the animal is received and every animal has its record,
+//     status 'completed' + intakeCompletedAt with the same status line and
+//     activity-log entry. Cases whose animals follow separate
+//     post-treatment paths are completed per animal in the app.
+const {quarantineDue, intakeCompletionDue} = require('./rescue_timer_rules');
+
+const QUARANTINE_AUTO_REASON = 'Automatic — scheduled duration elapsed.';
+
+function caseAnimalLabel(c) {
+  const animals = Array.isArray(c.animals) ? c.animals : [];
+  const names = animals.map((a) => a && (a.name || a.species)).filter(Boolean);
+  if (names.length) return names.slice(0, 3).join(', ');
+  return c.animalName || c.animalType || c.species || 'The animal';
+}
+
+exports.completeDueQuarantines = onSchedule('every 30 minutes', async () => {
+  const nowMs = Date.now();
+  const snap = await db.collection('cases')
+    .where('quarantineStatus', '==', 'active')
+    .where('quarantineScheduledEndAt', '<=', admin.firestore.Timestamp.fromMillis(nowMs))
+    .get();
+  for (const doc of snap.docs) {
+    try {
+      const ended = await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists) return null;
+        const c = s.data();
+        const endMs = millisOf(c.quarantineScheduledEndAt) || null;
+        if (!quarantineDue({status: c.quarantineStatus, scheduledEndMs: endMs, nowMs})) return null;
+        tx.update(doc.ref, {
+          quarantineStatus: 'completed',
+          quarantineEndedAt: c.quarantineScheduledEndAt,
+          quarantineEndReason: QUARANTINE_AUTO_REASON,
+        });
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'quarantine_completed',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          details: {reason: QUARANTINE_AUTO_REASON, scheduledEndAt: c.quarantineScheduledEndAt},
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return c;
+      });
+      if (!ended) continue;
+      await notifyStaff(await orgStaffUids(ended.organizationId), {
+        title: 'Quarantine ended',
+        body: `${caseAnimalLabel(ended)} finished the scheduled quarantine. Check on them and plan the next step.`,
+        data: {type: 'quarantine_ended', caseId: doc.id},
+      });
+    } catch (e) {
+      console.error('[completeDueQuarantines] failed for', doc.ref.path, e);
+    }
+  }
+});
+
+exports.completeDueIntakes = onSchedule('every 30 minutes', async () => {
+  const snap = await db.collection('cases').where('status', '==', 'intake').get();
+  for (const doc of snap.docs) {
+    const first = doc.data();
+    if (!first.intakeReceivedAt) continue;
+    try {
+      const records = await db.collection('animals').where('linkedCaseId', '==', doc.id).get();
+      const indexes = records.docs
+        .map((r) => r.get('sourceAnimalIndex'))
+        .filter((i) => typeof i === 'number')
+        .map((i) => Math.trunc(i));
+      if (!intakeCompletionDue(first, indexes)) continue;
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists || !intakeCompletionDue(s.data(), indexes)) return;
+        const now = admin.firestore.Timestamp.now();
+        tx.update(doc.ref, {
+          status: 'completed',
+          intakeCompletedAt: now,
+          statusHistory: admin.firestore.FieldValue.arrayUnion({
+            status: 'Intake completed — all animal records created.',
+            timestamp: now,
+          }),
+        });
+        tx.set(doc.ref.collection('activityLogs').doc(), {
+          action: 'intake_completed',
+          actorUid: null,
+          actorName: 'System',
+          actorRole: null,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (e) {
+      console.error('[completeDueIntakes] failed for', doc.ref.path, e);
+    }
+  }
+});
 
 const REPORTER_RESPONSE_TIMEOUT_HOURS = 48;
 

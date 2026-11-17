@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/utils/org_list_scope.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
+import 'package:respawnd1/core/models/adoption/adoption_fit_assessment.dart';
+import 'package:respawnd1/core/models/adoption/adoption_no_show_rules.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_schedule.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
@@ -325,17 +327,94 @@ class AdoptionApplicationRepository {
     });
   }
 
-  Future<void> markNoShow({
+  /// Records that the applicant missed the booked interview. The first
+  /// no-show sends the application back to Pending with the appointment
+  /// cleared so they can book once more; the second closes it as rejected
+  /// with [kNoShowClosedReason] (adoption_no_show_rules.dart). The
+  /// applicant is told by notifyAdopterOfNoShow (functions/adoptions.js).
+  Future<NoShowOutcome> markNoShow({
     required String applicationId,
+    required String actorUid,
     required String actorName,
   }) async {
-    await _adoptionDoc(applicationId).update({
-      'noShowAt': FieldValue.serverTimestamp(),
-      'noShowBy': actorName,
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Applicant marked as no-show by $actorName.', 'timestamp': Timestamp.now()}
-      ]),
+    final ref = _adoptionDoc(applicationId);
+    final result = await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      final data = snap.data();
+      if (data == null) throw StateError('Application not found.');
+      final status = AdoptionStatus.fromFirestoreValue(data['status'] as String?);
+      if (status != AdoptionStatus.pending && status != AdoptionStatus.interview) {
+        throw StateError('Only an application waiting for its interview can be marked as a no-show.');
+      }
+      if (data['appointmentDate'] == null) throw StateError('No interview is booked.');
+      final previous = noShowCountOf(data);
+      final outcome = noShowOutcome(previousNoShows: previous);
+      final now = Timestamp.now();
+      final missed = {
+        'at': now,
+        'by': actorName,
+        'appointmentDate': data['appointmentDate'],
+        'appointmentTime': data['appointmentTime'],
+        'appointmentType': data['appointmentType'],
+      };
+      final common = <String, dynamic>{
+        'noShowCount': previous + 1,
+        'lastNoShowAt': now,
+        'noShows': FieldValue.arrayUnion([missed]),
+      };
+      if (outcome == NoShowOutcome.rebook) {
+        tx.update(ref, {
+          ...common,
+          // Cleared so the applicant's app shows Book Appointment again and
+          // the staff screen offers Complete Interview for the new booking.
+          'noShowAt': FieldValue.delete(),
+          'noShowBy': FieldValue.delete(),
+          'status': AdoptionStatus.pending.firestoreValue,
+          'appointmentDate': FieldValue.delete(),
+          'appointmentTime': FieldValue.delete(),
+          'appointmentType': FieldValue.delete(),
+          'statusHistory': FieldValue.arrayUnion([
+            {
+              'status': 'Missed the interview (recorded by $actorName). One more interview can be booked; '
+                  'missing it closes the application.',
+              'timestamp': now,
+            }
+          ]),
+        });
+      } else {
+        tx.update(ref, {
+          ...common,
+          'noShowAt': now,
+          'noShowBy': actorName,
+          'status': AdoptionStatus.rejected.firestoreValue,
+          'rejectionReasons': [kNoShowClosedReason],
+          'rejectedAt': FieldValue.serverTimestamp(),
+          'rejectedBy': actorName,
+          'closedReason': 'no_show',
+          'statusHistory': FieldValue.arrayUnion([
+            {'status': 'Application closed: $kNoShowClosedReason.', 'timestamp': now}
+          ]),
+        });
+      }
+      return (outcome: outcome, previousStatus: data['status'] as String?, count: previous + 1);
     });
+    await _auditLog.log(
+      category: AuditCategory.adoptions,
+      action: result.outcome == NoShowOutcome.close
+          ? 'Application closed — second interview no-show'
+          : 'Interview no-show recorded — may rebook once',
+      actorId: actorUid,
+      actorName: actorName,
+      targetType: 'AdoptionApplication',
+      targetId: applicationId,
+      oldValues: {'status': result.previousStatus},
+      newValues: {
+        'status': result.outcome == NoShowOutcome.close ? 'rejected' : 'pending',
+        'noShowCount': result.count,
+        if (result.outcome == NoShowOutcome.close) 'reasons': [kNoShowClosedReason],
+      },
+    );
+    return result.outcome;
   }
 
   // ---- Fit assessment (manual only — see FitAssessmentValue doc comment) --
@@ -393,15 +472,22 @@ class AdoptionApplicationRepository {
 
   // ---- Accept / Reject --------------------------------------------------
 
+  /// Approves the application and saves the Fit Assessment as it stood
+  /// ([fitAssessment], calculated by the caller from the form and the
+  /// animal record), with the staff's own fit value and notes, as
+  /// `fitAtDecision` (see [FitAtDecision]).
   Future<void> accept({
     required String applicationId,
     required String actorUid,
     required String actorName,
+    AdoptionFitAssessment? fitAssessment,
   }) async {
+    final fit = await _fitAtDecision(applicationId, 'approved', actorName, fitAssessment);
     await _adoptionDoc(applicationId).update({
       'status': AdoptionStatus.approved.firestoreValue,
       'approvedAt': FieldValue.serverTimestamp(),
       'approvedBy': actorName,
+      'fitAtDecision': fit,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Application approved by $actorName.', 'timestamp': Timestamp.now()}
       ]),
@@ -416,6 +502,7 @@ class AdoptionApplicationRepository {
       targetType: 'AdoptionApplication',
       targetId: applicationId,
       newValues: const {'status': 'approved'},
+      metadata: _fitAuditMetadata(fitAssessment, fit),
     );
   }
 
@@ -425,13 +512,16 @@ class AdoptionApplicationRepository {
     String? notes,
     required String actorUid,
     required String actorName,
+    AdoptionFitAssessment? fitAssessment,
   }) async {
+    final fit = await _fitAtDecision(applicationId, 'rejected', actorName, fitAssessment);
     await _adoptionDoc(applicationId).update({
       'status': AdoptionStatus.rejected.firestoreValue,
       'rejectionReasons': reasons,
       if (notes != null && notes.isNotEmpty) 'rejectionNotes': notes,
       'rejectedAt': FieldValue.serverTimestamp(),
       'rejectedBy': actorName,
+      'fitAtDecision': fit,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Application rejected: ${reasons.join(', ')}.', 'timestamp': Timestamp.now()}
       ]),
@@ -444,9 +534,50 @@ class AdoptionApplicationRepository {
       targetType: 'AdoptionApplication',
       targetId: applicationId,
       newValues: {'status': 'rejected', 'reasons': reasons},
-      metadata: notes != null && notes.isNotEmpty ? {'notes': notes} : null,
+      metadata: {
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+        ..._fitAuditMetadata(fitAssessment, fit),
+      },
     );
   }
+
+  /// The `fitAtDecision` map: the rule-based score with its breakdown and
+  /// rubric version, plus the staff's manual fit value and notes as they
+  /// stand now.
+  Future<Map<String, dynamic>> _fitAtDecision(
+    String applicationId,
+    String decision,
+    String actorName,
+    AdoptionFitAssessment? assessment,
+  ) async {
+    final appSnap = await _adoptionDoc(applicationId).get();
+    final manual = (appSnap.data()?['fitAssessment'] as Map?) ?? const {};
+    final notesSnap = await _notesOf(applicationId).orderBy('createdAt', descending: true).limit(50).get();
+    DateTime? ts(Object? v) => v is Timestamp ? v.toDate() : null;
+    return {
+      ...FitAtDecision.toMap(
+        decision: decision,
+        decidedBy: actorName,
+        assessment: assessment,
+        staffFitValue: manual['value'] as String?,
+        staffFitBy: manual['assessedBy'] as String?,
+        staffFitAt: ts(manual['assessedAt']),
+        staffNotes: [
+          for (final n in notesSnap.docs)
+            if (n.data()['text'] is String)
+              (text: n.data()['text'] as String, by: n.data()['createdBy'] as String?, at: ts(n.data()['createdAt'])),
+        ],
+      ),
+      'decidedAt': FieldValue.serverTimestamp(),
+    };
+  }
+
+  static Map<String, dynamic> _fitAuditMetadata(AdoptionFitAssessment? a, Map<String, dynamic> fit) => {
+        'fitScoreAtDecision': (a == null || a.insufficientData) ? null : a.score,
+        'fitBandAtDecision': (a == null || a.insufficientData) ? null : a.band.label,
+        'fitRubricVersion': a?.version,
+        'staffFitValue': (fit['staffFit'] as Map?)?['value'],
+      };
 
   // ---- Reserve / Unreserve / Release (transactional) ---------------------
 

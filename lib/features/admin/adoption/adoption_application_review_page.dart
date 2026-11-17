@@ -188,7 +188,7 @@ class _AdoptionFilters {
         'notReviewed' => a.fitAssessment == FitAssessmentValue.notReviewed,
         'reviewed' => a.fitAssessment != FitAssessmentValue.notReviewed,
         'interviewCompleted' => a.interviewCompletedAt != null,
-        'noShow' => a.noShowAt != null,
+        'noShow' => a.noShowAt != null || a.noShowCount > 0,
         _ => true,
       };
       if (!ok) return false;
@@ -818,10 +818,14 @@ class _ApplicationCard extends ConsumerWidget {
     // fitAssessment), never colored like an approve/reject status, and
     // always the same shared calculateFitAssessment() the detail page
     // uses — never a second/different score for the same application.
-    final computedAssessment = animal == null ? null : calculateFitAssessment(application: application, animal: animal);
+    // A decided application shows the score saved with the decision.
+    final saved = application.fitAtDecision;
+    final computedAssessment = saved != null
+        ? saved.assessment
+        : (animal == null ? null : calculateFitAssessment(application: application, animal: animal));
     final computedLabel = (computedAssessment == null || computedAssessment.insufficientData)
         ? 'Not assessed'
-        : '${computedAssessment.score} · ${computedAssessment.band.label}';
+        : '${computedAssessment.score} · ${computedAssessment.band.label}${saved != null ? ' (at decision)' : ''}';
 
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdoptionApplicationDetailPage(applicationId: application.id))),

@@ -113,6 +113,18 @@ describe('organizations', () => {
     await assertFails(as('staffB').doc('organizations/orgA').update({ name: 'Hijacked' }));
     await assertSucceeds(as('staffA').doc('organizations/orgA').update({ shelterName: 'Main shelter' }));
   });
+
+  test("shelter settings: the organization's staff read, its admins write", async () => {
+    const doc = 'organizations/orgA/settings/shelter';
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc(doc).set({ maxCapacity: 20 }));
+    await assertSucceeds(as('staffA').doc(doc).get());
+    await assertSucceeds(as('admin').doc(doc).get());
+    await assertFails(as('staffB').doc(doc).get());
+    await assertFails(as('stranger').doc(doc).get());
+    await assertSucceeds(as('ownerA').doc(doc).set({ maxCapacity: 25 }, { merge: true }));
+    await assertFails(as('staffA').doc(doc).set({ maxCapacity: 99 }, { merge: true }));
+    await assertFails(as('staffB').doc(doc).set({ maxCapacity: 99 }, { merge: true }));
+  });
 });
 
 describe('who reads full rescue reports', () => {
@@ -142,8 +154,9 @@ describe('who reads full rescue reports', () => {
     // Staff: the unowned pool, their own organization's, and referrals.
     await assertSucceeds(as('staffB').collection('cases').where('organizationId', '==', '').where('status', 'in', ['pending', 'verifying']).get());
     await assertSucceeds(as('staffA').collection('cases').where('organizationId', '==', 'orgA').where('status', 'in', ['accepted', 'assigned']).get());
-    await assertSucceeds(as('staffB').collection('cases').where('status', '==', 'referred').get());
-    await assertFails(as('staffB').collection('cases').where('status', 'in', ['pending', 'referred']).get());
+    await assertSucceeds(as('staffB').collection('cases').where('referredToOrgId', '==', 'orgB').get());
+    await assertFails(as('staffB').collection('cases').where('referredToOrgId', '==', 'orgA').get());
+    await assertFails(as('staffB').collection('cases').where('status', '==', 'referred').get());
     await assertFails(as('staffB').collection('cases').where('organizationId', '==', 'orgA').get());
     await assertFails(as('reporter').collection('cases').where('status', '==', 'pending').get());
   });
@@ -186,13 +199,20 @@ describe('staff stay inside their own organization', () => {
       const db = ctx.firestore();
       await db.doc('cases/offered/transportAssignments/as1').update({ organizationId: 'orgA' });
       await db.doc('adoptions/appA/followUps/f1').set({ organizationId: 'orgA', status: 'scheduled' });
-      await db.doc('cases/referredA').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA' });
+      await db.doc('cases/referredA').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA', referredToOrgId: 'orgB' });
+      await db.doc('cases/referredElsewhere').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA', referredToOrgId: 'orgC' });
     });
     // Owned case.
     await assertSucceeds(as('staffA').doc('cases/ownedA').get());
     await assertFails(as('staffB').doc('cases/ownedA').get());
-    // A referred case is shared.
+    // A referred case: the organization it is referred to, and nobody else.
     await assertSucceeds(as('staffB').doc('cases/referredA').get());
+    await assertFails(as('staffB').doc('cases/referredElsewhere').get());
+    // The target accepts it (takes ownership) or declines it.
+    await assertSucceeds(as('staffB').doc('cases/referredA').update({
+      status: 'pending', organizationId: 'orgB', referredToOrgId: FieldValue.delete(),
+    }));
+    await assertFails(as('staffB').doc('cases/referredElsewhere').update({ status: 'pending' }));
     // The unowned pool is shared.
     await assertSucceeds(as('staffB').doc('cases/pending1').get());
     // Offers.
@@ -468,6 +488,11 @@ describe('adoptions', () => {
   test('adopters can withdraw but not approve', async () => {
     await assertFails(as('adopter').doc('adoptions/appA').update({ status: 'approved' }));
     await assertSucceeds(as('adopter').doc('adoptions/appA').update({ status: 'withdrawn' }));
+    // The fit score saved with the staff decision is staff-only.
+    await assertFails(as('adopter').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
+    // Nor reset their missed-interview count.
+    await assertFails(as('adopter').doc('adoptions/appA').update({ noShowCount: 0 }));
+    await assertSucceeds(as('staffA').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
   });
 
   test("the owning organization's staff decide", async () => {

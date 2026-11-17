@@ -252,6 +252,8 @@ class CampaignHistoryEntry {
     'converted_to_general' => 'Converted to general fund',
     'offline_donation_recorded' => 'Offline donation recorded',
     'allocation_recorded' => 'Funds allocated',
+    'allocation_voided' => 'Spending voided (returned to balance)',
+    'flagged_payment_accepted' => 'Flagged online payment accepted',
     'excess_transferred_out' => 'Excess transferred out',
     'excess_transferred_in' => 'Excess received (transfer)',
     'inkind_received' => 'In-kind donation received',
@@ -278,11 +280,23 @@ class CampaignHistoryEntry {
 /// `donationPayments/{id}` — PayMongo checkout attempts (finance admins only).
 class PaymentAttempt {
   final String id;
-  final String status; // creating | pending | paid | needs_review | expired | cancelled | error
+  final String status; // creating | pending | paid | needs_review | voided | expired | cancelled | error
   final String campaignName;
+  final String? campaignId;
+  final String? organizationId;
+
+  /// The amount this backend priced (what the donor chose), in pesos.
   final double amount;
+
+  /// What PayMongo actually received, in pesos, for a needs_review payment
+  /// (null when it was flagged before the amount was recorded; "Check with
+  /// PayMongo" fetches it).
+  final double? paidAmount;
   final String methodLabel;
   final String? refNumber;
+  final String? paymongoPaymentId;
+  final String? checkoutSessionId;
+  final String? reviewReason;
   final DateTime? createdAt;
 
   const PaymentAttempt({
@@ -291,7 +305,13 @@ class PaymentAttempt {
     required this.campaignName,
     required this.amount,
     required this.methodLabel,
+    this.campaignId,
+    this.organizationId,
+    this.paidAmount,
     this.refNumber,
+    this.paymongoPaymentId,
+    this.checkoutSessionId,
+    this.reviewReason,
     this.createdAt,
   });
 
@@ -302,8 +322,14 @@ class PaymentAttempt {
       status: data['status'] as String? ?? '',
       campaignName: data['campaignName'] as String? ?? '',
       amount: (data['amount'] is num) ? (data['amount'] as num).toDouble() : 0,
+      campaignId: data['campaignId'] as String?,
+      organizationId: data['organizationId'] as String?,
+      paidAmount: (data['paidAmountCentavos'] is num) ? (data['paidAmountCentavos'] as num) / 100 : null,
       methodLabel: data['paymentMethodLabel'] as String? ?? '',
       refNumber: data['refNumber'] as String?,
+      paymongoPaymentId: data['paymongoPaymentId'] as String?,
+      checkoutSessionId: data['checkoutSessionId'] as String?,
+      reviewReason: data['reviewReason'] as String?,
       createdAt: data['createdAt'] is Timestamp ? (data['createdAt'] as Timestamp).toDate() : null,
     );
   }

@@ -17,6 +17,10 @@ class Referral {
   // anotherOrganization
   final String? targetOrgId;
   final String? targetOrgName;
+  final String? fromOrgName;
+  final DateTime? respondedAt;
+  final String? respondedByName;
+  final String? declineReason;
 
   // rescueVolunteer (TODO: no assignment logic yet, stub only)
   final String? targetVolunteerId;
@@ -39,6 +43,10 @@ class Referral {
     this.note,
     this.targetOrgId,
     this.targetOrgName,
+    this.fromOrgName,
+    this.respondedAt,
+    this.respondedByName,
+    this.declineReason,
     this.targetVolunteerId,
     this.targetVolunteerName,
     this.barangay,
@@ -64,6 +72,10 @@ class Referral {
       note: data['note'] as String?,
       targetOrgId: data['targetOrgId'] as String?,
       targetOrgName: data['targetOrgName'] as String?,
+      fromOrgName: data['fromOrgName'] as String?,
+      respondedAt: data['respondedAt'] is Timestamp ? (data['respondedAt'] as Timestamp).toDate() : null,
+      respondedByName: data['respondedByName'] as String?,
+      declineReason: data['declineReason'] as String?,
       targetVolunteerId: data['targetVolunteerId'] as String?,
       targetVolunteerName: data['targetVolunteerName'] as String?,
       barangay: data['barangay'] as String?,

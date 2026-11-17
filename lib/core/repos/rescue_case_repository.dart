@@ -394,6 +394,21 @@ class RescueCaseRepository {
     actorName: actorName,
   );
 
+  /// Delegates to [CaseReferralRepository.acceptReferral].
+  Future<void> acceptReferral({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+  }) => referrals.acceptReferral(caseId: caseId, actorUid: actorUid, actorName: actorName);
+
+  /// Delegates to [CaseReferralRepository.declineReferral].
+  Future<void> declineReferral({
+    required String caseId,
+    required String reason,
+    required String actorUid,
+    required String actorName,
+  }) => referrals.declineReferral(caseId: caseId, reason: reason, actorUid: actorUid, actorName: actorName);
+
   /// Delegates to [CaseReferralRepository.referToLgu].
   Future<String> referToLgu({
     required String caseId,

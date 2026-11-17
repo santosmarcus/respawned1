@@ -15,6 +15,7 @@ import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
+import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
 /// The four transparent readiness states. There is no overall score: the
@@ -72,6 +73,7 @@ class RescueReadinessCard extends ConsumerWidget {
     final supply = ref.watch(transportSupplyProvider).asData?.value;
     final records = ref.watch(allAnimalRecordsProvider).asData?.value;
     final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
     final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
 
     return SectionCard(
@@ -104,6 +106,7 @@ class RescueReadinessCard extends ConsumerWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (orgId != null) ShelterPinPrompt(organizationId: orgId, canSet: canManage),
               if (!settings.isConfigured)
                 _SetupPrompt(onTap: () => showShelterSetupSheet(context))
               else

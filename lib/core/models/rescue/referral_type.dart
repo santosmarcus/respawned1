@@ -19,6 +19,9 @@ enum ReferralStatus {
   referredPending,
   accepted,
   declined,
+  // The receiving organization didn't answer in time; the case went back
+  // to the referring organization (functions/index.js followUpCaseReferrals).
+  expired,
   notified; // used for LGU referrals, which are one-way notifications
 
   static ReferralStatus fromName(String? value) => ReferralStatus.values
@@ -48,3 +51,11 @@ enum LguReferralReason {
   static LguReferralReason fromName(String? value) => LguReferralReason.values
       .firstWhere((e) => e.name == value, orElse: () => LguReferralReason.other);
 }
+
+/// Hours a receiving organization has to answer a referral before it is
+/// reminded, and before the case goes back to the referring organization.
+/// Pending the organization's confirmation; keep equal to
+/// REFERRAL_REMINDER_HOURS / REFERRAL_RETURN_HOURS in
+/// functions/referral_rules.js.
+const kReferralReminderHours = 24;
+const kReferralReturnHours = 48;

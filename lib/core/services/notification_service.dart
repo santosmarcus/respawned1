@@ -199,6 +199,12 @@ class NotificationService {
       case 'geofence_case_nearby':
       // notifyStaffOfTransitEnd (functions/index.js): staff open Rescue Details.
       case 'transit_ended_staff':
+      // Referral received, reminded, answered or returned (functions/index.js).
+      case 'case_referral':
+      // notifyStaffOfMissingShelterPin: the case waiting on a shelter pin.
+      case 'shelter_location_missing':
+      // completeDueQuarantines: a case's quarantine ended.
+      case 'quarantine_ended':
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);

@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/adoption_fit_assessment.dart';
+import 'package:respawnd1/core/models/adoption/adoption_no_show_rules.dart';
 import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
 import 'package:respawnd1/core/services/adoption_fit_assessment_service.dart';
 import 'package:respawnd1/core/widgets/photo_thumbnail_strip.dart';
@@ -77,6 +78,27 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     await _run(() => ref
         .read(adoptionApplicationRepositoryProvider)
         .completeInterview(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
+  }
+
+  Future<void> _markNoShow(AdoptionApplication app) async {
+    final closes = noShowOutcome(previousNoShows: app.noShowCount) == NoShowOutcome.close;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Mark as No-show?',
+      message: closes
+          ? 'This is ${app.adopterName}\'s second missed interview. The application will be closed '
+              '("$kNoShowClosedReason") and they will be told.'
+          : '${app.adopterName} will be told they missed the interview and can book one more. '
+              'A second no-show closes the application.',
+      confirmLabel: closes ? 'Close Application' : 'Mark No-show',
+      destructive: closes,
+    );
+    if (!confirmed || !mounted) return;
+    await _run(() => ref
+        .read(adoptionApplicationRepositoryProvider)
+        .markNoShow(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
+    // The missed interview's online meeting is no longer needed.
+    if (mounted && app.hasActiveZoomMeeting) await _cancelZoomMeeting(app.id);
   }
 
   Future<void> _reschedule(AdoptionApplication app) async {
@@ -159,19 +181,37 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     final confirmed =
         await showConfirmActionDialog(context, title: 'Accept Application?', message: 'This moves the application to Approved.', confirmLabel: 'Accept');
     if (!confirmed) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).accept(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
+    await _run(() async {
+      final fit = await _fitAssessmentNow(app);
+      await ref
+          .read(adoptionApplicationRepositoryProvider)
+          .accept(applicationId: app.id, actorUid: _actorUid, actorName: _actorName, fitAssessment: fit);
+    });
+  }
+
+  /// The rule-based Fit Assessment as it stands right now, saved with the
+  /// decision. Null when the application has no linked animal record.
+  Future<AdoptionFitAssessment?> _fitAssessmentNow(AdoptionApplication app) async {
+    final animalRecordId = app.animalRecordId;
+    if (animalRecordId == null) return null;
+    final animal = await ref.read(animalRecordProvider(animalRecordId).future);
+    return animal == null ? null : calculateFitAssessment(application: app, animal: animal);
   }
 
   Future<void> _reject(AdoptionApplication app) async {
     final result = await showAdoptionRejectionSheet(context);
     if (result == null) return;
-    await _run(() => ref.read(adoptionApplicationRepositoryProvider).reject(
-          applicationId: app.id,
-          reasons: result.reasons,
-          notes: result.notes,
-          actorUid: _actorUid,
-          actorName: _actorName,
-        ));
+    await _run(() async {
+      final fit = await _fitAssessmentNow(app);
+      await ref.read(adoptionApplicationRepositoryProvider).reject(
+            applicationId: app.id,
+            reasons: result.reasons,
+            notes: result.notes,
+            actorUid: _actorUid,
+            actorName: _actorName,
+            fitAssessment: fit,
+          );
+    });
     // Zoom interview spec — rejecting an application with a scheduled
     // online interview counts as cancelling that interview: the meeting is
     // invalidated so the old join link stops working, without deleting the
@@ -298,6 +338,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                     busy: _busy,
                     onCompleteInterview: () => _completeInterview(app),
                     onReschedule: () => _reschedule(app),
+                    onNoShow: () => _markNoShow(app),
                   ),
 
                   const SizedBox(height: 12),
@@ -398,6 +439,21 @@ class _FitAssessmentCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Once staff accepted or rejected the application, show the score they
+    // saw then (saved with the decision), never a recalculated one.
+    final saved = app.fitAtDecision;
+    if (saved != null) {
+      return SectionCard(
+        title: 'Fit Assessment at decision time',
+        child: _SavedFitAssessment(
+          saved: saved,
+          expanded: expanded,
+          onToggle: onToggle,
+          bandColor: saved.assessment == null ? AppColors.slaterspwn : _bandColor(saved.assessment!.band),
+        ),
+      );
+    }
+
     // app.animalId is the legacy join key, never a real doc id.
     final animalRecordId = app.animalRecordId;
     final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
@@ -408,6 +464,12 @@ class _FitAssessmentCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (app.status == AdoptionStatus.approved || app.status == AdoptionStatus.rejected)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text('Decided before scores were saved; this is a fresh calculation.',
+                  style: GoogleFonts.zain(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.textSecondary)),
+            ),
           if (assessment == null)
             Text(
               animalRecordId == null
@@ -518,6 +580,56 @@ class _AssessmentSummary extends StatelessWidget {
                 child: Text('•  $u', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
               ),
           ],
+        ],
+      ],
+    );
+  }
+}
+
+/// The Fit Assessment saved when the application was accepted or rejected:
+/// the score and breakdown under the rubric version of the day, the staff's
+/// own fit value and the notes they had written.
+class _SavedFitAssessment extends StatelessWidget {
+  final FitAtDecision saved;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final Color bandColor;
+  const _SavedFitAssessment({required this.saved, required this.expanded, required this.onToggle, required this.bandColor});
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary);
+    final verb = saved.decision == 'approved' ? 'accepted' : 'rejected';
+    final when = saved.decidedAt == null ? '' : ' on ${_fmtDateTime(saved.decidedAt)}';
+    final staffFit = saved.staffFitValue == null ? null : FitAssessmentValue.fromName(saved.staffFitValue);
+    final a = saved.assessment;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Saved when ${saved.decidedBy ?? 'staff'} $verb this application$when'
+            '${saved.rubricVersion == null ? '' : ' (rubric v${saved.rubricVersion})'}.', style: muted),
+        const SizedBox(height: 8),
+        if (a == null)
+          Text('No score was calculated (no linked animal record).',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+        else if (a.insufficientData)
+          Text('Not enough application or animal information for a score at the time.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+        else
+          _AssessmentSummary(assessment: a, expanded: expanded, onToggle: onToggle, bandColor: bandColor),
+        const SizedBox(height: 10),
+        Text('Staff fit at decision: ${staffFit == null || staffFit == FitAssessmentValue.notReviewed ? 'not set' : staffFit.label}'
+            '${saved.staffFitBy == null || staffFit == null ? '' : ' (by ${saved.staffFitBy})'}',
+            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+        if (saved.staffNotes.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text('Staff notes at decision', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          for (final n in saved.staffNotes)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('•  ${n.text}${n.by == null ? '' : ' (${n.by}${n.at == null ? '' : ', ${_fmtDate(n.at)}'})'}',
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+            ),
         ],
       ],
     );
@@ -808,11 +920,13 @@ class _AppointmentSection extends StatelessWidget {
   final bool busy;
   final VoidCallback onCompleteInterview;
   final VoidCallback onReschedule;
+  final VoidCallback onNoShow;
   const _AppointmentSection({
     required this.app,
     required this.busy,
     required this.onCompleteInterview,
     required this.onReschedule,
+    required this.onNoShow,
   });
 
   ButtonStyle _yellowButton({bool enabled = true}) => ElevatedButton.styleFrom(
@@ -850,6 +964,9 @@ class _AppointmentSection extends StatelessWidget {
           if (app.interviewCompletedAt != null)
             _InfoItem('Interview Completed', '${_fmtDateTime(app.interviewCompletedAt)}${app.interviewCompletedBy != null ? ' · ${app.interviewCompletedBy}' : ''}'),
           if (app.noShowAt != null) _InfoItem('No-show recorded', _fmtDateTime(app.noShowAt)),
+          if (app.noShowCount > 0)
+            _InfoItem('Missed interviews', '${app.noShowCount} of $kMaxInterviewNoShows allowed'
+                '${app.noShowAt == null && app.lastNoShowAt != null ? ' · last ${_fmtDateTime(app.lastNoShowAt)}' : ''}'),
           // Zoom interview spec — only shown for an Online interview that
           // actually has a meeting on file; the host start URL is
           // deliberately never available here (server-side only).
@@ -890,6 +1007,14 @@ class _AppointmentSection extends StatelessWidget {
                   style: _yellowButton(),
                   child: const Text('Reschedule'),
                 ),
+                if (app.interviewCompletedAt == null &&
+                    app.noShowAt == null &&
+                    (app.status == AdoptionStatus.pending || app.status == AdoptionStatus.interview))
+                  OutlinedButton(
+                    onPressed: busy ? null : onNoShow,
+                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                    child: const Text('Mark No-show'),
+                  ),
               ],
             ),
         ],

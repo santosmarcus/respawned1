@@ -13,6 +13,7 @@ import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart'
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
+import 'package:respawnd1/features/admin/donation/flagged_payments_page.dart';
 import 'package:respawnd1/features/admin/events/admin_event_detail_page.dart';
 import 'package:respawnd1/features/admin/events/admin_events_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -84,6 +85,8 @@ void openReturn(BuildContext context, AdoptionApplication app) =>
     _push(context, (_) => ReturnDetailsPage(applicationId: app.id));
 
 void openDonationsAdmin(BuildContext context) => _push(context, (_) => const DonationAdminHomeScreen());
+
+void openFlaggedPayments(BuildContext context) => _push(context, (_) => const FlaggedPaymentsPage());
 
 void openCampaign(BuildContext context, String campaignId) =>
     _push(context, (_) => DonationAdminInfoPage(campaignId: campaignId));

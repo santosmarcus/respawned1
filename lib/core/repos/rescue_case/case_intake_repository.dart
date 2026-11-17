@@ -709,9 +709,10 @@ class CaseIntakeRepository {
   /// is read/opened — RescueCase.isQuarantineActive applies the same
   /// past-the-deadline logic purely client-side (no write) so the UI never
   /// shows an overdue quarantine as still active even before this runs.
-  /// TODO(quarantine): this only fires when an admin actually opens the
-  /// case; replace with a scheduled Cloud Function for true server-side
-  /// automatic completion that doesn't depend on the case being reopened.
+  /// The server now does this on its own every 30 minutes
+  /// (completeDueQuarantines in functions/index.js, which also tells the
+  /// organization's staff); this stays as the in-app fallback and writes
+  /// the same fields.
   Future<void> checkAndCompleteQuarantineIfDue(RescueCase c) async {
     if (c.quarantineStatus != 'active') return;
     final scheduledEnd = c.quarantineScheduledEndAt;
@@ -730,9 +731,10 @@ class CaseIntakeRepository {
   /// pipeline, still visible in case history" terminal state — the exact
   /// same status a deceased-case close already reaches (see
   /// RescueStatus.completed's queryValues including the legacy 'closed'
-  /// alias) — rather than inventing a second, parallel status field. Cheap,
-  /// client-triggered reconciliation (mirrors
-  /// [checkAndCompleteQuarantineIfDue]'s own pattern/TODO) called from
+  /// alias) — rather than inventing a second, parallel status field. The
+  /// server makes the same writes every 30 minutes for whole-case intakes
+  /// (completeDueIntakes in functions/index.js); this cheap,
+  /// client-triggered reconciliation stays as the fallback, called from
   /// IntakeDetailPage's live rebuild and from AnimalRecordsFlowPage the
   /// instant the last record is created — a transaction re-checks the same
   /// guard against the freshest doc, so calling this redundantly from both

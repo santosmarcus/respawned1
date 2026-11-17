@@ -114,6 +114,17 @@ class DonationAdminService {
         'reason': reason,
       });
 
+  /// A PayMongo payment flagged needs_review (paid amount differs from the
+  /// price). action: check (fetch the paid amount from PayMongo) | accept
+  /// (credit the amount actually paid) | void (needs [reason]).
+  /// functions/paymongo.js settleFlaggedPayment.
+  static Future<Map<String, dynamic>> settleFlaggedPayment(String paymentId, String action, {String? reason}) =>
+      _call('settleFlaggedPayment', {
+        'paymentId': paymentId,
+        'action': action,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      });
+
   /// action: received | cancel | follow_up. Returns {status, donorNotified, donorName}.
   static Future<Map<String, dynamic>> manageInKind(String donationId, String action,
       {int? itemIndex, int? quantityReceived, String? notes}) =>

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/constants/service_areas.dart';
@@ -18,6 +19,7 @@ import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
+import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart';
 import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/features/organization/widgets/facebook_integration_section.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -222,8 +224,13 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       _isOrgAdmin = capabilities.canManageTeam;
       _canManageFacebook = capabilities.canManageFacebookConnection;
     }
-    final shelterDoc = await FirebaseFirestore.instance.collection('settings').doc('shelter').get();
-    final maxCapacity = (shelterDoc.data()?['maxCapacity'] as num?)?.toInt();
+    // The organization's own shelter settings, or the old platform-wide
+    // document until they are migrated (shelter_settings.dart).
+    final ownShelter = await shelterSettingsDoc(orgId).get();
+    final shelterData = ownShelter.exists
+        ? ownShelter.data()
+        : (await FirebaseFirestore.instance.collection('settings').doc('shelter').get()).data();
+    final maxCapacity = (shelterData?['maxCapacity'] as num?)?.toInt();
     _capacityController.text = maxCapacity?.toString() ?? '';
 
     if (mounted) setState(() => _loading = false);
@@ -509,17 +516,20 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     setState(() => _saving = true);
     try {
       if (_isOrgAdmin) {
-        // settings/shelter is the single source both this field and the
-        // dashboard Capacity card read/write — updating it here reflects
-        // live on the dashboard immediately via shelterMaxCapacityProvider
-        // (a Firestore StreamProvider), no separate refresh needed.
-        // updatedBy/updatedAt is the only audit trail available — there is
-        // no broader organization-level audit log in this codebase yet.
-        await FirebaseFirestore.instance.collection('settings').doc('shelter').set({
-          'maxCapacity': clearCapacity ? null : capacityValue,
-          'updatedAt': FieldValue.serverTimestamp(),
-          'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-        }, SetOptions(merge: true));
+        // The organization's shelter settings are the single source both
+        // this field and the dashboard Capacity card read/write — updating
+        // it here reflects live on the dashboard via
+        // shelterMaxCapacityProvider. updatedBy/updatedAt is the only audit
+        // trail available. A brand-new organization has no id yet; its
+        // capacity is set after it exists.
+        final orgId = _organizationId;
+        if (orgId != null) {
+          await shelterSettingsDoc(orgId).set({
+            'maxCapacity': clearCapacity ? null : capacityValue,
+            'updatedAt': FieldValue.serverTimestamp(),
+            'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+          }, SetOptions(merge: true));
+        }
       }
 
       if (_isBootstrapping) {
@@ -860,6 +870,10 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   _field('Location', _locationController, hint: 'Full address')
                 else ...[
                   _label('Location'),
+                  // The transporter's shelter leg needs this pin; there is
+                  // no default shelter.
+                  if (_organizationId != null)
+                    ShelterPinPrompt(organizationId: _organizationId!, canSet: true),
                   Row(
                     children: [
                       Expanded(child: _readonlyish(_locationController)),
