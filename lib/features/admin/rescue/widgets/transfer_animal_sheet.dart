@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/clinic_search_result.dart';
 import 'package:respawnd1/core/models/rescue/org_referral_candidate.dart';
@@ -79,7 +80,14 @@ class _TransferAnimalSheetBody extends ConsumerStatefulWidget {
 }
 
 class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBody> {
-  late TransferDestinationType _type = widget.initialType;
+  // Another organization is offered only while the app spans organizations
+  // (FeatureFlags.multiOrganizationEnabled).
+  static final List<TransferDestinationType> _types = [
+    for (final t in TransferDestinationType.values)
+      if (t != TransferDestinationType.organization || FeatureFlags.multiOrganizationEnabled) t,
+  ];
+  late TransferDestinationType _type =
+      _types.contains(widget.initialType) ? widget.initialType : _types.first;
 
   // Organization branch
   OrgReferralCandidate? _selectedOrg;
@@ -220,7 +228,7 @@ class _TransferAnimalSheetBodyState extends ConsumerState<_TransferAnimalSheetBo
             Wrap(
               spacing: 8,
               children: [
-                for (final t in TransferDestinationType.values)
+                for (final t in _types)
                   ChoiceChip(
                     label: Text(t.label),
                     selected: _type == t,

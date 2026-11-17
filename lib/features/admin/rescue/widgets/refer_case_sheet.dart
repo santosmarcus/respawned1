@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
@@ -48,11 +49,12 @@ Future<bool> showReferCaseSheet(
           Text('Refer Case',
               style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
           const SizedBox(height: 12),
-          _TypeOption(
-            icon: Icons.apartment_outlined,
-            label: ReferralType.anotherOrganization.label,
-            onTap: () => Navigator.pop(context, ReferralType.anotherOrganization),
-          ),
+          if (FeatureFlags.multiOrganizationEnabled)
+            _TypeOption(
+              icon: Icons.apartment_outlined,
+              label: ReferralType.anotherOrganization.label,
+              onTap: () => Navigator.pop(context, ReferralType.anotherOrganization),
+            ),
           _TypeOption(
             icon: Icons.volunteer_activism_outlined,
             label: ReferralType.rescueVolunteer.label,

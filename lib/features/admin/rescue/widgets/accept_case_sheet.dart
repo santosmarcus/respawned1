@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/features/admin/stock/stock_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -148,6 +149,7 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
+            if (FeatureFlags.multiOrganizationEnabled) ...[
             const SizedBox(height: 12),
             // Transfers between organizations aren't built yet: the switch
             // stays off and tapping explains. Cases flagged before this keep
@@ -192,6 +194,7 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
                 ),
               ),
             ),
+            ],
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,

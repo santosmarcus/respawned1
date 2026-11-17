@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/org_referral_candidate.dart';
@@ -37,7 +38,10 @@ class _TransferAnimalRecordSheetBody extends ConsumerStatefulWidget {
 }
 
 class _TransferAnimalRecordSheetBodyState extends ConsumerState<_TransferAnimalRecordSheetBody> {
-  _TransferTargetType _targetType = _TransferTargetType.organization;
+  // Another organization only while the app spans organizations
+  // (FeatureFlags.multiOrganizationEnabled); otherwise a named volunteer.
+  _TransferTargetType _targetType =
+      FeatureFlags.multiOrganizationEnabled ? _TransferTargetType.organization : _TransferTargetType.volunteer;
   final _searchController = TextEditingController();
   final _volunteerNameController = TextEditingController();
   final _notesController = TextEditingController();
@@ -133,7 +137,7 @@ class _TransferAnimalRecordSheetBodyState extends ConsumerState<_TransferAnimalR
                 style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
             const SizedBox(height: 12),
 
-            Row(
+            if (FeatureFlags.multiOrganizationEnabled) Row(
               children: [
                 Expanded(
                   child: ChoiceChip(
