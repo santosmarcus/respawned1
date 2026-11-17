@@ -1056,6 +1056,44 @@ exports.notifyStaffOfTransitEnd = onDocumentUpdated(
   },
 );
 
+// ---- Shelter leg blocked: no shelter pin ------------------------------------
+//
+// TransitCaseService (transporter app) stops before the shelter leg when the
+// organization has no saved shelter location (there is no default shelter)
+// and stamps cases/{id}.shelterLocationMissing. Each new stamp alerts the
+// organization's staff and admins once, with an adminAlerts entry, so an
+// admin sets the pin in Organization Profile and the transporter can go on.
+exports.notifyStaffOfMissingShelterPin = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after) return;
+    const at = millisOf((after.shelterLocationMissing || {}).at);
+    if (!at || at === millisOf((before.shelterLocationMissing || {}).at)) return;
+    const caseId = event.params.caseId;
+    const orgId = after.organizationId || null;
+
+    await db.collection('adminAlerts').add({
+      type: 'shelter_location_missing',
+      caseId,
+      organizationId: orgId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      resolved: false,
+    });
+    const recipients = [
+      ...(await orgStaffUids(orgId)),
+      ...(await orgStaffUids(orgId, {adminsOnly: true})),
+    ];
+    await notifyStaff(recipients, {
+      title: 'Set your shelter location',
+      body: 'A transporter can\'t take an animal to the shelter because your organization has no shelter '
+        + 'location saved. An admin needs to set it in Organization Profile, then the transporter can continue.',
+      data: {type: 'shelter_location_missing', caseId},
+    });
+  },
+);
+
 // ---- Report verification ------------------------------------------------
 //
 // Before a report is accepted, staff may ask the reporter for a fresh photo

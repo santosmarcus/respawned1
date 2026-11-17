@@ -25,23 +25,17 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 /// transporter must be before an "arrived" action is accepted.
 const double kArrivalThresholdMeters = 150;
 
-// Temporary default shelter — used whenever
-// OrganizationDirectoryRepository.resolveShelterLocation comes back null,
-// which per that method's own doc comment is still the common case today
-// (org-membership backfill hasn't happened for most test accounts). Without
-// this, a case with no org-registered shelter would show "Shelter address
-// not available" and have no coordinates to route/verify arrival against.
-// Remove once every organization has a real shelter location configured.
-const String kFallbackShelterName = 'Loved by the Gapz Shelter - Rodriguez';
-const String kFallbackShelterAddress =
-    'Sitio Maislap, Brgy. San Isidro, Rodriguez, Rizal, Philippines';
-// APPROXIMATE coordinates for Brgy. San Isidro, Rodriguez, Rizal. The
-// shelter arrival geofence is only 150 m, so replace these with the exact
-// pin (Google Maps → long-press the shelter → copy the numbers).
-// TransitCaseService.acceptTreatment geocodes the address first and only
-// uses these if geocoding fails.
-const double kFallbackShelterLat = 14.7350;
-const double kFallbackShelterLng = 121.1590;
+// There is no default shelter. The shelter leg needs the organization's
+// saved shelter pin (organizations/{orgId}.shelterLat/shelterLng, set in
+// Organization Profile → shelter location): arrival is checked within
+// kArrivalThresholdMeters of it, so an approximate fallback would make
+// arrival impossible or wrong. Without a pin the transporter is stopped
+// before the shelter leg (TransitCaseService throws
+// ShelterLocationMissing) and staff are asked to set it.
+const String kShelterLocationMissingMessage =
+    "The organization hasn't set its shelter location yet, so the trip to the "
+    'shelter can\'t start. Staff have been asked to set it. Stay with the animal '
+    'and try again once they confirm.';
 
 /// Nearby-clinic search radii (meters), widened progressively when nearby
 /// clinics have already rejected the case.

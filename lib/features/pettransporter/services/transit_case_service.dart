@@ -17,7 +17,6 @@ import 'package:respawnd1/core/constants/maps_config.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:respawnd1/features/pettransporter/transit_rules.dart';
 
 /// Result of [TransitCaseService.findAndRouteToNextClinic].
@@ -27,6 +26,18 @@ enum ClinicSearchOutcome {
 
   /// No suitable clinic left; the case moved to `in_transit_shelter`.
   proceedingToShelter,
+
+  /// No suitable clinic left, but the organization has no shelter pin, so
+  /// the case stays where it is until staff set one.
+  shelterLocationMissing,
+}
+
+/// The shelter leg can't start: the organization has no saved shelter
+/// location (see kShelterLocationMissingMessage).
+class ShelterLocationMissing implements Exception {
+  const ShelterLocationMissing();
+  @override
+  String toString() => kShelterLocationMissingMessage;
 }
 
 class TransitCaseService {
@@ -116,25 +127,22 @@ class TransitCaseService {
     final data = await fetchCase();
 
     // The case never had its own shelter destination — resolve the
-    // assigned organization's registered shelter location (same source
-    // the Intake flow uses) and snapshot it onto the case now, so the
-    // in-transit-to-shelter panel/map/arrival-check all have a real
-    // destination instead of falling back to placeholder text with no
-    // coordinates at all.
-    final shelter = await OrganizationDirectoryRepository()
-        .resolveShelterLocation(data['organizationId'] as String?);
-    final fallback =
-        shelter == null ? await _resolveFallbackShelterLatLng() : null;
-
+    // assigned organization's saved shelter pin (same source the Intake
+    // flow uses) and snapshot it onto the case now, so the
+    // in-transit-to-shelter panel/map/arrival-check have a real
+    // destination. With no pin the shelter leg is blocked (no guessed
+    // coordinates): the case stays at the clinic and staff are told.
+    final shelter = await _shelterPin(data);
     final next = statusAfterTreatmentAccepted(data);
+    if (next.status == 'in_transit_shelter' && shelter == null) {
+      await _flagMissingShelter(data);
+      throw const ShelterLocationMissing();
+    }
 
     await _record('transit_treatment_accepted', next.label, {
       'status': next.status,
       'clinicVerificationUrls': clinicUrls,
-      'shelterName': shelter?.name ?? kFallbackShelterName,
-      'shelterAddress': shelter?.address ?? kFallbackShelterAddress,
-      'shelterLat': shelter?.lat ?? fallback!.lat,
-      'shelterLng': shelter?.lng ?? fallback!.lng,
+      ..._shelterFields(shelter),
     });
 
     unawaited(
@@ -257,8 +265,14 @@ class TransitCaseService {
         throw Exception('Could not reach clinic search. Please try again.');
       }
 
+      final shelter = await _shelterPin(await fetchCase());
+      if (shelter == null) {
+        await _flagMissingShelter(await fetchCase());
+        return ClinicSearchOutcome.shelterLocationMissing;
+      }
       await _record('transit_no_clinic_found', 'No more nearby clinics available. Proceeding directly to shelter.', {
         'status': 'in_transit_shelter',
+        ..._shelterFields(shelter),
       });
       return ClinicSearchOutcome.proceedingToShelter;
     }
@@ -281,19 +295,43 @@ class TransitCaseService {
     return ClinicSearchOutcome.routedToClinic;
   }
 
-  /// Geocodes the default shelter address; falls back to the approximate
-  /// constants in transit_rules.dart when geocoding isn't available.
-  Future<({double lat, double lng})> _resolveFallbackShelterLatLng() async {
-    try {
-      final hits = await locationFromAddress(kFallbackShelterAddress)
-          .timeout(const Duration(seconds: 8));
-      if (hits.isNotEmpty) {
-        return (lat: hits.first.latitude, lng: hits.first.longitude);
-      }
-    } catch (_) {
-      // fall through to the constants
-    }
-    return (lat: kFallbackShelterLat, lng: kFallbackShelterLng);
+  /// The owning organization's saved shelter pin, or null when it has none
+  /// with coordinates (a name-only legacy location doesn't count: arrival
+  /// is checked against the pin).
+  Future<({String name, String? address, double lat, double lng})?> _shelterPin(
+    Map<String, dynamic> caseData,
+  ) async {
+    final s = await OrganizationDirectoryRepository()
+        .resolveShelterLocation(caseData['organizationId'] as String?);
+    if (s == null || s.lat == null || s.lng == null) return null;
+    return (name: s.name, address: s.address, lat: s.lat!, lng: s.lng!);
+  }
+
+  Map<String, dynamic> _shelterFields(({String name, String? address, double lat, double lng})? s) => {
+    if (s != null) ...{
+      'shelterName': s.name,
+      'shelterAddress': s.address,
+      'shelterLat': s.lat,
+      'shelterLng': s.lng,
+    },
+    'shelterLocationMissing': FieldValue.delete(),
+  };
+
+  /// Records on the case that the shelter leg is waiting for a shelter pin.
+  /// notifyStaffOfMissingShelterPin (functions/index.js) asks the
+  /// organization's staff and admins to set it; Rescue Details shows it.
+  Future<void> _flagMissingShelter(Map<String, dynamic> caseData) {
+    return _record(
+      'transit_shelter_location_missing',
+      "Waiting for the organization to set its shelter location before going to the shelter.",
+      {
+        'shelterLocationMissing': {
+          'at': Timestamp.now(),
+          'organizationId': caseData['organizationId'],
+          'by': FirebaseAuth.instance.currentUser?.uid,
+        },
+      },
+    );
   }
 
   // transitCompletedAt/By let the transporter's profile keep counting the

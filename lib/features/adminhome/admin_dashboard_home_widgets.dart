@@ -1,9 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
@@ -368,17 +368,14 @@ final overdueFollowUpsProvider = StreamProvider<List<FollowUpRecord>>((ref) {
   return ref.watch(adoptionApplicationRepositoryProvider).streamOverdueFollowUps();
 });
 
-/// The shelter's configured maximum capacity — `settings/shelter.maxCapacity`
-/// — the only real "configured maximum" field anywhere in the data model
-/// (confirmed by inspection: no organization/animal-record field for this
-/// exists). Null when unset; the Capacity card shows "Capacity not
-/// configured" rather than inventing/hardcoding a maximum in that case.
-final shelterMaxCapacityProvider = StreamProvider.autoDispose<int?>((ref) {
-  return FirebaseFirestore.instance
-      .collection('settings')
-      .doc('shelter')
-      .snapshots()
-      .map((snap) => (snap.data()?['maxCapacity'] as num?)?.toInt());
+/// The shelter's configured maximum capacity — `maxCapacity` in the
+/// organization's shelter settings (organizations/{orgId}/settings/shelter,
+/// falling back to the old platform-wide settings/shelter until migrated;
+/// see shelter_settings.dart). Null when unset; the Capacity card shows
+/// "Capacity not configured" rather than inventing/hardcoding a maximum.
+final shelterMaxCapacityProvider = StreamProvider.autoDispose<int?>((ref) async* {
+  final orgId = await ref.watch(dashboardOrgIdProvider.future);
+  yield* watchShelterSettingsData(orgId).map((d) => (d?['maxCapacity'] as num?)?.toInt());
 });
 
 // ─── Top compact metrics: Capacity / Active Rescues / Active Volunteers ──

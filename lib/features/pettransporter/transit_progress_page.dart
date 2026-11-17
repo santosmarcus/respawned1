@@ -26,6 +26,7 @@ import 'package:respawnd1/features/pettransporter/widgets/transit_result_page.da
 import 'package:respawnd1/features/pettransporter/widgets/transit_tracking_map.dart';
 import 'package:respawnd1/features/pettransporter/widgets/transit_unread_badge.dart';
 import 'package:respawnd1/features/pettransporter/widgets/treatment_reject_dialog.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
 // Moved out of this file; re-exported so existing imports of
@@ -550,6 +551,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         'clinic',
       );
       await _service.acceptTreatment(urls);
+    } on ShelterLocationMissing {
+      if (mounted) {
+        await showInfoDialog(
+          context,
+          title: 'Shelter location not set',
+          message: kShelterLocationMissingMessage,
+        );
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -581,7 +590,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     if (_isSearchingClinic) return;
     setState(() => _isSearchingClinic = true);
     try {
-      await _service.findAndRouteToNextClinic();
+      final outcome = await _service.findAndRouteToNextClinic();
+      if (outcome == ClinicSearchOutcome.shelterLocationMissing && mounted) {
+        await showInfoDialog(
+          context,
+          title: 'No clinic found, and no shelter location',
+          message: 'No more nearby clinics are available. $kShelterLocationMissingMessage',
+        );
+      }
     } catch (e) {
       _showError('Clinic search failed: $e');
     } finally {

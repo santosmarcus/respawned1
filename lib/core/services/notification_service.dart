@@ -201,6 +201,8 @@ class NotificationService {
       case 'transit_ended_staff':
       // Referral received, reminded, answered or returned (functions/index.js).
       case 'case_referral':
+      // notifyStaffOfMissingShelterPin: the case waiting on a shelter pin.
+      case 'shelter_location_missing':
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);

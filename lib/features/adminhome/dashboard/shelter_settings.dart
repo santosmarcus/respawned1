@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/currency.dart';
+import 'package:respawnd1/core/utils/stream_combine.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -15,13 +16,14 @@ import 'package:respawnd1/core/utils/app_date_format.dart';
 /// isolation spots, monthly care budget, daily food use and how many riders
 /// the organization wants free at once.
 ///
-/// Stored in the shared `settings/shelter` document — the SAME document
-/// the dev branch's Organization Profile "Shelter Capacity" field and its
-/// dashboard Capacity card already use (`maxCapacity`). This sheet only
-/// adds sibling fields to that document with a merge write; it never
-/// overwrites anything else there. Every value is nullable — a missing
-/// value means "not set", never zero, and the dashboard shows a setup
-/// prompt instead of guessing.
+/// Stored per organization at `organizations/{orgId}/settings/shelter`
+/// (readable by that organization's staff, writable only by its admins,
+/// see firestore.rules), the same document Organization Profile's "Shelter
+/// Capacity" field writes (`maxCapacity`). Until an organization's values
+/// are migrated (functions/scripts/migrate_shelter_settings.js) the old
+/// platform-wide `settings/shelter` document is read as a fallback. Every
+/// value is nullable — a missing value means "not set", never zero, and the
+/// dashboard shows a setup prompt instead of guessing.
 class ShelterSettings {
   final int? capacity;
   final int? isolationCapacity;
@@ -71,23 +73,45 @@ final dashboardOrgIdProvider = StreamProvider.autoDispose<String?>((ref) {
   });
 });
 
-final shelterSettingsProvider = StreamProvider.autoDispose<ShelterSettings>((ref) {
-  return FirebaseFirestore.instance
-      .collection('settings')
-      .doc('shelter')
-      .snapshots()
-      .map((d) => ShelterSettings.fromMap(d.data()));
+/// The organization's shelter settings document.
+DocumentReference<Map<String, dynamic>> shelterSettingsDoc(String organizationId) => FirebaseFirestore.instance
+    .collection('organizations')
+    .doc(organizationId)
+    .collection('settings')
+    .doc('shelter');
+
+/// The old platform-wide document, read only as a fallback until the
+/// organization's own settings exist.
+DocumentReference<Map<String, dynamic>> get _legacyShelterSettingsDoc =>
+    FirebaseFirestore.instance.collection('settings').doc('shelter');
+
+/// The raw shelter settings for [organizationId]: its own document once it
+/// exists, the old platform-wide one before that (or with no organization).
+Stream<Map<String, dynamic>?> watchShelterSettingsData(String? organizationId) {
+  final legacy = _legacyShelterSettingsDoc.snapshots().map((d) => d.data());
+  if (organizationId == null || organizationId.isEmpty) return legacy;
+  final own = shelterSettingsDoc(organizationId).snapshots().map((d) => d.exists ? d.data() : null);
+  return combineLatest<Map<String, dynamic>?>([own, legacy]).map((v) => v[0] ?? v[1]);
+}
+
+final shelterSettingsProvider = StreamProvider.autoDispose<ShelterSettings>((ref) async* {
+  final orgId = await ref.watch(dashboardOrgIdProvider.future);
+  yield* watchShelterSettingsData(orgId).map(ShelterSettings.fromMap);
 });
 
 Future<void> saveShelterSettings({
+  required String? organizationId,
   required int capacity,
   required int isolationCapacity,
   double? monthlyBudget,
   double? foodPerDayKg,
   int? ridersNeeded,
 }) {
+  if (organizationId == null || organizationId.isEmpty) {
+    throw StateError('Your account is not linked to an organization.');
+  }
   final user = FirebaseAuth.instance.currentUser;
-  return FirebaseFirestore.instance.collection('settings').doc('shelter').set({
+  return shelterSettingsDoc(organizationId).set({
     'maxCapacity': capacity,
     'isolationCapacity': isolationCapacity,
     'monthlyBudget': monthlyBudget,
@@ -151,6 +175,7 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
     });
     try {
       await saveShelterSettings(
+        organizationId: await ref.read(dashboardOrgIdProvider.future),
         capacity: _capacity,
         isolationCapacity: _isolation,
         monthlyBudget: double.tryParse(_budget.text.replaceAll(',', '')),

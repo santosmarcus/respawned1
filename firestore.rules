@@ -223,6 +223,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // organizations/{orgId}/settings/{docId}: the organization's own
+    // settings (settings/shelter: safe capacity, isolation spots, monthly
+    // care budget, daily food use, riders wanted free; shelter_settings.dart).
+    // Its staff read them (the dashboard); only its admins change them.
+    match /organizations/{orgId}/settings/{docId} {
+      allow read: if isStaffOf(orgId) || isPlatformStaff();
+      allow write: if isOrgAdmin(orgId) || (isPlatformStaff() && myRole() == 'admin');
+    }
+
     // organizations/{orgId}/members/{uid}
     //   - Only the owner or an active admin adds, edits, or removes members.
     //   - An invited person may create only their own doc, with the role
@@ -294,7 +303,7 @@ service cloud.firestore {
     // Every other organization subcollection (communityReports,
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
-      allow read, write: if signedIn() && !(sub in ['members', 'integrations']);
+      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings']);
     }
 
     // ---- Organization invitations ------------------------------------------

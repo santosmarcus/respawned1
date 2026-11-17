@@ -113,6 +113,18 @@ describe('organizations', () => {
     await assertFails(as('staffB').doc('organizations/orgA').update({ name: 'Hijacked' }));
     await assertSucceeds(as('staffA').doc('organizations/orgA').update({ shelterName: 'Main shelter' }));
   });
+
+  test("shelter settings: the organization's staff read, its admins write", async () => {
+    const doc = 'organizations/orgA/settings/shelter';
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc(doc).set({ maxCapacity: 20 }));
+    await assertSucceeds(as('staffA').doc(doc).get());
+    await assertSucceeds(as('admin').doc(doc).get());
+    await assertFails(as('staffB').doc(doc).get());
+    await assertFails(as('stranger').doc(doc).get());
+    await assertSucceeds(as('ownerA').doc(doc).set({ maxCapacity: 25 }, { merge: true }));
+    await assertFails(as('staffA').doc(doc).set({ maxCapacity: 99 }, { merge: true }));
+    await assertFails(as('staffB').doc(doc).set({ maxCapacity: 99 }, { merge: true }));
+  });
 });
 
 describe('who reads full rescue reports', () => {
