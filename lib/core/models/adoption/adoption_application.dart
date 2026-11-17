@@ -233,6 +233,18 @@ class AdoptionApplication {
   Map<String, dynamic>? get zoom => raw['zoom'] as Map<String, dynamic>?;
   bool get hasActiveZoomMeeting => zoom != null && zoom!['zoomMeetingStatus'] == 'active';
 
+  /// Missed interviews so far (adoption_no_show_rules.dart).
+  int get noShowCount {
+    final n = raw['noShowCount'];
+    if (n is num) return n.toInt();
+    return noShowAt != null ? 1 : 0;
+  }
+
+  DateTime? get lastNoShowAt {
+    final t = raw['lastNoShowAt'];
+    return t is Timestamp ? t.toDate() : noShowAt;
+  }
+
   /// The Fit Assessment saved when staff accepted or rejected this
   /// application (AdoptionApplicationRepository.accept / reject), or null
   /// for an undecided application or one decided before it was saved.

@@ -188,7 +188,7 @@ class _AdoptionFilters {
         'notReviewed' => a.fitAssessment == FitAssessmentValue.notReviewed,
         'reviewed' => a.fitAssessment != FitAssessmentValue.notReviewed,
         'interviewCompleted' => a.interviewCompletedAt != null,
-        'noShow' => a.noShowAt != null,
+        'noShow' => a.noShowAt != null || a.noShowCount > 0,
         _ => true,
       };
       if (!ok) return false;

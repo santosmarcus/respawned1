@@ -1132,9 +1132,11 @@ service cloud.firestore {
       }
 
       function adopterUpdate() {
-        // fitAtDecision is the score staff saved with their decision.
+        // fitAtDecision is the score staff saved with their decision; the
+        // no-show and booking-reminder counters are staff/backend only.
         return isAdopterOf(resource.data) &&
-          !changedAny(['personal', 'organizationId', 'fitAtDecision']) &&
+          !changedAny(['personal', 'organizationId', 'fitAtDecision',
+            'noShowCount', 'noShows', 'lastNoShowAt', 'bookingReminders']) &&
           (!changedAny(['status']) || request.resource.data.status == 'withdrawn');
       }
 

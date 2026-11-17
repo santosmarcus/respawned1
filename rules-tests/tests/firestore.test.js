@@ -490,6 +490,8 @@ describe('adoptions', () => {
     await assertSucceeds(as('adopter').doc('adoptions/appA').update({ status: 'withdrawn' }));
     // The fit score saved with the staff decision is staff-only.
     await assertFails(as('adopter').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
+    // Nor reset their missed-interview count.
+    await assertFails(as('adopter').doc('adoptions/appA').update({ noShowCount: 0 }));
     await assertSucceeds(as('staffA').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
   });
 

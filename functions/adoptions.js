@@ -14,6 +14,7 @@
 
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
 const {onDocumentUpdated} = require('firebase-functions/v2/firestore');
+const {onSchedule} = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 
 // index.js calls admin.initializeApp() before requiring this module.
@@ -207,3 +208,163 @@ exports.closeOtherAdoptionApplications = onDocumentUpdated('animals/{animalId}',
     }
   }
 });
+
+// ---- Stalled applications: no-shows and no interview booked ---------------
+//
+// Staff record a missed interview from Adoption Details
+// (AdoptionApplicationRepository.markNoShow). The first no-show sends the
+// application back to Pending with the appointment cleared, so the
+// applicant can book once more; the second closes it as rejected with the
+// reason kNoShowClosedReason (closedReason 'no_show'). notifyAdopterOfNoShow
+// tells the applicant which it was.
+//
+// followUpStalledApplications (daily, 09:00 Manila) looks at pending
+// applications with no interview booked: the applicant is reminded after 3
+// days and the application is withdrawn after 14, counted from submission
+// or from the last missed interview (adoption_stall_rules.js, pending the
+// organization's confirmation). Each step is claimed in a transaction by
+// stamping bookingReminders.<step> (tied to the clock start) before
+// anything is sent, so a retry or an overlapping run never sends twice.
+const {
+  noShowOutcome,
+  bookingClockStart,
+  bookingStepDue,
+  BOOKING_WITHDRAW_DAYS,
+} = require('./adoption_stall_rules');
+
+const STALL_WITHDRAWN_REASON = `No interview booked within ${BOOKING_WITHDRAW_DAYS} days`;
+const PENDING_STATUSES = ['pending', 'pending_appointment'];
+
+async function tellApplicant(adopterId, adoptionId, {title, body, type}) {
+  if (!adopterId) return;
+  try {
+    await db.collection('users').doc(adopterId).collection('notifications').add({
+      title,
+      message: body,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      isRead: false,
+      type,
+      adoptionId,
+    });
+  } catch (e) {
+    console.warn('[adoptions] in-app notification failed', adopterId, e.message);
+  }
+  await pushTo(adopterId, {title, body, data: {type, adoptionId}});
+}
+
+const tsMillis = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : null);
+
+exports.notifyAdopterOfNoShow = onDocumentUpdated('adoptions/{adoptionId}', async (event) => {
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  const count = Number(after.noShowCount) || 0;
+  if (count <= (Number(before.noShowCount) || 0)) return;
+  const personal = after.personal || {};
+  const animal = personal.animalName || 'the animal';
+  const closed = noShowOutcome(count) === 'close' && after.closedReason === 'no_show';
+  await tellApplicant(personal.adopterId, event.params.adoptionId, closed ? {
+    title: 'Adoption application closed',
+    body: `You missed your interview for ${animal} a second time, so your application was closed. `
+      + 'You are welcome to apply again.',
+    type: 'adoption_no_show_closed',
+  } : {
+    title: 'You missed your interview',
+    body: `You missed your adoption interview for ${animal}. You can book one more interview from the app; `
+      + 'missing it will close your application.',
+    type: 'adoption_no_show_rebook',
+  });
+});
+
+async function claimBookingStep(ref, nowMs) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return null;
+    const d = snap.data();
+    if (!PENDING_STATUSES.includes(d.status) || d.appointmentDate) return null;
+    const clockStartMs = bookingClockStart({createdMs: tsMillis(d.createdAt), lastNoShowMs: tsMillis(d.lastNoShowAt)});
+    const raw = d.bookingReminders || null;
+    const sent = raw && {forStart: tsMillis(raw.forStart), remind: tsMillis(raw.remind), withdraw: tsMillis(raw.withdraw)};
+    const step = bookingStepDue({clockStartMs, nowMs, sent});
+    if (!step) return null;
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const same = sent && sent.forStart === clockStartMs;
+    const update = {
+      bookingReminders: {
+        ...(same ? raw : {}),
+        forStart: admin.firestore.Timestamp.fromMillis(clockStartMs),
+        [step]: now,
+      },
+    };
+    if (step === 'withdraw') {
+      Object.assign(update, {
+        status: 'withdrawn',
+        withdrawnAt: now,
+        withdrawnBy: 'System',
+        closedReason: 'no_interview_booked',
+        withdrawnReason: STALL_WITHDRAWN_REASON,
+        statusHistory: admin.firestore.FieldValue.arrayUnion({
+          status: `Application withdrawn automatically: ${STALL_WITHDRAWN_REASON.toLowerCase()}.`,
+          timestamp: now,
+        }),
+      });
+    } else {
+      update.statusHistory = admin.firestore.FieldValue.arrayUnion({
+        status: 'Reminder sent: please book your interview.',
+        timestamp: now,
+      });
+    }
+    tx.update(ref, update);
+    return {step, data: d};
+  });
+}
+
+exports.followUpStalledApplications = onSchedule(
+  {schedule: 'every day 09:00', timeZone: 'Asia/Manila'},
+  async () => {
+    const nowMs = Date.now();
+    const snap = await db.collection('adoptions').where('status', 'in', PENDING_STATUSES).get();
+    for (const doc of snap.docs) {
+      if (doc.get('appointmentDate')) continue;
+      try {
+        const claimed = await claimBookingStep(doc.ref, nowMs);
+        if (!claimed) continue;
+        const d = claimed.data;
+        const personal = d.personal || {};
+        const animal = personal.animalName || 'the animal';
+        if (claimed.step === 'remind') {
+          await tellApplicant(personal.adopterId, doc.id, {
+            title: 'Book your adoption interview',
+            body: `Your application for ${animal} is waiting for you to book an interview. Open the app to pick a `
+              + `date; applications without one are withdrawn after ${BOOKING_WITHDRAW_DAYS} days.`,
+            type: 'adoption_booking_reminder',
+          });
+          continue;
+        }
+        await tellApplicant(personal.adopterId, doc.id, {
+          title: 'Adoption application withdrawn',
+          body: `Your application for ${animal} was withdrawn because no interview was booked within `
+            + `${BOOKING_WITHDRAW_DAYS} days. You are welcome to apply again.`,
+          type: 'adoption_booking_withdrawn',
+        });
+        try {
+          await db.collection('auditLogs').add({
+            category: 'adoptions',
+            action: 'Application withdrawn — no interview booked',
+            actorName: 'System',
+            ...(d.organizationId ? {organizationId: d.organizationId} : {}),
+            targetType: 'AdoptionApplication',
+            targetId: doc.id,
+            oldValues: {status: d.status || null},
+            newValues: {status: 'withdrawn', reason: STALL_WITHDRAWN_REASON},
+            metadata: {animalId: personal.animalRecordId || null},
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        } catch (e) {
+          console.error('[followUpStalledApplications] audit log write failed', doc.id, e);
+        }
+      } catch (e) {
+        console.error('[followUpStalledApplications] failed for', doc.ref.path, e);
+      }
+    }
+  },
+);

@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/adoption_fit_assessment.dart';
+import 'package:respawnd1/core/models/adoption/adoption_no_show_rules.dart';
 import 'package:respawnd1/core/models/adoption/adoption_response_sections.dart';
 import 'package:respawnd1/core/services/adoption_fit_assessment_service.dart';
 import 'package:respawnd1/core/widgets/photo_thumbnail_strip.dart';
@@ -77,6 +78,27 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     await _run(() => ref
         .read(adoptionApplicationRepositoryProvider)
         .completeInterview(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
+  }
+
+  Future<void> _markNoShow(AdoptionApplication app) async {
+    final closes = noShowOutcome(previousNoShows: app.noShowCount) == NoShowOutcome.close;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Mark as No-show?',
+      message: closes
+          ? 'This is ${app.adopterName}\'s second missed interview. The application will be closed '
+              '("$kNoShowClosedReason") and they will be told.'
+          : '${app.adopterName} will be told they missed the interview and can book one more. '
+              'A second no-show closes the application.',
+      confirmLabel: closes ? 'Close Application' : 'Mark No-show',
+      destructive: closes,
+    );
+    if (!confirmed || !mounted) return;
+    await _run(() => ref
+        .read(adoptionApplicationRepositoryProvider)
+        .markNoShow(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
+    // The missed interview's online meeting is no longer needed.
+    if (mounted && app.hasActiveZoomMeeting) await _cancelZoomMeeting(app.id);
   }
 
   Future<void> _reschedule(AdoptionApplication app) async {
@@ -316,6 +338,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
                     busy: _busy,
                     onCompleteInterview: () => _completeInterview(app),
                     onReschedule: () => _reschedule(app),
+                    onNoShow: () => _markNoShow(app),
                   ),
 
                   const SizedBox(height: 12),
@@ -897,11 +920,13 @@ class _AppointmentSection extends StatelessWidget {
   final bool busy;
   final VoidCallback onCompleteInterview;
   final VoidCallback onReschedule;
+  final VoidCallback onNoShow;
   const _AppointmentSection({
     required this.app,
     required this.busy,
     required this.onCompleteInterview,
     required this.onReschedule,
+    required this.onNoShow,
   });
 
   ButtonStyle _yellowButton({bool enabled = true}) => ElevatedButton.styleFrom(
@@ -939,6 +964,9 @@ class _AppointmentSection extends StatelessWidget {
           if (app.interviewCompletedAt != null)
             _InfoItem('Interview Completed', '${_fmtDateTime(app.interviewCompletedAt)}${app.interviewCompletedBy != null ? ' · ${app.interviewCompletedBy}' : ''}'),
           if (app.noShowAt != null) _InfoItem('No-show recorded', _fmtDateTime(app.noShowAt)),
+          if (app.noShowCount > 0)
+            _InfoItem('Missed interviews', '${app.noShowCount} of $kMaxInterviewNoShows allowed'
+                '${app.noShowAt == null && app.lastNoShowAt != null ? ' · last ${_fmtDateTime(app.lastNoShowAt)}' : ''}'),
           // Zoom interview spec — only shown for an Online interview that
           // actually has a meeting on file; the host start URL is
           // deliberately never available here (server-side only).
@@ -979,6 +1007,14 @@ class _AppointmentSection extends StatelessWidget {
                   style: _yellowButton(),
                   child: const Text('Reschedule'),
                 ),
+                if (app.interviewCompletedAt == null &&
+                    app.noShowAt == null &&
+                    (app.status == AdoptionStatus.pending || app.status == AdoptionStatus.interview))
+                  OutlinedButton(
+                    onPressed: busy ? null : onNoShow,
+                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                    child: const Text('Mark No-show'),
+                  ),
               ],
             ),
         ],
