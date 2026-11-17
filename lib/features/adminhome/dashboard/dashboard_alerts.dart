@@ -47,6 +47,10 @@ class DashAlert {
   final String action;
   final AlertArea area;
 
+  /// Stable id of the issue (not of its wording or count), so a claim
+  /// ("I'm on it", alert_claims.dart) stays on the same row as it updates.
+  final String key;
+
   /// Short verb for the row's button (Verify, Assign, Review, Open).
   final String button;
   final void Function(BuildContext context, WidgetRef ref) open;
@@ -59,6 +63,7 @@ class DashAlert {
     required this.action,
     required this.open,
     required this.area,
+    required this.key,
     this.button = 'Open',
     this.subject,
     this.timing,
@@ -133,6 +138,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   ].join(' · ');
 
   void addCases({
+    required String kind,
     required List<RescueCase> cases,
     required DashSeverity severity,
     required IconData icon,
@@ -157,6 +163,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
             timing: 'Reported ${elapsedSince(c.createdAt)}',
             action: action,
             area: AlertArea.rescue,
+            key: 'case:${c.id}:$kind',
             button: button,
             open: (context, _) => openRescueCase(context, c),
           ),
@@ -177,6 +184,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
           timing: oldest == null ? null : 'Oldest reported ${elapsedSince(oldest)}',
           action: action,
           area: AlertArea.rescue,
+          key: 'rescue:$kind',
           button: button,
           open: (context, ref) =>
           tab == null ? openRescueCase(context, sorted.first) : openRescueTab(context, ref, tab),
@@ -191,6 +199,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   bool isCritical(RescueCase c) => UrgencyLevel.fromFirestoreValue(c.urgency) == UrgencyLevel.critical;
 
   addCases(
+    kind: 'critical-review',
     cases: reviewCases.where((c) => c.status == RescueStatus.pendingReview && isCritical(c)).toList(),
     severity: DashSeverity.critical,
     icon: Icons.priority_high,
@@ -206,6 +215,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
       .where((c) => c.status == RescueStatus.needsSpecializedAssistance)
       .toList();
   addCases(
+    kind: 'specialized',
     cases: specialist,
     severity: DashSeverity.critical,
     icon: Icons.support_agent_outlined,
@@ -218,6 +228,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   );
 
   addCases(
+    kind: 'transit-ended',
     cases: (fieldIssues.asData?.value ?? const <RescueCase>[])
         .where((c) => c.status == RescueStatus.transitEnded)
         .toList(),
@@ -232,6 +243,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   );
 
   addCases(
+    kind: 'critical-not-moving',
     cases: [...reviewCases.where((c) => c.status == RescueStatus.accepted), ...assignCases].where(isCritical).toList(),
     severity: DashSeverity.critical,
     icon: Icons.local_shipping_outlined,
@@ -255,6 +267,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         timing: stale.first.expiresAt == null ? null : 'Expired ${elapsedSince(stale.first.expiresAt)}',
         action: 'Re-offer to another available transporter',
         area: AlertArea.rescue,
+        key: 'rescue:stale-offers',
         button: 'Assign',
         open: (context, ref) => openRescueTab(context, ref, RescuePipelineTab.assign),
       ),
@@ -263,6 +276,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
 
   // ── Rescue: bottlenecks ───────────────────────────────────────────────
   addCases(
+    kind: 'needs-transporter',
     cases: assignCases.where((c) => !isCritical(c)).toList(),
     severity: DashSeverity.warning,
     icon: Icons.local_shipping_outlined,
@@ -275,6 +289,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   );
 
   addCases(
+    kind: 'needs-clinic',
     cases: reviewCases.where((c) => c.status == RescueStatus.accepted && !isCritical(c)).toList(),
     severity: DashSeverity.warning,
     icon: Icons.local_hospital_outlined,
@@ -287,6 +302,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   );
 
   addCases(
+    kind: 'review',
     cases: reviewCases.where((c) => c.status == RescueStatus.pendingReview && !isCritical(c)).toList(),
     severity: DashSeverity.warning,
     icon: Icons.fact_check_outlined,
@@ -299,6 +315,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   );
 
   addCases(
+    kind: 'field-issue',
     cases: (fieldIssues.asData?.value ?? const <RescueCase>[])
         .where((c) =>
             c.status != RescueStatus.needsSpecializedAssistance && c.status != RescueStatus.transitEnded)
@@ -325,6 +342,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         subject: ready.length == 1 ? caseSubject(ready.first) : null,
         action: 'Decide post-treatment action and plan shelter space',
         area: AlertArea.care,
+        key: 'care:ready-discharge',
         button: 'Decide',
         open: (context, ref) => ready.length == 1
             ? openTreatment(context, ready.first)
@@ -346,6 +364,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         subject: intakeCases.length == 1 ? caseSubject(intakeCases.first) : null,
         action: 'Confirm intake and create the animal record',
         area: AlertArea.care,
+        key: 'care:intake',
         button: 'Confirm',
         open: (context, ref) => intakeCases.length == 1
             ? openIntakeCase(context, intakeCases.first)
@@ -369,6 +388,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         timing: 'Requested ${elapsedSince(r.requestedAt)}',
         action: nextReturnStep(r),
         area: AlertArea.adoption,
+        key: 'return:${app.id}',
         button: 'Review',
         open: (context, _) => openReturn(context, app),
       ),
@@ -390,6 +410,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         timing: overdue.length == 1 ? 'Due ${shortDate(overdue.first.record.scheduledDate)}' : null,
         action: 'Contact adopters and record the follow-up',
         area: AlertArea.adoption,
+        key: 'adoption:overdue-follow-ups',
         open: (context, _) => overdue.length == 1
             ? openApplication(context, overdue.first.app)
             : openAdoptionQueue(context, AdoptionStatus.adopted),
@@ -412,6 +433,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         timing: oldest == null ? null : 'Oldest submitted ${elapsedSince(oldest)}',
         action: 'Screen applicants and schedule interviews',
         area: AlertArea.adoption,
+        key: 'adoption:pending',
         button: 'Review',
         open: (context, _) => openAdoptionQueue(context, AdoptionStatus.pending),
       ),
@@ -428,6 +450,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         status: 'Approved · handover not completed',
         action: 'Coordinate release with the adopter',
         area: AlertArea.adoption,
+        key: 'adoption:approved',
         open: (context, _) => openAdoptionQueue(context, AdoptionStatus.approved),
       ),
     );
@@ -450,6 +473,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         timing: oldest == null ? null : 'Oldest submitted ${elapsedSince(oldest)}',
         action: 'Check the documents, then approve or decline',
         area: AlertArea.people,
+        key: 'people:transporters',
         button: 'Review',
         open: (context, _) => openTransporterApplications(context),
       ),
@@ -469,6 +493,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         timing: oldest == null ? null : 'Oldest submitted ${elapsedSince(oldest)}',
         action: 'Review availability and experience, then approve or decline',
         area: AlertArea.people,
+        key: 'people:volunteers',
         button: 'Review',
         open: (context, _) => openVolunteerApplications(context),
       ),
@@ -487,6 +512,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         subject: decisions.length == 1 ? decisions.first.title : null,
         action: 'Decide whether to extend, or cover the remaining need from applicable funds',
         area: AlertArea.funds,
+        key: 'funds:campaign-decisions',
         button: 'Decide',
         open: (context, _) =>
         decisions.length == 1 ? openCampaign(context, decisions.first.id) : openDonationsAdmin(context),
@@ -514,6 +540,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
           timing: due == null ? null : 'Overdue since ${shortDate(due)}',
           action: 'Schedule the vaccine and record it',
           area: AlertArea.care,
+          key: 'care:vaccinations-overdue',
           open: (context, _) => overdueVax.length == 1 ? openAnimalRecord(context, a) : openAnimalRecords(context),
         ),
       );
@@ -548,6 +575,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
               : null,
           action: 'Give the care and record it on the Medical tab',
           area: AlertArea.care,
+          key: 'care:preventive-overdue',
           open: (context, _) =>
               animals.length == 1 ? openAnimalRecord(context, first.animal) : openAnimalRecords(context),
         ),
@@ -575,6 +603,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
           timing: 'In the past 7 days',
           action: 'Check with the carer, then record the dose or adjust the order',
           area: AlertArea.care,
+          key: 'care:missed-doses',
           open: (context, _) => animals.length == 1 ? openAnimalRecord(context, first) : openAnimalRecords(context),
         ),
       );
@@ -598,6 +627,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         timing: oldest == null ? null : 'Oldest ${elapsedSince(oldest)}',
         action: 'Accept it for the amount paid, or void it with a reason',
         area: AlertArea.funds,
+        key: 'funds:verify-payments',
         button: 'Review',
         open: (context, _) => openFlaggedPayments(context),
       ),

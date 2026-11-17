@@ -2343,3 +2343,12 @@ exports.sendCommunityAdoptionCheckIns = onSchedule({schedule: '30 9 * * *', time
     }
   }
 });
+
+// ---- Dashboard digest, critical pushes, monthly analytics summaries ------
+// (Dashboard gaps 6 and 7, Analytics gap 6). See functions/dashboard_ops.js.
+Object.assign(exports, require('./dashboard_ops')({
+  db,
+  orgStaffUids,
+  notifyStaff,
+  openFollowUpStatuses: OPEN_FOLLOW_UP_STATUSES,
+}));

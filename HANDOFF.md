@@ -1,6 +1,44 @@
 # Handoff
 
-_Latest: defense gap fixes on `claude/remaining-gap-fixes-481458` (2026-11-17). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: Dashboard and Analytics gaps on `claude/adoption-gap-fixes` (2026-11-17, uncommitted). Then the defense gap fixes of the same day. The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Dashboard and Analytics gaps (2026-11-17, not checked on a device, not deployed)
+
+| Gap | What |
+|---|---|
+| Dashboard 2, care rounds | `lib/features/care/`. Areas × round tasks (default: Main shelter; morning feed, water, cleaning, evening feed) ticked once a day at `organizations/{orgId}/careRounds/{yyyy-MM-dd}`, with who and when. On the carer's Care tasks screen (full list) and the Shelter care card (progress, what is still open, link to the full list). |
+| Dashboard 3, care coverage | Weekly roster (weekday × shift → members) in `organizations/{orgId}/settings/care`, edited by admins on **Roster & tasks**. The readiness factor reads Constrained when any shift in the next 7 days has no one, "not set" with no roster. The accept-case snapshot uses the same factor. |
+| Dashboard 6, pushes | `functions/dashboard_ops.js`: `sendDashboardDigest` (07:00 Manila) pushes each approved org's admins the Priority actions counts by area, and deletes lapsed claims. `notifyStaffOfSpecializedAssistance` pushes staff at once when a rescue needs specialized assistance (the other critical alerts already pushed). |
+| Dashboard 7, alert ownership | Every alert has a stable `key`. The row's ⋮ menu: I'm on it / Release / Take over. Claims at `organizations/{orgId}/alertClaims/{key}`, shown as "Ana is on it · 2h ago", lapse after 24 h (`kAlertClaimTtl`). Alerts still clear only when the record changes. |
+| Analytics 1, export | Export menu next to the period: summary PDF for the period vs. the comparison period, CSVs (cases, animals, adoptions, donations for financial admins), and a monthly accomplishment report for last month with up to five earlier months from the stored summaries. |
+| Analytics 2, periods | `analytics_range.dart`: last 30/90/365 days, this/last/any month, this/last quarter, custom range. Calendar ranges compare with the previous month or quarter. |
+| Analytics 3, timestamps | `readyForAdoptionAt` is stamped when an animal is confirmed ready (older records fall back to the checklist's `confirmedAt`). "Discharge (or intake) to ready" and "Ready to adopted" now show medians. |
+| Analytics 4, location | Rescue report: "By city", "By barangay" (parsed from the saved Google address, `case_location.dart`) and a heat map of report pins. |
+| Analytics 5, untracked events | Community cat: a switch on the stray report form when a cat is reported, and a staff switch on Rescue Details (`communityCat`). Illness log: a section on the Medical tab (`animals/{id}/illnesses`). Euthanasia second review: on the End-of-care card, a different admin records alternatives considered and agrees or has concerns (`euthanasiaReview`; `markDeceased` now stores `deceasedByUid`). **Help requests are still not tracked: ask the organization whether they should become a report type.** |
+| Analytics 6, summaries | `writeAnalyticsSummaries` (1st of the month, 02:00 Manila) stores `organizations/{orgId}/analyticsSummaries/{yyyy-MM}` for the month just ended and fills in any of the last 12 that are missing. `rebuildAnalyticsSummaries` (callable, org admins) rebuilds all 12. A new **Month by month** card reads them; the current month is live. The existing cards still compute on the phone. |
+
+Pending the organization's confirmation: the default round tasks and shifts, the 24 h claim lapse, the 07:00 digest time.
+
+### Deploy, in this order
+
+1. **Functions:** new `sendDashboardDigest`, `notifyStaffOfSpecializedAssistance`, `writeAnalyticsSummaries`, `rebuildAnalyticsSummaries`, `stampAnimalsIllnessesOrganization`. A full `firebase deploy --only functions` covers them.
+2. **Indexes:** `firebase deploy --only firestore:indexes` (new `illnesses.organizationId` field override).
+3. Optional: an org admin presses **Rebuild the last 12 months** on Analytics → Month by month, so the card isn't empty until 1 December.
+4. **App build.**
+5. **Rules:** `firebase deploy --only firestore:rules` (care settings readable by carers; `careRounds`, `alertClaims`, `analyticsSummaries`; `illnesses` collection-group read).
+
+### Checks run
+
+- `flutter analyze`: the same 9 issues as before, none in new code. `flutter test`: 201 pass (12 new in `test/features/adminhome/dashboard_analytics_gaps_test.dart`).
+- `functions/`: `npm test` 50 pass (digest and summary rules are new). `rules-tests`: 137 pass (6 new).
+
+### Check on a device
+
+- Care rounds: as a carer, tick and untick a task; the dashboard card updates. As an admin, edit the roster, leave a shift empty, and see Care coverage turn Constrained.
+- Claims: as two admins, claim an alert on one phone and see "… is on it" on the other; release as a non-admin fails for someone else's claim.
+- Export: each of the three exports opens the share sheet; PDFs show peso amounts as "PHP".
+- Heat map: needs the Maps SDK key that the other maps use; check it draws on Android.
+- Digest: run `sendDashboardDigest` from the Cloud Scheduler console once and check the push.
 
 ## Defense gap fixes (2026-11-17, not checked on a device)
 

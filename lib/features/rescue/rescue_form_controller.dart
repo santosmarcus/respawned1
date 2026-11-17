@@ -114,6 +114,11 @@ class RescueFormController {
   String? onSiteChoice; // 'yes' | 'no'
   bool reportAnonymously = false;
 
+  /// Analytics gap 5: the cat lives outdoors in the community with no
+  /// owner. Only asked when a cat is reported on a stray report.
+  bool communityCat = false;
+  bool get asksCommunityCat => !isPetSurrenderType && !isLostPetType && validAnimals.any((a) => a.species == 'Cat');
+
   bool? isOwner;
   String? scannedTagId;
 

@@ -493,6 +493,31 @@ class StrayReportFields extends StatelessWidget {
             ],
           ),
         ],
+
+        // Analytics gap 5: community (outdoor, unowned) cats.
+        if (form.asksCommunityCat) ...[
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  'This cat lives outdoors in the community, with no owner',
+                  style: GoogleFonts.zain(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              Switch(
+                value: form.communityCat,
+                activeThumbColor: AppColors.textPrimary,
+                onChanged: (v) => _set(() => form.communityCat = v),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }

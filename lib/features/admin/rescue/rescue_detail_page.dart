@@ -725,6 +725,27 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             if (rescueType != null && rescueType.isNotEmpty)
               _DetailSection(label: 'Rescue Type', value: rescueType),
 
+            // Analytics gap 5: staff confirm or correct the reporter's
+            // "community cat" answer; Analytics counts the tagged reports.
+            if (c.allSpecies.any((s) => s.toLowerCase() == 'cat'))
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                activeThumbColor: AppColors.textPrimary,
+                title: Text('Community cat (outdoor, no owner)',
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                value: d['communityCat'] == true,
+                onChanged: (v) => FirebaseFirestore.instance
+                    .collection('cases')
+                    .doc(c.id)
+                    .update({'communityCat': v})
+                    .catchError((Object e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+                  }
+                }),
+              ),
+
             const SizedBox(height: 8),
 
             _DetailSection(label: 'Description', value: c.condition ?? '-'),

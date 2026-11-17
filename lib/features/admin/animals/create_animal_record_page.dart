@@ -923,6 +923,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'tags': tags,
         'adoptionStatus': _isAdoptable ? 'adoptable' : 'not_ready',
         'adoptionReadiness': ?readiness,
+        // Analytics gap 3: when the animal was confirmed ready, so
+        // Analytics can show discharge → ready and ready → adopted.
+        if (readiness != null) 'readyForAdoptionAt': FieldValue.serverTimestamp(),
       };
 
       if (widget.isEditing) {

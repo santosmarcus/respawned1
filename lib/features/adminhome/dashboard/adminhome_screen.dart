@@ -124,9 +124,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                         style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textSecondary),
                       ),
                     ),
-                    if (_tab == _DashTab.analytics) const AnalyticsPeriodButton() else const _LivePill(),
+                    if (_tab == _DashTab.today) const _LivePill(),
                   ],
                 ),
+                if (_tab == _DashTab.analytics)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Align(alignment: Alignment.centerLeft, child: AnalyticsPeriodButton()),
+                  ),
                 const SizedBox(height: 14),
                 if (_tab == _DashTab.today) TodayView(priorityKey: _priorityKey) else const AnalyticsView(),
               ],

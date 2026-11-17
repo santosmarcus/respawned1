@@ -60,7 +60,7 @@ const {onDocumentWritten, onDocumentUpdated} = require('firebase-functions/v2/fi
 // adoption follow-ups (dashboard overdue follow-ups), so staff see only
 // their own organization's.
 const FOLLOWING_RECORDS = {
-  animals: ['vaccinations', 'careRecords', 'medications', 'medicationDoses'],
+  animals: ['vaccinations', 'careRecords', 'medications', 'medicationDoses', 'illnesses'],
   cases: ['expenses', 'transportAssignments'],
   adoptions: ['followUps'],
 };

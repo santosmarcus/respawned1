@@ -1002,3 +1002,74 @@ describe('volunteer stats', () => {
     await assertSucceeds(as('newbie').doc('users/newbie').set({ role: 'general' }));
   });
 });
+
+describe('dashboard and analytics gaps: care rounds, alert claims, summaries, illnesses', () => {
+  test("care setup: the org's admins write it; staff and carers read it", async () => {
+    const setup = { areas: [{ id: 'main', label: 'Main' }], tasks: [], shifts: [], roster: {} };
+    await assertSucceeds(as('ownerA').doc('organizations/orgA/settings/care').set(setup));
+    await assertFails(as('staffA').doc('organizations/orgA/settings/care').set(setup));
+    await assertFails(as('carerA').doc('organizations/orgA/settings/care').set(setup));
+    await assertSucceeds(as('staffA').doc('organizations/orgA/settings/care').get());
+    await assertSucceeds(as('carerA').doc('organizations/orgA/settings/care').get());
+    // Carers still can't read the other settings (budget, approvals).
+    await assertFails(as('carerA').doc('organizations/orgA/settings/shelter').get());
+    await assertFails(as('staffB').doc('organizations/orgA/settings/care').get());
+  });
+
+  test('care rounds: staff and carers of the org tick; others cannot', async () => {
+    const tick = { organizationId: 'orgA', done: { main__water: { byUid: 'carerA', byName: 'C' } } };
+    await assertSucceeds(as('carerA').doc('organizations/orgA/careRounds/2026-11-17').set(tick));
+    await assertSucceeds(as('staffA').doc('organizations/orgA/careRounds/2026-11-17').update({ 'done.main__clean': { byUid: 'staffA' } }));
+    await assertSucceeds(as('carerA').doc('organizations/orgA/careRounds/2026-11-17').get());
+    await assertFails(as('staffB').doc('organizations/orgA/careRounds/2026-11-17').get());
+    await assertFails(as('staffB').doc('organizations/orgA/careRounds/2026-11-18').set({ ...tick }));
+    await assertFails(as('carerA').doc('organizations/orgA/careRounds/2026-11-18').set({ ...tick, organizationId: 'orgB' }));
+    await assertFails(as('stranger').doc('organizations/orgA/careRounds/2026-11-18').set(tick));
+    await assertFails(as('staffA').doc('organizations/orgA/careRounds/2026-11-17').delete());
+  });
+
+  test('alert claims: staff claim for themselves; only the claimer or an admin releases', async () => {
+    const claim = (uid) => ({ byUid: uid, byName: uid, organizationId: 'orgA' });
+    await assertSucceeds(as('staffA').doc('organizations/orgA/alertClaims/rescue:review').set(claim('staffA')));
+    await assertFails(as('staffA').doc('organizations/orgA/alertClaims/x').set(claim('ownerA')));
+    await assertFails(as('carerA').doc('organizations/orgA/alertClaims/x').set(claim('carerA')));
+    await assertFails(as('staffB').doc('organizations/orgA/alertClaims/x').set({ ...claim('staffB') }));
+    await assertFails(as('staffB').doc('organizations/orgA/alertClaims/rescue:review').get());
+    await assertSucceeds(as('ownerA').doc('organizations/orgA/alertClaims/rescue:review').get());
+    // Taking over is allowed (claims can go stale); releasing someone else's is admins only.
+    await assertSucceeds(as('ownerA').doc('organizations/orgA/alertClaims/rescue:review').set(claim('ownerA')));
+    await assertFails(as('staffA').doc('organizations/orgA/alertClaims/rescue:review').delete());
+    await assertSucceeds(as('ownerA').doc('organizations/orgA/alertClaims/rescue:review').delete());
+    await assertSucceeds(as('staffA').doc('organizations/orgA/alertClaims/mine').set(claim('staffA')));
+    await assertSucceeds(as('staffA').doc('organizations/orgA/alertClaims/mine').delete());
+  });
+
+  test('monthly summaries are read by the org staff and written by the backend only', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('organizations/orgA/analyticsSummaries/2026-10').set({ month: '2026-10', reports: 3 }));
+    await assertSucceeds(as('staffA').doc('organizations/orgA/analyticsSummaries/2026-10').get());
+    await assertSucceeds(as('staffA').collection('organizations/orgA/analyticsSummaries').orderBy('month', 'desc').limit(12).get());
+    await assertFails(as('staffB').doc('organizations/orgA/analyticsSummaries/2026-10').get());
+    await assertFails(as('carerA').doc('organizations/orgA/analyticsSummaries/2026-10').get());
+    await assertFails(as('ownerA').doc('organizations/orgA/analyticsSummaries/2026-11').set({ month: '2026-11' }));
+  });
+
+  test("illness log: the animal's staff write it; reads stay inside the org", async () => {
+    const illness = { condition: 'Kennel cough', contagious: true, organizationId: 'orgA' };
+    await assertSucceeds(as('staffA').doc('animals/animalA/illnesses/i1').set(illness));
+    await assertFails(as('carerA').doc('animals/animalA/illnesses/i2').set(illness));
+    await assertFails(as('staffB').doc('animals/animalA/illnesses/i2').set(illness));
+    await assertSucceeds(as('carerA').doc('animals/animalA/illnesses/i1').get());
+    await assertSucceeds(as('staffA').collectionGroup('illnesses').where('organizationId', '==', 'orgA').get());
+    await assertFails(as('staffB').collectionGroup('illnesses').where('organizationId', '==', 'orgA').get());
+  });
+
+  test('a euthanasia second review is saved on the record by its staff', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('animals/animalA').update({
+      adoptionStatus: 'deceased', deceasedCause: 'Euthanasia', deceasedByUid: 'staffA',
+    }));
+    const review = { euthanasiaReview: { reviewerUid: 'ownerA', alternativesConsidered: 'Referral', agrees: true } };
+    await assertSucceeds(as('ownerA').doc('animals/animalA').update(review));
+    await assertFails(as('staffB').doc('animals/animalA').update(review));
+  });
+});

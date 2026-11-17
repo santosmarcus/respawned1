@@ -227,9 +227,40 @@ service cloud.firestore {
     // settings (settings/shelter: safe capacity, isolation spots, monthly
     // care budget, daily food use, riders wanted free; shelter_settings.dart).
     // Its staff read them (the dashboard); only its admins change them.
+    // settings/care (care_rounds.dart: areas, round tasks, shifts, weekly
+    // roster) is read by its carers too: they tick the rounds it lists.
     match /organizations/{orgId}/settings/{docId} {
-      allow read: if isStaffOf(orgId) || isPlatformStaff();
+      allow read: if isStaffOf(orgId) || isPlatformStaff() || (docId == 'care' && isCarerOf(orgId));
       allow write: if isOrgAdmin(orgId) || (isPlatformStaff() && myRole() == 'admin');
+    }
+
+    // Dashboard gap 2: each day's care-round ticks (careRounds/{yyyy-MM-dd},
+    // field done.<area>__<task> = who and when). The organization's staff
+    // and carers tick and untick; nobody deletes a day.
+    match /organizations/{orgId}/careRounds/{day} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId) || isCarerOf(orgId);
+      allow create, update: if (isApprovedStaffOf(orgId) || isCarerOf(orgId)) &&
+        request.resource.data.get('organizationId', '') == orgId;
+      allow delete: if false;
+    }
+
+    // Dashboard gap 7: who is handling a Priority actions item. Staff claim
+    // for themselves (and may take over a claim); they release their own,
+    // admins release anyone's. sendDashboardDigest deletes lapsed ones.
+    match /organizations/{orgId}/alertClaims/{key} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId);
+      allow create, update: if (isPlatformStaff() || isApprovedStaffOf(orgId)) &&
+        request.resource.data.get('byUid', '') == request.auth.uid &&
+        request.resource.data.get('organizationId', '') == orgId;
+      allow delete: if (isPlatformStaff() || isApprovedStaffOf(orgId)) &&
+        (resource.data.get('byUid', '') == request.auth.uid || isOrgAdmin(orgId));
+    }
+
+    // Analytics gap 6: monthly summaries, written only by
+    // writeAnalyticsSummaries / rebuildAnalyticsSummaries (dashboard_ops.js).
+    match /organizations/{orgId}/analyticsSummaries/{month} {
+      allow read: if isPlatformStaff() || isApprovedStaffOf(orgId);
+      allow write: if false;
     }
 
     // organizations/{orgId}/members/{uid}
@@ -321,7 +352,8 @@ service cloud.firestore {
     // Every other organization subcollection (communityReports,
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
-      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements']);
+      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements',
+        'careRounds', 'alertClaims', 'analyticsSummaries']);
     }
 
     // ---- Organization invitations ------------------------------------------
@@ -1321,6 +1353,11 @@ service cloud.firestore {
     }
 
     match /{path=**}/careRecords/{docId} {
+      allow read: if canReadOrgRecord(true);
+    }
+
+    // Analytics gap 5: the Medical tab's illness log, counted on Analytics.
+    match /{path=**}/illnesses/{docId} {
       allow read: if canReadOrgRecord(true);
     }
 

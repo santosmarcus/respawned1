@@ -13,6 +13,7 @@ import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart'
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/adminhome/dashboard/alert_claims.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_alerts.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
@@ -23,6 +24,7 @@ import 'package:respawnd1/features/adminhome/dashboard/rescue_readiness.dart';
 import 'package:respawnd1/features/adminhome/dashboard/week_schedule.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'package:respawnd1/features/admin/donation/expense_oversight_page.dart';
+import 'package:respawnd1/features/care/care_rounds_widgets.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
 /// The "Today" tab: what needs action now, whether the shelter can take
@@ -472,10 +474,31 @@ class _ActionRow extends ConsumerWidget {
   final bool first;
   const _ActionRow({required this.alert, required this.first});
 
+  Future<void> _claim(BuildContext context, WidgetRef ref, String action, AlertClaim? claim) async {
+    final orgId = await ref.read(dashboardOrgIdProvider.future);
+    if (orgId == null) return;
+    try {
+      if (action == 'release') {
+        await releaseAlert(orgId: orgId, key: alert.key);
+      } else {
+        await claimAlert(orgId: orgId, key: alert.key, title: alert.title);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(action == 'release' && claim != null && !claim.isMine
+              ? 'Only ${claim.byName} or an admin can release this.'
+              : 'Could not save: $e'),
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final color = alert.severity.color;
     final subtitle = [alert.subject, alert.status].whereType<String>().join(' · ');
+    final claim = ref.watch(alertClaimsProvider).asData?.value[alertClaimDocId(alert.key)];
     return InkWell(
       onTap: () => alert.open(context, ref),
       child: Container(
@@ -505,19 +528,48 @@ class _ActionRow extends ConsumerWidget {
                   children: [
                     Text(alert.title, style: dashBody(size: 15, weight: FontWeight.w700)),
                     Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: dashMuted(12.5)),
-                    if (alert.timing != null)
+                    if (alert.timing != null || claim != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
-                        child: StatusChip(
-                          alert.timing!,
-                          tone: alert.timing!.startsWith('Overdue') ? ChipTone.red : ChipTone.info,
-                          icon: alert.timing!.startsWith('Overdue') ? Icons.error_outline : Icons.schedule,
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            if (alert.timing != null)
+                              StatusChip(
+                                alert.timing!,
+                                tone: alert.timing!.startsWith('Overdue') ? ChipTone.red : ChipTone.info,
+                                icon: alert.timing!.startsWith('Overdue') ? Icons.error_outline : Icons.schedule,
+                              ),
+                            // Dashboard gap 7: who is handling it.
+                            if (claim != null)
+                              StatusChip(
+                                '${claim.isMine ? 'You’re' : '${claim.byName} is'} on it'
+                                '${claim.at == null ? '' : ' · ${elapsedSince(claim.at)}'}',
+                                tone: ChipTone.green,
+                                icon: Icons.pan_tool_outlined,
+                              ),
+                          ],
                         ),
                       ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              PopupMenuButton<String>(
+                tooltip: 'Who is handling this',
+                icon: const Icon(Icons.more_vert, size: 20, color: AppColors.textSecondary),
+                onSelected: (a) => _claim(context, ref, a, claim),
+                itemBuilder: (_) => [
+                  if (claim == null)
+                    const PopupMenuItem(value: 'claim', child: Text('I’m on it'))
+                  else if (claim.isMine)
+                    const PopupMenuItem(value: 'release', child: Text('Release'))
+                  else ...[
+                    PopupMenuItem(value: 'claim', child: Text('Take over from ${claim.byName}')),
+                    const PopupMenuItem(value: 'release', child: Text('Release (admins)')),
+                  ],
+                ],
+              ),
               Center(
                 child: FilledButton(
                   style: FilledButton.styleFrom(
@@ -653,6 +705,8 @@ class ShelterCareCard extends ConsumerWidget {
     final recordsAsync = ref.watch(allAnimalRecordsProvider);
     final vaxAsync = ref.watch(vaccinationsByAnimalProvider);
     final vax = vaxAsync.asData?.value;
+    final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
+    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
 
     final inCare = (recordsAsync.asData?.value ?? const <AnimalRecord>[]).where(isInCare).toList();
     final statuses = {for (final a in inCare) a.id: vax == null ? null : healthStatusOf(vax[a.id])};
@@ -683,10 +737,15 @@ class ShelterCareCard extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const CardLabel('Today’s care'),
-              const _NotTrackedRow(
-                icon: Icons.restaurant,
-                text: 'Feeding, water and cleaning rounds aren’t recorded as tasks yet.',
-              ),
+              // Dashboard gaps 2 and 3: the rounds carers tick off, and who
+              // is on shift today.
+              if (orgId != null)
+                CareRoundsChecklist(organizationId: orgId, compact: true, canEditSetup: canManage)
+              else
+                const _NotTrackedRow(
+                  icon: Icons.restaurant,
+                  text: 'Care rounds are kept per organization. This account isn’t linked to one.',
+                ),
               const SizedBox(height: 6),
               const DetailLine(
                 Icons.medication,

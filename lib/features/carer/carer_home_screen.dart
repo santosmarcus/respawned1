@@ -11,6 +11,7 @@ import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/care_updates_section.dart';
+import 'package:respawnd1/features/care/care_rounds_widgets.dart';
 
 /// Home for organization members with the `carer` role. Carers give care and
 /// record doses; they don't get the admin shell (cases, records, adoptions,
@@ -64,11 +65,32 @@ class CarerHomeScreen extends ConsumerWidget {
               .where(isInCare)
               .toList()
             ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-          if (animals.isEmpty) return _message('No animals in care.');
 
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // Dashboard gap 2: the day's feeding, water and cleaning rounds.
+              Container(
+                padding: const EdgeInsets.all(14),
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Today’s rounds', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+                    const SizedBox(height: 4),
+                    CareRoundsChecklist(organizationId: organizationId),
+                  ],
+                ),
+              ),
+              if (animals.isEmpty)
+                Text('No animals in care.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
               Text('Every animal in care. Record each dose as you give it, and add an update for anything '
                   'staff should know.',
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),

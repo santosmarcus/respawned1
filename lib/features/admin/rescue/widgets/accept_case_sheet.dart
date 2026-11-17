@@ -11,6 +11,7 @@ import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart'
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/features/adminhome/dashboard/rescue_readiness.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
+import 'package:respawnd1/features/care/care_rounds.dart';
 
 /// What the admin confirmed in the Accept Case sheet.
 class AcceptCaseResult {
@@ -95,6 +96,8 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
     final records = ref.watch(allAnimalRecordsProvider).asData?.value;
     final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
     final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
+    final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
+    final careSetup = orgId == null ? null : ref.watch(careSetupProvider(orgId)).asData?.value;
 
     final factors = occ == null
         ? const <ReadinessFactor>[]
@@ -107,6 +110,7 @@ class _AcceptCaseSheetBodyState extends ConsumerState<_AcceptCaseSheetBody> {
       canManage: canManage,
       campaigns: campaigns,
       stock: ref.watch(stockItemsProvider).asData?.value,
+      careSetup: careSetup,
     );
 
     return SafeArea(

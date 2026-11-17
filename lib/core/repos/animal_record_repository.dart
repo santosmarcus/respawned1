@@ -576,6 +576,10 @@ class AnimalRecordRepository {
       'deceasedAt': date != null ? Timestamp.fromDate(date) : FieldValue.serverTimestamp(),
       if (cause != null && cause.isNotEmpty) 'deceasedCause': cause,
       if (notes != null && notes.isNotEmpty) 'deceasedNotes': notes,
+      // Analytics gap 5: a euthanasia's second review must come from
+      // someone other than the person who recorded it.
+      'deceasedByUid': FirebaseAuth.instance.currentUser?.uid ?? actorId,
+      'deceasedByName': ?actorName,
       'updatedAt': FieldValue.serverTimestamp(),
     });
     await _addManagementLog(
