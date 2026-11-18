@@ -1,8 +1,8 @@
 # Handoff
 
-_Latest: feedback round on `dev` (2026-11-18, rules not deployed). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: feedback round on `dev` (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
 
-## Feedback round: view-only modules, account page, transport flow (2026-11-18, not deployed, not checked on a device)
+## Feedback round: view-only modules, account page, transport flow (2026-11-18, rules deployed, not checked on a device)
 
 - **Access:** every module shows for every Staff member outside the care-tasks screen; without the permission it is **view only** (drawer tag, banner, no action bar/menus/create buttons). `firestore.rules` `readKeys()` (= `opsKeys()`) now gates reads of cases, animals and medical records, adoptions, events, volunteer/transporter applications, transport assignments, logs, audit log and analytics; writes keep their own permission. Money (donor records, payments, expenses, transfers, general expenses) is unchanged. Carers still can't read the unowned pool. Storage rules unchanged (transporter IDs and adoption documents stay with `volunteers`/`adoptions`).
 - **Presets:** Rescue coordinator + Adoptions officer are now one preset, **Rescue & adoptions** (`rescueAdoptions`: rescue, animals, care, adoptions, insights). Members saved with the old names match by permissions, so they show as Custom. Picking **Custom** clears every box.
@@ -13,7 +13,7 @@ _Latest: feedback round on `dev` (2026-11-18, rules not deployed). Before that, 
 - **Track Case:** the map follows the sheet (no empty band when it slides down); the animal's photo is its map pin and sits on the status card.
 - **Create Animal Record from a case:** description starts empty; every case photo is prefilled (removable).
 
-**Deploy:** `firebase deploy --only firestore:rules` (only widens reads; safe for older builds), then the app build. Checks: `flutter analyze` (pre-existing issues only), `flutter test` 242 pass, functions 78 pass, rules-tests 181 pass.
+**Deployed 2026-11-18:** `firebase deploy --only firestore:rules` to respawnd1-45021 (only widens reads; safe for older builds; the four compiler warnings are pre-existing). **Not done:** the app build. Checks: `flutter analyze` (pre-existing issues only), `flutter test` 242 pass, functions 78 pass, rules-tests 181 pass.
 
 ## Admin + Staff permissions (2026-11-18, deployed, not checked on a device)
 
