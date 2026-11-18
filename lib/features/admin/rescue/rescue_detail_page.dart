@@ -23,6 +23,7 @@ import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/accept_case_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_animals_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_messages_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
@@ -44,6 +45,7 @@ import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart'
 import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
 import 'package:respawnd1/core/geofence/geofence_config.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
 class RescueDetailPage extends ConsumerStatefulWidget {
@@ -108,12 +110,15 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     }
     if (mounted) setState(() => _isLoading = false);
 
-    // Stay on Rescue Details — open the clinic sheet from here instead of
-    // navigating away immediately. Whether this leads to Assign Transporter
-    // is decided entirely by the sheet's own explicit result (see
-    // _openClinicSheet): dismissing it just leaves the case in "accepted,
-    // no clinic yet", which the action area below renders as "Select Clinic".
-    if (mounted) await _openClinicSheet(c, offerAssignRider: true);
+    // Straight to Assign Transport: the clinic and the transporter are
+    // picked on that one page. Backing out leaves the case accepted with
+    // no clinic yet, shown below as "Assign Transport".
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)),
+      );
+    }
   }
 
   /// Shared Close Case flow (spec §2) — every screen that can close a case
@@ -670,7 +675,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         // awaitingAssignment with no clinic); an outstanding offer routes to
         // its status view instead of a second Assign Transporter.
         if (!c.hasSavedClinic) {
-          primary = CaseAction('Select Clinic', () => _openClinicSheet(c, offerAssignRider: true));
+          primary = CaseAction('Assign Transport', () => _push(AssignRiderPage(caseId: c.id, data: c.raw)));
         } else if (hasActiveAssignment) {
           primary = CaseAction('View Assignment Status', () => _push(AdminTrackCasePage(caseId: c.id, data: c.raw)));
         } else {
@@ -1054,7 +1059,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             gap,
             // Per-animal details (species/breed/sex/size/color and the
             // health & behavior assessment).
-            _AnimalGroupSection(currentCase: c),
+            CaseAnimalsSection(currentCase: c),
 
             gap,
             _LocationCard(rescueCase: c, pendingLocationReports: pendingLocationReports),
@@ -1328,16 +1333,10 @@ class _RejectedBanner extends ConsumerWidget {
 /// Animal records created from this case at intake (`linkedCaseId`).
 final _caseAnimalRecordsProvider =
     StreamProvider.autoDispose.family<List<({String id, String name})>, String>((ref, caseId) {
-  return FirebaseFirestore.instance
-      .collection('animals')
-      .where('linkedCaseId', isEqualTo: caseId)
-      .snapshots()
-      .map((s) => [
-            for (final d in s.docs)
-              (id: d.id, name: ((d.data()['name'] as String?)?.trim().isNotEmpty ?? false)
-                  ? (d.data()['name'] as String).trim()
-                  : 'Animal record'),
-          ]);
+  // Org-scoped: an unfiltered `animals` query is denied for org staff.
+  return ref.watch(animalRecordRepositoryProvider).streamRecordsForCase(caseId).map((records) => [
+        for (final r in records) (id: r.id, name: r.name.trim().isNotEmpty ? r.name.trim() : 'Animal record'),
+      ]);
 });
 
 /// Completed case: intaked (with links to the animal records it created),
@@ -1393,146 +1392,6 @@ class _CompletedBanner extends ConsumerWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-/// Per-animal details. Current submissions keep every animal of a report
-/// in this case's `animals` array; older group reports stored one case per
-/// animal linked by `groupId` (read from publicCases); single-animal cases
-/// show the case's own fields.
-class _AnimalGroupSection extends StatelessWidget {
-  final RescueCase currentCase;
-  const _AnimalGroupSection({required this.currentCase});
-
-  // Maps an `animals[]` entry onto the case-doc key shape.
-  Map<String, dynamic> _animalMap(Map raw) => {
-        'animalType': raw['species'],
-        'breed': raw['breed'],
-        'sex': raw['sex'],
-        'size': raw['size'],
-        'colorMarkings': raw['colorMarkings'],
-        'bodyCondition': raw['bodyCondition'],
-        'mobility': raw['mobility'],
-        'alertness': raw['alertness'],
-        'eyesNoseMouth': raw['eyesNoseMouth'],
-        'skinAndCoat': raw['skinAndCoat'],
-        'appetiteHydration': raw['appetiteHydration'],
-        'behavior': raw['behavior'],
-        'environmentSafety': raw['environmentSafety'],
-        'biteRisk': raw['biteRisk'],
-        'escapeRisk': raw['escapeRisk'],
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final animals = currentCase.raw['animals'] as List?;
-    if (animals != null && animals.isNotEmpty) {
-      return _AnimalsCard(animals: [for (final a in animals) _animalMap(a as Map)]);
-    }
-    final groupId = currentCase.raw['groupId'] as String?;
-    if (groupId == null || groupId.isEmpty) return _AnimalsCard(animals: [currentCase.raw]);
-
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      // The public copy carries the animal details and can be queried by
-      // groupId whoever owns the sibling reports.
-      future: FirebaseFirestore.instance.collection('publicCases').where('groupId', isEqualTo: groupId).get(),
-      builder: (context, snapshot) {
-        final docs = snapshot.data?.docs ?? const [];
-        // This case's own animal shows at once; the rest fill in.
-        if (docs.length <= 1) return _AnimalsCard(animals: [currentCase.raw]);
-        return _AnimalsCard(
-          animals: [for (final d in docs) d.data()],
-          highlightIndex: docs.indexWhere((d) => d.id == currentCase.id),
-        );
-      },
-    );
-  }
-}
-
-class _AnimalsCard extends StatelessWidget {
-  final List<Map<String, dynamic>> animals;
-  final int highlightIndex;
-  const _AnimalsCard({required this.animals, this.highlightIndex = -1});
-
-  // Tolerant parsing: a legacy value might be a single String instead of a
-  // List, or missing; unknown option values are shown as they are.
-  static List<String> _stringList(dynamic value) {
-    if (value is List) return value.whereType<String>().where((s) => s.trim().isNotEmpty).toList();
-    if (value is String && value.trim().isNotEmpty) return [value.trim()];
-    return const [];
-  }
-
-  static String? _s(Map<String, dynamic> data, String key) => (data[key] as String?)?.trim();
-
-  static List<CaseInfoItem> _basics(Map<String, dynamic> data) {
-    final bite = _s(data, 'biteRisk');
-    final escape = _s(data, 'escapeRisk');
-    return [
-      CaseInfoItem('Species', _s(data, 'animalType')),
-      CaseInfoItem('Breed / mixed', _s(data, 'breed')),
-      CaseInfoItem('Sex', _s(data, 'sex')),
-      CaseInfoItem('Size', _s(data, 'size')),
-      CaseInfoItem('Bite risk', (bite?.isNotEmpty ?? false) ? bite : 'Not assessed'),
-      CaseInfoItem('Escape risk', (escape?.isNotEmpty ?? false) ? escape : 'Not assessed'),
-      CaseInfoItem('Color / markings', _s(data, 'colorMarkings'), wide: true),
-    ];
-  }
-
-  static List<CaseInfoItem> _assessment(Map<String, dynamic> data) {
-    final behavior = _stringList(data['behavior']);
-    final environment = _stringList(data['environmentSafety']);
-    return [
-      CaseInfoItem('Body condition', _s(data, 'bodyCondition')),
-      CaseInfoItem('Mobility', _s(data, 'mobility')),
-      CaseInfoItem('Alertness', _s(data, 'alertness')),
-      CaseInfoItem('Eyes, nose, mouth', _s(data, 'eyesNoseMouth')),
-      CaseInfoItem('Skin and coat', _s(data, 'skinAndCoat')),
-      CaseInfoItem('Appetite and hydration', _s(data, 'appetiteHydration')),
-      CaseInfoItem('Behavior', behavior.join(', '), wide: true),
-      CaseInfoItem('Environment and safety', environment.join(', '), wide: true),
-    ];
-  }
-
-  Widget _animal(Map<String, dynamic> data) {
-    final assessment = _assessment(data);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        CaseInfoGrid(card: false, items: _basics(data)),
-        if (assessment.any((i) => i.hasValue)) ...[
-          const SizedBox(height: 10),
-          Text('Health & behavior',
-              style: GoogleFonts.zain(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          CaseInfoGrid(card: false, items: assessment),
-        ],
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final total = animals.length;
-    return CaseCard(
-      title: total == 1 ? 'Animal' : 'Animals ($total)',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < total; i++) ...[
-            if (i > 0) const Divider(height: 20),
-            if (total > 1)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  'Animal ${i + 1} of $total${i == highlightIndex ? ' (this report)' : ''}',
-                  style: GoogleFonts.zain(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-                ),
-              ),
-            _animal(animals[i]),
-          ],
-        ],
-      ),
     );
   }
 }

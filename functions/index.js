@@ -353,18 +353,23 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
     .where('verificationStatus', '==', 'approved')
     .get();
 
-  const matched = orgsSnap.docs
-    .filter((d) => orgCoversPoint(d.data(), c.lat, c.lng))
+  const covering = orgsSnap.docs.filter((d) => orgCoversPoint(d.data(), c.lat, c.lng));
+  // An org admin can pause new reports (Organization Profile → "Accepting
+  // new rescue reports"); a paused org isn't tagged or notified.
+  const matched = covering
+    .filter((d) => d.get('acceptingCases') !== false)
     .map((d) => d.id);
+  const allPaused = covering.length > 0 && matched.length === 0;
 
   await caseRef.update({
     areaOrgIds: matched,
-    outsideServiceArea: matched.length === 0,
+    outsideServiceArea: covering.length === 0,
+    ...(allPaused ? {noOrgAccepting: true} : {}),
   });
 
   if (matched.length === 0) {
     await db.collection('adminAlerts').add({
-      type: 'outside_service_area',
+      type: allPaused ? 'no_org_accepting' : 'outside_service_area',
       caseId,
       lat: c.lat,
       lng: c.lng,

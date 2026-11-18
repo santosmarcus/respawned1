@@ -21,6 +21,7 @@ import 'package:respawnd1/core/models/organization/facebook_integration.dart';
 import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/core/repos/saved_clinics_repository.dart';
 
 // ---- Repositories -----------------------------------------------------
@@ -244,8 +245,14 @@ final expensesProvider = StreamProvider.family<List<Expense>, String>((ref, case
 /// Which animal-array indexes already have a created animal record —
 /// drives the Intake Details "N of M records created" progress and the
 /// multi-animal creation flow's duplicate prevention.
+/// Org-scoped (AnimalRecordRepository.streamRecordsForCase): firestore.rules
+/// deny a staff list query on `animals` that doesn't filter on
+/// organizationId, which made "Create Animal Records" fail with
+/// permission-denied.
 final completedAnimalRecordIndexesProvider = StreamProvider.family<Set<int>, String>((ref, caseId) {
-  return ref.watch(rescueCaseRepositoryProvider).streamCompletedAnimalRecordIndexes(caseId);
+  return ref.watch(animalRecordRepositoryProvider).streamRecordsForCase(caseId).map(
+        (records) => records.map((r) => r.sourceAnimalIndex).whereType<int>().toSet(),
+      );
 });
 
 /// Display-ready transporter details (vehicle/plate/photo/phone) for a
@@ -351,15 +358,17 @@ final casesForTabProvider =
   if (tab != RescuePipelineTab.intake) return byStatus;
 
   final byStage = ref.watch(casesByActiveStageProvider('intake'));
-  if (byStatus.isLoading || byStage.isLoading) return const AsyncValue.loading();
   if (byStatus.hasError) return byStatus;
   if (byStage.hasError) return byStage;
+  // hasValue, not isLoading: a reload (e.g. returning to the dashboard)
+  // keeps showing the previous list instead of collapsing to a spinner.
+  if (!byStatus.hasValue || !byStage.hasValue) return const AsyncValue.loading();
 
   final merged = <String, RescueCase>{};
-  for (final c in byStatus.asData?.value ?? const <RescueCase>[]) {
+  for (final c in byStatus.value ?? const <RescueCase>[]) {
     merged[c.id] = c;
   }
-  for (final c in byStage.asData?.value ?? const <RescueCase>[]) {
+  for (final c in byStage.value ?? const <RescueCase>[]) {
     merged[c.id] = c;
   }
   return AsyncValue.data(merged.values.toList());

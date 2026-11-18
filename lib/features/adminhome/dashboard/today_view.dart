@@ -1112,7 +1112,7 @@ class _FundsBody extends ConsumerWidget {
                       InkWell(
                         onTap: () => Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const DonationAdminHomeScreen(openOnRefunds: true)),
+                          MaterialPageRoute(builder: (_) => const DonationAdminHomeScreen(initialTab: DonationAdminTab.refunds)),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),

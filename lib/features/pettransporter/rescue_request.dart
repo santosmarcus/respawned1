@@ -40,6 +40,9 @@ class RescueRequest extends StatefulWidget {
 }
 
 class _RescueRequestState extends State<RescueRequest> {
+  // Created once: a stream made inside build() was re-subscribed on every
+  // setState (the case doc re-read each time).
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _caseStream = watchCaseOrPublic(widget.caseId);
   bool _isAccepting = false;
   bool _isDeclining = false;
   bool _riskAcknowledged = false;
@@ -262,7 +265,7 @@ class _RescueRequestState extends State<RescueRequest> {
     // blank flash, then always prefers the live doc.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       // Full report once the rider may read it; the public copy before.
-      stream: watchCaseOrPublic(widget.caseId),
+      stream: _caseStream,
       builder: (context, snapshot) {
         final d = snapshot.data?.data() ?? widget.data;
         return _buildScaffold(context, d);

@@ -12,7 +12,7 @@ import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart' show kAgeGroupOptions, matchesAgeGroup;
 import 'animal_record_detail_page.dart';
-import 'create_animal_record_page.dart';
+import 'widgets/link_intake_case_sheet.dart';
 
 // 'Recently Updated' removed — it overlapped with 'Newest Intake' (both
 // ultimately read createdAt for most records, since updatedAt is only set
@@ -645,11 +645,9 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: ElevatedButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const CreateAnimalRecordPage()),
-              ),
+              // Offers intaked rescue animals that still need a record
+              // (linked to their case) before a blank record.
+              onPressed: () => openAddAnimalRecord(context),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
                 foregroundColor: AppColors.textPrimary,

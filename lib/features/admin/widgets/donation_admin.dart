@@ -535,7 +535,21 @@ class InlineSelectRow extends StatefulWidget {
   final String? value;
   final List<String> options;
   final ValueChanged<String> onChanged;
-  const InlineSelectRow({super.key, required this.label, required this.value, required this.options, required this.onChanged});
+
+  /// Label as a [FieldLabel] header with the picker on its own line below
+  /// it, matching the other fields of a form; otherwise label and value share
+  /// one row.
+  final bool stacked;
+  final bool required;
+  const InlineSelectRow({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.stacked = false,
+    this.required = false,
+  });
 
   @override
   State<InlineSelectRow> createState() => _InlineSelectRowState();
@@ -549,20 +563,44 @@ class _InlineSelectRowState extends State<InlineSelectRow> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
-          onTap: () => setState(() => _open = !_open),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.slaterspwn))),
-            child: Row(
-              children: [
-                Expanded(child: Text(widget.label, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textSecondary))),
-                Text(widget.value ?? 'Select',
-                    style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
-              ],
+        if (widget.stacked) ...[
+          FieldLabel(widget.label, required: widget.required),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.slaterspwn),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(widget.value ?? 'Select',
+                        style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+                  ),
+                  Icon(_open ? Icons.expand_less : Icons.expand_more, color: AppColors.textSecondary),
+                ],
+              ),
             ),
           ),
-        ),
+        ] else
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.slaterspwn))),
+              child: Row(
+                children: [
+                  Expanded(child: Text(widget.label, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textSecondary))),
+                  Text(widget.value ?? 'Select',
+                      style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
         if (_open)
           Container(
             margin: const EdgeInsets.only(top: 4, bottom: 6),
@@ -593,6 +631,35 @@ class _InlineSelectRowState extends State<InlineSelectRow> {
                   ),
               ],
             ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One unit picked from a fixed list (kg, pcs, …) as chips — units are no
+/// longer free text, so stock quantities in the same unit add up.
+class UnitChips extends StatelessWidget {
+  final String value;
+  final List<String> options;
+  final ValueChanged<String> onChanged;
+  const UnitChips({super.key, required this.value, required this.options, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final u in options)
+          ChoiceChip(
+            label: Text(u, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
+            selected: u == value,
+            onSelected: (_) => onChanged(u),
+            selectedColor: AppColors.yellowrspwn,
+            backgroundColor: Colors.white,
+            side: const BorderSide(color: AppColors.slaterspwn),
+            showCheckmark: false,
           ),
       ],
     );

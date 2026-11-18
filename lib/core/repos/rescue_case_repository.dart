@@ -147,10 +147,6 @@ class RescueCaseRepository {
   Stream<List<Expense>> streamExpenses(String caseId) =>
       expenses.streamExpenses(caseId);
 
-  /// Delegates to [RescueCaseQueryRepository.streamCompletedAnimalRecordIndexes].
-  Stream<Set<int>> streamCompletedAnimalRecordIndexes(String caseId) =>
-      queries.streamCompletedAnimalRecordIndexes(caseId);
-
   /// Delegates to [RescueCaseQueryRepository.streamReports].
   Stream<List<RescueReport>> streamReports(String caseId) =>
       queries.streamReports(caseId);

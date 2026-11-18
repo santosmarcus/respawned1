@@ -13,6 +13,7 @@ import 'donation_admin_providers.dart';
 import 'donation_admin_service.dart';
 import 'sponsorable_animals.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
+import 'package:respawnd1/features/admin/stock/stock_service.dart' show stockUnits;
 
 /// Starting values for a new campaign opened from somewhere else in the app
 /// (e.g. a rescue case's outstanding treatment balance). Everything stays
@@ -87,7 +88,8 @@ class _InKindRow {
   _InKindRow({required this.category, String description = '', int? quantity, String? unit, String? instructions})
       : description = TextEditingController(text: description),
         quantity = TextEditingController(text: quantity?.toString() ?? ''),
-        unit = TextEditingController(text: unit ?? ''),
+        // A unit saved before units became a fixed list is left unset.
+        unit = TextEditingController(text: stockUnits.contains(unit) ? unit : ''),
         instructions = TextEditingController(text: instructions ?? '');
 
   void dispose() {
@@ -699,7 +701,17 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                 child: TextField(controller: r.quantity, keyboardType: TextInputType.number, style: style, decoration: box('Qty needed')),
               ),
               const SizedBox(width: 8),
-              SizedBox(width: 90, child: TextField(controller: r.unit, style: style, decoration: box('Unit (kg, pcs)'))),
+              SizedBox(
+                width: 96,
+                child: DropdownButtonFormField<String>(
+                  initialValue: r.unit.text.isEmpty ? null : r.unit.text,
+                  isExpanded: true,
+                  style: style,
+                  decoration: box('Unit'),
+                  items: [for (final u in stockUnits) DropdownMenuItem(value: u, child: Text(u))],
+                  onChanged: (v) => r.unit.text = v ?? '',
+                ),
+              ),
               const SizedBox(width: 8),
               Expanded(child: TextField(controller: r.instructions, style: style, decoration: box('Drop-off instructions'))),
             ],

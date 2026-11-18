@@ -37,16 +37,21 @@ class _AcceptInvitationPageState extends State<AcceptInvitationPage> {
     final invitationId = _idController.text.trim();
     if (invitationId.isEmpty) return;
     final user = FirebaseAuth.instance.currentUser;
-    if (user?.email == null) {
+    if (user == null || (user.email == null && user.phoneNumber == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        appSnackBar('Sign in with an email/password or Google account first.', kind: AppMessageKind.error),
+        appSnackBar('Sign in with the email or mobile number the invitation was sent to.', kind: AppMessageKind.error),
       );
       return;
     }
 
     setState(() => _submitting = true);
     try {
-      await _repo.acceptInvitation(invitationId: invitationId, uid: user!.uid, signedInEmail: user.email!);
+      await _repo.acceptInvitation(
+        invitationId: invitationId,
+        uid: user.uid,
+        signedInEmail: user.email,
+        signedInPhone: user.phoneNumber,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Invitation accepted.'));
         Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const AuthWrapper()), (route) => false);

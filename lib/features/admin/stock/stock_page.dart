@@ -313,14 +313,14 @@ class _NewItemSheet extends StatefulWidget {
 
 class _NewItemSheetState extends State<_NewItemSheet> {
   final _name = TextEditingController();
-  final _unit = TextEditingController(text: 'kg');
+  String _unit = 'kg';
   final _qty = TextEditingController(text: '0');
   final _threshold = TextEditingController();
   String _category = stockCategories.first;
 
   @override
   void dispose() {
-    for (final c in [_name, _unit, _qty, _threshold]) {
+    for (final c in [_name, _qty, _threshold]) {
       c.dispose();
     }
     super.dispose();
@@ -329,7 +329,7 @@ class _NewItemSheetState extends State<_NewItemSheet> {
   @override
   Widget build(BuildContext context) {
     final qty = _parseQty(_qty.text);
-    final ok = _name.text.trim().isNotEmpty && _unit.text.trim().isNotEmpty && qty != null;
+    final ok = _name.text.trim().isNotEmpty && qty != null;
     void changed(String _) => setState(() {});
     return AdminSheetFrame(
       title: 'New stock item',
@@ -338,7 +338,7 @@ class _NewItemSheetState extends State<_NewItemSheet> {
           ? null
           : () => Navigator.pop(
                 context,
-                _NewItem(_name.text.trim(), _category, _unit.text.trim(), qty, _parseQty(_threshold.text)),
+                _NewItem(_name.text.trim(), _category, _unit, qty, _parseQty(_threshold.text)),
               ),
       children: [
         const FieldLabel('Name', required: true),
@@ -348,11 +348,14 @@ class _NewItemSheetState extends State<_NewItemSheet> {
           label: 'Category',
           value: _category,
           options: stockCategories,
+          stacked: true,
+          required: true,
           onChanged: (v) => setState(() => _category = v),
         ),
         const SizedBox(height: 16),
         const FieldLabel('Unit', required: true),
-        SheetTextField(controller: _unit, hint: 'kg, pcs, sacks…', onChanged: changed),
+        const SizedBox(height: 6),
+        UnitChips(value: _unit, options: stockUnits, onChanged: (v) => setState(() => _unit = v)),
         const SizedBox(height: 16),
         const FieldLabel('On hand now', required: true),
         SheetTextField(

@@ -245,14 +245,18 @@ class TransportAssignmentRepository {
     final assignmentsCol = _store.transportAssignmentsOf(caseId);
     final newRef = assignmentsCol.doc();
 
+    // Revalidate presence here, not just in the UI's rider list — that
+    // list may already be stale by the time the admin taps Send (the
+    // transporter could have gone offline moments ago). Demo riders have
+    // no real presence data and are exempt. Read once before the
+    // transaction (not inside it) so the transaction itself only reads the
+    // case and its current offer — one fewer sequential round trip, and a
+    // transaction retry doesn't re-read the transporter.
+    final riderSnap = isDemo ? null : await _store.users.doc(riderId).get();
+
     await _store.db.runTransaction((tx) async {
       final caseSnap = await tx.get(caseRef);
-      // Revalidate presence here, not just in the UI's rider list — that
-      // list may already be stale by the time the admin taps Confirm (the
-      // transporter could have gone offline moments ago). Demo riders have
-      // no real presence data and are exempt.
-      if (!isDemo) {
-        final riderSnap = await tx.get(_store.users.doc(riderId));
+      if (riderSnap != null) {
         final riderData = riderSnap.data();
         final online = riderData?['online'] as bool? ?? false;
         final lastSeen = riderData?['lastSeenAt'];
@@ -330,6 +334,10 @@ class TransportAssignmentRepository {
         'offeredBy': ?FirebaseAuth.instance.currentUser?.uid,
         'vehicle': ?vehicle,
         'plate': ?plate,
+        // Written up front (the case's own) so the stamp trigger in
+        // functions/audit_logs.js has nothing to correct — no second write
+        // to the offer while the admin is watching it.
+        'organizationId': ?(caseSnap.data()?['organizationId'] as String?),
       });
       tx.update(caseRef, {'currentAssignmentId': newRef.id});
     });

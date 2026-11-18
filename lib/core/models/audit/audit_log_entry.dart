@@ -118,11 +118,88 @@ class AuditLogEntry {
 /// adapted into, so the Audit page's list UI is written once and shared by
 /// every tab regardless of which underlying collection a category reads
 /// from.
+/// What a case/animal log's action code means, as a sentence fragment:
+/// `rejected` → "Rejected the case". Unknown codes are turned from
+/// snake_case into words.
+String auditActionLabel(String code) {
+  const labels = {
+    'accepted': 'Accepted the case',
+    'rejected': 'Rejected the case',
+    'assigned_clinic': 'Assigned a clinic',
+    'changed_clinic': 'Changed the clinic',
+    'case_closed': 'Closed the case',
+    'closed_deceased': 'Closed the case (animal died)',
+    'treatment_started': 'Started treatment',
+    'treatment_update': 'Added a treatment update',
+    'intake_assigned': 'Sent animals to intake',
+    'intake_confirmed': 'Confirmed intake',
+    'intake_completed': 'Completed intake',
+    'animal_received': 'Confirmed the animal arrived',
+    'received': 'Confirmed the animal arrived',
+    'transporter_accepted': 'Transporter accepted the trip',
+    'transporter_declined': 'Transporter declined the trip',
+    'transporter_claimed': 'Transporter claimed the trip',
+    'transferred_animal': 'Transferred an animal',
+    'merged': 'Merged a duplicate report',
+    'kept_separate': 'Kept reports separate',
+    'flagged_possible_duplicate': 'Flagged a possible duplicate',
+    'referred_to_lgu': 'Referred to the LGU',
+    'referred_to_organization': 'Referred to another organization',
+    'referred_to_volunteer': 'Referred to a volunteer',
+    'referral_withdrawn': 'Withdrew a referral',
+    'referral_expired': 'Referral expired',
+    'verification_desk_result': 'Recorded a desk verification',
+    'verification_rider_result': 'Recorded an on-site verification',
+    'live_proof_requested': 'Asked the reporter for live proof',
+    'live_proof_submitted': 'Reporter sent live proof',
+    'location_updated': 'Updated the location',
+    'community_location_approved': 'Approved a community location update',
+    'community_location_rejected': 'Rejected a community location update',
+    'community_report_submitted': 'Community report submitted',
+    'updated_ownership_info': 'Updated owner information',
+    'released_to_reporter': 'Released the animal to the reporter',
+    'released_to_adopter': 'Released the animal to the adopter',
+    'animal_death_reported': 'Reported an animal death',
+    'quarantine_completed': 'Quarantine completed',
+    'critical_report_escalated': 'Critical report escalated',
+    'test_arrived_at_clinic': 'Marked arrived at clinic (test)',
+  };
+  final known = labels[code];
+  if (known != null) return known;
+  if (code.isEmpty) return 'Unknown action';
+  final words = code.replaceAll('_', ' ').trim();
+  return words[0].toUpperCase() + words.substring(1);
+}
+
+String _humanizeValue(Object? v) {
+  if (v == null) return '';
+  if (v is List) return v.map(_humanizeValue).where((s) => s.isNotEmpty).join(', ');
+  final s = v.toString().trim();
+  if (s.isEmpty) return '';
+  // A single enum-style token (notAnimal, not_an_animal) reads as words;
+  // free text (a typed reason, a name) is shown as written.
+  if (s.contains(' ') || !RegExp(r'^[A-Za-z_]+$').hasMatch(s)) return s;
+  final spaced = s
+      .replaceAllMapped(RegExp(r'(?<=[a-z])([A-Z])'), (m) => ' ${m[1]!.toLowerCase()}')
+      .replaceAll('_', ' ');
+  return spaced[0].toUpperCase() + spaced.substring(1);
+}
+
+String _humanizeKey(String k) {
+  final spaced = k
+      .replaceAllMapped(RegExp(r'(?<=[a-z])([A-Z])'), (m) => ' ${m[1]!.toLowerCase()}')
+      .replaceAll('_', ' ');
+  return spaced[0].toUpperCase() + spaced.substring(1);
+}
+
 class AuditDisplayRow {
   final String id;
   final String action;
   final String? description;
   final String? actorName;
+
+  /// Who acted, for resolving a name when the log didn't store one.
+  final String? actorUid;
   final String? actorEmail;
   final String? targetLabel;
   final Map<String, dynamic>? oldValues;
@@ -134,6 +211,7 @@ class AuditDisplayRow {
     required this.action,
     this.description,
     this.actorName,
+    this.actorUid,
     this.actorEmail,
     this.targetLabel,
     this.oldValues,
@@ -145,6 +223,7 @@ class AuditDisplayRow {
         id: e.id,
         action: e.action,
         actorName: e.actorName,
+        actorUid: e.actorId,
         actorEmail: e.actorEmail,
         targetLabel: e.targetType != null ? '${e.targetType}${e.targetId != null ? ' #${e.targetId}' : ''}' : e.targetId,
         oldValues: e.oldValues,
@@ -164,12 +243,20 @@ class AuditDisplayRow {
     final rawDetails = data['details'];
     final description = (data['description'] as String?) ??
         (rawDetails is String ? rawDetails : null) ??
-        (rawDetails is Map ? rawDetails.entries.map((e) => '${e.key}: ${e.value}').join(', ') : null);
+        (rawDetails is Map
+            ? rawDetails.entries
+                .where((e) => _humanizeValue(e.value).isNotEmpty)
+                .map((e) => '${_humanizeKey(e.key.toString())}: ${_humanizeValue(e.value)}')
+                .join(' · ')
+            : null);
+    // 'Staff' is the placeholder some screens write before the name loads.
+    final storedName = (data['actorName'] as String?)?.trim();
     return AuditDisplayRow(
       id: doc.id,
-      action: (data['action'] as String?) ?? 'Unknown action',
+      action: auditActionLabel((data['action'] as String?) ?? ''),
       description: description,
-      actorName: (data['actorName'] as String?) ?? (data['actorUid'] as String?),
+      actorName: (storedName == null || storedName.isEmpty || storedName == 'Staff') ? null : storedName,
+      actorUid: data['actorUid'] as String?,
       actorEmail: data['actorEmail'] as String?,
       targetLabel: targetLabel,
       oldValues: asMap(data['previousValues']),

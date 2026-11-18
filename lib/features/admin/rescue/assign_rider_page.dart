@@ -25,6 +25,7 @@ import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/refer_case_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
@@ -183,8 +184,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   String? _selectedRiderUid;
 
   /// True only while the confirmed assignment is being saved, to guard
-  /// against duplicate taps on "Next".
+  /// against duplicate taps on "Send offer".
   bool _isAssigning = false;
+
+  /// High-risk cases: the bite/escape risk is acknowledged with a checkbox
+  /// on this page rather than a separate popup before the offer goes out.
+  bool _riskAcknowledged = false;
+
+  bool _savingClinic = false;
 
   GoogleMapController? _mapController;
   bool _hasFitCamera = false;
@@ -582,6 +589,91 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     });
   }
 
+  /// Picks (or changes) the case's clinic without leaving this page: the
+  /// clinic and the transporter are chosen together here, then one
+  /// "Send offer" starts the trip.
+  Future<void> _pickClinic(Map<String, dynamic> d) async {
+    if (_savingClinic) return;
+    final c = ref.read(caseDetailProvider(widget.caseId)).asData?.value;
+    final currentName = (d['vetClinicName'] as String?)?.trim();
+    final hasClinic = currentName != null && currentName.isNotEmpty;
+    setState(() => _savingClinic = true);
+    try {
+      final outcome = await showSelectClinicSheet(
+        context,
+        repository: ref.read(clinicSearchRepositoryProvider),
+        caseRepository: ref.read(rescueCaseRepositoryProvider),
+        savedClinicsRepository: ref.read(savedClinicsRepositoryProvider),
+        caseId: widget.caseId,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        centerLat: c?.lat ?? (d['lat'] as num?)?.toDouble(),
+        centerLng: c?.lng ?? (d['lng'] as num?)?.toDouble(),
+        currentClinicName: currentName,
+        currentClinicAddress: d['vetClinicAddress'] as String?,
+        currentClinicPlaceId: d['vetClinicPlaceId'] as String?,
+        currentClinicLat: (d['vetClinicLat'] as num?)?.toDouble(),
+        currentClinicLng: (d['vetClinicLng'] as num?)?.toDouble(),
+        currentClinicPhone: d['vetClinicPhone'] as String?,
+        offerAssignRider: false,
+        previousClinicName: hasClinic ? currentName : null,
+      );
+      if (!mounted) return;
+      if (outcome.result == ClinicSheetResult.clinicSaved) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Clinic set: ${outcome.clinic?.name ?? ''}'));
+      }
+    } finally {
+      if (mounted) setState(() => _savingClinic = false);
+    }
+  }
+
+  Widget _clinicCard(Map<String, dynamic> d) {
+    final name = (d['vetClinicName'] as String?)?.trim() ?? '';
+    final address = (d['vetClinicAddress'] as String?)?.trim() ?? '';
+    final hasClinic = name.isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+      decoration: BoxDecoration(
+        color: hasClinic ? Colors.white : AppColors.yellowrspwn.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: hasClinic ? AppColors.slaterspwn : AppColors.yellowrspwn),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.local_hospital_outlined, color: AppColors.textPrimary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hasClinic ? 'Clinic' : 'Choose a clinic first',
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                Text(hasClinic ? name : 'Where the transporter takes the animal',
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                if (hasClinic && address.isNotEmpty)
+                  Text(address,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          _savingClinic
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              : TextButton(
+                  onPressed: () => _pickClinic(d),
+                  child: Text(hasClinic ? 'Change' : 'Choose',
+                      style: GoogleFonts.zain(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                ),
+        ],
+      ),
+    );
+  }
+
   /// The live case document, not the possibly-stale snapshot passed in at
   /// construction time.
   Map<String, dynamic> _currentCaseData() =>
@@ -604,22 +696,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       return;
     }
 
-    final caseData = _currentCaseData();
-    final caseHighRiskAnimals = highRiskAnimalsIn(
-      animals: caseData['animals'] as List?,
-      legacyBiteRisk: caseData['biteRisk'] as String?,
-      legacyEscapeRisk: caseData['escapeRisk'] as String?,
-    );
-    if (caseHighRiskAnimals.isNotEmpty) {
-      final acknowledged = await confirmHighRiskAcknowledgment(context, highRiskAnimals: caseHighRiskAnimals);
-      if (!acknowledged || !mounted) return;
-    }
-
     setState(() => _isAssigning = true);
 
-    // A single modal instance carries the admin through
-    // confirmation -> pending -> accepted/declined/error without ever
-    // navigating away from this screen. See _TransporterAssignmentDialog.
+    // One popup, opened by "Send offer": it sends the offer straight away
+    // (no separate confirm or "creating" step), waits for the
+    // transporter, and on acceptance goes on to tracking by itself. See
+    // _TransporterAssignmentDialog.
     final outcome = await showDialog<_DialogOutcome>(
       context: context,
       barrierDismissible: false,
@@ -729,7 +811,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // case itself has no saved coordinates yet.
     final riderCenter = caseLocation ?? const LatLng(14.5995, 120.9842); // Manila fallback
 
-    final transporters = ref.watch(petTransportersProvider).asData?.value ?? const <PetTransporter>[];
+    final transportersAsync = ref.watch(petTransportersProvider);
+    final transportersLoading = !transportersAsync.hasValue && !transportersAsync.hasError;
+    final transporters = transportersAsync.value ?? const <PetTransporter>[];
     final activeByRider =
         ref.watch(activeAssignmentsByRiderProvider).asData?.value ?? const <String, TransportAssignmentStatus>{};
 
@@ -819,6 +903,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         !fallbackDismissed &&
         shouldOfferNoTransporterFallback(searchExhausted: searchExhausted, failedOfferCount: failedOffers);
 
+    final highRisk = highRiskAnimalsIn(
+      animals: d['animals'] as List?,
+      legacyBiteRisk: d['biteRisk'] as String?,
+      legacyEscapeRisk: d['escapeRisk'] as String?,
+    );
+    final needsClinic = widget.postAcceptTrackingMode == TrackingMode.rescuePickup &&
+        ((d['vetClinicName'] as String?)?.trim().isEmpty ?? true);
+    final canSend = _selectedRiderUid != null &&
+        !_isAssigning &&
+        !needsClinic &&
+        (highRisk.isEmpty || _riskAcknowledged);
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -829,7 +925,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           // Details, regardless of selection.
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Assign Transporter',
+        title: Text('Assign Transport',
             style: GoogleFonts.tiltWarp(
                 fontSize: 18, color: AppColors.background)),
       ),
@@ -873,6 +969,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ],
             ),
           ),
+          // Rescue pickup: the clinic is picked here too, so clinic and
+          // transporter are one page. The intake leg's pickup is the
+          // clinic the animal is already at.
+          if (widget.postAcceptTrackingMode == TrackingMode.rescuePickup)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _clinicCard(d),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: RescueRiskBanner(
@@ -1096,7 +1200,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             // scroll position/list identity otherwise untouched by radius
             // changes since this is the same ListView, just fewer/more items.
             Expanded(
-              child: visibleRiders.isEmpty && !showFallback
+              child: transportersLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : visibleRiders.isEmpty && !showFallback
                   ? Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -1134,31 +1240,56 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
             ),
 
-            // Fixed bottom action — always visible; "Next" is simply disabled
-            // until an available transporter is selected. No Back button
-            // here — the app-bar back arrow is the only way to leave this page.
+            // Fixed bottom action — always visible; "Send offer" stays
+            // disabled until a clinic (rescue pickup), an available
+            // transporter and, for high-risk animals, the risk
+            // acknowledgement are all in place.
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               decoration: BoxDecoration(
                 color: AppColors.background,
                 border: Border(top: BorderSide(color: AppColors.slaterspwn)),
               ),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(visibleRiders),
-                  style: AppButtons.primary,
-                  child: _isAssigning
-                      ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                      : Text('Next',
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 15,
-                          color: _selectedRiderUid == null
-                              ? AppColors.textSecondary
-                              : AppColors.textPrimary)),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (highRisk.isNotEmpty)
+                      CheckboxListTile(
+                        value: _riskAcknowledged,
+                        onChanged: (v) => setState(() => _riskAcknowledged = v ?? false),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text('I\'ve told the transporter about the bite/escape risk above.',
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                      ),
+                    if (needsClinic)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text('Choose a clinic to send the offer.',
+                            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      ),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: !canSend ? null : () => _handleNext(visibleRiders),
+                        style: AppButtons.primary,
+                        child: _isAssigning
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                            : Text(
+                                _selectedRiderUid == null ? 'Select a transporter' : 'Send offer',
+                                style: GoogleFonts.tiltWarp(
+                                    fontSize: 15,
+                                    color: canSend ? AppColors.textPrimary : AppColors.textSecondary),
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1429,7 +1560,18 @@ class _TransporterAssignmentDialog extends ConsumerStatefulWidget {
 }
 
 class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssignmentDialog> {
-  _ModalPhase _phase = _ModalPhase.confirmation;
+  // Opens already sending: "Send offer" on the page was the confirmation.
+  _ModalPhase _phase = _ModalPhase.creating;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _confirm();
+    });
+  }
+
+  Timer? _autoContinue;
   String? _errorMessage;
   String? _rejectionReason;
 
@@ -1468,6 +1610,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   void dispose() {
     _assignmentSub?.cancel();
     _elapsedTimer?.cancel();
+    _autoContinue?.cancel();
     super.dispose();
   }
 
@@ -1583,10 +1726,12 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       case 'accepted':
         if (_phase == _ModalPhase.accepted) return;
         _elapsedTimer?.cancel();
-        // Shows the success state and stays open — the admin closes this
-        // (and only then does the caller navigate to Track Case) by
-        // pressing "View Transport Tracking" below, never automatically.
+        // Shows the success state briefly, then goes on to tracking by
+        // itself (the button below does the same at once).
         setState(() => _phase = _ModalPhase.accepted);
+        _autoContinue = Timer(const Duration(milliseconds: 1200), () {
+          if (mounted) Navigator.of(context).pop(_DialogOutcome.accepted);
+        });
         break;
       case 'rejected':
         if (_phase == _ModalPhase.declined) return;
@@ -1724,7 +1869,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     _ModalPhase.confirmation ||
     _ModalPhase.creating ||
     _ModalPhase.pending =>
-    'Confirm Transporter Assignment',
+    'Waiting for ${widget.rider.name}',
     _ModalPhase.cancelling => 'Cancelling Offer',
     _ModalPhase.accepted => 'Assignment Accepted',
     _ModalPhase.declined => 'Assignment Declined',
@@ -1736,7 +1881,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
 
   Widget _content(BuildContext context) => switch (_phase) {
     _ModalPhase.confirmation => _confirmationContent(),
-    _ModalPhase.creating => _loadingContent('Creating assignment…'),
+    _ModalPhase.creating => _loadingContent('Sending the offer…'),
     _ModalPhase.cancelling => _loadingContent('Cancelling the pending offer…'),
     _ModalPhase.pending => _pendingContent(),
     _ModalPhase.accepted => _acceptedContent(),
@@ -1947,13 +2092,6 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   // _back) — the admin closes them explicitly here, which is also
   // the one moment the caller is allowed to navigate to Track Case.
     _ModalPhase.accepted => [
-      // "Close" keeps the admin on Assign Transporter — the accepted
-      // card/state stays visible there, and continuing to tracking
-      // becomes a separate, deliberate next step instead of automatic.
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.acceptedStayHere),
-        child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-      ),
       ElevatedButton(
         onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
         style: AppButtons.primary,
@@ -1971,12 +2109,11 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       OutlinedButton(
         onPressed: _back,
         style: AppButtons.outline,
-        child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+        child: Text('Cancel offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
-      ElevatedButton(
+      TextButton(
         onPressed: _isRetrying ? null : _retry,
-        style: AppButtons.primary,
-        child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+        child: Text('Refresh', style: GoogleFonts.zain(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
       ),
     ],
     _ModalPhase.declined || _ModalPhase.expired => [
@@ -1987,6 +2124,12 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
       ),
     ],
     _ModalPhase.error => [
+      if (_assignmentId == null)
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
+          child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+        )
+      else
       OutlinedButton(
         onPressed: _back,
         style: AppButtons.outline,
@@ -2039,6 +2182,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     // through the cancel-the-offer confirmation rather than abandoning the
     // dialog with the offer left dangling).
     final canPop =
+        (_phase == _ModalPhase.error && _assignmentId == null) ||
         _phase == _ModalPhase.confirmation ||
             _phase == _ModalPhase.declined ||
             _phase == _ModalPhase.expired ||

@@ -443,6 +443,30 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     }
     _breedController.text = _selectedBreed ?? '';
     _loadReadinessFacts();
+    _loadRescuingOrgName();
+  }
+
+  /// Name shown and saved as "Rescued by" when the prefill doesn't carry one:
+  /// the owning organization (the linked case's, else the creator's).
+  String? _rescuingOrgName;
+
+  Future<void> _loadRescuingOrgName() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+      final orgId = await _resolveOwningOrganizationId(uid);
+      if (orgId == null) return;
+      final org = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
+      final name = (org.data()?['name'] as String?)?.trim();
+      if (name != null && name.isNotEmpty && mounted) setState(() => _rescuingOrgName = name);
+    } catch (_) {
+      // Display-only; leave it blank rather than block the form.
+    }
+  }
+
+  String get _rescuedByLabel {
+    final prefill = (widget.prefillData?['rescuedBy'] as String?)?.trim();
+    if (prefill != null && prefill.isNotEmpty) return prefill;
+    return _rescuingOrgName ?? '';
   }
 
   /// Parses a saved `age` string like "2 years" (or legacy free-text like
@@ -780,10 +804,14 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     if (_isLoading) return; // guards against a duplicate Finish/Save tap
     // Image required for brand-new records only — a legacy record already
     // open for editing is never blocked just because it has no photo yet.
+    // From intake, the case's own photo counts (it's saved as the record's
+    // photo when none is picked).
+    final hasCasePhoto = ((widget.prefillData?['photoUrl'] as String?) ?? '').isNotEmpty;
     final missingImage =
         !widget.isEditing &&
         _existingPhotoUrls.isEmpty &&
-        _pickedImages.isEmpty;
+        _pickedImages.isEmpty &&
+        !hasCasePhoto;
 
     // Required fields — breed is deliberately not checked here: this form
     // has no editable breed input at all (see the field's own comment
@@ -1030,7 +1058,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           'linkedCaseId': widget.linkedCaseId ?? '',
           if (widget.sourceAnimalIndex != null)
             'sourceAnimalIndex': widget.sourceAnimalIndex,
-          'rescuedBy': widget.prefillData?['rescuedBy'] ?? 'Loved by the Gapz',
+          'rescuedBy': _rescuedByLabel,
           'intakeStaffId': uid,
           'photoUrls': uploadedUrls.isNotEmpty
               ? uploadedUrls
@@ -1662,8 +1690,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             // Rescued by (autofill, read-only)
             _FieldLabel('Rescued by'),
             Text(
-              (widget.prefillData?['rescuedBy'] as String?) ??
-                  'Loved by the Gapz',
+              _rescuedByLabel.isEmpty ? '—' : _rescuedByLabel,
               style: GoogleFonts.zain(
                 fontSize: 14,
                 color: AppColors.textSecondary,

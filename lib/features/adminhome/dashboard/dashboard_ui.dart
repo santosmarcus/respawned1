@@ -422,7 +422,12 @@ class DashAsync<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Keep showing the last data while a stream reloads (e.g. after returning
+    // from a pushed screen) — swapping cards for "Loading…" shrank the page
+    // and threw the dashboard's scroll position back to the top.
     return value.when(
+      skipLoadingOnReload: true,
+      skipLoadingOnRefresh: true,
       data: builder,
       loading: () => DashLoading(label: 'Loading $what…'),
       error: (e, _) => DashError(what: what, error: e),

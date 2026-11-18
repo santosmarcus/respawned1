@@ -1,7 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/welcome_greeting.dart';
+import 'package:respawnd1/core/repos/organization_repository.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_view.dart';
@@ -80,8 +86,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   alignment: Alignment.centerLeft,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(48, 0, 16, 14),
-                    child:
-                    Text('Welcome, Admin', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background)),
+                    child: WelcomeGreeting(
+                      style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background),
+                    ),
                   ),
                 ),
               ),
@@ -95,6 +102,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         ),
       ),
       body: SingleChildScrollView(
+        key: PageStorageKey('admin-dashboard-${_tab.name}'),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         child: Center(
           // Mobile-first single column; capped width on tablets/web.
@@ -130,14 +138,54 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 }
 
-/// Today's figures are live (current state), not a reporting period — so
-/// this is a label, not a button.
-class _LivePill extends StatelessWidget {
+/// Whether the organization is taking new rescue reports
+/// (`organizations/{id}.acceptingCases`, default true), plus its id.
+final _orgAcceptingProvider = StreamProvider.autoDispose<({String? orgId, bool accepting})>((ref) async* {
+  final orgId = await ref.watch(currentOrganizationIdProvider.future);
+  if (orgId == null) {
+    yield (orgId: null, accepting: true);
+    return;
+  }
+  yield* FirebaseFirestore.instance
+      .collection('organizations')
+      .doc(orgId)
+      .snapshots()
+      .map((s) => (orgId: orgId, accepting: s.data()?['acceptingCases'] as bool? ?? true));
+});
+
+/// "Live" while the organization takes new rescue reports, "Paused" when an
+/// admin turned that off. Admins tap it to switch; others just see it.
+class _LivePill extends ConsumerWidget {
   const _LivePill();
 
+  Future<void> _toggle(BuildContext context, String orgId, bool accepting) async {
+    final turnOff = accepting;
+    final ok = await showConfirmActionDialog(
+      context,
+      title: turnOff ? 'Pause new rescue reports?' : 'Go live again?',
+      message: turnOff
+          ? 'New reports in your service areas will go to other organizations until you turn this back on. '
+              'Cases you already have are not affected.'
+          : 'New rescue reports in your service areas will come to your organization again.',
+      confirmLabel: turnOff ? 'Pause' : 'Go live',
+    );
+    if (!ok) return;
+    try {
+      await OrganizationRepository().setAcceptingCases(organizationId: orgId, accepting: !accepting);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not update: $e', kind: AppMessageKind.error));
+      }
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
-    return Container(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(_orgAcceptingProvider).value;
+    final accepting = state?.accepting ?? true;
+    final isAdmin = ref.watch(isOrgAdminProvider).value ?? false;
+    final orgId = state?.orgId;
+    final pill = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFFFFDF8),
@@ -147,10 +195,23 @@ class _LivePill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.circle, size: 9, color: DashSeverity.ok.color),
+          Icon(Icons.circle, size: 9, color: accepting ? DashSeverity.ok.color : DashSeverity.warning.color),
           const SizedBox(width: 6),
-          Text('Live', style: dashBody(size: 14, weight: FontWeight.w700)),
+          Text(accepting ? 'Live' : 'Paused', style: dashBody(size: 14, weight: FontWeight.w700)),
+          if (isAdmin && orgId != null) ...[
+            const SizedBox(width: 4),
+            const Icon(Icons.expand_more, size: 16, color: AppColors.textSecondary),
+          ],
         ],
+      ),
+    );
+    if (!isAdmin || orgId == null) return pill;
+    return Tooltip(
+      message: accepting ? 'Taking new rescue reports. Tap to pause.' : 'New reports paused. Tap to go live.',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => _toggle(context, orgId, accepting),
+        child: pill,
       ),
     );
   }

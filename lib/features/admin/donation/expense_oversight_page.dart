@@ -11,7 +11,6 @@ import 'package:respawnd1/core/repos/audit_log_repository.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
-import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
@@ -61,19 +60,6 @@ Future<void> approveExpense(Expense e, {String? organizationId}) async {
   );
 }
 
-/// Approvals & receipts on its own screen (dashboard shortcut). The
-/// Donations home shows the same content as its Approvals tab.
-class ExpenseOversightPage extends StatelessWidget {
-  const ExpenseOversightPage({super.key});
-
-  @override
-  Widget build(BuildContext context) => const Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AdminAppBar(title: 'Approvals & Receipts', showDrawerButton: false),
-        body: ExpenseOversightTab(),
-      );
-}
-
 /// Expenses waiting for a second financial admin, and receipts past due.
 class ExpenseOversightTab extends ConsumerWidget {
   const ExpenseOversightTab({super.key});
@@ -117,7 +103,8 @@ class ExpenseOversightTab extends ConsumerWidget {
         DonationSectionHeader(
           'Awaiting approval (${pending.length})',
           help: settings.expenseApprovalThreshold == null
-              ? 'No approval threshold is set. Set one under Shelter setup.'
+              ? 'No approval threshold is set. Admins set it in Organization Profile → '
+                  'Shelter, approvals & receipts (or Set approval rule in this screen\'s menu).'
               : 'Expenses above ${formatPeso(settings.expenseApprovalThreshold!)} need a second financial admin '
                   'before they are funded.',
         ),

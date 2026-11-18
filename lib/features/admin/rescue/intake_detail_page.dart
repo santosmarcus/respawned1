@@ -66,6 +66,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
   ShelterDestination? _resolvedDestination;
   String? _currentOrganizationId;
+  bool _resolvingDestination = true;
+  // Post-frame intake completion runs once per distinct state, not on every
+  // rebuild (each rebuild used to schedule another uncaught transaction).
+  String? _lastIntakeCompletionKey;
 
   @override
   void initState() {
@@ -89,19 +93,25 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     ShelterDestination? resolved;
     String? orgId;
-    if (uid != null) {
-      final membership = await OrgMembershipService().getMembership(uid);
-      orgId = membership?.organizationId;
-      final repo = ref.read(organizationDirectoryRepositoryProvider);
-      resolved = await repo.resolveShelterLocation(orgId);
-      // TODO: Remove the user-scoped shelter fallback once organization
-      // membership is required for every admin/NGO account.
-      resolved ??= await repo.resolveUserShelterLocation(uid);
+    if (mounted) setState(() => _resolvingDestination = true);
+    try {
+      if (uid != null) {
+        final membership = await OrgMembershipService().getMembership(uid);
+        orgId = membership?.organizationId;
+        final repo = ref.read(organizationDirectoryRepositoryProvider);
+        resolved = await repo.resolveShelterLocation(orgId);
+        // TODO: Remove the user-scoped shelter fallback once organization
+        // membership is required for every admin/NGO account.
+        resolved ??= await repo.resolveUserShelterLocation(uid);
+      }
+    } catch (_) {
+      // Shown as "no shelter location" with a way to set one.
     }
     if (mounted) {
       setState(() {
         _resolvedDestination = resolved;
         _currentOrganizationId = orgId;
+        _resolvingDestination = false;
       });
     }
   }
@@ -198,27 +208,8 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
     if (transporterUid == null) return;
 
-    final confirmed = await showConfirmActionDialog(context, title: 'Confirm Intake', content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _ConfirmRow('Intake Destination', destination.name),
-            _ConfirmRow('Transporter', '$transporterName ($transporterType)'),
-            _ConfirmRow(
-              'Clinic Pickup Location',
-              c.vetClinicName ?? 'Not on file',
-            ),
-            _ConfirmRow('Case ID', '#${c.shortCaseId}'),
-            _ConfirmRow('Species Summary', c.speciesSummary),
-            _ConfirmRow(
-              'Discharge Date',
-              c.dischargedAt != null
-                  ? formatDate(c.dischargedAt!)
-                  : 'Not on file',
-            ),
-          ],
-        ), confirmLabel: 'Confirm');
-    if (confirmed != true || !mounted) return;
+    // No second "Confirm Intake" popup: this page already lists the
+    // destination, transporter and case, so the button is the confirmation.
 
     setState(() => _isConfirmingIntake = true);
     try {
@@ -384,6 +375,59 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
   }
 
+  void _reassignTransporter(RescueCase c) => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AssignRiderPage(
+            caseId: widget.caseId,
+            data: c.raw,
+            postAcceptTrackingMode: TrackingMode.intakeTransfer,
+          ),
+        ),
+      );
+
+  /// Before intake is confirmed: Confirm Intake (or Set Shelter Location
+  /// when none is usable yet) and Reassign, in the same sticky bar every
+  /// other case page uses.
+  Widget _confirmBar(
+    RescueCase c, {
+    required String? defaultUid,
+    required String defaultName,
+    required String defaultType,
+    required bool defaultIsDemo,
+  }) {
+    final d = _resolvedDestination;
+    final hasDestination = d != null && d.lat != null && d.lng != null;
+    final CaseAction primary;
+    if (_resolvingDestination) {
+      primary = const CaseAction('Confirm Intake', null);
+    } else if (!hasDestination) {
+      primary = CaseAction('Set Shelter Location', _openShelterPicker);
+    } else {
+      primary = CaseAction(
+        'Confirm Intake',
+        defaultUid == null
+            ? null
+            : () => _confirmIntake(
+                  c: c,
+                  transporterUid: defaultUid,
+                  transporterName: defaultName,
+                  transporterType: defaultType,
+                  transporterIsDemo: defaultIsDemo,
+                ),
+      );
+    }
+    return CaseActionBar(
+      primary: primary,
+      secondary: CaseAction(
+        defaultUid == null ? 'Assign Transporter' : 'Reassign',
+        () => _reassignTransporter(c),
+        icon: Icons.swap_horiz,
+      ),
+      busy: _isConfirmingIntake,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final liveCase = ref.watch(caseDetailProvider(widget.caseId)).asData?.value;
@@ -448,26 +492,31 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
         intakeAnimalIndexes.isNotEmpty &&
         intakeAnimalIndexes.every((i) => animalIsReceived(c, i));
 
-    if (widget.animalIndexes != null) {
+    final completionKey =
+        '${completedIndexes.length}/$totalAnimals/$selectedAnimalsReceived/${c.intakeReceivedAt != null}';
+    if (completionKey != _lastIntakeCompletionKey) {
+      _lastIntakeCompletionKey = completionKey;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (completedIndexes.length >= totalAnimals &&
-            selectedAnimalsReceived) {
-          await ref
-              .read(rescueCaseRepositoryProvider)
-              .completeIntakeForAnimals(
-                caseId: widget.caseId,
-                animalIndexes: widget.animalIndexes!,
-              );
+        try {
+          if (widget.animalIndexes != null) {
+            if (completedIndexes.length >= totalAnimals && selectedAnimalsReceived) {
+              await ref.read(rescueCaseRepositoryProvider).completeIntakeForAnimals(
+                    caseId: widget.caseId,
+                    animalIndexes: widget.animalIndexes!,
+                  );
+            }
+          } else {
+            await _checkIntakeAutoComplete(
+              c,
+              completedCount: completedIndexes.length,
+              totalAnimals: totalAnimals,
+            );
+          }
+        } catch (e) {
+          debugPrint('Intake auto-complete skipped: $e');
+          _lastIntakeCompletionKey = null; // retry on the next change
         }
       });
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _checkIntakeAutoComplete(
-          c,
-          completedCount: completedIndexes.length,
-          totalAnimals: totalAnimals,
-        ),
-      );
     }
 
     final dischargeDateStr = c.dischargedAt != null
@@ -495,7 +544,11 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       // there's still something to reassign — Change Intake Destination
       // and Close Case.
       bottomNavigationBar: c.intakeConfirmedAt == null
-          ? null
+          ? _confirmBar(c,
+              defaultUid: defaultUid,
+              defaultName: defaultName,
+              defaultType: defaultType,
+              defaultIsDemo: defaultIsDemo)
           : CaseActionBar(
               primary: selectedAnimalsReceived
                   ? null
@@ -581,31 +634,17 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
             if (c.intakeConfirmedAt == null)
               _ConfirmIntakeSection(
-                rescueCase: c,
                 destination: _resolvedDestination,
+                resolvingDestination: _resolvingDestination,
+                assignment: (latestAssignment != null &&
+                        (latestAssignment.status == TransportAssignmentStatus.accepted ||
+                            latestAssignment.status == TransportAssignmentStatus.completed))
+                    ? latestAssignment
+                    : null,
                 defaultUid: defaultUid,
                 defaultName: defaultName,
                 defaultType: defaultType,
-                defaultIsDemo: defaultIsDemo,
-                isConfirming: _isConfirmingIntake,
                 onChangeShelter: _openShelterPicker,
-                onReassign: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AssignRiderPage(
-                      caseId: widget.caseId,
-                      data: c.raw,
-                      postAcceptTrackingMode: TrackingMode.intakeTransfer,
-                    ),
-                  ),
-                ),
-                onConfirm: () => _confirmIntake(
-                  c: c,
-                  transporterUid: defaultUid,
-                  transporterName: defaultName,
-                  transporterType: defaultType,
-                  transporterIsDemo: defaultIsDemo,
-                ),
               )
             else ...[
               CaseInfoGrid(
@@ -672,108 +711,81 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 }
 
 class _ConfirmIntakeSection extends StatelessWidget {
-  final RescueCase rescueCase;
   final ShelterDestination? destination;
+  final bool resolvingDestination;
+  final TransportAssignment? assignment;
   final String? defaultUid;
   final String defaultName;
   final String defaultType;
-  final bool defaultIsDemo;
-  final bool isConfirming;
   final VoidCallback onChangeShelter;
-  final VoidCallback onReassign;
-  final VoidCallback onConfirm;
 
   const _ConfirmIntakeSection({
-    required this.rescueCase,
     required this.destination,
+    required this.resolvingDestination,
+    required this.assignment,
     required this.defaultUid,
     required this.defaultName,
     required this.defaultType,
-    required this.defaultIsDemo,
-    required this.isConfirming,
     required this.onChangeShelter,
-    required this.onReassign,
-    required this.onConfirm,
   });
-
-  bool get _hasUsableDestination =>
-      destination != null &&
-      destination!.lat != null &&
-      destination!.lng != null;
 
   @override
   Widget build(BuildContext context) {
-    final canConfirm = _hasUsableDestination && defaultUid != null;
-
+    final hasUsableDestination =
+        destination != null && destination!.lat != null && destination!.lng != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader('Confirm Intake'),
-        _DestinationCard(
-          destination: destination,
-          onChangeShelter: onChangeShelter,
-        ),
+        _SectionHeader('Shelter destination'),
+        if (resolvingDestination)
+          const _DestinationLoadingCard()
+        else
+          _DestinationCard(destination: destination, onChangeShelter: onChangeShelter),
         const SizedBox(height: 16),
-        _InfoItem(
-          'Selected Transporter',
-          defaultUid != null ? '$defaultName ($defaultType)' : 'None selected',
-        ),
-        _InfoItem(
-          'Clinic Pickup Location',
-          rescueCase.vetClinicName ?? 'Not on file',
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton(
-          onPressed: onReassign,
-          style: AppButtons.outline,
-          child: Text(
-            'Reassign Transporter',
-            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-        ),
-        const SizedBox(height: 20),
-        if (!canConfirm) ...[
+        _SectionHeader('Clinic-to-shelter transporter'),
+        if (assignment != null)
+          TransporterDetailsCard(assignment: assignment!)
+        else if (defaultUid != null)
+          _InfoItem('Transporter', '$defaultName ($defaultType)')
+        else
           Text(
-            !_hasUsableDestination
+            'No transporter yet. Use Assign Transporter below.',
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          ),
+        if (!resolvingDestination && (!hasUsableDestination || defaultUid == null)) ...[
+          const SizedBox(height: 12),
+          Text(
+            !hasUsableDestination
                 ? 'Set a shelter location before confirming intake.'
-                : 'Select a transporter before confirming intake.',
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              color: AppColors.textSecondary,
-            ),
+                : 'Assign a transporter before confirming intake.',
+            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
           ),
-          const SizedBox(height: 8),
         ],
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: isConfirming
-                ? null
-                : (!_hasUsableDestination
-                      ? onChangeShelter
-                      : (canConfirm ? onConfirm : null)),
-            style: AppButtons.primary,
-            child: isConfirming
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.textPrimary,
-                    ),
-                  )
-                : Text(
-                    !_hasUsableDestination
-                        ? 'Set Shelter Location'
-                        : 'Confirm Intake',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-          ),
-        ),
       ],
+    );
+  }
+}
+
+class _DestinationLoadingCard extends StatelessWidget {
+  const _DestinationLoadingCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 12),
+          Text('Loading shelter location…',
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+        ],
+      ),
     );
   }
 }
@@ -1324,36 +1336,6 @@ class _InfoItem extends StatelessWidget {
               fontWeight: FontWeight.w600,
               color: AppColors.textPrimary,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ConfirmRow extends StatelessWidget {
-  final String label;
-  final String value;
-  const _ConfirmRow(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          Text(
-            value,
-            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
           ),
         ],
       ),

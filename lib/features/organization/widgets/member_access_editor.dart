@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
@@ -155,18 +156,22 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
 /// A bottom sheet with [MemberAccessEditor] (and an email field when
 /// [askEmail]); returns the email (when asked) and the chosen access, or
 /// null when cancelled.
-Future<({String email, MemberAccess access})?> showMemberAccessSheet(
+Future<({String email, String phone, MemberAccess access})?> showMemberAccessSheet(
   BuildContext context, {
   required String title,
   required MemberAccess initial,
   required String confirmLabel,
   bool askEmail = false,
+  /// With [askEmail]: also offer inviting by mobile number.
+  bool allowPhone = false,
   bool roleLocked = false,
   String? Function(String email)? validateEmail,
 }) {
   final emailController = TextEditingController();
+  final phoneController = TextEditingController();
+  var byPhone = false;
   var access = initial.role == OrgRole.admin ? initial : MemberAccess(OrgRole.staff, normalizePermissions(initial.permissions));
-  return showModalBottomSheet<({String email, MemberAccess access})>(
+  return showModalBottomSheet<({String email, String phone, MemberAccess access})>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.background,
@@ -186,17 +191,46 @@ Future<({String email, MemberAccess access})?> showMemberAccessSheet(
               child: ListView(
                 controller: scroll,
                 children: [
-                  if (askEmail) ...[
-                    Text('Email',
-                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(hintText: 'name@example.com'),
+                  if (askEmail)
+                    StatefulBuilder(
+                      builder: (context, setSheet) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (allowPhone) ...[
+                            SegmentedButton<bool>(
+                              segments: const [
+                                ButtonSegment(value: false, label: Text('Email'), icon: Icon(Icons.mail_outline)),
+                                ButtonSegment(value: true, label: Text('Mobile number'), icon: Icon(Icons.phone_iphone)),
+                              ],
+                              selected: {byPhone},
+                              onSelectionChanged: (v) => setSheet(() => byPhone = v.first),
+                              showSelectedIcon: false,
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          Text(byPhone ? 'Mobile number' : 'Email',
+                              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                          const SizedBox(height: 6),
+                          if (byPhone) ...[
+                            TextField(
+                              controller: phoneController,
+                              keyboardType: TextInputType.phone,
+                              inputFormatters: AppInputFormatters.phoneFlexible,
+                              decoration: const InputDecoration(hintText: '09171234567'),
+                            ),
+                            const SizedBox(height: 4),
+                            Text('They join by signing in with this number (SMS code).',
+                                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                          ] else
+                            TextField(
+                              controller: emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              decoration: const InputDecoration(hintText: 'name@example.com'),
+                            ),
+                          const SizedBox(height: 16),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                  ],
                   MemberAccessEditor(initial: initial, roleLocked: roleLocked, onChanged: (a) => access = a),
                 ],
               ),
@@ -212,6 +246,16 @@ Future<({String email, MemberAccess access})?> showMemberAccessSheet(
                   child: ElevatedButton(
                     style: AppButtons.primary,
                     onPressed: () {
+                      if (askEmail && byPhone) {
+                        final phone = phoneController.text.trim();
+                        final error = AppValidators.phFlexiblePhone(phone);
+                        if (error != null) {
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(appSnackBar(error, kind: AppMessageKind.error));
+                          return;
+                        }
+                        Navigator.pop(sheetContext, (email: '', phone: phone, access: access));
+                        return;
+                      }
                       final email = emailController.text.trim();
                       if (askEmail && validateEmail != null) {
                         final error = validateEmail(email);
@@ -220,7 +264,7 @@ Future<({String email, MemberAccess access})?> showMemberAccessSheet(
                           return;
                         }
                       }
-                      Navigator.pop(sheetContext, (email: email, access: access));
+                      Navigator.pop(sheetContext, (email: email, phone: '', access: access));
                     },
                     child: Text(confirmLabel),
                   ),

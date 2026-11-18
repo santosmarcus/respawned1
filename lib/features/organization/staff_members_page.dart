@@ -56,10 +56,9 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
   // Normalized once (spec §12 "normalize the user email once"), not
   // recomputed on every build.
   late final String? _signedInEmail = FirebaseAuth.instance.currentUser?.email?.trim().toLowerCase();
+  late final String? _signedInPhone = FirebaseAuth.instance.currentUser?.phoneNumber;
   late final Stream<List<OrganizationInvitation>> _myInvitationsStream =
-      (_signedInEmail == null || _signedInEmail.isEmpty)
-          ? Stream<List<OrganizationInvitation>>.value(const [])
-          : _repo.streamInvitationsForEmail(_signedInEmail);
+      _repo.streamMyInvitations(email: _signedInEmail, phone: _signedInPhone);
 
   /// Only the organization's owner or an active Admin invites, edits and
   /// removes members (firestore.rules and the setMemberAccess callable
@@ -157,10 +156,59 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
       initial: MemberAccess(OrgRole.staff, {...OrgPreset.fullStaff.permissions}),
       confirmLabel: 'Send Invitation',
       askEmail: true,
+      allowPhone: true,
       validateEmail: AppValidators.email,
     );
     if (result == null || !mounted) return;
-    await _submitInvite(result.email, result.access);
+    if (result.phone.isNotEmpty) {
+      await _submitPhoneInvite(result.phone, result.access);
+    } else {
+      await _submitInvite(result.email, result.access);
+    }
+  }
+
+  /// Invite by mobile number: matched when that person signs in with the
+  /// same number (phone sign-in), so it needs no email at all.
+  Future<void> _submitPhoneInvite(String phone, MemberAccess access) async {
+    final organizationId = widget.organizationId;
+    if (organizationId == null || !_isOrgAdmin) {
+      _snack('You do not have permission to add members.', error: true);
+      return;
+    }
+    final normalized = normalizePhPhone(phone);
+    if (normalized == null) {
+      _snack('Enter a valid Philippine mobile number.', error: true);
+      return;
+    }
+    if (_signedInPhone != null && _signedInPhone == normalized) {
+      _snack('You cannot invite your own number.', error: true);
+      return;
+    }
+    try {
+      if (await _repo.isAlreadyActiveMemberByPhone(organizationId: organizationId, normalizedPhone: normalized)) {
+        _snack('This person is already a member.', error: true);
+        return;
+      }
+      final existing = await _repo.findActiveInvitationByPhone(organizationId: organizationId, normalizedPhone: normalized);
+      if (existing != null && !existing.isExpired) {
+        _snack('An invitation is already pending for this number.', error: true);
+        return;
+      }
+      final doc = await FirebaseFirestore.instance.collection('organizations').doc(organizationId).get();
+      await _repo.createInvitation(
+        organizationId: organizationId,
+        organizationName: doc.data()?['name'] as String? ?? '',
+        phone: phone,
+        role: access.role,
+        permissions: access.permissions,
+        invitedBy: FirebaseAuth.instance.currentUser?.uid ?? '',
+        invitedByName: FirebaseAuth.instance.currentUser?.displayName ?? '',
+      );
+      _snack('Invitation created for $normalized. They join by signing in with that number.');
+    } catch (e) {
+      debugPrint('[StaffMembersPage] createInvitation (phone) failed: $e');
+      _snack('The invitation could not be created.', error: true);
+    }
   }
 
   Future<void> _submitInvite(String email, MemberAccess access) async {
@@ -299,13 +347,14 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
   Future<void> _acceptMyInvitation(OrganizationInvitation invite) async {
     if (_processingInvitationId != null) return;
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.email == null) return;
+    if (user == null || (user.email == null && user.phoneNumber == null)) return;
     setState(() => _processingInvitationId = invite.id);
     try {
       await _repo.acceptInvitation(
         invitationId: invite.id,
         uid: user.uid,
-        signedInEmail: user.email!,
+        signedInEmail: user.email,
+        signedInPhone: user.phoneNumber,
         // Reached from many entry points (already-admin accounts, brand
         // new Organization Member signups) — never clobber whatever
         // account role got them to this page.
@@ -323,7 +372,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
   Future<void> _rejectMyInvitation(OrganizationInvitation invite) async {
     if (_processingInvitationId != null) return;
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.email == null) return;
+    if (user == null || (user.email == null && user.phoneNumber == null)) return;
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Reject this invitation?',
@@ -334,7 +383,12 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     if (confirmed != true) return;
     setState(() => _processingInvitationId = invite.id);
     try {
-      await _repo.rejectInvitation(invitationId: invite.id, uid: user.uid, signedInEmail: user.email!);
+      await _repo.rejectInvitation(
+        invitationId: invite.id,
+        uid: user.uid,
+        signedInEmail: user.email,
+        signedInPhone: user.phoneNumber,
+      );
       _snack('Invitation rejected.');
     } catch (e) {
       debugPrint('[StaffMembersPage] rejectInvitation failed: $e');
@@ -463,7 +517,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
                 final seenEmails = <String>{};
                 final invites = (snapshot.data ?? const [])
                     .where((i) => i.status == InvitationStatus.pending)
-                    .where((i) => seenEmails.add(i.normalizedEmail))
+                    .where((i) => seenEmails.add(i.contactKey))
                     .toList();
                 if (invites.isEmpty) {
                   return Text('No pending invitations', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary));
@@ -674,7 +728,7 @@ class _InvitationRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(invitation.email, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Text(invitation.contactLabel, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     Text(
                         'Invited as ${invitation.accessLabel} · Sent $sentLabel',
                         style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),

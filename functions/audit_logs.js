@@ -23,18 +23,32 @@ function orgOf(snap) {
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
-async function stamp(event, parentCollection, parentId) {
+// A case still in the shared review pool has no organization yet, so a log
+// written while reviewing it (rejected, verification, live proof, merge,
+// refer) would be stamped null and stay hidden from every org's audit trail.
+// Then the log belongs to the organization of the staff member who acted:
+// users/{uid}.organizationId, which a user can only set once they hold a
+// membership in that org (firestore.rules canLinkSelfTo). Reporters and
+// transporters have none, so their logs stay null as before.
+async function actorOrg(log) {
+  const actorUid = log.get('actorUid');
+  if (typeof actorUid !== 'string' || !actorUid) return null;
+  return orgOf(await db.collection('users').doc(actorUid).get());
+}
+
+async function stamp(event, parentCollection, parentId, {actorFallback = false} = {}) {
   const log = event.data;
   if (!log) return;
   const parent = await db.collection(parentCollection).doc(parentId).get();
-  const organizationId = orgOf(parent);
+  let organizationId = orgOf(parent);
+  if (!organizationId && actorFallback) organizationId = await actorOrg(log);
   if ((log.get('organizationId') || null) === organizationId) return;
   await log.ref.update({organizationId});
 }
 
 exports.stampCaseLogOrganization = onDocumentCreated(
     'cases/{caseId}/activityLogs/{logId}',
-    (event) => stamp(event, 'cases', event.params.caseId),
+    (event) => stamp(event, 'cases', event.params.caseId, {actorFallback: true}),
 );
 
 exports.stampAnimalLogOrganization = onDocumentCreated(

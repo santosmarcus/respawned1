@@ -17,8 +17,7 @@ import '../../app_theme.dart';
 import '../rescue/rescue_page.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/widgets/welcome_greeting.dart';
 
 
 class HomeScreen extends StatelessWidget {
@@ -29,20 +28,7 @@ class HomeScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 80,
-        title: FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance
-              .collection('users')
-              .doc(FirebaseAuth.instance.currentUser?.uid)
-              .get(),
-          builder: (context, snapshot){
-            if(!snapshot.hasData){
-              return const Text('Welcome!');
-            }
-            final data = snapshot.data!.data() as Map<String, dynamic>?;
-            final firstName = data?['firstName'] ?? 'User';
-
-            return Text('Welcome, $firstName!');
-          },),
+        title: const WelcomeGreeting(exclaim: true),
         automaticallyImplyLeading: false,
       ),
       bottomNavigationBar: BottomNavigationBar(

@@ -45,6 +45,24 @@ service cloud.firestore {
       return request.auth.token.email.lower();
     }
 
+    // Null-safe sign-in email / verified phone (phone sign-in puts the
+    // number in the token as +639XXXXXXXXX; users.phone is self-edited
+    // and never trusted for this).
+    function myEmailOrEmpty() {
+      return request.auth.token.get('email', '').lower();
+    }
+    function myPhoneOrEmpty() {
+      return request.auth.token.get('phone_number', '');
+    }
+
+    // An invitation addressed to the signed-in account, by email or by
+    // verified mobile number. An empty side never matches.
+    function invitationIsMine(inv) {
+      return signedIn() && (
+        (inv.get('normalizedEmail', '') != '' && inv.get('normalizedEmail', '') == myEmailOrEmpty()) ||
+        (inv.get('normalizedPhone', '') != '' && inv.get('normalizedPhone', '') == myPhoneOrEmpty()));
+    }
+
     function changedOnly(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
@@ -363,7 +381,7 @@ service cloud.firestore {
           invitationId is string && invitationId.size() > 0 &&
           exists(/databases/$(database)/documents/organizationInvitations/$(invitationId)) &&
           invitation.organizationId == orgId &&
-          invitation.normalizedEmail == normalizedEmail() &&
+          invitationIsMine(invitation) &&
           invitation.status == 'pending' &&
           request.resource.data.get('role', 'staff') == invitation.get('role', 'staff') &&
           request.resource.data.get('permissions', null) == invitation.get('permissions', null) &&
@@ -438,8 +456,13 @@ service cloud.firestore {
 
       // The invited person may read and act on invitations addressed to
       // their own email.
-      allow read: if signedIn() &&
-        (resource.data.normalizedEmail == normalizedEmail() || managesOrg(resource.data.organizationId));
+      // A missing invitation (resource == null) is readable by the admins of
+      // the org its id starts with ({orgId}_{email}), so an admin's
+      // existence check never errors with permission-denied.
+      allow read: if signedIn() && (
+        (resource == null && managesOrg(invitationId.split('_')[0])) ||
+        (resource != null &&
+          (invitationIsMine(resource.data) || managesOrg(resource.data.organizationId))));
 
       allow create: if managesOrg(request.resource.data.organizationId) && invitationAccessOk(request.resource.data);
 
@@ -447,11 +470,12 @@ service cloud.firestore {
       // accepted/rejected without touching org, email, or role.
       allow update: if (managesOrg(resource.data.organizationId) && invitationAccessOk(request.resource.data)) ||
         (
-          resource.data.normalizedEmail == normalizedEmail() &&
+          invitationIsMine(resource.data) &&
           resource.data.status == 'pending' &&
           request.resource.data.status in ['accepted', 'rejected'] &&
           request.resource.data.organizationId == resource.data.organizationId &&
           request.resource.data.email == resource.data.email &&
+          request.resource.data.get('normalizedPhone', '') == resource.data.get('normalizedPhone', '') &&
           request.resource.data.role == resource.data.role &&
           request.resource.data.get('permissions', null) == resource.data.get('permissions', null) &&
           request.resource.data.get('preset', null) == resource.data.get('preset', null)

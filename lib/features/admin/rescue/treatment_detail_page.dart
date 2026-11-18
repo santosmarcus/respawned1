@@ -595,6 +595,9 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
       bottomNavigationBar: c.isDeceased
           ? CaseActionBar(primary: CaseAction('Close Case', () => _closeDeceasedCase(c, outstandingBalance)))
           : CaseActionBar(
+              // Spinner while Intake/Transfer/Release saves the selection
+              // before moving on (it used to sit silently on this page).
+              busy: _isActingOnNextStep,
               primary: CaseAction(
                 'Intake',
                 hasEligibleAnimal && !_isActingOnNextStep

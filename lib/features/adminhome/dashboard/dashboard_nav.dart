@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
@@ -14,7 +15,6 @@ import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart'
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
-import 'package:respawnd1/features/admin/donation/expense_oversight_page.dart';
 import 'package:respawnd1/features/admin/donation/flagged_payments_page.dart';
 import 'package:respawnd1/features/admin/stock/stock_page.dart';
 import 'package:respawnd1/features/admin/events/admin_event_detail_page.dart';
@@ -33,7 +33,12 @@ import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 /// Every dashboard tap opens an EXISTING screen with that screen's own
 /// constructor — the dashboard never creates its own record views.
 
-void _push(BuildContext context, WidgetBuilder builder) => Navigator.push(context, MaterialPageRoute(builder: builder));
+/// Routes opened from the dashboard are named [kFromDashboardRoute] so
+/// AdminAppBar shows a back arrow on them instead of the drawer button.
+void _push(BuildContext context, WidgetBuilder builder) => Navigator.push(
+      context,
+      MaterialPageRoute(builder: builder, settings: const RouteSettings(name: kFromDashboardRoute)),
+    );
 
 /// Mirrors RescueReportsPage._navigateToDetail's status → screen mapping
 /// (kept private there), so a case opens exactly where it would from the
@@ -94,8 +99,10 @@ void openDonationsAdmin(BuildContext context) => _push(context, (_) => const Don
 
 void openFlaggedPayments(BuildContext context) => _push(context, (_) => const FlaggedPaymentsPage());
 
-/// Donation gaps 6 and 7: expenses awaiting approval and overdue receipts.
-void openExpenseOversight(BuildContext context) => _push(context, (_) => const ExpenseOversightPage());
+/// Donation gaps 6 and 7: expenses awaiting approval and overdue receipts —
+/// the Approvals tab of Donations & Sponsorships, with its other tabs.
+void openExpenseOversight(BuildContext context) =>
+    _push(context, (_) => const DonationAdminHomeScreen(initialTab: DonationAdminTab.approvals));
 
 /// Donation gap 5: what the shelter has on hand.
 void openStock(BuildContext context) => _push(context, (_) => const StockPage());

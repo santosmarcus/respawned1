@@ -85,6 +85,8 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   final _capacityController = TextEditingController();
   bool _isOrgAdmin = false;
   bool _canManageFacebook = false;
+  bool _acceptingCases = true;
+  bool _savingAccepting = false;
 
   List<ServiceArea> _serviceAreas = [];
   final Set<String> _acceptedSpecies = {};
@@ -120,12 +122,13 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       _invitationCheckFailed = false;
     });
     final email = FirebaseAuth.instance.currentUser?.email?.trim().toLowerCase();
-    if (email == null || email.isEmpty) {
+    final phone = FirebaseAuth.instance.currentUser?.phoneNumber;
+    if ((email == null || email.isEmpty) && (phone == null || phone.isEmpty)) {
       if (mounted) setState(() { _checkingInvitations = false; _loading = false; });
       return;
     }
     try {
-      final invites = await _invitationRepo.streamInvitationsForEmail(email).first;
+      final invites = await _invitationRepo.streamMyInvitations(email: email, phone: phone).first;
       final valid = invites.where((i) => !i.isExpired).toList();
       if (mounted) {
         setState(() {
@@ -148,13 +151,14 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   Future<void> _joinInvitation(OrganizationInvitation invite) async {
     if (_acceptingInvitationId != null) return;
     final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null || currentUser.email == null) return;
+    if (currentUser == null || (currentUser.email == null && currentUser.phoneNumber == null)) return;
     setState(() => _acceptingInvitationId = invite.id);
     try {
       await _invitationRepo.acceptInvitation(
         invitationId: invite.id,
         uid: currentUser.uid,
-        signedInEmail: currentUser.email!,
+        signedInEmail: currentUser.email,
+        signedInPhone: currentUser.phoneNumber,
         // This entry point is reached only by an already-authenticated
         // admin account — joining an organization here must never re-route
         // them out of the admin shell by overwriting users/{uid}.role.
@@ -248,6 +252,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     _phoneController.text = (data['contactNumber'] as String?) ?? (data['phone'] as String?) ?? '';
     _facebookController.text = data['facebookUrl'] as String? ?? '';
     _websiteController.text = data['website'] as String? ?? '';
+    _acceptingCases = data['acceptingCases'] as bool? ?? true;
     _avatarUrl = data['avatarUrl'] as String?;
     _serviceAreas = (data['serviceAreas'] as List? ?? const [])
         .map((e) => ServiceArea.fromMap(Map<String, dynamic>.from(e as Map)))
@@ -837,6 +842,18 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         ),
         _viewRow('Shelter Capacity', capacity.isEmpty ? 'Not configured' : capacity),
         const SizedBox(height: 8),
+        if (_organizationId != null && _isOrgAdmin) ...[
+          _sectionTitle('Operations'),
+          _buildAcceptingCasesTile(),
+          const SizedBox(height: 8),
+          _settingsTile(
+            icon: Icons.verified_user_outlined,
+            title: 'Shelter, approvals & receipts',
+            subtitle: 'Capacity, expense approval threshold, receipt due days',
+            onTap: () => showShelterSetupSheet(context),
+          ),
+          const SizedBox(height: 16),
+        ],
         if (_organizationId != null)
           FacebookIntegrationSection(organizationId: _organizationId!, canManage: _canManageFacebook),
         _sectionTitle('Contact Details'),
@@ -847,6 +864,92 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       ],
     );
   }
+
+  Future<void> _setAcceptingCases(bool accepting) async {
+    final orgId = _organizationId;
+    if (orgId == null || _savingAccepting) return;
+    if (!accepting) {
+      final ok = await showConfirmActionDialog(
+        context,
+        title: 'Pause new rescue reports?',
+        message: 'New reports in your service areas will go to other organizations until you turn this back on. '
+            'Cases you already have are not affected.',
+        confirmLabel: 'Pause',
+      );
+      if (!ok || !mounted) return;
+    }
+    setState(() {
+      _savingAccepting = true;
+      _acceptingCases = accepting;
+    });
+    try {
+      await OrganizationRepository().setAcceptingCases(organizationId: orgId, accepting: accepting);
+      final user = FirebaseAuth.instance.currentUser;
+      await AuditLogRepository().log(
+        category: AuditCategory.organizationStaff,
+        action: accepting ? 'Resumed new rescue reports' : 'Paused new rescue reports',
+        actorId: user?.uid,
+        actorEmail: user?.email,
+        organizationId: orgId,
+        targetType: 'Organization',
+        targetId: orgId,
+        newValues: {'acceptingCases': accepting},
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _acceptingCases = !accepting);
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not update: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingAccepting = false);
+    }
+  }
+
+  Widget _buildAcceptingCasesTile() => Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.slaterspwn),
+        ),
+        child: SwitchListTile(
+          value: _acceptingCases,
+          onChanged: _savingAccepting ? null : _setAcceptingCases,
+          activeThumbColor: AppColors.textPrimary,
+          activeTrackColor: AppColors.yellowrspwn,
+          title: Text('Accepting new rescue reports',
+              style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          subtitle: Text(
+            _acceptingCases
+                ? 'Live: new reports in your service areas come to you.'
+                : 'Paused: new reports go to other organizations.',
+            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ),
+      );
+
+  Widget _settingsTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) =>
+      Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.slaterspwn),
+        ),
+        child: ListTile(
+          leading: Icon(icon, color: AppColors.textPrimary),
+          title: Text(title,
+              style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          subtitle: Text(subtitle, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: onTap,
+        ),
+      );
 
   Widget _viewRow(String label, String value) => Padding(
         padding: const EdgeInsets.only(bottom: 14),
@@ -1108,7 +1211,7 @@ class _InvitationCard extends StatelessWidget {
           Text(invitation.organizationName.isNotEmpty ? invitation.organizationName : 'Organization',
               style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
           const SizedBox(height: 6),
-          Text('Invited email: ${invitation.email}',
+          Text('Invited: ${invitation.contactLabel}',
               style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
           Text('Role: ${invitation.role.label}',
               style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),

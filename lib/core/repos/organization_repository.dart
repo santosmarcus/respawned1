@@ -571,6 +571,17 @@ class OrganizationRepository {
   /// Changing legal-identity fields (name/location) that should require
   /// re-verification is a reported policy limitation, not enforced here —
   /// see this session's final report.
+  /// Pauses or resumes new rescue reports for an organization (org admin).
+  /// While paused, assignCaseToServiceAreas (functions/index.js) routes no
+  /// new reports to it; cases it already has are unaffected.
+  Future<void> setAcceptingCases({required String organizationId, required bool accepting}) {
+    return _db.collection('organizations').doc(organizationId).update({
+      'acceptingCases': accepting,
+      'acceptingCasesChangedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   Future<void> updateProfile({
     required String organizationId,
     String? name,

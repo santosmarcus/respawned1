@@ -509,6 +509,16 @@ describe('animal records and public profiles', () => {
     await assertFails(as('stranger').collection('animals').where('adoptionStatus', '==', 'adoptable').get());
   });
 
+  test('records for one case: allowed when scoped to the organization', async () => {
+    // AnimalRecordRepository.streamRecordsForCase (Create Animal Records
+    // from intake) — the unscoped form was permission-denied.
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/fromCase').set({ name: 'C', organizationId: 'orgA', linkedCaseId: 'ownedA' }));
+    await assertFails(as('staffA').collection('animals').where('linkedCaseId', '==', 'ownedA').get());
+    await assertSucceeds(as('staffA').collection('animals')
+      .where('organizationId', '==', 'orgA').where('linkedCaseId', '==', 'ownedA').get());
+  });
+
   test('public profiles are readable by any signed-in user and written by no client', async () => {
     await env.withSecurityRulesDisabled((ctx) =>
       ctx.firestore().doc('publicAnimals/animalA').set({ name: 'Mochi', organizationId: 'orgA', adoptionStatus: 'adoptable' }));

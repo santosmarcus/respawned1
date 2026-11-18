@@ -85,8 +85,8 @@ class CollarIdTagIntroScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'A small fee applies, with all proceeds donated to the Loved '
-                        'by the Gapz organization to support animal rescue and welfare programs.',
+                    'A small fee applies, with all proceeds donated to partner rescue '
+                        'organizations to support animal rescue and welfare programs.',
                     style: GoogleFonts.zain(
                         fontSize: 14, color: AppColors.textPrimary),
                   ),

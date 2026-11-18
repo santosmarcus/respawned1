@@ -190,6 +190,36 @@ describe('who changes access', () => {
     await assertFails(as('adminA').doc('organizationInvitations/i4').set(invite({ permissions: ['everything'] })));
   });
 
+  test('an Admin can check for an invitation that does not exist yet', async () => {
+    // createInvitation used to read the doc in a transaction first; a missing
+    // invitation must not be permission-denied for its org's Admins.
+    await assertSucceeds(as('adminA').doc('organizationInvitations/orgA_new@example.com').get());
+    await assertFails(as('fullA').doc('organizationInvitations/orgA_new@example.com').get());
+    await assertFails(as('staffB').doc('organizationInvitations/orgA_new@example.com').get());
+  });
+
+  test('a phone invitation is matched by the verified sign-in number only', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('organizationInvitations/orgA_phone_639171234567').set({
+      organizationId: 'orgA', email: '', normalizedEmail: '', phone: '09171234567', normalizedPhone: '+639171234567',
+      status: 'pending', role: 'staff', permissions: presets.animalCare, preset: 'animalCare',
+    }));
+    const path = 'organizationInvitations/orgA_phone_639171234567';
+    const right = env.authenticatedContext('stranger', { phone_number: '+639171234567' }).firestore();
+    const wrong = env.authenticatedContext('reporter', { phone_number: '+639999999999' }).firestore();
+    // No email on a phone-only account must not match an invitation's empty email.
+    const noEmail = env.authenticatedContext('adopter', {}).firestore();
+    await assertSucceeds(right.doc(path).get());
+    await assertFails(wrong.doc(path).get());
+    await assertFails(noEmail.doc(path).get());
+    await assertSucceeds(right.collection('organizationInvitations')
+      .where('normalizedPhone', '==', '+639171234567').where('status', '==', 'pending').get());
+    const member = { uid: 'stranger', organizationId: 'orgA', role: 'staff', status: 'active',
+      invitationId: 'orgA_phone_639171234567', permissions: presets.animalCare, preset: 'animalCare' };
+    await assertFails(wrong.doc('organizations/orgA/members/reporter').set({ ...member, uid: 'reporter' }));
+    await assertSucceeds(right.doc('organizations/orgA/members/stranger').set(member));
+    await assertSucceeds(right.doc(path).update({ status: 'accepted' }));
+  });
+
   test('accepting copies the invitation access exactly', async () => {
     await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('organizationInvitations/t1').set({
       organizationId: 'orgA', email: 'stranger@example.com', normalizedEmail: 'stranger@example.com',

@@ -55,6 +55,8 @@ const FUND_KINDS = ['campaign', 'animal', 'medical', 'shelter_resource', 'genera
 const PURPOSE_TAGS = ['Rescue', 'Medicine & Treatment', 'Food and Supplies', 'Shelter', 'General Operations'];
 // Same categories as the Figma "Allocate Funds" sheet.
 const ALLOCATION_CATEGORIES = ['Food', 'Medicine and Treatment', 'Administrative', 'Bills and Utilities', 'Shelter', 'Transport', 'Other'];
+// Same list as stockUnits in lib/features/admin/stock/stock_service.dart.
+const STOCK_UNITS = ['pcs', 'kg', 'g', 'L', 'mL', 'sacks', 'packs', 'boxes', 'cans', 'bottles'];
 const IN_KIND_CATEGORIES = ['Food & Water', 'Medicine & Treatment', 'Supplies & Equipment', 'Hygiene & Cleaning', 'Transport Crates', 'Others'];
 const OFFLINE_METHODS = {bank_transfer: 'Bank Transfer', cash: 'Cash', check: 'Check', other: 'Other'};
 
@@ -305,12 +307,16 @@ function parseInKindItems(raw) {
     if (quantityNeeded !== null && (!Number.isInteger(quantityNeeded) || quantityNeeded <= 0 || quantityNeeded > 100000)) {
       throw new HttpsError('invalid-argument', `In-kind item ${i + 1} quantity must be a whole number.`);
     }
+    const unit = requireString(it.unit, `In-kind item ${i + 1} unit`, {max: 30, optional: true});
+    if (unit && !STOCK_UNITS.includes(unit)) {
+      throw new HttpsError('invalid-argument', `In-kind item ${i + 1} has an unknown unit.`);
+    }
     return {
       // category + description are what donation_detail.dart already shows.
       category,
       description: requireString(it.description, `In-kind item ${i + 1} description`, {max: 300}),
       quantityNeeded,
-      unit: requireString(it.unit, `In-kind item ${i + 1} unit`, {max: 30, optional: true}),
+      unit,
       instructions: requireString(it.instructions, `In-kind item ${i + 1} delivery instructions`, {max: 500, optional: true}),
       // Owned by manageInKindDonation(); saveCampaign restores it on edit.
       quantityReceived: 0,

@@ -15,6 +15,7 @@ import 'donation_admin_create.dart';
 import 'donation_admin_filters.dart';
 import 'donation_admin_info.dart';
 import 'donation_admin_providers.dart';
+import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'donation_admin_records.dart';
 import 'donation_admin_search.dart';
 import 'donation_admin_sheets.dart';
@@ -26,23 +27,24 @@ import 'refund_request_page.dart';
 /// View all.
 const _homeListLimit = 3;
 
-enum _HomeTab {
+enum DonationAdminTab {
   campaigns('Campaigns'),
   inKind('In Kind'),
   approvals('Approvals'),
   refunds('Refunds');
 
-  const _HomeTab(this.label);
+  const DonationAdminTab(this.label);
   final String label;
 }
 
 /// Admin Donations & Sponsorships: campaigns, in-kind stock, expense
 /// approvals and refund requests, one tab each.
 class DonationAdminHomeScreen extends ConsumerStatefulWidget {
-  const DonationAdminHomeScreen({super.key, this.openOnRefunds = false});
+  const DonationAdminHomeScreen({super.key, this.initialTab = DonationAdminTab.campaigns});
 
-  /// Opens on the Refunds tab (the dashboard's refund requests card).
-  final bool openOnRefunds;
+  /// The tab it opens on: Refunds from the dashboard's refund requests card,
+  /// Approvals from its "Expenses & receipts" link.
+  final DonationAdminTab initialTab;
 
   @override
   ConsumerState<DonationAdminHomeScreen> createState() => _DonationAdminHomeScreenState();
@@ -56,9 +58,9 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
       'Approvals: expenses waiting for a second financial admin, and overdue receipts.\n'
       'Refunds: donors\' refund requests to approve or decline.';
 
-  late _HomeTab _tab = widget.openOnRefunds ? _HomeTab.refunds : _HomeTab.campaigns;
+  late DonationAdminTab _tab = widget.initialTab;
 
-  void _selectTab(int i) => setState(() => _tab = _HomeTab.values[i]);
+  void _selectTab(int i) => setState(() => _tab = DonationAdminTab.values[i]);
 
   Future<void> _newCampaign() async {
     final type = await showModalBottomSheet<String>(
@@ -72,8 +74,8 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
   }
 
   Widget? _fab() => switch (_tab) {
-        _HomeTab.campaigns => _YellowFab(label: 'New Campaign', onPressed: _newCampaign),
-        _HomeTab.inKind => _YellowFab(label: 'Add item', onPressed: () => addStockItem(context, ref)),
+        DonationAdminTab.campaigns => _YellowFab(label: 'New Campaign', onPressed: _newCampaign),
+        DonationAdminTab.inKind => _YellowFab(label: 'Add item', onPressed: () => addStockItem(context, ref)),
         _ => null,
       };
 
@@ -104,6 +106,12 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
               icon: Icons.receipt_long_outlined,
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GeneralExpensesPage())),
             ),
+          if (canFinance)
+            AdminMenuAction(
+              label: 'Set approval rule',
+              icon: Icons.verified_user_outlined,
+              onTap: () => showShelterSetupSheet(context),
+            ),
           AdminMenuAction(
             label: 'Help',
             icon: Icons.lightbulb_outline,
@@ -113,7 +121,7 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
         ],
         bottom: AdminTabBar(
           tabs: [
-            for (final t in _HomeTab.values) AdminTab(t.label, count: t == _HomeTab.refunds ? openRefunds : null),
+            for (final t in DonationAdminTab.values) AdminTab(t.label, count: t == DonationAdminTab.refunds ? openRefunds : null),
           ],
           selectedIndex: _tab.index,
           onSelected: _selectTab,
@@ -122,13 +130,13 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
       floatingActionButton: _fab(),
       body: AdminTabSwipe(
         index: _tab.index,
-        count: _HomeTab.values.length,
+        count: DonationAdminTab.values.length,
         onSelected: _selectTab,
         child: switch (_tab) {
-          _HomeTab.campaigns => const _CampaignsTab(),
-          _HomeTab.inKind => const StockTab(),
-          _HomeTab.approvals => const ExpenseOversightTab(),
-          _HomeTab.refunds => const RefundRequestsTab(),
+          DonationAdminTab.campaigns => const _CampaignsTab(),
+          DonationAdminTab.inKind => const StockTab(),
+          DonationAdminTab.approvals => const ExpenseOversightTab(),
+          DonationAdminTab.refunds => const RefundRequestsTab(),
         },
       ),
     );

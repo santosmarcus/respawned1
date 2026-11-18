@@ -174,23 +174,6 @@ class RescueCaseQueryRepository {
         .map((doc) => doc.exists ? RescueCase.fromFirestore(doc) : null);
   }
 
-  /// Which animal-array indexes already have a created record for this
-  /// case — drives both the "N of M records created" progress and
-  /// duplicate-prevention in the multi-animal creation flow (checked
-  /// client-side against this single query rather than a second
-  /// composite-indexed query per animal).
-  Stream<Set<int>> streamCompletedAnimalRecordIndexes(String caseId) {
-    return _store.animals
-        .where('linkedCaseId', isEqualTo: caseId)
-        .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map((d) => (d.data()['sourceAnimalIndex'] as num?)?.toInt())
-              .whereType<int>()
-              .toSet(),
-        );
-  }
-
   Stream<List<RescueReport>> streamReports(String caseId) {
     return _store
         .reportsOf(caseId)
