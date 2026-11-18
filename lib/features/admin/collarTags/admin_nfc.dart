@@ -1,10 +1,11 @@
-/*import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/constants/app.links.dart';
 
 class AdminNfc extends StatefulWidget {
   const AdminNfc({super.key});
@@ -45,18 +46,36 @@ class _AdminNfcState extends State<AdminNfc> {
 
   Future<void> _fetchTags() async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('collarTags')
-          .orderBy('createdAt', descending: true)
-          .get();
+      // Sorted here rather than with orderBy('createdAt'): orderBy drops
+      // every tag that has no createdAt field.
+      final snap =
+      await FirebaseFirestore.instance.collection('collarTags').get();
 
-      final tags = snap.docs
-          .map((d) => CollarTagData.fromFirestore(d.data(), d.id))
-          .toList();
+      final tags = <CollarTagData>[];
+      for (final d in snap.docs) {
+        try {
+          tags.add(CollarTagData.fromFirestore(d.data(), d.id));
+        } catch (e) {
+          debugPrint('Skipping malformed collarTags doc ${d.id}: $e');
+        }
+      }
+      tags.sort((a, b) {
+        final aTime = a.createdAt;
+        final bTime = b.createdAt;
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime);
+      });
 
       if (mounted) {
         setState(() {
           _tags = tags;
+          // Keep the selection pointing at the refreshed copy of the tag.
+          final selectedId = _selected?.tagId;
+          _selected = selectedId == null
+              ? null
+              : tags.where((t) => t.tagId == selectedId).firstOrNull;
           _loadingTags = false;
         });
       }
@@ -67,24 +86,33 @@ class _AdminNfcState extends State<AdminNfc> {
   }
 
   Future<void> _startNfcWrite() async {
-    if (_selected == null || !_nfcAvailable) return;
+    final tagId = _selected?.tagId;
+    if (tagId == null || !_nfcAvailable) return;
 
     setState(() {
       _status = _NfcStatus.scanning;
-      _statusMessage = 'Hold the NFC chip near the back of your device…';
+      _statusMessage = 'Hold the NFC chip flat against the back of your device…';
     });
 
     try {
-      await _nfcService.writeTag(_selected!.tagId!);
+      // Completes only once the chip has actually been written.
+      await _nfcService.writeTag(tagId);
 
       if (mounted) {
         setState(() {
           _status = _NfcStatus.success;
-          _statusMessage = 'NFC chip written successfully!';
+          _statusMessage = 'NFC chip written. Scan it to check it opens this pet.';
         });
       }
 
       await _fetchTags();
+    } on NfcCancelledException {
+      if (mounted) {
+        setState(() {
+          _status = _NfcStatus.idle;
+          _statusMessage = '';
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -96,13 +124,9 @@ class _AdminNfcState extends State<AdminNfc> {
   }
 
   Future<void> _cancelWrite() async {
+    // Makes the pending writeTag() fail with NfcCancelledException, which
+    // _startNfcWrite turns back into the idle state.
     await _nfcService.stopSession();
-    if (mounted) {
-      setState(() {
-        _status = _NfcStatus.idle;
-        _statusMessage = '';
-      });
-    }
   }
 
   void _showSnack(String msg) {
@@ -143,7 +167,7 @@ class _AdminNfcState extends State<AdminNfc> {
 
             if (!_nfcAvailable)
               _Banner(
-                color: AppColors.error,
+                color: Colors.red,
                 icon: Icons.warning_amber_rounded,
                 text: 'NFC is not available or enabled on this device.',
               ),
@@ -322,7 +346,7 @@ class _TagTile extends StatelessWidget {
             ),
 
             // "Written" badge — shown once the chip has been programmed
-            if (tag.nfcWritten == true)
+            if (tag.nfcWritten)
               Container(
                 margin: const EdgeInsets.only(right: 6),
                 padding: const EdgeInsets.symmetric(
@@ -354,7 +378,7 @@ class _TagTile extends StatelessWidget {
         width: 52,
         height: 52,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder(),
+        errorBuilder: (_, _, _) => _placeholder(),
       );
     }
     return _placeholder();
@@ -375,7 +399,7 @@ class _ChipPreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = 'https://respawnd.app/tag/$tagId';
+    final url = AppLinks.tagUrl(tagId);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -539,4 +563,4 @@ class _FullWidthButton extends StatelessWidget {
   }
 }
 
-enum _NfcStatus { idle, scanning, success, error }*/
+enum _NfcStatus { idle, scanning, success, error }

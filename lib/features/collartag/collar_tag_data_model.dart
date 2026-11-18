@@ -40,8 +40,10 @@ class CollarTagData {
 
   String? ownerId;
   bool qrEnabled;
-  // final bool? nfcWritten;
-  // DateTime? nfcWrittenAt;
+  // Set by NfcService.writeTag only; never written by toFirestore(), so
+  // saving a tag doesn't reset it.
+  bool nfcWritten;
+  DateTime? nfcWrittenAt;
 
   CollarTagData({
     this.petImagePath,
@@ -73,8 +75,8 @@ class CollarTagData {
     this.createdAt,
     this.ownerId,
     this.qrEnabled = false,
-    // this.nfcWritten,
-    // this.nfcWrittenAt,
+    this.nfcWritten = false,
+    this.nfcWrittenAt,
   });
 
   // Firestore serialisation
@@ -100,10 +102,6 @@ class CollarTagData {
     'createdAt': createdAt != null
         ? Timestamp.fromDate(createdAt!)
         : FieldValue.serverTimestamp(),
-    // NFC disabled for now.
-    // 'nfcWritten': nfcWritten ?? false,
-    // if (nfcWrittenAt != null)
-    //   'nfcWrittenAt': Timestamp.fromDate(nfcWrittenAt!),
   };
 
   static DateTime? _parseCreatedAt(dynamic value) {
@@ -145,9 +143,7 @@ class CollarTagData {
         createdAt: _parseCreatedAt(data['createdAt']),
         ownerId: data['ownerId'] as String?,
         qrEnabled: data['qrEnabled'] as bool? ?? false,
-        // nfcWritten: data['nfcWritten'] as bool? ?? false,
-        // nfcWrittenAt: data['nfcWrittenAt'] != null
-        //     ? (data['nfcWrittenAt'] as Timestamp).toDate()
-        //     : null,
+        nfcWritten: data['nfcWritten'] as bool? ?? false,
+        nfcWrittenAt: _parseCreatedAt(data['nfcWrittenAt']),
       );
 }

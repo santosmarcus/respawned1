@@ -9,7 +9,7 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
+import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
@@ -89,6 +89,7 @@ class _RescuePageState extends State<RescuePage> {
 
   @override
   void dispose() {
+    _nfcService.stopSession();
     _mapController?.dispose();
     _form.dispose();
     super.dispose();
@@ -393,36 +394,38 @@ class _RescuePageState extends State<RescuePage> {
     }
   }
 
-  Future<void> _scanNFC() async {
-    try {
-      final availability = await FlutterNfcKit.nfcAvailability;
-      if (availability != NFCAvailability.available) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            appSnackBar('NFC is not available on this device.', kind: AppMessageKind.error),
-          );
-        }
-        return;
-      }
+  final _nfcService = NfcService();
 
+  Future<void> _scanNFC() async {
+    if (!await _nfcService.isAvailable()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Hold your device near the NFC tag…', duration: Duration(seconds: 4)),
+          appSnackBar('NFC is not available or is turned off on this device.',
+              kind: AppMessageKind.error),
         );
       }
+      return;
+    }
 
-      final tag = await FlutterNfcKit.poll(
-        timeout: const Duration(seconds: 10),
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        appSnackBar('Hold your device near the NFC tag…',
+            duration: const Duration(seconds: 15)),
       );
-      await FlutterNfcKit.finish();
+    }
 
+    try {
+      // Reads the link written on the chip (the same link as the QR code),
+      // not the chip's hardware serial number, which matches no collar tag.
+      final raw = await _nfcService.readTag(timeout: const Duration(seconds: 15));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      _handleScanResult(raw);
+    } on NfcCancelledException {
+      if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        _handleScanResult(tag.id);
-      }
-    } catch (e) {
-      await FlutterNfcKit.finish();
-      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('NFC scan failed: $e', kind: AppMessageKind.error),
         );
