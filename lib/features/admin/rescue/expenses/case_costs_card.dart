@@ -52,21 +52,6 @@ class CaseCostsCard extends ConsumerWidget {
     final funded = expenses.fold<double>(0, (t, e) => t + e.fundedAmount);
     final fundraiserId = ref.watch(caseFundraiserIdProvider(rescueCase.id)).asData?.value;
 
-    Widget row(String label, double amount, {bool strong = false}) => Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-              Text(formatPeso(amount),
-                  style: GoogleFonts.zain(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: strong ? AppColors.textPrimary : AppColors.textSecondary)),
-            ],
-          ),
-        );
-
     return Padding(
       padding: EdgeInsets.only(top: topGap),
       child: CaseCard(
@@ -74,9 +59,9 @@ class CaseCostsCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            row('Total case cost', total),
-            row('Funded', funded),
-            row('Outstanding', total - funded, strong: true),
+            CostRow('Total case cost', total),
+            CostRow('Funded', funded),
+            CostRow('Outstanding', total - funded, strong: true),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -108,6 +93,34 @@ class CaseCostsCard extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// One label and peso amount line of a cost summary (Case costs card,
+/// Donations > Case costs).
+class CostRow extends StatelessWidget {
+  const CostRow(this.label, this.amount, {super.key, this.strong = false});
+
+  final String label;
+  final double amount;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+          Text(formatPeso(amount),
+              style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: strong ? AppColors.textPrimary : AppColors.textSecondary)),
+        ],
       ),
     );
   }

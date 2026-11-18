@@ -13,6 +13,7 @@ import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
+import 'case_costs_tab.dart';
 import 'donation_admin_create.dart';
 import 'donation_admin_filters.dart';
 import 'donation_admin_info.dart';
@@ -33,14 +34,15 @@ enum DonationAdminTab {
   campaigns('Campaigns'),
   inKind('In Kind'),
   approvals('Approvals'),
-  refunds('Refunds');
+  refunds('Refunds'),
+  caseCosts('Case costs');
 
   const DonationAdminTab(this.label);
   final String label;
 }
 
 /// Admin Donations & Sponsorships: campaigns, in-kind stock, expense
-/// approvals and refund requests, one tab each.
+/// approvals, refund requests and every case's treatment costs, one tab each.
 class DonationAdminHomeScreen extends ConsumerStatefulWidget {
   const DonationAdminHomeScreen({super.key, this.initialTab = DonationAdminTab.campaigns});
 
@@ -143,6 +145,7 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
           DonationAdminTab.inKind => const StockTab(),
           DonationAdminTab.approvals => const ExpenseOversightTab(),
           DonationAdminTab.refunds => const RefundRequestsTab(),
+          DonationAdminTab.caseCosts => const CaseCostsTab(),
         },
       ),
     );
