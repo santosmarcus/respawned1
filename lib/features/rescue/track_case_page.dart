@@ -155,9 +155,15 @@ class _TrackCasePageState extends State<TrackCasePage> {
         .collection('users')
         .doc(uid)
         .get();
-    final name =
+    final fullName =
     '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
         .trim();
+    // Accounts without first/last name (e.g. Google sign-in) fall back to
+    // their account name so the organization sees who wrote.
+    final authName = FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
+    final name = fullName.isNotEmpty
+        ? fullName
+        : (authName.isNotEmpty ? authName : 'Reporter');
 
     await FirebaseFirestore.instance
         .collection('cases')
@@ -1279,7 +1285,7 @@ class _TrackingTabState extends State<_TrackingTab> {
                               radius: 14,
                               backgroundColor: AppColors.slaterspwn,
                               child: Text(
-                                (msg['senderName'] ?? 'U')[0],
+                                _initial(msg['senderName']),
                                 style: GoogleFonts.zain(
                                   fontSize: 12,
                                   color: AppColors.textPrimary,
@@ -2088,4 +2094,11 @@ class _RescueAdoptionSection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// First letter of a sender's name for the message avatar; 'U' when the
+/// name is missing or empty (indexing an empty string throws a RangeError).
+String _initial(Object? name) {
+  final s = (name is String ? name : '').trim();
+  return s.isEmpty ? 'U' : s[0].toUpperCase();
 }
