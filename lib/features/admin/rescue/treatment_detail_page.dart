@@ -580,11 +580,24 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             color: AppColors.background,
           ),
         ),
+        // Release and Close Case (top right); Intake and Transfer stay in
+        // the bottom bar.
         actions: [
-          // The AppBar's "Animal Moved" one-tap shortcut is gone — that
-          // location update now only ever comes from an approved Community
-          // Report. Close Case (any reason, including animal-moved) is now
-          // the 4th Post-Treatment Action button below, not a menu item.
+          if (!c.isDeceased)
+            CaseOverflowMenu(
+              busy: _isActingOnNextStep,
+              actions: [
+                CaseAction(
+                  'Release',
+                  hasEligibleAnimal && !_isActingOnNextStep
+                      ? () => _startPostTreatmentAction(c, 'release', data, animalOptions)
+                      : null,
+                  icon: Icons.park_outlined,
+                ),
+                CaseAction('Close Case', _closingCase ? null : () => _closeCase(c),
+                    icon: Icons.block, destructive: true),
+              ],
+            ),
         ],
       ),
       // Post-treatment actions (spec §2): Intake, Transfer, Release and
@@ -610,17 +623,6 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
                     ? () => _startPostTreatmentAction(c, 'transfer', data, animalOptions)
                     : null,
               ),
-              overflow: [
-                CaseAction(
-                  'Release',
-                  hasEligibleAnimal && !_isActingOnNextStep
-                      ? () => _startPostTreatmentAction(c, 'release', data, animalOptions)
-                      : null,
-                  icon: Icons.park_outlined,
-                ),
-                CaseAction('Close Case', _closingCase ? null : () => _closeCase(c),
-                    icon: Icons.block, destructive: true),
-              ],
             ),
       body: SingleChildScrollView(
         key: PageStorageKey('treatment_detail_${widget.caseId}'),

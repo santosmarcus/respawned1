@@ -81,12 +81,14 @@ describe('money', () => {
 });
 
 describe('operations', () => {
-  test('rescue cases: rescue staff work them, others do not', async () => {
+  test('rescue cases: rescue staff work them, other Staff read only, carers not at all', async () => {
     await assertSucceeds(as('rescueA').doc('cases/ownedA').update({ note: 'x' }));
     await assertSucceeds(as('fullA').doc('cases/ownedA').update({ note: 'y' }));
     await assertFails(as('treasurerA').doc('cases/ownedA').update({ note: 'z' }));
     await assertFails(as('careA').doc('cases/ownedA').update({ note: 'z' }));
-    await assertFails(as('treasurerA').doc('cases/ownedA').get());
+    // Every module is readable to Staff outside the care-tasks screen.
+    await assertSucceeds(as('treasurerA').doc('cases/ownedA').get());
+    await assertFails(as('careA').doc('cases/ownedA').get());
     await assertSucceeds(as('adoptA').doc('cases/ownedA').get());
     await assertSucceeds(as('rescueA').collection('cases').where('organizationId', '==', '').get());
     await assertFails(as('careA').collection('cases').where('organizationId', '==', '').get());
@@ -103,7 +105,8 @@ describe('operations', () => {
     // Analytics (insights) counts health records, so the treasurer may read them;
     // other organizations' staff may not.
     await assertFails(as('staffB').doc('animals/a1/vaccinations/v1').get());
-    await assertFails(as('treasurerA').doc('animals/a1').get());
+    await assertSucceeds(as('treasurerA').doc('animals/a1').get());
+    await assertSucceeds(as('treasurerA').doc('animals/a1/vaccinations/v1').get());
   });
 
   test('daily care: care staff record their own doses only', async () => {
@@ -115,26 +118,30 @@ describe('operations', () => {
     await assertFails(as('treasurerA').doc('organizations/orgA/stock/s1').set({ name: 'Food', quantity: 3 }));
   });
 
-  test('adoptions: adoption staff only', async () => {
+  test('adoptions: adoption staff work them, other Staff read only', async () => {
     await assertSucceeds(as('adoptA').doc('adoptions/ad1').get());
     await assertSucceeds(as('adoptA').doc('adoptions/ad1').update({ note: 'called' }));
-    await assertFails(as('rescueA').doc('adoptions/ad1').get());
+    await assertSucceeds(as('rescueA').doc('adoptions/ad1').get());
+    await assertFails(as('rescueA').doc('adoptions/ad1').update({ note: 'x' }));
+    await assertFails(as('careA').doc('adoptions/ad1').get());
     await assertFails(as('treasurerA').doc('adoptions/ad1').update({ note: 'x' }));
   });
 
-  test('volunteers, events and applications: volunteer staff only', async () => {
+  test('volunteers, events and applications: volunteer staff manage, other Staff read', async () => {
     await assertSucceeds(as('fullA').doc('volunteerApplications/rider').get());
-    await assertFails(as('rescueA').doc('volunteerApplications/rider').get());
+    await assertSucceeds(as('rescueA').doc('volunteerApplications/rider').get());
+    await assertFails(as('careA').doc('volunteerApplications/rider').get());
+    await assertFails(as('rescueA').doc('volunteerApplications/rider').update({ status: 'approved', reviewedBy: 'rescueA' }));
     await assertSucceeds(as('fullA').doc('events/e1').update({ title: 'Feeding day' }));
     await assertFails(as('careA').doc('events/e1').update({ title: 'x' }));
     await assertSucceeds(upload('fullA', 'events/orgA/cover.jpg'));
     await assertFails(upload('treasurerA', 'events/orgA/cover.jpg'));
   });
 
-  test('audit log and analytics: insights only', async () => {
+  test('audit log and analytics: every Staff member but carers reads them', async () => {
     await assertSucceeds(as('rescueA').doc('auditLogs/l1').get());
     await assertSucceeds(as('treasurerA').doc('auditLogs/l1').get());
-    await assertFails(as('adoptA').doc('auditLogs/l1').get());
+    await assertSucceeds(as('adoptA').doc('auditLogs/l1').get());
     await assertFails(as('careA').doc('auditLogs/l1').get());
   });
 

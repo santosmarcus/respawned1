@@ -50,7 +50,8 @@ export const users = {
   platformMemberA: { role: 'admin', organizationId: 'orgA' },
 };
 
-// Preset lists, as in functions/org_permissions.json.
+// Preset lists as in functions/org_permissions.json, plus two custom mixes
+// (rescueCoordinator, adoptionsOfficer) used by the fixtures below.
 export const presets = {
   fullStaff: ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'],
   rescueCoordinator: ['rescue', 'animals', 'care', 'insights'],

@@ -417,13 +417,13 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 ),
       );
     }
+    // Reassign lives on the transporter card's menu; Assign shows here only
+    // while there is no transporter yet.
     return CaseActionBar(
       primary: primary,
-      secondary: CaseAction(
-        defaultUid == null ? 'Assign Transporter' : 'Reassign',
-        () => _reassignTransporter(c),
-        icon: Icons.swap_horiz,
-      ),
+      secondary: defaultUid == null
+          ? CaseAction('Assign Transporter', () => _reassignTransporter(c), icon: Icons.swap_horiz)
+          : null,
       busy: _isConfirmingIntake,
     );
   }
@@ -538,50 +538,30 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
             color: AppColors.background,
           ),
         ),
+        actions: [
+          CaseOverflowMenu(
+            busy: _isConfirmingReceived || _isClosingCase,
+            actions: [
+              CaseAction('Change Intake Destination', _openShelterPicker, icon: Icons.home_work_outlined),
+              CaseAction('Close Case', _isClosingCase ? null : () => _closeCase(c), icon: Icons.block, destructive: true),
+            ],
+          ),
+        ],
       ),
-      // Once intake is confirmed: Confirm Animal Received until it is, the
-      // transport tracking, and (overflow) Reassign Transporter — only while
-      // there's still something to reassign — Change Intake Destination
-      // and Close Case.
+      // Once intake is confirmed, the bar has only Confirm Animal Received
+      // (until it is). Transport Tracking and Reassign Transporter are on the
+      // transporter card; Change Intake Destination and Close Case are in
+      // the app bar's menu.
       bottomNavigationBar: c.intakeConfirmedAt == null
           ? _confirmBar(c,
               defaultUid: defaultUid,
               defaultName: defaultName,
               defaultType: defaultType,
               defaultIsDemo: defaultIsDemo)
-          : CaseActionBar(
+          : CaseActionBar.maybe(
               primary: selectedAnimalsReceived
                   ? null
                   : CaseAction('Confirm Animal Received', _isConfirmingReceived ? null : () => _confirmAnimalReceived(c)),
-              secondary: CaseAction(
-                'Transport Tracking',
-                () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AdminTrackCasePage(
-                      caseId: widget.caseId,
-                      data: c.raw,
-                      mode: TrackingMode.intakeTransfer,
-                    ),
-                  ),
-                ),
-                icon: Icons.map_outlined,
-              ),
-              overflow: [
-                if (c.intakeReceivedAt == null)
-                  CaseAction('Reassign Transporter', () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AssignRiderPage(
-                      caseId: widget.caseId,
-                      data: c.raw,
-                      postAcceptTrackingMode: TrackingMode.intakeTransfer,
-                    ),
-                  ),
-                ), icon: Icons.swap_horiz),
-                CaseAction('Change Intake Destination', _openShelterPicker, icon: Icons.home_work_outlined),
-                CaseAction('Close Case', _isClosingCase ? null : () => _closeCase(c), icon: Icons.block, destructive: true),
-              ],
               busy: _isConfirmingReceived || _isClosingCase,
             ),
       body: SingleChildScrollView(
@@ -645,6 +625,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 defaultName: defaultName,
                 defaultType: defaultType,
                 onChangeShelter: _openShelterPicker,
+                onReassign: () => _reassignTransporter(c),
               )
             else ...[
               CaseInfoGrid(
@@ -672,7 +653,36 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                   (latestAssignment.status == TransportAssignmentStatus.accepted ||
                       latestAssignment.status == TransportAssignmentStatus.completed)) ...[
                 _SectionHeader('Clinic-to-Shelter Transport'),
-                TransporterDetailsCard(assignment: latestAssignment),
+                TransporterDetailsCard(
+                  assignment: latestAssignment,
+                  onTrack: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AdminTrackCasePage(
+                        caseId: widget.caseId,
+                        data: c.raw,
+                        mode: TrackingMode.intakeTransfer,
+                      ),
+                    ),
+                  ),
+                  menuActions: [
+                    if (c.intakeReceivedAt == null)
+                      CaseAction(
+                        'Reassign Transporter',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AssignRiderPage(
+                              caseId: widget.caseId,
+                              data: c.raw,
+                              postAcceptTrackingMode: TrackingMode.intakeTransfer,
+                            ),
+                          ),
+                        ),
+                        icon: Icons.swap_horiz,
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 8),
               ],
               const SizedBox(height: 12),
@@ -718,6 +728,7 @@ class _ConfirmIntakeSection extends StatelessWidget {
   final String defaultName;
   final String defaultType;
   final VoidCallback onChangeShelter;
+  final VoidCallback onReassign;
 
   const _ConfirmIntakeSection({
     required this.destination,
@@ -727,6 +738,7 @@ class _ConfirmIntakeSection extends StatelessWidget {
     required this.defaultName,
     required this.defaultType,
     required this.onChangeShelter,
+    required this.onReassign,
   });
 
   @override
@@ -744,9 +756,21 @@ class _ConfirmIntakeSection extends StatelessWidget {
         const SizedBox(height: 16),
         _SectionHeader('Clinic-to-shelter transporter'),
         if (assignment != null)
-          TransporterDetailsCard(assignment: assignment!)
-        else if (defaultUid != null)
-          _InfoItem('Transporter', '$defaultName ($defaultType)')
+          TransporterDetailsCard(
+            assignment: assignment!,
+            menuActions: [CaseAction('Reassign Transporter', onReassign, icon: Icons.swap_horiz)],
+          )
+        else if (defaultUid != null) ...[
+          _InfoItem('Transporter', '$defaultName ($defaultType)'),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: onReassign,
+              icon: const Icon(Icons.swap_horiz, size: 18),
+              label: const Text('Reassign Transporter'),
+            ),
+          ),
+        ]
         else
           Text(
             'No transporter yet. Use Assign Transporter below.',

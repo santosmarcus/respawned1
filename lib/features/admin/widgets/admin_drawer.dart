@@ -21,7 +21,7 @@ import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
 import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
-import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 /// The full set of admin root modules the drawer can open, in the required
 /// order — the single source of truth for labels/ordering/highlighting so
@@ -195,11 +195,15 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     final orgId = ref.watch(currentOrganizationIdProvider).asData?.value;
     final orgName = header?.name ?? 'Organization';
     final avatarUrl = header?.avatarUrl;
-    // Modules follow the member's permissions. Platform staff with no
-    // organization of their own keep the operational modules (never money).
+    // Every module shows for every member of the admin shell (care-only
+    // Staff get the care-tasks screen instead); a module they lack the
+    // permission for is view only (view_only.dart, firestore.rules
+    // readKeys()). Money stays with View donations & funds.
     final caps = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value ?? OrganizationCapabilities.none;
     final platform = ref.watch(isPlatformStaffProvider).asData?.value ?? false;
-    bool show(bool allowed) => allowed || (platform && !caps.isActive);
+    // Platform staff with no organization of their own keep the operational
+    // modules (never money).
+    bool can(bool allowed) => allowed || (platform && !caps.isActive);
     final roleLine = !caps.isActive
         ? (platform ? 'Platform staff' : 'Staff')
         : caps.isAdmin
@@ -261,129 +265,139 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             // Shelter Resources was removed entirely — it
             // was a permanent no-op with no destination page; shelter
             // capacity is edited from Organization Profile.
-            _DrawerItem(
-              label: 'Dashboard',
-              selected: widget.active == AdminModule.dashboard,
-              onTap: () {
-                final rootNavigator = Navigator.of(context, rootNavigator: true);
-                Navigator.pop(context); // close the drawer
-                // Pops every pushed admin route back to AdminHomeScreen
-                // (the app's first/root route) — previously this only
-                // closed the drawer and did nothing else, so "Dashboard"
-                // appeared broken from any page other than the dashboard
-                // itself.
-                rootNavigator.popUntil((route) => route.isFirst);
-              },
-            ),
-            if (show(caps.canManageRescues)) _DrawerItem(
-              label: 'Rescue',
-              selected: widget.active == AdminModule.rescue,
-              onTap: () => _openModule(context, (_) => const RescueReportsPage()),
-            ),
-            if (show(caps.canManageAdoptions)) _DrawerItem(
-              label: 'Adoptions',
-              selected: widget.active == AdminModule.adoptions,
-              // Straight to the tabbed Adoption Applications page — the
-              // separate admin adoption dashboard is no longer the
-              // landing page for Adoptions.
-              onTap: () => _openModule(context, (_) => const AdoptionApplicationReviewPage()),
-            ),
-            if (caps.canViewFinances || caps.canRunCampaigns) _DrawerItem(
-              label: 'Donations & Sponsorships',
-              selected: widget.active == AdminModule.donations,
-              onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
-            ),
-            if (show(caps.canManageRecords || caps.canGiveCare || caps.canManageAdoptions)) _DrawerItem(
-              label: 'Records',
-              selected: widget.active == AdminModule.records,
-              onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
-            ),
-            if (show(caps.canManageVolunteers)) _DrawerItem(
-              label: 'Events',
-              selected: widget.active == AdminModule.events,
-              onTap: () => _openModule(context, (_) => const AdminEventsPage()),
-            ),
-            if (show(caps.canManageVolunteers)) _DrawerItem(
-              label: 'Volunteers',
-              selected: widget.active == AdminModule.volunteers,
-              onTap: () => _openModule(context, (_) => const VolunteersPage()),
-            ),
-            if (show(caps.canManageVolunteers)) _DrawerItem(
-              label: 'Transporters',
-              selected: widget.active == AdminModule.transporters,
-              onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
-            ),
-            if (show(caps.canManageRescues)) _DrawerItem(
-              label: 'Collar Tags',
-              selected: widget.active == AdminModule.collarTags,
-              onTap: () => _openModule(context, (_) => const AdminCollarTagScreen()),
-            ),
-            if (show(caps.canViewAudits)) _DrawerItem(
-              label: 'Audit',
-              selected: widget.active == AdminModule.audit,
-              onTap: () => _openModule(context, (_) => const AuditPage()),
-            ),
-            // Platform staff only: organizations waiting for approval. With
-            // one organization, sign-ups are approved from the system admin
-            // console instead (FeatureFlags.multiOrganizationEnabled).
-            if (FeatureFlags.multiOrganizationEnabled && (ref.watch(isPlatformStaffProvider).asData?.value ?? false))
-              _DrawerItem(
-                label: 'Organization approvals',
-                count: ref.watch(pendingOrganizationReviewCountProvider).asData?.value,
-                selected: widget.active == AdminModule.organizationReview,
-                onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _DrawerItem(
+                    label: 'Dashboard',
+                    selected: widget.active == AdminModule.dashboard,
+                    onTap: () {
+                      final rootNavigator = Navigator.of(context, rootNavigator: true);
+                      Navigator.pop(context); // close the drawer
+                      // Back to AdminHomeScreen, the app's first route.
+                      rootNavigator.popUntil((route) => route.isFirst);
+                    },
+                  ),
+                  _DrawerItem(
+                    label: 'Rescue',
+                    viewOnly: !can(caps.canManageRescues),
+                    selected: widget.active == AdminModule.rescue,
+                    onTap: () => _openModule(context, (_) => const RescueReportsPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Adoptions',
+                    viewOnly: !can(caps.canManageAdoptions),
+                    selected: widget.active == AdminModule.adoptions,
+                    onTap: () => _openModule(context, (_) => const AdoptionApplicationReviewPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Donations & Sponsorships',
+                    viewOnly: !(caps.canRunCampaigns || caps.canManageFinances),
+                    selected: widget.active == AdminModule.donations,
+                    onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
+                  ),
+                  _DrawerItem(
+                    label: 'Records',
+                    viewOnly: !can(caps.canManageRecords || caps.canGiveCare),
+                    selected: widget.active == AdminModule.records,
+                    onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Events',
+                    viewOnly: !can(caps.canManageVolunteers),
+                    selected: widget.active == AdminModule.events,
+                    onTap: () => _openModule(context, (_) => const AdminEventsPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Collar Tags',
+                    viewOnly: !can(caps.canManageRescues),
+                    selected: widget.active == AdminModule.collarTags,
+                    onTap: () => _openModule(context, (_) => const AdminCollarTagScreen()),
+                  ),
+                  _DrawerItem(
+                    label: 'Audit',
+                    selected: widget.active == AdminModule.audit,
+                    onTap: () => _openModule(context, (_) => const AuditPage()),
+                  ),
+                  // Platform staff only: organizations waiting for approval.
+                  // With one organization, sign-ups are approved from the
+                  // system admin console (FeatureFlags.multiOrganizationEnabled).
+                  if (FeatureFlags.multiOrganizationEnabled && platform)
+                    _DrawerItem(
+                      label: 'Organization approvals',
+                      count: ref.watch(pendingOrganizationReviewCountProvider).asData?.value,
+                      selected: widget.active == AdminModule.organizationReview,
+                      onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
+                    ),
+                  // Members: the team (invite, access, remove; Admins only),
+                  // and the volunteers and transporters the organization works with.
+                  const Divider(color: Colors.white24),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
+                    child: Text('MEMBERS',
+                        style: GoogleFonts.zain(
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.background.withValues(alpha: 0.55))),
+                  ),
+                  if (caps.canManageTeam && orgId != null)
+                    _DrawerItem(
+                      label: 'Team',
+                      selected: widget.active == AdminModule.members,
+                      onTap: () => _openModule(context, (_) => StaffMembersPage(organizationId: orgId)),
+                    ),
+                  _DrawerItem(
+                    label: 'Volunteers',
+                    viewOnly: !can(caps.canManageVolunteers),
+                    selected: widget.active == AdminModule.volunteers,
+                    onTap: () => _openModule(context, (_) => const VolunteersPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Transporters',
+                    viewOnly: !can(caps.canManageVolunteers),
+                    selected: widget.active == AdminModule.transporters,
+                    onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
+                  ),
+                ],
               ),
-            // The organization's team (invite, access, remove); Admins only.
-            // Organization Profile opens from the header above.
-            if (caps.canManageTeam && orgId != null) ...[
-              const Divider(color: Colors.white24),
-              _DrawerItem(
-                label: 'Members',
-                selected: widget.active == AdminModule.members,
-                onTap: () => _openModule(context, (_) => StaffMembersPage(organizationId: orgId)),
-              ),
-            ],
-
-            const Spacer(),
-
+            ),
+            const Divider(color: Colors.white24, height: 1),
+            // Account (details, switch account, delete account) and Log out.
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-              child: GestureDetector(
-                onTap: _signingOut
-                    ? null
-                    : () {
-                        final rootContext = Navigator.of(context, rootNavigator: true).context;
-                        Navigator.pop(context); // close the drawer
-                        showDeleteAccountFlow(rootContext);
-                      },
-                child: Text('Delete account',
-                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.background.withValues(alpha: 0.7))),
-              ),
-            ),
-
-            // Log out
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: GestureDetector(
-                onTap: _signingOut ? null : _logOut,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Log out',
+              padding: const EdgeInsets.fromLTRB(8, 6, 12, 10),
+              child: Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _signingOut
+                        ? null
+                        : () {
+                            final rootNavigator = Navigator.of(context, rootNavigator: true);
+                            Navigator.pop(context); // close the drawer
+                            rootNavigator.push(MaterialPageRoute(builder: (_) => const AccountPage()));
+                          },
+                    icon: const Icon(Icons.account_circle_outlined, color: AppColors.background, size: 20),
+                    label: Text('Account',
+                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.background, fontWeight: FontWeight.w600)),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: _signingOut ? null : _logOut,
+                    icon: _signingOut
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
+                          )
+                        : const Icon(Icons.logout, color: AppColors.error, size: 20),
+                    label: Text('Log out',
                         style: GoogleFonts.zain(
                             fontSize: 14,
                             color: _signingOut ? AppColors.error.withValues(alpha: 0.5) : AppColors.error,
                             fontWeight: FontWeight.w600)),
-                    if (_signingOut) ...[
-                      const SizedBox(width: 10),
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
-                      ),
-                    ],
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -399,8 +413,10 @@ class _DrawerItem extends StatelessWidget {
   final bool selected;
   // Items waiting for action (organizations to review); hidden when 0.
   final int? count;
+  // The member can look but not change anything in this module.
+  final bool viewOnly;
 
-  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.count});
+  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.count, this.viewOnly = false});
 
   @override
   Widget build(BuildContext context) {
@@ -417,6 +433,12 @@ class _DrawerItem extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (viewOnly)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Text('View only',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.background.withValues(alpha: 0.55))),
+              ),
             if ((count ?? 0) > 0)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),

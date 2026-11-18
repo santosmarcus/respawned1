@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
 
 /// Shared building blocks for the admin case pages (Rescue Details, Track
 /// Case, Treatment, Intake): a compact header, one outcome/next-step
 /// banner, a two-column fact grid instead of tall label/value rows,
 /// collapsible secondary sections, and a sticky action bar with one
-/// primary and one secondary action (the rest in an overflow menu).
+/// primary and one secondary action (the rest in the app bar's menu).
 
 const double kCaseGap = 12;
 
@@ -459,32 +462,28 @@ class CaseAction {
   const CaseAction(this.label, this.onPressed, {this.icon, this.destructive = false});
 }
 
-/// Sticky bottom bar: one primary (filled), one secondary (outlined), the
-/// rest behind a "more" button. With no primary or secondary, the first
-/// overflow action takes the secondary slot so the bar is never just an
-/// icon. Use [CaseActionBar.maybe] for a Scaffold's bottomNavigationBar.
-class CaseActionBar extends StatelessWidget {
+/// Sticky bottom bar: one primary (filled) and one secondary (outlined)
+/// action. Everything else goes in the app bar's [CaseOverflowMenu] (top
+/// right). Hidden for Staff who can only view rescue cases. Use
+/// [CaseActionBar.maybe] for a Scaffold's bottomNavigationBar.
+class CaseActionBar extends ConsumerWidget {
   final CaseAction? primary;
   final CaseAction? secondary;
-  final List<CaseAction> overflow;
   final bool busy;
 
-  const CaseActionBar({super.key, this.primary, this.secondary, this.overflow = const [], this.busy = false});
+  const CaseActionBar({super.key, this.primary, this.secondary, this.busy = false});
 
   /// Null when there is nothing to show.
-  static Widget? maybe({CaseAction? primary, CaseAction? secondary, List<CaseAction> overflow = const [], bool busy = false}) {
-    if (primary == null && secondary == null && overflow.isEmpty) return null;
-    return CaseActionBar(primary: primary, secondary: secondary, overflow: overflow, busy: busy);
+  static Widget? maybe({CaseAction? primary, CaseAction? secondary, bool busy = false}) {
+    if (primary == null && secondary == null) return null;
+    return CaseActionBar(primary: primary, secondary: secondary, busy: busy);
   }
 
   @override
-  Widget build(BuildContext context) {
-    var secondary = this.secondary;
-    var overflow = this.overflow;
-    if (primary == null && secondary == null && overflow.isNotEmpty) {
-      secondary = overflow.first;
-      overflow = overflow.sublist(1);
-    }
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(canEditProvider(OrgPermission.rescue))) return const SizedBox.shrink();
+    final secondary = this.secondary;
+    if (primary == null && secondary == null) return const SizedBox.shrink();
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -496,44 +495,6 @@ class CaseActionBar extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Row(
             children: [
-              if (overflow.isNotEmpty) ...[
-                PopupMenuButton<int>(
-                  tooltip: 'More actions',
-                  enabled: !busy,
-                  icon: const Icon(Icons.more_horiz, color: AppColors.textPrimary),
-                  style: IconButton.styleFrom(
-                    side: const BorderSide(color: AppColors.slaterspwn),
-                    shape: const CircleBorder(),
-                  ),
-                  onSelected: (i) => overflow[i].onPressed?.call(),
-                  itemBuilder: (_) => [
-                    for (var i = 0; i < overflow.length; i++)
-                      PopupMenuItem<int>(
-                        value: i,
-                        enabled: overflow[i].onPressed != null,
-                        child: Row(
-                          children: [
-                            if (overflow[i].icon != null) ...[
-                              Icon(overflow[i].icon, size: 18,
-                                  color: overflow[i].destructive ? AppColors.error : AppColors.textPrimary),
-                              const SizedBox(width: 10),
-                            ],
-                            Flexible(
-                              child: Text(
-                                overflow[i].label,
-                                style: GoogleFonts.zain(
-                                  fontSize: 14,
-                                  color: overflow[i].destructive ? AppColors.error : AppColors.textPrimary,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(width: 8),
-              ],
               if (secondary != null)
                 Expanded(
                   child: OutlinedButton(
@@ -570,6 +531,51 @@ class CaseActionBar extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: GoogleFonts.tiltWarp(fontSize: 14, color: color),
       );
+}
+
+/// The case page's other actions, as a "more" button for the app bar's
+/// `actions` (top right). Shows nothing when [actions] is empty or the
+/// account can only view rescue cases.
+class CaseOverflowMenu extends ConsumerWidget {
+  final List<CaseAction> actions;
+  final bool busy;
+
+  const CaseOverflowMenu({super.key, required this.actions, this.busy = false});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (actions.isEmpty || !ref.watch(canEditProvider(OrgPermission.rescue))) return const SizedBox.shrink();
+    return PopupMenuButton<int>(
+      tooltip: 'More actions',
+      enabled: !busy,
+      icon: const Icon(Icons.more_vert, color: AppColors.background),
+      onSelected: (i) => actions[i].onPressed?.call(),
+      itemBuilder: (_) => [
+        for (var i = 0; i < actions.length; i++)
+          PopupMenuItem<int>(
+            value: i,
+            enabled: actions[i].onPressed != null,
+            child: Row(
+              children: [
+                if (actions[i].icon != null) ...[
+                  Icon(actions[i].icon, size: 18, color: actions[i].destructive ? AppColors.error : AppColors.textPrimary),
+                  const SizedBox(width: 10),
+                ],
+                Flexible(
+                  child: Text(
+                    actions[i].label,
+                    style: GoogleFonts.zain(
+                      fontSize: 14,
+                      color: actions[i].destructive ? AppColors.error : AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// The white rounded card the kit's pieces sit on (same look as

@@ -1,3 +1,5 @@
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -73,9 +75,13 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
     Navigator.push(context, MaterialPageRoute(builder: (_) => DonationAdminCreatePage(initialType: type)));
   }
 
+  /// Create buttons only for people who may create (the tabs stay
+  /// readable for everyone).
   Widget? _fab() => switch (_tab) {
-        DonationAdminTab.campaigns => _YellowFab(label: 'New Campaign', onPressed: _newCampaign),
-        DonationAdminTab.inKind => _YellowFab(label: 'Add item', onPressed: () => addStockItem(context, ref)),
+        DonationAdminTab.campaigns when ref.watch(canEditProvider(OrgPermission.campaigns)) =>
+          _YellowFab(label: 'New Campaign', onPressed: _newCampaign),
+        DonationAdminTab.inKind when canEditAny(ref, const [OrgPermission.care, OrgPermission.animals]) =>
+          _YellowFab(label: 'Add item', onPressed: () => addStockItem(context, ref)),
         _ => null,
       };
 

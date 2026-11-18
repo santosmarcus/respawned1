@@ -1687,7 +1687,7 @@ class _FocusAreasCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (areasAsync.isLoading && !areasAsync.hasValue)
+          if (areasAsync.isLoading && !areasAsync.hasValue && !areasAsync.hasError)
             const DashLoading()
           else if (areas.isEmpty)
             Padding(

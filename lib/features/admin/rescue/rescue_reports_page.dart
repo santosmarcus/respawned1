@@ -1,3 +1,5 @@
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -201,6 +203,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
       ),
       body: Column(
         children: [
+          const ViewOnlyBanner(perms: [OrgPermission.rescue]),
           AdminSearchBar(
             controller: _searchController,
             hintText: 'Search species, reporter, case ID…',

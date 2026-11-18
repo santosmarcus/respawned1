@@ -1,9 +1,11 @@
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
+import 'package:respawnd1/core/services/known_accounts.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/main.dart' show AuthWrapper, appNavigatorKey;
 
@@ -26,7 +28,9 @@ Future<void> showDeleteAccountFlow(BuildContext context) async {
     ),
   );
   try {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     await FirebaseFunctions.instance.httpsCallable('deleteMyAccount').call<Object?>({'confirm': 'DELETE'});
+    if (uid != null) await KnownAccounts.forget(uid);
     // The Auth account is gone server-side; clear the local session.
     try {
       await AuthService().signOut();

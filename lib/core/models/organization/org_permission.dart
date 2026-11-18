@@ -49,7 +49,7 @@ enum OrgPermissionGroup {
 }
 
 /// Starting points an Admin picks for a Staff member; changing any box makes
-/// the member [custom].
+/// the member [custom], and picking [custom] starts from no boxes ticked.
 enum OrgPreset {
   fullStaff('Full staff', {
     OrgPermission.rescue,
@@ -61,14 +61,14 @@ enum OrgPreset {
     OrgPermission.volunteers,
     OrgPermission.insights,
   }),
-  rescueCoordinator('Rescue coordinator', {
+  rescueAdoptions('Rescue & adoptions', {
     OrgPermission.rescue,
     OrgPermission.animals,
     OrgPermission.care,
+    OrgPermission.adoptions,
     OrgPermission.insights,
   }),
   animalCare('Animal care', {OrgPermission.care}),
-  adoptionsOfficer('Adoptions officer', {OrgPermission.adoptions, OrgPermission.animals, OrgPermission.care}),
   treasurer('Treasurer', {
     OrgPermission.campaigns,
     OrgPermission.financeView,
@@ -82,7 +82,7 @@ enum OrgPreset {
   final String label;
   final Set<OrgPermission> permissions;
 
-  /// The presets an Admin can choose (everything but [custom]).
+  /// The named presets (everything but [custom]).
   static List<OrgPreset> get choices => values.where((p) => p != custom).toList();
 
   /// The preset with exactly these permissions, or [custom].

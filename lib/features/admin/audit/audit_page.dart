@@ -63,7 +63,8 @@ class _AuditPageState extends ConsumerState<AuditPage> {
       if (!mounted) return;
       setState(() {
         _organizationId = orgId;
-        _allowed = capabilities.canViewAudits;
+        // Every member of the admin shell reads the audit log.
+        _allowed = capabilities.isActive && !capabilities.isCareOnly;
         _loading = false;
       });
     } catch (_) {

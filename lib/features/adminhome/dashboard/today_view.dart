@@ -978,7 +978,7 @@ class _FundsBody extends ConsumerWidget {
         }
         final shown = cats.values.where((c) => c.setAside > 0 || c.need > 0 || c.allocatedTotal > 0).toList()
           ..sort((a, b) => b.level.index.compareTo(a.level.index));
-        final loadingParts = allocations.isLoading || expenses.isLoading || general.isLoading;
+        final loadingParts = [allocations, expenses, general].any((v) => v.isLoading && !v.hasError);
         final failedParts = [
           if (allocations.hasError) 'allocations',
           if (expenses.hasError) 'case bills',
@@ -1097,7 +1097,7 @@ class _FundsBody extends ConsumerWidget {
                 ],
               ),
             const CardLabel('Needs refund review'),
-            if (donations.isLoading)
+            if (donations.isLoading && !donations.hasError)
               const DashLoading(label: 'Loading donations…')
             else if (donations.hasError)
               DashError(what: 'donations', error: donations.error!)

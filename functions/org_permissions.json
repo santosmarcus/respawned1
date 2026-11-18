@@ -14,9 +14,8 @@
   ],
   "presets": {
     "fullStaff": ["rescue", "animals", "care", "adoptions", "campaigns", "financeView", "volunteers", "insights"],
-    "rescueCoordinator": ["rescue", "animals", "care", "insights"],
+    "rescueAdoptions": ["rescue", "animals", "care", "adoptions", "insights"],
     "animalCare": ["care"],
-    "adoptionsOfficer": ["adoptions", "animals", "care"],
     "treasurer": ["campaigns", "financeView", "financeManage", "insights"]
   },
   "legacy": {

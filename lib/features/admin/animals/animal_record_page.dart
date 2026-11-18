@@ -1,3 +1,5 @@
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -516,6 +518,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       ),
       body: Column(
         children: [
+          const ViewOnlyBanner(perms: [OrgPermission.animals, OrgPermission.care]),
           AdminSearchBar(
             controller: _searchController,
             hintText: 'Search name, species, breed, tag, case ID…',

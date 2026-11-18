@@ -20,10 +20,10 @@ Map<String, dynamic> animalRecordPrefillFor(RescueCase c, Map<String, dynamic> a
     'sex': animal['sex'],
     'size': animal['size'],
     'colorMarkings': animal['colorMarkings'],
-    'description': c.condition,
     'reporterName': c.reporterName,
     'vetClinicName': c.vetClinicName,
-    'photoUrl': c.photoUrls.isNotEmpty ? c.photoUrls.first : null,
+    // Every photo from the case; staff remove any that don't fit.
+    'photoUrls': [...c.photoUrls],
     'rescueDate': c.raw['createdAt'],
     'scannedTagId': c.scannedTagId,
   };

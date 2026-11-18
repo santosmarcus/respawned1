@@ -638,6 +638,8 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   // insertion order above is itself the within-severity priority.
   final ordered = [for (final s in DashSeverity.values) ...alerts.where((a) => a.severity == s)];
 
-  final loading = [review, assign, treatment, intake, fieldIssues, pendingApps, adoptedBucket].any((v) => v.isLoading);
+  // A source that failed (even while being retried) isn't still loading.
+  final loading = [review, assign, treatment, intake, fieldIssues, pendingApps, adoptedBucket]
+      .any((v) => v.isLoading && !v.hasError);
   return DashAlertsState(alerts: ordered, loading: loading, failedSources: failed);
 });

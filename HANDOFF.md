@@ -1,6 +1,19 @@
 # Handoff
 
-_Latest: Admin + Staff permissions on `dev` (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: feedback round on `dev` (2026-11-18, rules not deployed). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Feedback round: view-only modules, account page, transport flow (2026-11-18, not deployed, not checked on a device)
+
+- **Access:** every module shows for every Staff member outside the care-tasks screen; without the permission it is **view only** (drawer tag, banner, no action bar/menus/create buttons). `firestore.rules` `readKeys()` (= `opsKeys()`) now gates reads of cases, animals and medical records, adoptions, events, volunteer/transporter applications, transport assignments, logs, audit log and analytics; writes keep their own permission. Money (donor records, payments, expenses, transfers, general expenses) is unchanged. Carers still can't read the unowned pool. Storage rules unchanged (transporter IDs and adoption documents stay with `volunteers`/`adoptions`).
+- **Presets:** Rescue coordinator + Adoptions officer are now one preset, **Rescue & adoptions** (`rescueAdoptions`: rescue, animals, care, adoptions, insights). Members saved with the old names match by permissions, so they show as Custom. Picking **Custom** clears every box.
+- **Dashboard loading for Staff:** Riverpod 3 retried refused queries and reported them as loading; `appProviderRetry` (main.dart) no longer retries `permission-denied`, and the dashboard treats errors as settled.
+- **Drawer:** Members section (Team for Admins, Volunteers, Transporters); **Account** next to Log out: details, Switch account (accounts used on this device, `known_accounts.dart`, `shared_preferences`), Delete account. Carers get Account and a labelled Log out.
+- **Rescue pages:** the bottom-left "more" button moved to the app bar (top right) on Rescue Details, Track Case, Treatment and Intake. Intake: transporter card has its own menu (Reassign Transporter) and Transport Tracking under Call; the bar keeps only Confirm Animal Received. Transporter card is full width everywhere.
+- **Assign Transport:** no popup. One inline panel: live timer, Send to Another Transporter, Cancel Offer; a declined/expired offer offers Retry <name> or Choose Another; acceptance opens tracking.
+- **Track Case:** the map follows the sheet (no empty band when it slides down); the animal's photo is its map pin and sits on the status card.
+- **Create Animal Record from a case:** description starts empty; every case photo is prefilled (removable).
+
+**Deploy:** `firebase deploy --only firestore:rules` (only widens reads; safe for older builds), then the app build. Checks: `flutter analyze` (pre-existing issues only), `flutter test` 242 pass, functions 78 pass, rules-tests 181 pass.
 
 ## Admin + Staff permissions (2026-11-18, deployed, not checked on a device)
 

@@ -425,6 +425,9 @@ class DashAsync<T> extends StatelessWidget {
     // Keep showing the last data while a stream reloads (e.g. after returning
     // from a pushed screen) — swapping cards for "Loading…" shrank the page
     // and threw the dashboard's scroll position back to the top.
+    // An error with nothing to show settles as the error, even while
+    // Riverpod retries it (it reports a retry as loading).
+    if (value.hasError && !value.hasValue) return DashError(what: what, error: value.error!);
     return value.when(
       skipLoadingOnReload: true,
       skipLoadingOnRefresh: true,

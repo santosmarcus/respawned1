@@ -980,11 +980,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           'Rescue Details',
           style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background),
         ),
+        actions: [CaseOverflowMenu(actions: actions.overflow, busy: _isLoading)],
       ),
       bottomNavigationBar: CaseActionBar.maybe(
         primary: actions.primary,
         secondary: actions.secondary,
-        overflow: actions.overflow,
         busy: _isLoading,
       ),
       body: SingleChildScrollView(

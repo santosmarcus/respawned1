@@ -13,19 +13,39 @@ void main() {
       home: Scaffold(
         body: SingleChildScrollView(
           child: MemberAccessEditor(
-            initial: MemberAccess(OrgRole.staff, {...OrgPreset.rescueCoordinator.permissions}),
+            initial: MemberAccess(OrgRole.staff, {...OrgPreset.rescueAdoptions.permissions}),
             onChanged: (a) => last = a,
           ),
         ),
       ),
     ));
-    expect(find.text('Rescue coordinator'), findsOneWidget);
+    expect(find.text('Rescue & adoptions'), findsOneWidget);
     await tester.ensureVisible(box(OrgPermission.adoptions));
     await tester.tap(box(OrgPermission.adoptions));
     await tester.pumpAndSettle();
-    expect(last!.permissions, contains(OrgPermission.adoptions));
+    expect(last!.permissions, isNot(contains(OrgPermission.adoptions)));
     expect(last!.preset, OrgPreset.custom);
-    expect(find.text('Custom (changed below)'), findsOneWidget);
+    expect(find.text('Custom (tick below)'), findsOneWidget);
+  });
+
+  testWidgets('picking Custom clears every box', (tester) async {
+    MemberAccess? last;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: MemberAccessEditor(
+            initial: MemberAccess(OrgRole.staff, {...OrgPreset.treasurer.permissions}),
+            onChanged: (a) => last = a,
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Treasurer'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom (tick below)').last);
+    await tester.pumpAndSettle();
+    expect(last!.permissions, isEmpty);
+    expect(last!.preset, OrgPreset.custom);
   });
 
   testWidgets('Manage money ticks and locks View donations', (tester) async {

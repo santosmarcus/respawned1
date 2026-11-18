@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
 
 /// Shared transporter-details card shown on Track Case, in both ongoing
 /// rescue tracking and intake clinic-to-shelter tracking, directly below
@@ -26,11 +29,20 @@ class TransporterDetailsCard extends ConsumerWidget {
   final double? distanceKm;
   final Duration? etaDuration;
 
+  /// Opens the transport's live tracking; shown as a button under Call.
+  final VoidCallback? onTrack;
+
+  /// Actions behind the card's "more" button (Reassign Transporter, ...).
+  /// Hidden for Staff who can only view rescue cases.
+  final List<CaseAction> menuActions;
+
   const TransporterDetailsCard({
     super.key,
     required this.assignment,
     this.distanceKm,
     this.etaDuration,
+    this.onTrack,
+    this.menuActions = const [],
   });
 
   // Reuses the exact tel: launch pattern already established in
@@ -78,8 +90,19 @@ class TransporterDetailsCard extends ConsumerWidget {
     final chipLabel = isCompleted ? 'Completed' : 'Busy';
     final chipColor = isCompleted ? AppColors.slaterspwn : AppColors.yellowrspwn;
 
+    // Full width of its parent, like the other case cards: callers pad it
+    // the same way as their neighbours.
+    final canEdit = ref.watch(canEditProvider(OrgPermission.rescue));
+    final menu = canEdit ? menuActions : const <CaseAction>[];
+    final buttonStyle = OutlinedButton.styleFrom(
+      foregroundColor: AppColors.textPrimary,
+      disabledForegroundColor: AppColors.textSecondary,
+      side: const BorderSide(color: AppColors.textPrimary),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    );
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -89,8 +112,45 @@ class TransporterDetailsCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Transporter',
-              style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Transporter',
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              ),
+              if (menu.isNotEmpty)
+                SizedBox(
+                  height: 28,
+                  width: 32,
+                  child: PopupMenuButton<int>(
+                    tooltip: 'Transporter actions',
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.more_horiz, size: 20, color: AppColors.textPrimary),
+                    onSelected: (i) => menu[i].onPressed?.call(),
+                    itemBuilder: (_) => [
+                      for (var i = 0; i < menu.length; i++)
+                        PopupMenuItem<int>(
+                          value: i,
+                          enabled: menu[i].onPressed != null,
+                          child: Row(
+                            children: [
+                              if (menu[i].icon != null) ...[
+                                Icon(menu[i].icon, size: 18,
+                                    color: menu[i].destructive ? AppColors.error : AppColors.textPrimary),
+                                const SizedBox(width: 10),
+                              ],
+                              Text(menu[i].label,
+                                  style: GoogleFonts.zain(
+                                      fontSize: 14,
+                                      color: menu[i].destructive ? AppColors.error : AppColors.textPrimary)),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,6 +228,18 @@ class TransporterDetailsCard extends ConsumerWidget {
               ),
             ),
           ),
+          if (onTrack != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onTrack,
+                icon: const Icon(Icons.map_outlined, size: 16),
+                label: Text('Transport Tracking', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
+                style: buttonStyle,
+              ),
+            ),
+          ],
         ],
       ),
     );

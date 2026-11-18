@@ -7,12 +7,10 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/medication.dart';
-import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
-import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/care_updates_section.dart';
 import 'package:respawnd1/features/care/care_rounds_widgets.dart';
-import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 /// Home for organization members with the `carer` role. Carers give care and
 /// record doses; they don't get the admin shell (cases, records, adoptions,
@@ -21,17 +19,6 @@ class CarerHomeScreen extends ConsumerWidget {
   const CarerHomeScreen({super.key, required this.organizationId});
 
   final String organizationId;
-
-  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
-    final navigator = Navigator.of(context, rootNavigator: true);
-    // AuthWrapper swaps this screen out as soon as auth state changes, which
-    // disposes `ref`; the container outlives it.
-    final container = ProviderScope.containerOf(context, listen: false);
-    await authService.value.signOut();
-    container.invalidate(currentOrgMembershipProvider);
-    container.invalidate(currentOrganizationCapabilitiesProvider);
-    navigator.popUntil((route) => route.isFirst);
-  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -43,15 +30,17 @@ class CarerHomeScreen extends ConsumerWidget {
         title: Text('Care tasks', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
         actions: [
           IconButton(
-            tooltip: 'Log out',
-            icon: const Icon(Icons.logout, color: AppColors.textPrimary),
-            onPressed: () => _signOut(context, ref),
+            tooltip: 'Account',
+            icon: const Icon(Icons.account_circle_outlined, color: AppColors.textPrimary),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountPage())),
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: AppColors.textPrimary),
-            onSelected: (_) => showDeleteAccountFlow(context),
-            itemBuilder: (_) => const [PopupMenuItem(value: 'delete', child: Text('Delete account'))],
+          TextButton.icon(
+            onPressed: () => signOutToLogin(context),
+            icon: const Icon(Icons.logout, color: AppColors.error, size: 20),
+            label: Text('Log out',
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.error, fontWeight: FontWeight.w700)),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(

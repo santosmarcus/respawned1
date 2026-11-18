@@ -1,3 +1,5 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,15 +51,40 @@ void main() {
     });
   });
 
-  testWidgets('CaseActionBar: overflow fills the secondary slot when alone', (tester) async {
+  testWidgets('other case actions are in the app bar menu', (tester) async {
     var exported = false;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        bottomNavigationBar: CaseActionBar.maybe(overflow: [CaseAction('Export transfer details', () => exported = true)]),
+    await tester.pumpWidget(ProviderScope(
+      overrides: [canEditProvider.overrideWith((ref, perm) => true)],
+      child: MaterialApp(
+        home: Scaffold(
+          appBar: AppBar(actions: [
+            CaseOverflowMenu(actions: [CaseAction('Export transfer details', () => exported = true)]),
+          ]),
+          bottomNavigationBar: CaseActionBar.maybe(),
+        ),
       ),
     ));
+    await tester.tap(find.byTooltip('More actions'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Export transfer details'));
+    await tester.pumpAndSettle();
     expect(exported, isTrue);
     expect(CaseActionBar.maybe(), isNull);
+  });
+
+  testWidgets('view-only Staff get no case actions', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [canEditProvider.overrideWith((ref, perm) => false)],
+      child: MaterialApp(
+        home: Scaffold(
+          appBar: AppBar(actions: [
+            CaseOverflowMenu(actions: [CaseAction('Close Case', () {})]),
+          ]),
+          bottomNavigationBar: CaseActionBar(primary: CaseAction('Proceed', () {})),
+        ),
+      ),
+    ));
+    expect(find.byTooltip('More actions'), findsNothing);
+    expect(find.text('Proceed'), findsNothing);
   });
 }

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
+import 'package:respawnd1/core/services/known_accounts.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/organization/organization_member_pending_page.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
@@ -51,7 +52,18 @@ void main() async {
   }*/
 
 
-  runApp(const ProviderScope(child: ResPAWndApp()));
+  runApp(const ProviderScope(retry: appProviderRetry, child: ResPAWndApp()));
+}
+
+/// Riverpod retries a failed provider (up to 10 times, backing off to 6.4s)
+/// and reports it as loading meanwhile. A query the rules refuse fails the
+/// same way every time, so retrying it only kept screens (the dashboard for
+/// Staff without some permission) spinning: settle it as an error at once.
+/// Other errors (offline, timeouts) retry 3 times.
+Duration? appProviderRetry(int retryCount, Object error) {
+  if (error is FirebaseException && error.code == 'permission-denied') return null;
+  if (retryCount >= 3) return null;
+  return ProviderContainer.defaultRetry(retryCount, error);
 }
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -182,9 +194,12 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
   /// device's push token (users/{uid}.fcmToken — every Cloud Function
   /// notification depends on it), starts geofencing, and lets a tapped
   /// notification open its screen.
-  void _startSignedInServices() {
+  void _startSignedInServices(Map<String, dynamic>? profile) {
     if (_signedInServicesStarted) return;
     _signedInServicesStarted = true;
+    // Account > Switch account lists the accounts used on this device.
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) KnownAccounts.remember(user, profile);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       PushTokenService.register();
       GeofenceService.start(widget.uid);
@@ -288,7 +303,7 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
           return const _DisabledAccountScreen();
         }
 
-        _startSignedInServices();
+        _startSignedInServices(data);
 
         // Existing user with role — route based on role
         switch (role) {

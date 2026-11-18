@@ -31,6 +31,7 @@ import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 import 'package:respawnd1/core/repos/rescue_case/case_message_sender.dart';
+import 'package:respawnd1/core/utils/photo_marker.dart';
 
 // Raw case-doc status values written by the pet-transporter app's own
 // transit flow (see transit_progress_page.dart) once it has physically
@@ -82,6 +83,24 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   final _messageController = TextEditingController();
   GoogleMapController? _mapController;
   bool _hasFitCamera = false;
+
+  /// How much of the screen the details sheet covers (0-1). The map's
+  /// height follows it, so sliding the sheet down shows more map instead
+  /// of an empty band (the map used to stop at a fixed 56%).
+  double _sheetExtent = 0.48;
+
+  /// The rescued animal's photo as its map pin (null until built, or when
+  /// the case has no photo).
+  BitmapDescriptor? _animalPin;
+  String? _animalPinUrl;
+
+  void _loadAnimalPin(String? url) {
+    if (url == null || url.isEmpty || url == _animalPinUrl) return;
+    _animalPinUrl = url;
+    PhotoMarkers.forUrl(url, ring: AppColors.yellowrspwn).then((pin) {
+      if (mounted && pin != null && _animalPinUrl == url) setState(() => _animalPin = pin);
+    });
+  }
   bool _closing = false;
 
   /// The last road route (or straight-line fallback) to the current
@@ -530,7 +549,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   Marker(
                     markerId: const MarkerId('rescue_case'),
                     position: caseLocation,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                    icon: _animalPin ?? BitmapDescriptor.defaultMarkerWithHue(
                       BitmapDescriptor.hueViolet,
                     ),
                     infoWindow: InfoWindow(title: _originMarkerLabel),
@@ -610,16 +629,16 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           Marker(
             markerId: const MarkerId('destination'),
             position: destinationLocation,
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueAzure,
-            ),
+            // Before pickup the destination is the animal itself.
+            icon: (!isPostPickupDestination ? _animalPin : null) ??
+                BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
             infoWindow: InfoWindow(title: destination.label),
           ),
           if (showSeparateCaseMarker)
             Marker(
               markerId: const MarkerId('rescue_case'),
               position: caseLocation,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
+              icon: _animalPin ?? BitmapDescriptor.defaultMarkerWithHue(
                 BitmapDescriptor.hueViolet,
               ),
               infoWindow: InfoWindow(title: _originMarkerLabel),
@@ -827,6 +846,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           ),
           child: Row(
             children: [
+              // The animal being moved, so the page reads at a glance.
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: c.photoUrls.isEmpty
+                      ? Container(color: AppColors.tearspwn, child: const Icon(Icons.pets, color: AppColors.textPrimary))
+                      : Image.network(c.photoUrls.first,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              Container(color: AppColors.tearspwn, child: const Icon(Icons.pets))),
+                ),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -855,10 +889,13 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       ),
       const SizedBox(height: 10),
       if (accepted) ...[
-        TransporterDetailsCard(
-          assignment: assignment,
-          distanceKm: route?.distanceKm,
-          etaDuration: route?.duration,
+        Padding(
+          padding: pad,
+          child: TransporterDetailsCard(
+            assignment: assignment,
+            distanceKm: route?.distanceKm,
+            etaDuration: route?.duration,
+          ),
         ),
         const SizedBox(height: 10),
       ],
@@ -938,11 +975,12 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             ?.value;
 
         final c = RescueCase.fromMap(widget.caseId, data);
+        _loadAnimalPin(c.photoUrls.isNotEmpty ? c.photoUrls.first : null);
         final isIntakeMode = widget.mode == TrackingMode.intakeTransfer;
         final reachedClinic = _kArrivedAtClinicStatuses.contains(data['status']);
         final hasReceivedIntake = data['intakeReceivedAt'] != null;
         // Change Clinic and Close Case used to sit in the app bar's menu;
-        // they're the action bar's overflow now.
+        // they're in the app bar's menu (top right).
         final overflow = <CaseAction>[
           // Testing without GPS, before the transporter reaches the clinic.
           if (kDebugMode && !isIntakeMode && !reachedClinic)
@@ -986,9 +1024,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
 
         return Scaffold(
           backgroundColor: AppColors.background,
-          bottomNavigationBar: CaseActionBar(
+          bottomNavigationBar: CaseActionBar.maybe(
             primary: primary,
-            overflow: overflow,
             busy: _isProceedingToTreatment,
           ),
           appBar: AppBar(
@@ -1006,6 +1043,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 color: AppColors.background,
               ),
             ),
+            actions: [CaseOverflowMenu(actions: overflow, busy: _isProceedingToTreatment)],
           ),
           // Map behind a draggable sheet (like a delivery tracker): the map
           // takes about half the screen and the details slide up over it.
@@ -1023,14 +1061,23 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                   ],
                 )
               : LayoutBuilder(
-                  builder: (context, constraints) => Stack(
+                  builder: (context, constraints) {
+                    return NotificationListener<DraggableScrollableNotification>(
+                    onNotification: (n) {
+                      // Rebuild only on a visible change (the sheet sends
+                      // one notification per frame while dragging).
+                      if ((n.extent - _sheetExtent).abs() > 0.01) setState(() => _sheetExtent = n.extent);
+                      return false;
+                    },
+                    child: Stack(
                     children: [
+                      // Down to where the sheet starts (plus the sheet's
+                      // rounded corner), following the sheet as it moves.
                       Positioned(
                         left: 0,
                         right: 0,
                         top: 0,
-                        // The visible map ends where the sheet starts.
-                        height: constraints.maxHeight * 0.56,
+                        height: constraints.maxHeight * (1 - _sheetExtent) + 20,
                         child: _buildTrackingMap(data, assignment),
                       ),
                       DraggableScrollableSheet(
@@ -1073,6 +1120,8 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                       ),
                     ],
                   ),
+                  );
+                  },
                 ),
         );
       },

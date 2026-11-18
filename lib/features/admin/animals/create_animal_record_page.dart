@@ -91,7 +91,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // _createRecord's validation, gated on `!widget.isEditing`.
   final _picker = ImagePicker();
   final List<XFile> _pickedImages = [];
-  // Edit mode only — already-uploaded photos, individually removable;
+  // Already-uploaded photos (the record's own when editing, the case's
+  // when created from intake), individually removable;
   // newly picked images are uploaded and appended alongside whatever
   // remains of this list on Save.
   late final List<String> _existingPhotoUrls = List<String>.from(
@@ -559,7 +560,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   }
 
   /// Prefills whatever the source rescue report/case already captured.
-  /// Species/breed/sex/size/color/description/image come straight from the
+  /// Species/breed/sex/size and the case's photos come straight from the
   /// report — never invented. Fields the report never asked about (name,
   /// age, coat length, vaccination/sterilization status, temperament,
   /// etc.) are deliberately left blank/unchecked here, matching whatever
@@ -593,16 +594,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       if (match != null) _selectedSize = match;
     }
 
-    // Report breed/"condition"/color-markings text folded into the
-    // description so nothing captured at report time is lost, even though
-    // this form has no dedicated breed/color field of its own.
-    final descriptionParts = <String>[
-      if ((d['description'] as String?)?.isNotEmpty ?? false)
-        d['description'] as String,
-      if ((d['colorMarkings'] as String?)?.isNotEmpty ?? false)
-        'Color/markings: ${d['colorMarkings']}',
-    ];
-    _descriptionController.text = descriptionParts.join('\n');
+    // The description is left for staff to write (it used to be filled
+    // with the report's condition text). The case's photos come in as
+    // removable thumbnails.
+    final photos = d['photoUrls'];
+    if (photos is List) {
+      _existingPhotoUrls.addAll(photos.whereType<String>().where((u) => u.isNotEmpty));
+    }
 
     // This record came from the rescue workflow — "Rescued" is implied,
     // not something the org has to remember to tick.
@@ -742,7 +740,6 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     final otherTraits = [
       for (final e in [..._compatibility.entries, ..._training.entries]) if (e.value) e.key,
     ];
-    final fallbackPhoto = widget.prefillData?['photoUrl'] as String?;
     return assessAdoptionReadiness(ReadinessInput(
       inActiveTreatment: _inActiveTreatment,
       vaccineCount: _vaccineCount,
@@ -752,9 +749,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       spayedNeutered: _spayedNeutered,
       lastVetCheckup: checkup is Timestamp ? checkup.toDate() : null,
       temperament: temperament.isNotEmpty ? temperament : otherTraits,
-      photoCount: _existingPhotoUrls.length +
-          _pickedImages.length +
-          (!widget.isEditing && fallbackPhoto != null && fallbackPhoto.isNotEmpty ? 1 : 0),
+      photoCount: _existingPhotoUrls.length + _pickedImages.length,
     ));
   }
 
@@ -804,14 +799,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     if (_isLoading) return; // guards against a duplicate Finish/Save tap
     // Image required for brand-new records only — a legacy record already
     // open for editing is never blocked just because it has no photo yet.
-    // From intake, the case's own photo counts (it's saved as the record's
-    // photo when none is picked).
-    final hasCasePhoto = ((widget.prefillData?['photoUrl'] as String?) ?? '').isNotEmpty;
+    // From intake, the case's photos are already in the list.
     final missingImage =
         !widget.isEditing &&
         _existingPhotoUrls.isEmpty &&
-        _pickedImages.isEmpty &&
-        !hasCasePhoto;
+        _pickedImages.isEmpty;
 
     // Required fields — breed is deliberately not checked here: this form
     // has no editable breed input at all (see the field's own comment
@@ -1049,7 +1041,6 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } else {
-        final fallbackPhotoUrl = widget.prefillData?['photoUrl'] as String?;
         final organizationId = await _resolveOwningOrganizationId(uid);
         await docRef.set({
           ...sharedFields,
@@ -1060,9 +1051,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             'sourceAnimalIndex': widget.sourceAnimalIndex,
           'rescuedBy': _rescuedByLabel,
           'intakeStaffId': uid,
-          'photoUrls': uploadedUrls.isNotEmpty
-              ? uploadedUrls
-              : (fallbackPhotoUrl != null ? [fallbackPhotoUrl] : []),
+          'photoUrls': [..._existingPhotoUrls, ...uploadedUrls],
           'treatmentLog': [],
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),

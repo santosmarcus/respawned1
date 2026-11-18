@@ -18,7 +18,7 @@ class MemberAccess {
 }
 
 /// Admin or Staff, and for Staff a preset to start from plus the permission
-/// boxes. Changing any box shows "Custom". Ticking Manage money also ticks
+/// boxes. Changing any box shows "Custom"; picking Custom clears the boxes. Ticking Manage money also ticks
 /// (and locks) View donations & funds. Used when inviting and when an Admin
 /// edits a member (staff_members_page.dart).
 class MemberAccessEditor extends StatefulWidget {
@@ -47,8 +47,9 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
     _emit();
   }
 
+  /// A named preset ticks its boxes; Custom starts from none ticked.
   void _setPreset(OrgPreset? p) {
-    if (p == null || p == OrgPreset.custom) return;
+    if (p == null) return;
     setState(() => _perms = {...p.permissions});
     _emit();
   }
@@ -113,8 +114,7 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
               for (final p in OrgPreset.values)
                 DropdownMenuItem(
                   value: p,
-                  enabled: p != OrgPreset.custom,
-                  child: Text(p == OrgPreset.custom ? 'Custom (changed below)' : p.label),
+                  child: Text(p == OrgPreset.custom ? 'Custom (tick below)' : p.label),
                 ),
             ],
             onChanged: _setPreset,

@@ -1,3 +1,5 @@
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -87,7 +89,7 @@ class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
           onSelected: _selectFilter,
         ),
       ),
-      floatingActionButton: organizationId == null
+      floatingActionButton: organizationId == null || !ref.watch(canEditProvider(OrgPermission.volunteers))
           ? null
           : FloatingActionButton.extended(
               backgroundColor: AppColors.yellowrspwn,
@@ -96,7 +98,11 @@ class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
               icon: const Icon(Icons.add),
               label: Text('New Event', style: GoogleFonts.tiltWarp(fontSize: 14)),
             ),
-      body: orgIdAsync.when(
+      body: Column(
+        children: [
+          const ViewOnlyBanner(perms: [OrgPermission.volunteers]),
+          Expanded(
+            child: orgIdAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => const AdminListMessage('Could not load your organization.'),
         data: (orgId) {
@@ -148,6 +154,9 @@ class _AdminEventsPageState extends ConsumerState<AdminEventsPage> {
             ],
           );
         },
+      ),
+          ),
+        ],
       ),
     );
   }

@@ -175,6 +175,19 @@ service cloud.firestore {
       return ['rescue', 'animals', 'adoptions', 'campaigns', 'financeView', 'financeManage', 'volunteers', 'insights'];
     }
 
+    // Reading: every module is visible to Staff outside the care-tasks
+    // screen, read-only where they lack the permission (writes keep their
+    // own keys). Money (donor records, payments, expenses, transfers) stays
+    // with financeView/financeManage.
+    function readKeys() {
+      return opsKeys();
+    }
+
+    // The same plus daily care, for what the care-tasks screen reads.
+    function readOrCareKeys() {
+      return opsKeys().concat(['care']);
+    }
+
     function permsOf(m) {
       return m.get('permissions',
         m.get('role', '') == 'carer' ? ['care'] :
@@ -304,7 +317,7 @@ service cloud.firestore {
     // field done.<area>__<task> = who and when). Staff with daily care or
     // animal records tick and untick; nobody deletes a day.
     match /organizations/{orgId}/careRounds/{day} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readOrCareKeys());
       allow create, update: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('organizationId', '') == orgId;
       allow delete: if false;
@@ -325,7 +338,7 @@ service cloud.firestore {
     // Analytics gap 6: monthly summaries, written only by
     // writeAnalyticsSummaries / rebuildAnalyticsSummaries (dashboard_ops.js).
     match /organizations/{orgId}/analyticsSummaries/{month} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['insights']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readKeys());
       allow write: if false;
     }
 
@@ -418,14 +431,14 @@ service cloud.firestore {
     // record usage, purchases and low-stock levels. Every change is a
     // movement row that names who made it and is never edited.
     match /organizations/{orgId}/stock/{itemId} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readOrCareKeys());
       allow create, update: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('quantity', 0) is number &&
         request.resource.data.get('quantity', 0) >= 0;
       allow delete: if false;
     }
     match /organizations/{orgId}/stockMovements/{moveId} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readOrCareKeys());
       allow create: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('byUid', '') == request.auth.uid;
       allow update, delete: if false;
@@ -541,7 +554,7 @@ service cloud.firestore {
           return get(/databases/$(database)/documents/events/$(eventId)).data;
         }
 
-        allow read: if isSelf(uid) || managesEventOrg(eventBefore().organizationId);
+        allow read: if isSelf(uid) || staffWith(eventBefore().organizationId, readKeys());
 
         // Attendance is staff-only, so a new sign-up can't arrive already
         // marked (volunteer badges count it).
@@ -832,7 +845,8 @@ service cloud.firestore {
       // The owner's copy of each collar tag; staff toggle QR codes on it
       // (admin_qr.dart).
       match /collarTags/{tagId} {
-        allow read, write: if isSelf(uid) || isPlatformStaff() || myStaffWith(['rescue']);
+        allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(readKeys());
+        allow write: if isSelf(uid) || isPlatformStaff() || myStaffWith(['rescue']);
       }
       match /history/{itemId} {
         allow read: if isSelf(uid);
@@ -969,6 +983,13 @@ service cloud.firestore {
         ));
     }
 
+    // Read-only access to a case's records for the owning organization's
+    // Staff without the rescue permission (every module is readable).
+    function isCaseReader(caseId) {
+      return isCaseParticipant(caseId) ||
+        canRecordOf(get(casePath(caseId)).data.get('organizationId', ''), readKeys());
+    }
+
     function canWorkCase(caseId) {
       let data = get(casePath(caseId)).data;
       return canStaffCase(data) ||
@@ -1090,7 +1111,7 @@ service cloud.firestore {
         isCommunityAdoptable(resource.data) ||
         isPlatformStaff() ||
         (resource.data.get('referredToOrgId', '') == myOrgId() && myOrgId() != '' && myStaffWith(['rescue'])) ||
-        canRecordOf(resource.data.organizationId, ['rescue', 'adoptions', 'animals']) ||
+        canRecordOf(resource.data.organizationId, readKeys()) ||
         isVerifiedResponder() ||
         isOfferedTransporter(caseId, resource.data)
       );
@@ -1132,7 +1153,7 @@ service cloud.firestore {
       }
       // The case timeline (who did what): the people working the case.
       match /activityLogs/{logId} {
-        allow read: if isCaseParticipant(caseId);
+        allow read: if isCaseReader(caseId);
         allow create: if signedIn();
         allow update, delete: if canStaffCase(get(casePath(caseId)).data);
       }
@@ -1142,14 +1163,14 @@ service cloud.firestore {
         allow read, write: if isCaseParticipant(caseId);
       }
       match /tracking/{pointId} {
-        allow read: if isCaseParticipant(caseId);
+        allow read: if isCaseReader(caseId);
         allow write: if canWorkCase(caseId);
       }
 
       // Offers: staff create and manage them; the offered transporter
       // answers their own (TransportAssignmentRepository).
       match /transportAssignments/{assignmentId} {
-        allow read: if isCaseParticipant(caseId) || resource.data.get('riderId', '') == request.auth.uid;
+        allow read: if isCaseReader(caseId) || resource.data.get('riderId', '') == request.auth.uid;
         allow create: if canStaffCase(get(casePath(caseId)).data);
         allow update: if canStaffCase(get(casePath(caseId)).data) || (
                     resource.data.get('riderId', '') == request.auth.uid &&
@@ -1181,7 +1202,7 @@ service cloud.firestore {
       // transporter working it.
       match /{sub}/{docId=**} {
         allow read: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments', 'expenses']) &&
-          isCaseParticipant(caseId);
+          isCaseReader(caseId);
         allow write: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments', 'expenses']) &&
           canWorkCase(caseId);
       }
@@ -1208,7 +1229,7 @@ service cloud.firestore {
 
     function canReadAnimalMedical(animalId) {
       let data = get(animalPath(animalId)).data;
-      return canRecordOf(data.get('organizationId', ''), ['rescue', 'animals', 'adoptions']) ||
+      return canRecordOf(data.get('organizationId', ''), readKeys()) ||
         staffWith(data.get('organizationId', ''), ['care']);
     }
 
@@ -1249,7 +1270,7 @@ service cloud.firestore {
         isPlatformStaff() ||
         data.get('reservedForUserId', '') == request.auth.uid ||
         data.get('adoptedByUserId', '') == request.auth.uid ||
-        canRecordOf(data.organizationId, ['rescue', 'animals', 'adoptions']) ||
+        canRecordOf(data.organizationId, readKeys()) ||
         staffWith(data.organizationId, ['care']));
     }
 
@@ -1370,7 +1391,7 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource.data.personal.adopterId == request.auth.uid ||
         isPlatformStaff() ||
-        staffWith(resource.data.organizationId, ['adoptions'])
+        staffWith(resource.data.organizationId, readKeys())
       );
       // Rescue gaps 6/10: an adoption request for a rescued animal, from the
       // reporter who said they want to adopt it or the user who registered
@@ -1407,7 +1428,11 @@ service cloud.firestore {
       allow delete: if false;
 
       match /{sub}/{docId=**} {
-        allow read, write: if signedIn() && (
+        allow read: if signedIn() && (
+          isAdopterOf(get(adoptionPath(adoptionId)).data) ||
+          canRecordOf(get(adoptionPath(adoptionId)).data.get('organizationId', ''), readKeys())
+        );
+        allow write: if signedIn() && (
           isAdopterOf(get(adoptionPath(adoptionId)).data) ||
           canStaffAdoption(get(adoptionPath(adoptionId)).data)
         );
@@ -1428,7 +1453,7 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(readKeys());
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
         (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
@@ -1456,7 +1481,7 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(readKeys());
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
         (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
@@ -1479,7 +1504,7 @@ service cloud.firestore {
       // functions/audit_logs.js), through a query that filters on it. Each
       // rider's busy status for every organization is on their user doc
       // (transportStatus, functions/rider_status.js).
-      allow read: if canReadOrgRecord(['rescue']) || resource.data.get('riderId', '') == request.auth.uid;
+      allow read: if canReadOrgRecord(readKeys()) || resource.data.get('riderId', '') == request.auth.uid;
     }
 
     // Vaccinations, care records, medication orders and doses (animals) and
@@ -1495,7 +1520,7 @@ service cloud.firestore {
     }
 
     function medicalKeys() {
-      return ['rescue', 'animals', 'care', 'adoptions', 'insights'];
+      return readOrCareKeys();
     }
 
     // Dashboard: vaccine status, overdue deworming, flea & tick and vet
@@ -1532,7 +1557,7 @@ service cloud.firestore {
     function canReadOrgLog() {
       return isPlatformStaff() ||
         (resource.data.get('organizationId', '') != '' &&
-          staffWith(resource.data.get('organizationId', ''), ['insights', 'rescue', 'animals']));
+          staffWith(resource.data.get('organizationId', ''), readKeys()));
     }
 
     match /{path=**}/managementLogs/{docId} {
@@ -1553,7 +1578,7 @@ service cloud.firestore {
     // adoption by functions/audit_logs.js). The adopter reads through the
     // per-adoption rule.
     match /{path=**}/followUps/{docId} {
-      allow read: if canReadOrgRecord(['adoptions']);
+      allow read: if canReadOrgRecord(readKeys());
     }
 
     // ---- General expenses ----------------------------------------------------
@@ -1588,7 +1613,7 @@ service cloud.firestore {
     match /auditLogs/{entryId} {
       allow read: if isPlatformStaff() ||
         (resource.data.get('organizationId', '') != '' &&
-          staffWith(resource.data.get('organizationId', ''), ['insights']));
+          staffWith(resource.data.get('organizationId', ''), readKeys()));
       allow create: if signedIn() &&
         request.resource.data.get('actorId', request.auth.uid) == request.auth.uid &&
         request.resource.data.get('category', null) is string &&
@@ -1610,7 +1635,7 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource.data.get('adopterId', '') == request.auth.uid ||
         isPlatformStaff() ||
-        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && myStaffWith(['adoptions']))
+        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && myStaffWith(readKeys()))
       );
       allow update: if signedIn() &&
         resource.data.get('adopterId', '') == request.auth.uid &&
