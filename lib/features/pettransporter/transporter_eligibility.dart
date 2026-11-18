@@ -45,16 +45,33 @@ Future<String?> transitBlockReason() async {
 
 /// Banner on the transporter's job board while their account isn't verified,
 /// so they know why they can't take transits. Updates live when approved.
-class TransporterVerificationBanner extends StatelessWidget {
+class TransporterVerificationBanner extends StatefulWidget {
   const TransporterVerificationBanner({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  State<TransporterVerificationBanner> createState() => _TransporterVerificationBannerState();
+}
+
+class _TransporterVerificationBannerState extends State<TransporterVerificationBanner> {
+  // Created once: a new stream on every rebuild re-ran the read.
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _user;
+
+  @override
+  void initState() {
+    super.initState();
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
+    if (uid != null) {
+      _user = FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = _user;
+    if (user == null) return const SizedBox.shrink();
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      stream: user,
       builder: (context, snap) {
         final user = snap.data?.data();
         // Rescue volunteers are checked when they accept (transitBlockReason).

@@ -74,6 +74,50 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   double? _distanceToStopMeters;
   String? _proximityStatus; // status the distance above was computed for
 
+  // Created once, not in build(): a new stream on every rebuild re-opened
+  // the case listener each time the page redrew (every GPS update).
+  late final Stream<DocumentSnapshot> _caseStream = FirebaseFirestore.instance
+      .collection('cases')
+      .doc(widget.caseId)
+      .snapshots();
+
+  // The clinic profile for the dropoff panel, fetched once per clinic
+  // instead of on every rebuild.
+  String? _clinicProfileKey;
+  Future<Map<String, dynamic>?>? _clinicProfileFuture;
+
+  Future<Map<String, dynamic>?> _clinicProfile(String? placeId, String address) {
+    final key = '${placeId ?? ''}|$address';
+    if (key != _clinicProfileKey || _clinicProfileFuture == null) {
+      _clinicProfileKey = key;
+      _clinicProfileFuture = _service.fetchClinicProfile(placeId, address);
+    }
+    return _clinicProfileFuture!;
+  }
+
+  /// The rider's position for a step: the live stream's reading when it is
+  /// under 20 s old, otherwise a fresh fix that gives up after 10 s (a
+  /// high-accuracy fix with no limit can hang for 30 s on budget phones).
+  Future<Position> _currentFix() async {
+    final recent = _lastRiderPosition;
+    if (recent != null &&
+        DateTime.now().difference(recent.timestamp) < const Duration(seconds: 20)) {
+      return recent;
+    }
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+    } catch (_) {
+      final fallback = recent ?? await Geolocator.getLastKnownPosition();
+      if (fallback != null) return fallback;
+      rethrow;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -260,7 +304,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       target.latitude,
       target.longitude,
     );
-    if (meters != _distanceToStopMeters) {
+    // Redraw only when it matters: crossing the geofence, or a change of
+    // 5 m or more. GPS jitter used to redraw the whole page constantly.
+    final old = _distanceToStopMeters;
+    final changed = (old == null) != (meters == null) ||
+        (old != null && meters != null &&
+            ((old <= kArrivalThresholdMeters) != (meters <= kArrivalThresholdMeters) ||
+                (old - meters).abs() >= 5));
+    if (changed) {
       setState(() => _distanceToStopMeters = meters);
     }
   }
@@ -269,9 +320,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     final known = _lastRiderPosition;
     if (known != null) _updateStopProximity(known);
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+      final pos = await _currentFix();
       _updateStopProximity(pos);
     } catch (_) {
       // The live stream will fill it in on the next GPS update.
@@ -294,9 +343,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     final target = stop?.target;
     if (stop == null || target == null) return true;
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+      final pos = await _currentFix();
       _updateStopProximity(pos);
       final meters = Geolocator.distanceBetween(
         pos.latitude,
@@ -455,11 +502,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
 
     setState(() => _isVerifyingArrival = true);
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
+      final pos = await _currentFix();
       final origin = LatLng(pos.latitude, pos.longitude);
       final route = await fetchDirectionsRoute(origin, destination);
 
@@ -769,10 +812,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .snapshots(),
+      stream: _caseStream,
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Scaffold(
@@ -963,7 +1003,7 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           address: address,
           images: _clinicImages,
           isActing: _isActing,
-          clinicProfileFuture: _service.fetchClinicProfile(
+          clinicProfileFuture: _clinicProfile(
             data['dropoffPlaceId'] as String?,
             address.toString(),
           ),

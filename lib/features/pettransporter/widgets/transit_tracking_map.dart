@@ -31,6 +31,24 @@ class TransitTrackingMap extends StatefulWidget {
 }
 
 class _TrackingMapState extends State<TransitTrackingMap> {
+  // Created once: a new stream on every rebuild re-read up to 100 tracking
+  // points each time the transit page redrew.
+  late Stream<QuerySnapshot> _tracking = _trackingFor(widget.caseId);
+
+  static Stream<QuerySnapshot> _trackingFor(String caseId) => FirebaseFirestore.instance
+      .collection('cases')
+      .doc(caseId)
+      .collection('tracking')
+      .orderBy('timestamp')
+      .limitToLast(100)
+      .snapshots();
+
+  @override
+  void didUpdateWidget(TransitTrackingMap old) {
+    super.didUpdateWidget(old);
+    if (old.caseId != widget.caseId) _tracking = _trackingFor(widget.caseId);
+  }
+
   GoogleMapController? _controller;
   bool _centered = false;
 
@@ -53,18 +71,18 @@ class _TrackingMapState extends State<TransitTrackingMap> {
 
     final destChanged =
         _routeFetchedFor == null ||
-        _routeFetchedFor!.latitude != widget.destination!.latitude ||
-        _routeFetchedFor!.longitude != widget.destination!.longitude;
+            _routeFetchedFor!.latitude != widget.destination!.latitude ||
+            _routeFetchedFor!.longitude != widget.destination!.longitude;
 
     final movedFar =
         _routeFetchedFrom == null ||
-        Geolocator.distanceBetween(
+            Geolocator.distanceBetween(
               _routeFetchedFrom!.latitude,
               _routeFetchedFrom!.longitude,
               riderPosition.latitude,
               riderPosition.longitude,
             ) >
-            200;
+                200;
 
     if (!destChanged && !movedFar) return;
 
@@ -73,14 +91,14 @@ class _TrackingMapState extends State<TransitTrackingMap> {
 
     debugPrint(
       '_maybeRefreshRoute: fetching route from $riderPosition to '
-      '${widget.destination} (${widget.destinationLabel})',
+          '${widget.destination} (${widget.destinationLabel})',
     );
 
     fetchDirectionsRoute(riderPosition, widget.destination!).then((route) {
       if (route == null) {
         debugPrint(
           '_maybeRefreshRoute: fetchDirectionsRoute returned null — see '
-          'fetchDirectionsRoute logs above for the actual reason.',
+              'fetchDirectionsRoute logs above for the actual reason.',
         );
         return;
       }
@@ -93,13 +111,7 @@ class _TrackingMapState extends State<TransitTrackingMap> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .collection('tracking')
-          .orderBy('timestamp')
-          .limitToLast(100)
-          .snapshots(),
+      stream: _tracking,
       builder: (context, snapshot) {
         final points = <LatLng>[];
         if (snapshot.hasData) {
@@ -126,7 +138,7 @@ class _TrackingMapState extends State<TransitTrackingMap> {
 
         if (points.isNotEmpty) {
           WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _maybeRefreshRoute(points.last),
+                (_) => _maybeRefreshRoute(points.last),
           );
         }
 

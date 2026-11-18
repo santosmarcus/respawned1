@@ -74,7 +74,16 @@ class TransitCaseService {
 
   // Location streaming — fire-and-forget, exactly like the original
   // listener (neither write was awaited).
+  DateTime? _lastPositionWrite;
+
+  /// Saves the rider's position at most every 10 seconds. Each write
+  /// updates the case document, which redraws every screen watching the
+  /// case, so writing on every GPS update made the transit page sluggish.
   void recordPosition(double lat, double lng) {
+    final now = DateTime.now();
+    final last = _lastPositionWrite;
+    if (last != null && now.difference(last) < const Duration(seconds: 10)) return;
+    _lastPositionWrite = now;
     unawaited(
       caseRef.collection('tracking').add({
         'lat': lat,

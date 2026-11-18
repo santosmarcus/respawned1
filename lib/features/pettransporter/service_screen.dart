@@ -503,23 +503,50 @@ class _ServiceScreenState extends State<ServiceScreen> {
         _showError('Location permission denied.');
         return;
       }
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
+      // A high-accuracy fix can take 10-30 seconds on budget phones or
+      // indoors. Go online at once from the phone's last known position,
+      // then refine it in the background.
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      final pos = lastKnown ??
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.medium,
+              timeLimit: Duration(seconds: 15),
+            ),
+          );
+      if (!mounted) return;
       setState(() {
         _currentLocation = LatLng(pos.latitude, pos.longitude);
         _isOnline = true;
       });
-      await _writePresence(online: true);
+      unawaited(_writePresence(online: true));
       _presenceHeartbeat?.cancel();
       _presenceHeartbeat = Timer.periodic(
           const Duration(minutes: 2), (_) => _writePresence(online: true));
+      if (lastKnown != null) unawaited(_refineLocation());
     } catch (_) {
-      _showError('Could not get location.');
+      _showError('Could not get location. Check that location is on and try again.');
     } finally {
       if (mounted) setState(() => _loadingLocation = false);
+    }
+  }
+
+  /// Replaces the last known position used to go online with a fresh fix,
+  /// without making the transporter wait for it.
+  Future<void> _refineLocation() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 30),
+        ),
+      );
+      if (!mounted || !_isOnline) return;
+      setState(() => _currentLocation = LatLng(pos.latitude, pos.longitude));
+      unawaited(_writePresence(online: true));
+      _fitMapToRange();
+    } catch (_) {
+      // Keep the last known position.
     }
   }
 
@@ -564,7 +591,7 @@ class _ServiceScreenState extends State<ServiceScreen> {
 
 }
 
-class _ServiceRequestList extends StatelessWidget {
+class _ServiceRequestList extends StatefulWidget {
   final String currentRiderUid;
   final LatLng? currentLocation;
   final double serviceRangeKm;
@@ -576,13 +603,73 @@ class _ServiceRequestList extends StatelessWidget {
   });
 
   @override
+  State<_ServiceRequestList> createState() => _ServiceRequestListState();
+}
+
+class _ServiceRequestListState extends State<_ServiceRequestList> {
+  static const _activeStatuses = ['assigned', 'accepted', 'ongoing'];
+  static const _listedStatuses = {'pending', 'assigned', 'accepted', 'ongoing'};
+
+  // Created once, not in build(): a new stream object on every rebuild made
+  // each StreamBuilder resubscribe and show its spinner again.
+  late Stream<QuerySnapshot> _offers;
+  late Stream<QuerySnapshot> _mine;
+  String _offeredKey = '';
+  Stream<List<QueryDocumentSnapshot>> _offered = const Stream.empty();
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribe();
+  }
+
+  @override
+  void didUpdateWidget(_ServiceRequestList old) {
+    super.didUpdateWidget(old);
+    if (old.currentRiderUid != widget.currentRiderUid) _subscribe();
+  }
+
+  void _subscribe() {
+    final db = FirebaseFirestore.instance;
+    _offers = db
+        .collectionGroup('transportAssignments')
+        .where('riderId', isEqualTo: widget.currentRiderUid)
+        .where('status', isEqualTo: 'pending')
+        .snapshots();
+    // Only this rider's own active trips, instead of downloading the 50
+    // newest cases and throwing almost all of them away.
+    _mine = db
+        .collection('publicCases')
+        .where('assignedVolunteerId', isEqualTo: widget.currentRiderUid)
+        .where('status', whereIn: _activeStatuses)
+        .snapshots();
+    _offeredKey = '';
+    _offered = const Stream.empty();
+  }
+
+  /// The cases offered to this rider, fetched by id. Re-queried only when
+  /// the set of offered cases changes.
+  Stream<List<QueryDocumentSnapshot>> _offeredCases(Iterable<String> ids) {
+    final sorted = ids.toList()..sort();
+    final key = sorted.join(',');
+    if (key == _offeredKey) return _offered;
+    _offeredKey = key;
+    // whereIn takes at most 30 ids; a rider never has that many open offers.
+    // An empty list (not an empty stream) clears an offer that just ended.
+    _offered = sorted.isEmpty
+        ? Stream.value(const <QueryDocumentSnapshot>[])
+        : FirebaseFirestore.instance
+        .collection('publicCases')
+        .where(FieldPath.documentId, whereIn: sorted.take(30).toList())
+        .snapshots()
+        .map((snap) => snap.docs);
+    return _offered;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collectionGroup('transportAssignments')
-          .where('riderId', isEqualTo: currentRiderUid)
-          .where('status', isEqualTo: 'pending')
-          .snapshots(),
+      stream: _offers,
       builder: (context, offersSnapshot) {
         // Admin-assigned offers only reach this list through this query, so
         // a failure here (security rules / missing index) must be visible —
@@ -600,147 +687,160 @@ class _ServiceRequestList extends StatelessWidget {
             doc.id,
         }..remove('');
 
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('publicCases')
-              .where('status', whereIn: ['pending', 'assigned', 'accepted', 'ongoing'])
-              .orderBy('createdAt', descending: true)
-              .limit(50)
-              .snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return _emptyState('Could not load requests.');
-            }
-            if (!snapshot.hasData) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: CircularProgressIndicator(color: AppColors.textPrimary),
-                ),
-              );
-            }
-
-            final docs = snapshot.data!.docs;
-
-            final visible = docs.where((doc) {
-              final d = doc.data() as Map<String, dynamic>;
-              final status = d['status'];
-              final assignedId = d['assignedVolunteerId'];
-
-              // Note: single-active-transit is already enforced upstream —
-              // RescueCaseRepository.createAssignmentOffer throws
-              // ActiveAssignmentConflictException (with its own
-              // View Pending / Track Case / Reassign Transporter
-              // resolution) before a conflicting offer can even be
-              // created, and the legacy open-pool accept path in
-              // rescue_request.dart guards itself the same way at
-              // accept-time. This list must never hide a genuine
-              // isOfferedToMe assignment on top of that — doing so here
-              // used a cruder signal (the case's own assignedVolunteerId/
-              // status) that can disagree with the real source of truth
-              // (the transportAssignments docs), and silently hid
-              // legitimate admin-assigned offers from the transporter.
-              final isMineActive = assignedId == currentRiderUid &&
-                  (status == 'assigned' ||
-                      status == 'accepted' ||
-                      status == 'ongoing');
-              final isOfferedToMe = offeredCaseIds.containsKey(doc.id);
-
-              if (!isMineActive && !isOfferedToMe) return false;
-
-              final pickupLat = (d['lat'] as num?)?.toDouble();
-              final pickupLng = (d['lng'] as num?)?.toDouble();
-              if (currentLocation != null &&
-                  pickupLat != null &&
-                  pickupLng != null) {
-                final meters = Geolocator.distanceBetween(
-                  currentLocation!.latitude,
-                  currentLocation!.longitude,
-                  pickupLat,
-                  pickupLng,
-                );
-                if (meters / 1000 > serviceRangeKm) return false;
-              }
-
-              return true;
-            }).toList();
-
-            if (visible.isEmpty) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Service Request',
-                        style: GoogleFonts.tiltWarp(
-                            fontSize: 16, color: AppColors.textPrimary)),
-                    const SizedBox(height: 10),
-                    _emptyState(offersFailed
-                        ? 'Could not load your assigned requests. Please try again later.'
-                        : 'There are no requests for now.'),
-                  ],
-                ),
-              );
-            }
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Service Request',
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 16, color: AppColors.textPrimary)),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: visible.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        final doc = visible[index];
-                        final data = doc.data() as Map<String, dynamic>;
-                        final assignmentId = offeredCaseIds[doc.id];
-                        final isMine = data['assignedVolunteerId'] == currentRiderUid;
-                        final isActiveTrip = isMine &&
-                            (data['status'] == 'assigned' ||
-                                data['status'] == 'accepted' ||
-                                data['status'] == 'ongoing') &&
-                            assignmentId == null;
-
-                        return _RequestCard(
-                          caseId: doc.id,
-                          data: data,
-                          isOfferedToMe: assignmentId != null,
-                          currentLocation: currentLocation,
-                          onTap: () {
-                            if (isActiveTrip) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => TransitProgressPage(
-                                    caseId: doc.id,
-                                  ),
-                                ),
-                              );
-                            } else {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => RescueRequest(
-                                    caseId: doc.id,
-                                    data: data,
-                                    assignmentId: assignmentId,
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                        );
-                      },
+        return StreamBuilder<List<QueryDocumentSnapshot>>(
+          stream: _offeredCases(offeredCaseIds.keys),
+          initialData: const [],
+          builder: (context, offeredSnapshot) {
+            return StreamBuilder<QuerySnapshot>(
+              stream: _mine,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return _emptyState('Could not load requests.');
+                }
+                if (!snapshot.hasData) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(color: AppColors.textPrimary),
                     ),
+                  );
+                }
+
+                // This rider's active trips plus the cases offered to them,
+                // newest first.
+                final byId = <String, QueryDocumentSnapshot>{
+                  for (final doc in offeredSnapshot.data ?? const <QueryDocumentSnapshot>[]) doc.id: doc,
+                  for (final doc in snapshot.data!.docs) doc.id: doc,
+                };
+                DateTime createdAt(QueryDocumentSnapshot doc) {
+                  final ts = (doc.data() as Map<String, dynamic>)['createdAt'];
+                  return ts is Timestamp ? ts.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+                }
+                final docs = byId.values.toList()
+                  ..sort((a, b) => createdAt(b).compareTo(createdAt(a)));
+
+                final visible = docs.where((doc) {
+                  final d = doc.data() as Map<String, dynamic>;
+                  final status = d['status'];
+                  final assignedId = d['assignedVolunteerId'];
+                  if (!_listedStatuses.contains(status)) return false;
+
+                  // Note: single-active-transit is already enforced upstream —
+                  // RescueCaseRepository.createAssignmentOffer throws
+                  // ActiveAssignmentConflictException (with its own
+                  // View Pending / Track Case / Reassign Transporter
+                  // resolution) before a conflicting offer can even be
+                  // created, and the legacy open-pool accept path in
+                  // rescue_request.dart guards itself the same way at
+                  // accept-time. This list must never hide a genuine
+                  // isOfferedToMe assignment on top of that — doing so here
+                  // used a cruder signal (the case's own assignedVolunteerId/
+                  // status) that can disagree with the real source of truth
+                  // (the transportAssignments docs), and silently hid
+                  // legitimate admin-assigned offers from the transporter.
+                  final isMineActive = assignedId == widget.currentRiderUid &&
+                      (status == 'assigned' ||
+                          status == 'accepted' ||
+                          status == 'ongoing');
+                  final isOfferedToMe = offeredCaseIds.containsKey(doc.id);
+
+                  if (!isMineActive && !isOfferedToMe) return false;
+
+                  final pickupLat = (d['lat'] as num?)?.toDouble();
+                  final pickupLng = (d['lng'] as num?)?.toDouble();
+                  if (widget.currentLocation != null &&
+                      pickupLat != null &&
+                      pickupLng != null) {
+                    final meters = Geolocator.distanceBetween(
+                      widget.currentLocation!.latitude,
+                      widget.currentLocation!.longitude,
+                      pickupLat,
+                      pickupLng,
+                    );
+                    if (meters / 1000 > widget.serviceRangeKm) return false;
+                  }
+
+                  return true;
+                }).toList();
+
+                if (visible.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Service Request',
+                            style: GoogleFonts.tiltWarp(
+                                fontSize: 16, color: AppColors.textPrimary)),
+                        const SizedBox(height: 10),
+                        _emptyState(offersFailed
+                            ? 'Could not load your assigned requests. Please try again later.'
+                            : 'There are no requests for now.'),
+                      ],
+                    ),
+                  );
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Service Request',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 16, color: AppColors.textPrimary)),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: visible.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final doc = visible[index];
+                            final data = doc.data() as Map<String, dynamic>;
+                            final assignmentId = offeredCaseIds[doc.id];
+                            final isMine = data['assignedVolunteerId'] == widget.currentRiderUid;
+                            final isActiveTrip = isMine &&
+                                (data['status'] == 'assigned' ||
+                                    data['status'] == 'accepted' ||
+                                    data['status'] == 'ongoing') &&
+                                assignmentId == null;
+
+                            return _RequestCard(
+                              caseId: doc.id,
+                              data: data,
+                              isOfferedToMe: assignmentId != null,
+                              currentLocation: widget.currentLocation,
+                              onTap: () {
+                                if (isActiveTrip) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => TransitProgressPage(
+                                        caseId: doc.id,
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => RescueRequest(
+                                        caseId: doc.id,
+                                        data: data,
+                                        assignmentId: assignmentId,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             );
           },
         );
