@@ -25,6 +25,7 @@ import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart'
 import 'package:respawnd1/features/admin/rescue/widgets/accept_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animals_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
+import 'package:respawnd1/features/admin/rescue/expenses/case_costs_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_messages_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
@@ -1089,6 +1090,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 ),
               ),
             ],
+
+            // A case past treatment (closed, intaked, referred): its costs.
+            if (c.status != RescueStatus.treatment) CaseCostsCard(rescueCase: c),
 
             gap,
             _OwnershipSection(

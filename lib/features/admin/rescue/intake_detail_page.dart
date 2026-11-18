@@ -13,6 +13,7 @@ import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
+import 'package:respawnd1/features/admin/rescue/expenses/case_costs_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
@@ -713,6 +714,9 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 animalIndexes: widget.animalIndexes,
               ),
             ],
+
+            // Treatment costs stay viewable after the Treatment page.
+            CaseCostsCard(rescueCase: c, topGap: 20),
 
             const SizedBox(height: 32),
           ],

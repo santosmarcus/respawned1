@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
@@ -18,6 +17,7 @@ import 'package:respawnd1/features/admin/animals/state/animal_records_providers.
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_create.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
+import 'package:respawnd1/features/admin/rescue/expenses/case_costs_card.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
@@ -1285,25 +1285,6 @@ class _DischargedNotice extends StatelessWidget {
   }
 }
 
-/// The newest fundraiser made for [caseId] (Create Fundraiser stamps
-/// `linkedCaseId`), or null when there is none yet.
-final _caseFundraiserIdProvider = StreamProvider.autoDispose.family<String?, String>((ref, caseId) {
-  return FirebaseFirestore.instance
-      .collection('campaigns')
-      .where('linkedCaseId', isEqualTo: caseId)
-      .snapshots()
-      .map((snap) {
-    if (snap.docs.isEmpty) return null;
-    final docs = [...snap.docs]..sort((a, b) {
-        final ta = a.data()['createdAt'], tb = b.data()['createdAt'];
-        final da = ta is Timestamp ? ta.toDate() : DateTime(0);
-        final db = tb is Timestamp ? tb.toDate() : DateTime(0);
-        return db.compareTo(da);
-      });
-    return docs.first.id;
-  });
-});
-
 class _CostTrackingSection extends ConsumerWidget {
   final String caseId;
   final RescueCase rescueCase;
@@ -1329,7 +1310,7 @@ class _CostTrackingSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Recording expenses is for financial administrators (firestore.rules).
     final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
-    final fundraiserId = ref.watch(_caseFundraiserIdProvider(caseId)).asData?.value;
+    final fundraiserId = ref.watch(caseFundraiserIdProvider(caseId)).asData?.value;
     // Total/Funded/Outstanding always reflect the whole case (never
     // filtered by animal — Close Case's own financial summary and every
     // other reader of these totals expects the case-wide figure). The
