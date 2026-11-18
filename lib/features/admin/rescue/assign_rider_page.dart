@@ -253,10 +253,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     setState(() => _fallbackBusy = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).startOrganizationTransport(
-            caseId: widget.caseId,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: widget.caseId,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar('Recorded: your organization is transporting this animal.'),
@@ -457,7 +457,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       Map<String, TransportAssignmentStatus> activeByRider,
       AnimalTransportProfile animalProfile,
       ) {
-    final onlineTransporters = transporters.where((t) => t.isOnline).toList();
+    // Unverified transporters can't take transits (firestore.rules
+    // isVerifiedResponder), so they are never offered one.
+    final onlineTransporters = transporters.where((t) => t.isOnline && t.isVerified).toList();
     double distanceFor(LatLng pos) =>
         haversineDistanceKm(center.latitude, center.longitude, pos.latitude, pos.longitude);
 
@@ -553,19 +555,19 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     final allRiders = [...demoRiders, ...realRiders];
 
     final demoAvailable = demoRiders.where((r) => r.availability == _RiderAvailability.available).toList()
-      ..sort(byDistance);
+    ..sort(byDistance);
     var available = realRiders.where((r) => r.availability == _RiderAvailability.available).toList()
-      ..sort(byCompatibilityThenDistance);
+    ..sort(byCompatibilityThenDistance);
     // The single top-ranked real, available transporter is labeled
     // Preferred — every other eligible transporter stays listed below it,
     // never hidden.
     if (available.isNotEmpty) {
-      available = [available.first.copyWith(isPreferred: true), ...available.skip(1)];
+    available = [available.first.copyWith(isPreferred: true), ...available.skip(1)];
     }
     final pending = allRiders.where((r) => r.availability == _RiderAvailability.pending).toList()
-      ..sort(byDistance);
+    ..sort(byDistance);
     final busy = allRiders.where((r) => r.availability == _RiderAvailability.busy).toList()
-      ..sort(byDistance);
+    ..sort(byDistance);
 
     return [...demoAvailable, ...available, ...pending, ...busy];
   }
@@ -693,23 +695,23 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ),
       for (final rider in riders)
         if (rider.position != null)
-        Marker(
-          markerId: MarkerId(rider.uid),
-          position: rider.position!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            rider.uid == _selectedRiderUid
-                ? BitmapDescriptor.hueGreen
-                : switch (rider.availability) {
-              _RiderAvailability.pending => BitmapDescriptor.hueOrange,
-              _RiderAvailability.busy => BitmapDescriptor.hueViolet,
-              _RiderAvailability.available => BitmapDescriptor.hueRed,
-            },
+          Marker(
+            markerId: MarkerId(rider.uid),
+            position: rider.position!,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              rider.uid == _selectedRiderUid
+                  ? BitmapDescriptor.hueGreen
+                  : switch (rider.availability) {
+                _RiderAvailability.pending => BitmapDescriptor.hueOrange,
+                _RiderAvailability.busy => BitmapDescriptor.hueViolet,
+                _RiderAvailability.available => BitmapDescriptor.hueRed,
+              },
+            ),
+            infoWindow: InfoWindow(
+              title: rider.name,
+              snippet: rider.distanceLabel,
+            ),
           ),
-          infoWindow: InfoWindow(
-            title: rider.name,
-            snippet: rider.distanceLabel,
-          ),
-        ),
     };
   }
 
@@ -811,7 +813,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // reassignment picker, where referring or "organization will
     // transport" don't apply.
     final showFallback = RescueStatus.fromFirestoreValue(d['status'] as String?) ==
-            RescueStatus.awaitingAssignment &&
+        RescueStatus.awaitingAssignment &&
         blockingOffer == null &&
         acceptedAssignment == null &&
         !fallbackDismissed &&
@@ -2038,9 +2040,9 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     // dialog with the offer left dangling).
     final canPop =
         _phase == _ModalPhase.confirmation ||
-        _phase == _ModalPhase.declined ||
-        _phase == _ModalPhase.expired ||
-        _phase == _ModalPhase.conflict;
+            _phase == _ModalPhase.declined ||
+            _phase == _ModalPhase.expired ||
+            _phase == _ModalPhase.conflict;
 
     return PopScope(
       canPop: canPop,

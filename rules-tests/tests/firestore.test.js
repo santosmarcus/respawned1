@@ -32,9 +32,9 @@ describe('users', () => {
   });
 
   test('cannot approve themselves', async () => {
-    await assertFails(as('rider').doc('users/rider').update({ isVerified: true }));
-    await assertFails(as('rider').doc('users/rider').update({ transporterVerificationStatus: 'approved' }));
-    await assertSucceeds(as('rider').doc('users/rider').update({ transporterVerificationStatus: 'pending' }));
+    await assertFails(as('rider2').doc('users/rider2').update({ isVerified: true }));
+    await assertFails(as('rider2').doc('users/rider2').update({ transporterVerificationStatus: 'approved' }));
+    await assertSucceeds(as('rider2').doc('users/rider2').update({ transporterVerificationStatus: 'pending' }));
   });
 
   test("cannot edit someone else's profile", async () => {
@@ -311,6 +311,16 @@ describe('cases', () => {
     }));
     await assertSucceeds(as('rider2').doc('cases/ownedA').update({ declinedBy: FieldValue.arrayUnion('rider2') }));
     await assertFails(as('stranger').doc('cases/pending1').update({ status: 'accepted', assignedVolunteerId: 'stranger' }));
+  });
+
+  test('an unverified transporter cannot claim or accept a transit', async () => {
+    // rider2 is a pet transporter whose application isn't approved yet.
+    await assertFails(as('rider2').doc('cases/pending1').update({
+      status: 'accepted', assignedVolunteerId: 'rider2', assignedVolunteerName: 'R2',
+    }));
+    await assertFails(as('rider2').doc('cases/pending1').update({ riderId: 'rider2' }));
+    // Declining still works.
+    await assertSucceeds(as('rider2').doc('cases/pending1').update({ declinedBy: FieldValue.arrayUnion('rider2') }));
   });
 
   test('one person registers adoption interest; nobody can replace them', async () => {

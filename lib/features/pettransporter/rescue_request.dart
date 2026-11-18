@@ -11,6 +11,7 @@ import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
+import 'package:respawnd1/features/pettransporter/transporter_eligibility.dart';
 import 'package:respawnd1/core/widgets/reason_picker.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
@@ -63,6 +64,18 @@ class _RescueRequestState extends State<RescueRequest> {
     setState(() => _isAccepting = true);
 
     try {
+      // Only verified transporters (and approved rescue volunteers) may
+      // take a transit. firestore.rules enforces the same.
+      final blockReason = await transitBlockReason();
+      if (blockReason != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            appSnackBar(blockReason, kind: AppMessageKind.error),
+          );
+        }
+        return;
+      }
+
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
@@ -126,7 +139,7 @@ class _RescueRequestState extends State<RescueRequest> {
             'status': 'accepted',
             'assignedVolunteerId': uid,
             'assignedVolunteerName':
-                riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
+            riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
           },
         );
       }

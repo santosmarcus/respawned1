@@ -34,7 +34,8 @@ export const users = {
   reporter: { role: 'general' },
   stranger: { role: 'general' },
   adopter: { role: 'general' },
-  rider: { role: 'pet_transporter' },
+  // rider is a verified transporter; rider2 is not (still pending review).
+  rider: { role: 'pet_transporter', isVerified: true, transporterVerificationStatus: 'approved' },
   rider2: { role: 'pet_transporter' },
   // orgA members with explicit permissions (Admin + Staff model).
   adminA: { role: 'organization_member', organizationId: 'orgA' },

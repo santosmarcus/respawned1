@@ -955,9 +955,11 @@ service cloud.firestore {
       // be cleared (a decline un-assigns).
       function riderFieldsSelfOnly() {
         let data = request.resource.data;
-        return (!changedAny(['riderId']) || data.get('riderId', null) == request.auth.uid || data.get('riderId', null) == null) &&
-          (!changedAny(['assignedVolunteerId']) ||
-            data.get('assignedVolunteerId', null) == request.auth.uid || data.get('assignedVolunteerId', null) == null);
+                // Taking the case (becoming the rider) needs a verified account.
+                return (!changedAny(['riderId']) || data.get('riderId', null) == null ||
+                    (data.get('riderId', null) == request.auth.uid && isVerifiedResponder())) &&
+                  (!changedAny(['assignedVolunteerId']) || data.get('assignedVolunteerId', null) == null ||
+                    (data.get('assignedVolunteerId', null) == request.auth.uid && isVerifiedResponder()));
       }
 
       function transporterUpdate() {
@@ -1125,9 +1127,11 @@ service cloud.firestore {
         allow read: if isCaseParticipant(caseId) || resource.data.get('riderId', '') == request.auth.uid;
         allow create: if canStaffCase(get(casePath(caseId)).data);
         allow update: if canStaffCase(get(casePath(caseId)).data) || (
-          resource.data.get('riderId', '') == request.auth.uid &&
-          changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt'])
-        ) || (
+                    resource.data.get('riderId', '') == request.auth.uid &&
+                    changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt']) &&
+                    // Accepting an offer needs a verified account; declining doesn't.
+                    (request.resource.data.get('status', '') != 'accepted' || isVerifiedResponder())
+                  ) || (
           // reconcileStaleOffer from any participant's screen.
           isCaseParticipant(caseId) &&
           changedOnly(['status', 'respondedAt']) &&
