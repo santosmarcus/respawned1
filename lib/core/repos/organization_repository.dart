@@ -293,6 +293,12 @@ class OrganizationRepository {
     required String name,
     required String contactNumber,
     required String address,
+    // Map pin chosen on About Your Organization; saved as the shelter
+    // location (same fields ShelterLocationPickerPage writes).
+    String? pinName,
+    String? pinPlaceId,
+    double? pinLat,
+    double? pinLng,
   }) async {
     final normalizedName = normalizeForMatch(name);
     final normalizedAddress = normalizeForMatch(address);
@@ -310,6 +316,14 @@ class OrganizationRepository {
       'normalizedAddress': normalizedAddress,
       'normalizedPhone': normalizedPhone,
       'ownerId': uid,
+      if (pinLat != null && pinLng != null) ...{
+        'shelterName': (pinName == null || pinName.isEmpty) ? name : pinName,
+        'shelterAddress': address,
+        'shelterPlaceId': (pinPlaceId == null || pinPlaceId.isEmpty) ? null : pinPlaceId,
+        'shelterLat': pinLat,
+        'shelterLng': pinLng,
+        'shelterUpdatedAt': FieldValue.serverTimestamp(),
+      },
       if (existing == null) 'verificationStatus': OrgVerificationStatus.draft.name,
       if (existing == null) 'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),

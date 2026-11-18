@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/clinic_search_result.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/core/utils/validators.dart';
+import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_screen.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
@@ -30,6 +32,9 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
   final _repo = OrganizationRepository();
 
   bool _loadingDraft = true;
+  // Map pin for the address (required). Saved as the shelter location.
+  ClinicSearchResult? _pin;
+  bool _showPinError = false;
   bool _submitting = false;
   List<OrgDuplicateMatch> _acknowledgedWarnings = const [];
 
@@ -48,6 +53,17 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
         _nameController.text = data['name'] as String? ?? '';
         _phoneController.text = (data['contactNumber'] as String?) ?? (data['phone'] as String?) ?? '';
         _addressController.text = data['location'] as String? ?? '';
+        final lat = (data['shelterLat'] as num?)?.toDouble();
+        final lng = (data['shelterLng'] as num?)?.toDouble();
+        if (lat != null && lng != null) {
+          _pin = ClinicSearchResult(
+            placeId: data['shelterPlaceId'] as String? ?? '',
+            name: data['shelterName'] as String? ?? '',
+            address: data['shelterAddress'] as String? ?? _addressController.text,
+            lat: lat,
+            lng: lng,
+          );
+        }
       }
     }
     if (mounted) setState(() => _loadingDraft = false);
@@ -63,8 +79,36 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
 
   String _normalizeWhitespace(String v) => v.trim().replaceAll(RegExp(r'\s+'), ' ');
 
+  Future<void> _pickPin() async {
+    final result = await Navigator.push<ClinicSearchResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ShelterLocationPickerPage.pick(
+          title: 'Pin Organization Address',
+          emptyHint: "Search for your organization's address.",
+          initialName: _pin?.name,
+          initialAddress: _pin?.address ?? _addressController.text,
+          initialPlaceId: _pin?.placeId,
+          initialLat: _pin?.lat,
+          initialLng: _pin?.lng,
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _pin = result;
+      _showPinError = false;
+      // Fill the address from the pin when it's empty; keep what they typed.
+      if (_addressController.text.trim().isEmpty) {
+        _addressController.text = result.address.isNotEmpty ? result.address : result.name;
+      }
+    });
+  }
+
   Future<void> _submit() async {
-    if (_submitting || !(_formKey.currentState?.validate() ?? false)) return;
+    final formOk = _formKey.currentState?.validate() ?? false;
+    if (_pin == null) setState(() => _showPinError = true);
+    if (_submitting || !formOk || _pin == null) return;
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -97,7 +141,17 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
         setState(() => _submitting = true);
       }
 
-      final orgId = await _repo.createOrUpdateDraft(uid: uid, name: name, contactNumber: phone, address: address);
+      final pin = _pin!;
+      final orgId = await _repo.createOrUpdateDraft(
+        uid: uid,
+        name: name,
+        contactNumber: phone,
+        address: address,
+        pinName: pin.name,
+        pinPlaceId: pin.placeId,
+        pinLat: pin.lat,
+        pinLng: pin.lng,
+      );
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -181,9 +235,8 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
                       decoration: const InputDecoration(hintText: 'Street, Barangay, City'),
                       validator: (v) => AppValidators.nonEmptyText(v, fieldName: 'Address'),
                     ),
-                    const SizedBox(height: 4),
-                    Text('You can pin the exact location on a map later from Organization Profile.',
-                        style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                    const SizedBox(height: 10),
+                    _pinTile(),
                     const SizedBox(height: 28),
                     SizedBox(
                       width: double.infinity,
@@ -199,6 +252,59 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _pinTile() {
+    final pin = _pin;
+    final borderColor = _showPinError ? Theme.of(context).colorScheme.error : AppColors.greenrspwn;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: _submitting ? null : _pickPin,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: borderColor, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Icon(pin == null ? Icons.add_location_alt_outlined : Icons.location_on, color: AppColors.textPrimary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(pin == null ? 'Pin address on map' : 'Location pinned',
+                          style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      if (pin != null)
+                        Text(
+                          pin.address.isNotEmpty ? pin.address : pin.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                    ],
+                  ),
+                ),
+                Text(pin == null ? 'Set' : 'Change',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ],
+            ),
+          ),
+        ),
+        if (_showPinError)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 12),
+            child: Text("Pin your organization's address on the map.",
+                style: GoogleFonts.zain(fontSize: 12, color: Theme.of(context).colorScheme.error)),
+          ),
+      ],
     );
   }
 

@@ -55,6 +55,12 @@ void main() async {
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
+/// The account Firebase restored from disk when the app launched, until it
+/// signs out. A restored session that never finished onboarding is signed
+/// out so the app opens on the login screen instead of "Your Details"; an
+/// account that signs in during this run continues onboarding as usual.
+String? _restoredUnfinishedUid = FirebaseAuth.instance.currentUser?.uid;
+
 class ResPAWndApp extends StatefulWidget {
   const ResPAWndApp({super.key});
 
@@ -127,6 +133,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // Not logged in
         if (!snapshot.hasData) {
+          _restoredUnfinishedUid = null;
           return const LoginScreen();
         }
 
@@ -242,9 +249,19 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
                 body: Center(child: CircularProgressIndicator()),
             );
           }
+          // Reopening the app with a half-finished signup: start from the
+          // login screen; signing in again resumes onboarding here.
+          if (_restoredUnfinishedUid == widget.uid) {
+            _restoredUnfinishedUid = null;
+            WidgetsBinding.instance.addPostFrameCallback((_) => AuthService().signOut());
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
           return const EnterDetailsScreen();
         }
 
+        _restoredUnfinishedUid = null;
         _startSignedInServices();
 
         // Existing user with role — route based on role

@@ -193,7 +193,9 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
                           setState(() => _selectedRole = option.role),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
-                        height: 140,
+                        // Grows with the text (a fixed 140 overflowed the
+                        // longer descriptions on narrow phones / large fonts).
+                        constraints: const BoxConstraints(minHeight: 140),
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           color: option.color,

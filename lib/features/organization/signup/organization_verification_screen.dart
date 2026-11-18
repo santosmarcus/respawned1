@@ -32,7 +32,8 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
   final _picker = ImagePicker();
   bool _loading = true;
   bool _submitting = false;
-  String? _uploadingGroup;
+  // "Uploading 2 of 5..." while Submit is sending the picked files.
+  String? _progressLabel;
 
   final Map<String, List<String>> _existingUrls = {'registration': [], 'permits': [], 'shelterPhotos': []};
   final Map<String, List<File>> _pendingFiles = {'registration': [], 'permits': [], 'shelterPhotos': []};
@@ -62,36 +63,6 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     setState(() => _pendingFiles[group]!.addAll(picked.map((x) => File(x.path))));
   }
 
-  Future<void> _uploadPendingFor(String group) async {
-    final files = _pendingFiles[group]!;
-    if (files.isEmpty) return;
-    setState(() => _uploadingGroup = group);
-    try {
-      final urls = <String>[];
-      for (var i = 0; i < files.length; i++) {
-        final file = files[i];
-        final ext = file.path.contains('.') ? file.path.split('.').last : 'jpg';
-        final filename = '${DateTime.now().millisecondsSinceEpoch}_$i.$ext';
-        final ref = FirebaseStorage.instance.ref('organizations/${widget.organizationId}/verification/$group/$filename');
-        await ref.putFile(file);
-        urls.add(await ref.getDownloadURL());
-      }
-      await _repo.addVerificationFiles(organizationId: widget.organizationId, group: group, urls: urls);
-      if (mounted) {
-        setState(() {
-          _existingUrls[group]!.addAll(urls);
-          _pendingFiles[group]!.clear();
-          _uploadingGroup = null;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _uploadingGroup = null);
-        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Upload failed: $e', kind: AppMessageKind.error));
-      }
-    }
-  }
-
   Future<void> _removeExisting(String group, String url) async {
     setState(() => _existingUrls[group]!.remove(url));
     await _repo.removeVerificationFile(organizationId: widget.organizationId, group: group, url: url);
@@ -99,17 +70,43 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
 
   void _removePending(String group, int index) => setState(() => _pendingFiles[group]!.removeAt(index));
 
-  bool get _hasAllGroups => _existingUrls.values.every((v) => v.isNotEmpty);
-  bool get _hasAnyPending => _pendingFiles.values.any((v) => v.isNotEmpty);
+  /// Every group has a file, already uploaded or picked and waiting.
+  bool get _hasAllGroups =>
+      _existingUrls.keys.every((g) => _existingUrls[g]!.isNotEmpty || _pendingFiles[g]!.isNotEmpty);
+
+  /// Uploads every picked file, group by group, recording each group's
+  /// URLs on the organization as soon as that group finishes so a failure
+  /// part-way keeps what already went up (and isn't uploaded twice).
+  Future<void> _uploadAllPending() async {
+    final total = _pendingFiles.values.fold<int>(0, (n, files) => n + files.length);
+    if (total == 0) return;
+    var done = 0;
+    for (final group in _pendingFiles.keys) {
+      final files = List<File>.from(_pendingFiles[group]!);
+      if (files.isEmpty) continue;
+      final urls = <String>[];
+      for (var i = 0; i < files.length; i++) {
+        if (mounted) setState(() => _progressLabel = 'Uploading ${done + 1} of $total...');
+        final file = files[i];
+        final ext = file.path.contains('.') ? file.path.split('.').last : 'jpg';
+        final filename = '${DateTime.now().millisecondsSinceEpoch}_$i.$ext';
+        final ref = FirebaseStorage.instance.ref('organizations/${widget.organizationId}/verification/$group/$filename');
+        await ref.putFile(file);
+        urls.add(await ref.getDownloadURL());
+        done++;
+      }
+      await _repo.addVerificationFiles(organizationId: widget.organizationId, group: group, urls: urls);
+      if (mounted) {
+        setState(() {
+          _existingUrls[group]!.addAll(urls);
+          _pendingFiles[group]!.clear();
+        });
+      }
+    }
+  }
 
   Future<void> _submit() async {
-    if (_submitting || _uploadingGroup != null) return;
-    if (_hasAnyPending) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        appSnackBar('Upload your selected files before submitting.', kind: AppMessageKind.error),
-      );
-      return;
-    }
+    if (_submitting) return;
     if (!_hasAllGroups) {
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar(
@@ -121,6 +118,12 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     }
     setState(() => _submitting = true);
     try {
+      // Storage only accepts verification uploads from an Admin member of
+      // the organization (storage.rules isOrgAdminOf). Drafts whose owner
+      // membership never got written were denied, so recreate it first.
+      await _repo.ensureOwnerMembership(widget.organizationId);
+      await _uploadAllPending();
+      if (mounted) setState(() => _progressLabel = 'Submitting...');
       // Platform staff review the submission (OrganizationReviewPage), so
       // the owner waits on the pending page, which follows the status live
       // and moves on once approved. `pushAndRemoveUntil` clears the signup
@@ -137,9 +140,23 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
           (route) => false,
         );
       }
+    } on FirebaseException catch (e) {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _progressLabel = null;
+        });
+        final message = e.code == 'unauthorized' || e.code == 'permission-denied'
+            ? "Upload not allowed for this account. Make sure you're signed in as the organization's owner, then try again."
+            : 'Could not submit: ${e.message ?? e.code}';
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(message, kind: AppMessageKind.error));
+      }
     } catch (e) {
       if (mounted) {
-        setState(() => _submitting = false);
+        setState(() {
+          _submitting = false;
+          _progressLabel = null;
+        });
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not submit: $e', kind: AppMessageKind.error));
       }
     }
@@ -161,7 +178,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
                 Text('Upload verification documents',
                     style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
                 const SizedBox(height: 6),
-                Text('JPG or PNG only. All three groups are required before you can submit.',
+                Text('JPG or PNG only. All three groups are required. Your photos upload when you tap Submit.',
                     style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                 const SizedBox(height: 20),
                 _uploadGroup('registration', 'Registration Document(s)', 'e.g. SEC/DTI registration, business permit cover page'),
@@ -176,7 +193,20 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
                     onPressed: _submitting ? null : _submit,
                     style: AppButtons.primary,
                     child: _submitting
-                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary)),
+                              if (_progressLabel != null) ...[
+                                const SizedBox(width: 10),
+                                Flexible(
+                                  child: Text(_progressLabel!,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                                ),
+                              ],
+                            ],
+                          )
                         : Text('Submit for Verification', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
                   ),
                 ),
@@ -188,7 +218,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
   Widget _uploadGroup(String group, String title, String hint) {
     final existing = _existingUrls[group]!;
     final pending = _pendingFiles[group]!;
-    final uploading = _uploadingGroup == group;
+    final busy = _submitting;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -204,11 +234,12 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
             spacing: 10,
             runSpacing: 10,
             children: [
-              for (final url in existing) _thumb(image: Image.network(url, fit: BoxFit.cover), onRemove: () => _removeExisting(group, url)),
+              for (final url in existing)
+                _thumb(image: Image.network(url, fit: BoxFit.cover), onRemove: busy ? null : () => _removeExisting(group, url)),
               for (var i = 0; i < pending.length; i++)
-                _thumb(image: Image.file(pending[i], fit: BoxFit.cover), onRemove: () => _removePending(group, i)),
+                _thumb(image: Image.file(pending[i], fit: BoxFit.cover), onRemove: busy ? null : () => _removePending(group, i)),
               GestureDetector(
-                onTap: uploading ? null : () => _pickFor(group),
+                onTap: busy ? null : () => _pickFor(group),
                 child: Container(
                   width: 72,
                   height: 72,
@@ -218,24 +249,12 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
               ),
             ],
           ),
-          if (pending.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: uploading ? null : () => _uploadPendingFor(group),
-                child: uploading
-                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text('Upload ${pending.length} file${pending.length == 1 ? '' : 's'}'),
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
 
-  Widget _thumb({required Widget image, required VoidCallback onRemove}) => Stack(
+  Widget _thumb({required Widget image, required VoidCallback? onRemove}) => Stack(
         children: [
           ClipRRect(borderRadius: BorderRadius.circular(8), child: SizedBox(width: 72, height: 72, child: image)),
           Positioned(

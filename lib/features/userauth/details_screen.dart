@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/userauth/onboard_screen.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
@@ -68,7 +69,16 @@ class _EnterDetailsScreenState extends State<EnterDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Your Details')),
+      appBar: AppBar(
+        title: const Text('Your Details'),
+        actions: [
+          // Root screen with no Back: lets the user return to login.
+          TextButton(
+            onPressed: () => authService.value.signOut(),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32),
