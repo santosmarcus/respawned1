@@ -318,7 +318,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
     kind: 'field-issue',
     cases: (fieldIssues.asData?.value ?? const <RescueCase>[])
         .where((c) =>
-            c.status != RescueStatus.needsSpecializedAssistance && c.status != RescueStatus.transitEnded)
+    c.status != RescueStatus.needsSpecializedAssistance && c.status != RescueStatus.transitEnded)
         .toList(),
     severity: DashSeverity.warning,
     icon: Icons.location_off_outlined,
@@ -412,7 +412,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
         area: AlertArea.adoption,
         key: 'adoption:overdue-follow-ups',
         open: (context, _) => overdue.length == 1
-            ? openApplication(context, overdue.first.app)
+            ? openPostAdoption(context, overdue.first.app)
             : openAdoptionQueue(context, AdoptionStatus.adopted),
       ),
     );
@@ -577,7 +577,7 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
           area: AlertArea.care,
           key: 'care:preventive-overdue',
           open: (context, _) =>
-              animals.length == 1 ? openAnimalRecord(context, first.animal) : openAnimalRecords(context),
+          animals.length == 1 ? openAnimalRecord(context, first.animal) : openAnimalRecords(context),
         ),
       );
     }
@@ -588,50 +588,50 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   if (missed != null && missed.isNotEmpty) {
     final byId = {for (final a in inCare) a.id: a};
     final animals = [for (final id in missed.keys) ?byId[id]];
-    if (animals.isNotEmpty) {
-      final total = animals.fold<int>(0, (n, a) => n + missed[a.id]!);
-      final first = animals.first;
-      alerts.add(
-        DashAlert(
-          severity: DashSeverity.critical,
-          icon: Icons.medication_outlined,
-          title: animals.length == 1
-              ? plural(total, 'missed dose')
-              : '${plural(total, 'missed dose')} across ${plural(animals.length, 'animal')}',
-          status: 'No dose recorded for a scheduled slot',
-          subject: animals.length == 1 ? (first.name.isEmpty ? first.species : first.name) : null,
-          timing: 'In the past 7 days',
-          action: 'Check with the carer, then record the dose or adjust the order',
-          area: AlertArea.care,
-          key: 'care:missed-doses',
-          open: (context, _) => animals.length == 1 ? openAnimalRecord(context, first) : openAnimalRecords(context),
-        ),
-      );
-    }
+  if (animals.isNotEmpty) {
+  final total = animals.fold<int>(0, (n, a) => n + missed[a.id]!);
+  final first = animals.first;
+  alerts.add(
+  DashAlert(
+  severity: DashSeverity.critical,
+  icon: Icons.medication_outlined,
+  title: animals.length == 1
+  ? plural(total, 'missed dose')
+      : '${plural(total, 'missed dose')} across ${plural(animals.length, 'animal')}',
+  status: 'No dose recorded for a scheduled slot',
+  subject: animals.length == 1 ? (first.name.isEmpty ? first.species : first.name) : null,
+  timing: 'In the past 7 days',
+  action: 'Check with the carer, then record the dose or adjust the order',
+  area: AlertArea.care,
+  key: 'care:missed-doses',
+  open: (context, _) => animals.length == 1 ? openAnimalRecord(context, first) : openAnimalRecords(context),
+  ),
+  );
+  }
   }
 
   // ── Funds: payments needing manual verification ───────────────────────
   final review2 = (payments?.asData?.value ?? const []).where((p) => p.status == 'needs_review').toList();
   if (review2.isNotEmpty) {
-    final total = review2.fold<double>(0, (s, p) => s + p.amount);
-    final oldest = review2
-        .map((p) => p.createdAt)
-        .whereType<DateTime>()
-        .fold<DateTime?>(null, (m, t) => m == null || t.isBefore(m) ? t : m);
-    alerts.add(
-      DashAlert(
-        severity: DashSeverity.warning,
-        icon: Icons.payments_outlined,
-        title: '${plural(review2.length, 'donation')} to verify',
-        status: '${formatPeso(total)} · payment needs review',
-        timing: oldest == null ? null : 'Oldest ${elapsedSince(oldest)}',
-        action: 'Accept it for the amount paid, or void it with a reason',
-        area: AlertArea.funds,
-        key: 'funds:verify-payments',
-        button: 'Review',
-        open: (context, _) => openFlaggedPayments(context),
-      ),
-    );
+  final total = review2.fold<double>(0, (s, p) => s + p.amount);
+  final oldest = review2
+      .map((p) => p.createdAt)
+      .whereType<DateTime>()
+      .fold<DateTime?>(null, (m, t) => m == null || t.isBefore(m) ? t : m);
+  alerts.add(
+  DashAlert(
+  severity: DashSeverity.warning,
+  icon: Icons.payments_outlined,
+  title: '${plural(review2.length, 'donation')} to verify',
+  status: '${formatPeso(total)} · payment needs review',
+  timing: oldest == null ? null : 'Oldest ${elapsedSince(oldest)}',
+  action: 'Accept it for the amount paid, or void it with a reason',
+  area: AlertArea.funds,
+  key: 'funds:verify-payments',
+  button: 'Review',
+  open: (context, _) => openFlaggedPayments(context),
+  ),
+  );
   }
 
   // Stable by severity — List.sort isn't guaranteed stable, and the

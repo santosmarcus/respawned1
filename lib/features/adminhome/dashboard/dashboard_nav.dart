@@ -9,6 +9,7 @@ import 'package:respawnd1/core/utils/animal_treatment_state.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_detail_page.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/adoption/return_details_page.dart';
+import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
@@ -82,6 +83,9 @@ void openAdoptionQueue(BuildContext context, AdoptionStatus status) =>
 
 void openApplication(BuildContext context, AdoptionApplication app) =>
     _push(context, (_) => AdoptionApplicationDetailPage(applicationId: app.id));
+
+void openPostAdoption(BuildContext context, AdoptionApplication app) =>
+    _push(context, (_) => PostAdoptionDetailsPage(applicationId: app.id));
 
 void openReturn(BuildContext context, AdoptionApplication app) =>
     _push(context, (_) => ReturnDetailsPage(applicationId: app.id));

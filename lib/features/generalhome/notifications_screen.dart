@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/core/services/notification_service.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -52,9 +51,9 @@ const Map<String, String> _kDonationNotifLabels = {
   'adoption_no_show_closed': 'Adoption',
   'adoption_booking_reminder': 'Adoption',
   'adoption_booking_withdrawn': 'Adoption',
-  'adoption_interview_confirmed': 'Adoption',
-  // escalateCriticalReports (functions/index.js): opens the case.
-  'critical_report_escalated': 'Urgent Rescue',
+  // sendFollowUpReminders (kPostAdoptionNotifTypes).
+  'follow_up_reminder': 'Post-Adoption',
+  'follow_up_overdue_staff': 'Post-Adoption',
 };
 
 /// Notification types whose tap opens Profile → Certificates.
@@ -468,10 +467,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       final sourceType = data['type'] as String? ?? '';
       final title = data['title'] as String? ?? 'Update';
       items.add(_NotifItem(
-        // Staff case notices (notifyStaff in functions/index.js) carry a
-        // caseId; label them as rescue notices, not donations.
-        refLabel: _kDonationNotifLabels[sourceType] ??
-            (((data['caseId'] as String?) ?? '').isNotEmpty ? 'Rescue' : 'Donation'),
+        refLabel: _kDonationNotifLabels[sourceType] ?? 'Donation',
         type: title,
         message: data['message'] as String? ?? '',
         timestamp: ts.toDate(),
@@ -867,23 +863,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         await _askToRenewSponsorship(item);
         return;
       }
-      // A notice about a rescue case (critical report escalation, referral,
-      // transit ended, ...) opens the same screen as its push, never the
-      // donation history.
-      final caseId = item.data?['caseId'] as String?;
-      if (caseId != null && caseId.isNotEmpty) {
-        Widget? page;
+      final adoptionId = item.data?['adoptionId'] as String?;
+      if (kPostAdoptionNotifTypes.contains(item.sourceType)) {
+        if (adoptionId == null || adoptionId.isEmpty) return;
         try {
-          page = await NotificationService.pageFor(item.data!);
+          final page = await postAdoptionPageForAdoption(adoptionId);
+          if (page == null || !mounted) return;
+          Navigator.push(context, MaterialPageRoute(builder: (_) => page));
         } catch (_) {}
-        if (!mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => page ?? TrackCasePage(caseId: caseId)),
-        );
         return;
       }
-      final adoptionId = item.data?['adoptionId'] as String?;
       if (kApplicantAdoptionNotifTypes.contains(item.sourceType) && adoptionId != null && adoptionId.isNotEmpty) {
         try {
           final page = await adopterPageForAdoption(adoptionId);
@@ -912,7 +901,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     try {
-      final page = await adopterPageForAdoption(item.docId, fallbackName: item.refLabel);
+      final page = item.type == 'Post-Adoption Check-in'
+          ? await postAdoptionPageForAdoption(item.docId, fallbackName: item.refLabel)
+          : await adopterPageForAdoption(item.docId, fallbackName: item.refLabel);
       if (page == null || !mounted) return;
       Navigator.push(context, MaterialPageRoute(builder: (_) => page));
     } catch (_) {}

@@ -869,6 +869,7 @@ async function notifyStaff(uids, {title, body, data}) {
         isRead: false,
         type: data.type,
         caseId: data.caseId || null,
+        adoptionId: data.adoptionId || null,
       });
     } catch (e) {
       console.warn('[notifyStaff] in-app notification failed', uid, e.message);
