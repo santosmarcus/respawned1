@@ -138,7 +138,9 @@ class Referral {
       fromOrgName: data['fromOrgName'] as String?,
       respondedAt: data['respondedAt'] is Timestamp ? (data['respondedAt'] as Timestamp).toDate() : null,
       respondedByName: data['respondedByName'] as String?,
-      declineReason: data['declineReason'] as String?,
+      // A withdrawn referral keeps its reason under withdrawReason
+      // (CaseReferralRepository.withdraw); show it the same way.
+      declineReason: (data['declineReason'] ?? data['withdrawReason']) as String?,
       targetVolunteerId: data['targetVolunteerId'] as String?,
       targetVolunteerName: data['targetVolunteerName'] as String?,
       barangay: data['barangay'] as String?,

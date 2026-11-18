@@ -157,9 +157,21 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   String? _selectedSize;
   String? _selectedCoatLength;
   // Off for new records: listing an animal goes through the adoption
-  // readiness check (_confirmAdoptionReadiness), never by default.
+  // readiness gate (_onAdoptableChanged), never by default.
   bool _isAdoptable = false;
   bool _isLoading = false;
+
+  // Adoption readiness facts that live outside this form (open treatment
+  // episode, vaccinations subcollection). Loaded once for an existing
+  // record; a new record has neither. See _readinessChecks.
+  bool _inActiveTreatment = false;
+  int? _vaccineCount;
+  int _overdueVaccineCount = 0;
+  Future<void>? _readinessFactsLoad;
+  bool _readinessFactsLoaded = false;
+
+  /// Set when staff override unmet readiness items to list the animal.
+  String? _readinessOverrideReason;
 
   // Preventive Care — unchecked when unknown, never inferred. Vaccinated
   // was removed from creation entirely (spec: vaccines are recorded after
@@ -430,6 +442,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       _prefill();
     }
     _breedController.text = _selectedBreed ?? '';
+    _loadReadinessFacts();
   }
 
   /// Parses a saved `age` string like "2 years" (or legacy free-text like
@@ -662,47 +675,105 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     return ref.getDownloadURL();
   }
 
-  /// Runs the adoption readiness checklist against the live record (open
-  /// treatment episode, vaccine records) plus this form's values. Returns
-  /// the confirmed checklist to store, or null if staff cancelled or the
-  /// animal can't be listed yet.
-  Future<Map<String, dynamic>?> _confirmAdoptionReadiness() async {
-    final db = FirebaseFirestore.instance;
-    var inActiveTreatment = false;
-    var vaccineCount = 0;
-    var overdue = 0;
-    final animalId = widget.existingAnimalId;
-    if (widget.isEditing && animalId != null) {
-      final currentCaseId = widget.existingData?['currentCaseId'] as String?;
-      if (currentCaseId != null && currentCaseId.isNotEmpty) {
-        final caseSnap = await db.collection('cases').doc(currentCaseId).get();
-        inActiveTreatment = caseSnap.exists &&
-            !RescueStatus.fromFirestoreValue(caseSnap.data()?['status'] as String?).isTerminal;
-      }
-      final vaccines = await db.collection('animals').doc(animalId).collection('vaccinations').get();
-      final records = vaccines.docs.map((d) => VaccinationRecord.fromFirestore(d, animalId)).toList();
-      vaccineCount = records.length;
-      overdue = records.where((r) => r.status == VaccineStatus.overdue).length;
-    }
-    final checks = assessAdoptionReadiness(ReadinessInput(
-      inActiveTreatment: inActiveTreatment,
-      temperament: [for (final e in _temperament.entries) if (e.value) e.key],
-      vaccineCount: vaccineCount,
-      overdueVaccineCount: overdue,
+  /// Loads the readiness facts this form doesn't hold: whether the animal
+  /// is still in an active treatment episode, and its vaccine records.
+  /// Runs once; later calls wait for the same load.
+  Future<void> _loadReadinessFacts() => _readinessFactsLoad ??= () async {
+        final animalId = widget.existingAnimalId;
+        if (!widget.isEditing || animalId == null) {
+          // Nothing to fetch. Runs synchronously from initState, so no
+          // setState here.
+          _vaccineCount = 0;
+          _readinessFactsLoaded = true;
+          return;
+        }
+        final db = FirebaseFirestore.instance;
+        try {
+          final currentCaseId = widget.existingData?['currentCaseId'] as String?;
+          if (currentCaseId != null && currentCaseId.isNotEmpty) {
+            final caseSnap = await db.collection('cases').doc(currentCaseId).get();
+            _inActiveTreatment = caseSnap.exists &&
+                !RescueStatus.fromFirestoreValue(caseSnap.data()?['status'] as String?).isTerminal;
+          }
+          final vaccines = await db.collection('animals').doc(animalId).collection('vaccinations').get();
+          final records = vaccines.docs.map((d) => VaccinationRecord.fromFirestore(d, animalId)).toList();
+          _vaccineCount = records.length;
+          _overdueVaccineCount = records.where((r) => r.status == VaccineStatus.overdue).length;
+        } catch (_) {
+          // Unreadable: treatment falls back to the record's currentCaseId
+          // and vaccines to its legacy flag, so the gate still works.
+          _inActiveTreatment = (widget.existingData?['currentCaseId'] as String? ?? '').isNotEmpty;
+        }
+        if (mounted) setState(() => _readinessFactsLoaded = true);
+      }();
+
+  /// The readiness checklist from this form's current values plus the
+  /// loaded facts. Re-evaluated on every build, so ticking Dewormed or
+  /// adding a photo updates the Adoptable switch straight away.
+  List<ReadinessCheck> get _readinessChecks {
+    final existing = widget.existingData;
+    final checkup = existing?['lastVetCheckup'];
+    final vaccinated = existing?['vaccinated'];
+    final temperament = [for (final e in _temperament.entries) if (e.value) e.key];
+    final otherTraits = [
+      for (final e in [..._compatibility.entries, ..._training.entries]) if (e.value) e.key,
+    ];
+    final fallbackPhoto = widget.prefillData?['photoUrl'] as String?;
+    return assessAdoptionReadiness(ReadinessInput(
+      inActiveTreatment: _inActiveTreatment,
+      vaccineCount: _vaccineCount,
+      overdueVaccineCount: _overdueVaccineCount,
+      vaccinated: vaccinated is bool ? vaccinated : null,
+      dewormed: _dewormed,
       spayedNeutered: _spayedNeutered,
-      currentMedications: widget.existingData?['currentMedications'] as String?,
-      chronicConditions: widget.existingData?['chronicConditions'] as String?,
-      specialNeeds: _selectedSpecialNeedsTypes,
+      lastVetCheckup: checkup is Timestamp ? checkup.toDate() : null,
+      temperament: temperament.isNotEmpty ? temperament : otherTraits,
+      photoCount: _existingPhotoUrls.length +
+          _pickedImages.length +
+          (!widget.isEditing && fallbackPhoto != null && fallbackPhoto.isNotEmpty ? 1 : 0),
     ));
-    if (!mounted) return null;
-    final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
-    final animalName = _nameController.text.trim();
-    return showAdoptionReadinessDialog(
-      context,
-      animalName: animalName.isEmpty ? 'this animal' : animalName,
-      checks: checks,
-      confirmedBy: (name != null && name.isNotEmpty) ? name : 'Admin Staff',
-    );
+  }
+
+  String get _animalDisplayName {
+    final name = _nameController.text.trim();
+    return name.isEmpty ? 'this animal' : name;
+  }
+
+  /// Only a new listing goes through the gate: switching an already
+  /// adoptable record off and back on just restores it.
+  bool get _wasAdoptable => widget.isEditing && widget.existingData?['adoptionStatus'] == 'adoptable';
+
+  /// The Adoptable switch. Off always works. On works straight away when
+  /// every readiness item is met; otherwise it opens the checklist sheet,
+  /// and only an override with a reason turns it on.
+  Future<void> _onAdoptableChanged(bool value) async {
+    if (!value) {
+      setState(() {
+        _isAdoptable = false;
+        _readinessOverrideReason = null;
+      });
+      return;
+    }
+    if (_wasAdoptable) {
+      setState(() => _isAdoptable = true);
+      return;
+    }
+    await _loadReadinessFacts();
+    if (!mounted) return;
+    final checks = _readinessChecks;
+    if (readinessAllMet(checks)) {
+      setState(() {
+        _isAdoptable = true;
+        _readinessOverrideReason = null;
+      });
+      return;
+    }
+    final reason = await showAdoptionReadinessSheet(context, animalName: _animalDisplayName, checks: checks);
+    if (reason == null || !mounted) return;
+    setState(() {
+      _isAdoptable = true;
+      _readinessOverrideReason = reason;
+    });
   }
 
   Future<void> _createRecord() async {
@@ -749,17 +820,32 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       return;
     }
 
-    // Becoming adoptable needs the readiness checklist first; cancelling it
-    // leaves the form open with nothing saved.
+    // Becoming adoptable stores the readiness checklist. Re-evaluated here
+    // in case a field changed after the switch was turned on: if an item
+    // is now unmet and wasn't overridden, the sheet opens again, and
+    // closing it leaves the form open with nothing saved.
     Map<String, dynamic>? readiness;
     if (_becameAdoptableThisSave) {
       setState(() => _isLoading = true);
       try {
-        readiness = await _confirmAdoptionReadiness();
+        await _loadReadinessFacts();
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
-      if (readiness == null) return;
+      if (!mounted) return;
+      final checks = _readinessChecks;
+      if (!readinessAllMet(checks) && _readinessOverrideReason == null) {
+        final reason = await showAdoptionReadinessSheet(context, animalName: _animalDisplayName, checks: checks);
+        if (reason == null || !mounted) return;
+        setState(() => _readinessOverrideReason = reason);
+      }
+      final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
+      readiness = adoptionReadinessRecord(
+        checks: checks,
+        confirmedBy: (name != null && name.isNotEmpty) ? name : 'Admin Staff',
+        confirmedAt: FieldValue.serverTimestamp(),
+        overrideReason: _readinessOverrideReason,
+      );
     }
 
     setState(() {
@@ -968,6 +1054,27 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           ?.trim();
       final actorEmail = FirebaseAuth.instance.currentUser?.email;
       final logRepo = AnimalRecordRepository();
+      if (readiness != null && readiness['overridden'] == true) {
+        final unmet = [for (final c in unmetReadiness(_readinessChecks)) c.label];
+        await logRepo.logManagementEvent(
+          animalId: docRef.id,
+          eventType: 'adoption_readiness_override',
+          action: 'Adoption readiness overridden',
+          description: 'Marked adoptable with unmet items (${unmet.join(', ')}). '
+              'Reason: ${readiness['overrideReason']}',
+          actorId: uid,
+          actorName: (actorDisplayName?.isNotEmpty ?? false)
+              ? actorDisplayName
+              : 'Admin Staff',
+          actorEmail: actorEmail,
+          newValues: {
+            'adoptionStatus': 'adoptable',
+            'unmet': readiness['unmet'],
+            'overrideReason': readiness['overrideReason'],
+          },
+          sourceModule: 'animalRecords',
+        );
+      }
       if (widget.isEditing) {
         final prevSpecialNeedsTypes =
             (widget.existingData?['specialNeedsTypes'] as List?)
@@ -1577,15 +1684,38 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             _FieldLabel('Adoptable'),
             const SizedBox(height: 4),
-            Switch(
-              value: _isAdoptable,
-              onChanged: (v) => setState(() => _isAdoptable = v),
-              activeThumbColor: AppColors.greenrspwn,
-            ),
-            if (_becameAdoptableThisSave)
+            Builder(builder: (context) {
+              final unmet = unmetReadiness(_readinessChecks);
+              // Looks locked (but stays tappable, to open the checklist)
+              // while any readiness item is unmet.
+              final locked = !_isAdoptable && !_wasAdoptable && _readinessFactsLoaded && unmet.isNotEmpty;
+              return Row(
+                children: [
+                  Switch(
+                    value: _isAdoptable,
+                    onChanged: _isLoading ? null : _onAdoptableChanged,
+                    activeThumbColor: AppColors.greenrspwn,
+                    thumbIcon: locked
+                        ? const WidgetStatePropertyAll(Icon(Icons.lock, size: 14, color: AppColors.textSecondary))
+                        : null,
+                    inactiveTrackColor: locked ? AppColors.slaterspwn : null,
+                    trackOutlineColor: locked ? const WidgetStatePropertyAll(AppColors.slaterspwn) : null,
+                  ),
+                  const SizedBox(width: 8),
+                  if (locked)
+                    Expanded(
+                      child: Text(
+                        '${unmet.length} readiness item${unmet.length == 1 ? '' : 's'} not met. Tap to review.',
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ),
+                ],
+              );
+            }),
+            if (_isAdoptable && _readinessOverrideReason != null)
               Text(
-                'You\'ll confirm health, behavior, vaccines, spay/neuter and continuing care before it\'s listed.',
-                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+                'Readiness overridden: $_readinessOverrideReason',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.error, fontStyle: FontStyle.italic),
               ),
             const SizedBox(height: 16),
 

@@ -76,11 +76,27 @@ describe('storage', () => {
     await assertFails(upload('staffB', 'events/orgA/cover_1.jpg'));
     await assertFails(upload('carerA', 'events/orgA/cover_1.jpg'));
     await assertFails(upload('stranger', 'events/orgA/cover_1.jpg'));
-    await assertFails(upload('draftOwner', 'events/orgD/cover_1.jpg'));
+    // An unapproved organization's cover uploads, but firestore.rules
+    // refuses the event itself (Storage can't also read the org doc).
+    await assertSucceeds(upload('draftOwner', 'events/orgD/cover_1.jpg'));
+    await assertFails(upload('draftOwner', 'events/orgA/cover_1.jpg'));
   });
 
-  test('staff of an unapproved organization get no staff access', async () => {
-    await assertFails(upload('draftOwner', 'receipts/1.jpg'));
+  // Storage rules can read only two Firestore documents, so they don't read
+  // organizations/{orgId}: an unapproved organization's approval is
+  // enforced by firestore.rules on the records, not on the files.
+
+  test('organization profile picture: its Admins and platform staff', async () => {
+    const path = 'organizations/orgA/profile/avatar.jpg';
+    await assertSucceeds(upload('ownerA', path));
+    await assertSucceeds(upload('adminA', path));
+    await assertSucceeds(upload('platformMemberA', path));
+    await assertSucceeds(upload('admin', path));
+    await assertFails(upload('staffA', path));
+    await assertFails(upload('fullA', path));
+    await assertFails(upload('inactiveAdminA', path));
+    await assertFails(upload('staffB', path));
+    await assertFails(upload('stranger', path));
   });
 
   test('removed members lose staff access', async () => {

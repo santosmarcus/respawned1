@@ -209,33 +209,56 @@ class YellowPillButton extends StatelessWidget {
   }
 }
 
-class StatusChip extends StatelessWidget {
-  final String status;
-  const StatusChip(this.status, {super.key});
+/// Filled rounded pill, the same shape as the rescue module's
+/// `RescueStatusChip`. Text is dark on light colours and white on dark ones
+/// unless [foreground] says otherwise.
+class DonationPill extends StatelessWidget {
+  final String text;
+  final Color color;
+  final Color? foreground;
+  const DonationPill(this.text, this.color, {super.key, this.foreground});
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (status) {
-      'active' => AppColors.greenrspwn,
-      'goal_met' => const Color(0xFF2E7D32),
-      'goal_not_met' => Colors.deepOrange,
-      'draft' => AppColors.textSecondary,
-      'paused' => const Color(0xFF9C6B10),
-      'archived' => AppColors.textSecondary,
-      _ => AppColors.error,
-    };
+    final fg = foreground ?? (color.computeLuminance() > 0.35 ? AppColors.textPrimary : Colors.white);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        border: Border.all(color: color),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(campaignStatusLabel(status).toUpperCase(),
-          style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w800, color: color)),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+      child: Text(text, style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
     );
   }
 }
+
+/// A donation / sponsorship listing's lifecycle status. (Named apart from
+/// the dashboard's `StatusChip`.)
+class CampaignStatusChip extends StatelessWidget {
+  final String status;
+  const CampaignStatusChip(this.status, {super.key});
+
+  static Color colorFor(String status) => switch (status) {
+    'draft' => AppColors.textSecondary,
+    'active' => AppColors.greenrspwn,
+    'paused' => AppColors.warning,
+    'goal_met' => const Color(0xFF2E7D32),
+    'goal_not_met' => Colors.deepOrange,
+    'closed' => const Color(0xFF9E9E9E),
+    'archived' => const Color(0xFF616161),
+    _ => AppColors.slaterspwn,
+  };
+
+  @override
+  Widget build(BuildContext context) => DonationPill(campaignStatusLabel(status), colorFor(status));
+}
+
+/// Opens [sheet] (usually an [AdminSheetFrame]) as a keyboard-aware bottom
+/// sheet and returns what it pops with.
+Future<T?> showAdminFormSheet<T>(BuildContext context, Widget sheet) => showModalBottomSheet<T>(
+  context: context,
+  isScrollControlled: true,
+  backgroundColor: AppColors.background,
+  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+  builder: (_) => sheet,
+);
 
 /// Figma campaign card (Search Donation/Sponsorship and the general feed):
 /// tinted card, title + chevron, "Funds collected" and time left.
@@ -307,7 +330,7 @@ class CampaignCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                     ),
-                    if (listing.status != 'active') ...[const SizedBox(width: 6), StatusChip(listing.status)],
+                    if (listing.status != 'active') ...[const SizedBox(width: 6), CampaignStatusChip(listing.status)],
                     const Icon(Icons.chevron_right, size: 20, color: AppColors.textPrimary),
                   ],
                 ),
@@ -353,6 +376,44 @@ class CampaignCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Small section title used across the Donations tabs, with an optional
+/// line of help underneath and a link on the right.
+class DonationSectionHeader extends StatelessWidget {
+  final String title;
+  final String? help;
+  final String? action;
+  final VoidCallback? onAction;
+  const DonationSectionHeader(this.title, {super.key, this.help, this.action, this.onAction});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(title, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary))),
+              if (action != null)
+                InkWell(
+                  onTap: onAction,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                    child: Text(action!,
+                        style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  ),
+                ),
+            ],
+          ),
+          if (help != null) Text(help!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+        ],
       ),
     );
   }
@@ -430,14 +491,20 @@ class SheetTextField extends StatelessWidget {
   final String hint;
   final TextInputType? keyboardType;
   final String? prefix;
+  final String? suffix;
   final int maxLines;
+  final bool autofocus;
+  final ValueChanged<String>? onChanged;
   const SheetTextField({
     super.key,
     required this.controller,
     required this.hint,
     this.keyboardType,
     this.prefix,
+    this.suffix,
     this.maxLines = 1,
+    this.autofocus = false,
+    this.onChanged,
   });
 
   @override
@@ -446,10 +513,13 @@ class SheetTextField extends StatelessWidget {
       controller: controller,
       keyboardType: keyboardType,
       maxLines: maxLines,
+      autofocus: autofocus,
+      onChanged: onChanged,
       style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary),
       decoration: InputDecoration(
         hintText: hint,
         prefixText: prefix,
+        suffixText: suffix,
         hintStyle: GoogleFonts.zain(fontSize: 16, color: AppColors.textSecondary),
         enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.slaterspwn)),
         focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.textPrimary)),

@@ -191,6 +191,99 @@ class CaseReferralRepository {
     });
   }
 
+  /// The referring organization takes a still-unanswered referral back
+  /// (organization or LGU). The case returns to the status it had before
+  /// the referral (Rescue Review for older referrals that didn't record
+  /// one), the receiving organization loses access to it, and the existing
+  /// refer sheet can send it somewhere else. Organization referrals also
+  /// come back by themselves after 48 hours with no answer
+  /// (functions/index.js followUpCaseReferrals); LGU referrals only come
+  /// back this way.
+  Future<void> withdraw({
+    required String caseId,
+    required String reason,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final caseRef = _store.caseDoc(caseId);
+    // LGU referrals don't keep their id on the case; find the open one.
+    final open = await _store
+        .referralsOf(caseId)
+        .orderBy('createdAt', descending: true)
+        .limit(5)
+        .get();
+    await _store.db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final c = snap.data() ?? const <String, dynamic>{};
+      if (c['status'] != RescueStatus.referred.firestoreValue) {
+        throw StateError('This case is no longer waiting on a referral.');
+      }
+      final referral = c['referral'] is Map
+          ? Map<String, dynamic>.from(c['referral'] as Map)
+          : const <String, dynamic>{};
+      final targetOrgId = c['referredToOrgId'] as String? ?? '';
+      var referralId = targetOrgId.isNotEmpty ? referral['referralId'] as String? : null;
+      String? barangay;
+      if (referralId == null) {
+        for (final d in open.docs) {
+          final status = d.data()['status'];
+          if (status == ReferralStatus.notified.name || status == ReferralStatus.referredPending.name) {
+            referralId = d.id;
+            barangay = d.data()['barangay'] as String?;
+            break;
+          }
+        }
+      }
+      final previous = targetOrgId.isNotEmpty ? referral['previousStatus'] as String? : null;
+      final backTo = (previous == null || previous.isEmpty || previous == RescueStatus.referred.firestoreValue)
+          ? RescueStatus.pendingReview.firestoreValue
+          : previous;
+      final targetName = targetOrgId.isNotEmpty
+          ? (referral['targetOrgName'] as String? ?? 'the receiving organization')
+          : (barangay == null || barangay.isEmpty ? 'the LGU/barangay' : 'the $barangay LGU/barangay');
+      if (referralId != null) {
+        tx.update(_store.referralsOf(caseId).doc(referralId), {
+          'status': ReferralStatus.withdrawn.name,
+          'respondedAt': FieldValue.serverTimestamp(),
+          'respondedByUid': actorUid,
+          'respondedByName': actorName,
+          'withdrawReason': reason,
+        });
+      }
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        statusLine: 'Referral to $targetName withdrawn. The case is open again.',
+        fields: {
+          'status': backTo,
+          'referredToOrgId': FieldValue.delete(),
+          'referralOutcome': {
+            'status': 'withdrawn',
+            'referralId': referralId,
+            'targetOrgId': targetOrgId.isEmpty ? null : targetOrgId,
+            'targetOrgName': targetOrgId.isEmpty ? targetName : referral['targetOrgName'],
+            'fromOrgId': referral['fromOrgId'],
+            'fromOrgName': referral['fromOrgName'],
+            'reason': reason,
+            'byUid': actorUid,
+            'byName': actorName,
+            'at': FieldValue.serverTimestamp(),
+          },
+        },
+        action: 'referral_withdrawn',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {
+          'referralId': referralId,
+          'targetOrgId': targetOrgId.isEmpty ? null : targetOrgId,
+          'targetName': targetName,
+          'reason': reason,
+          'restoredStatus': backTo,
+        },
+      );
+    });
+  }
+
   Future<String> referToLgu({
     required String caseId,
     required String barangay,

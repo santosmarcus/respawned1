@@ -19,6 +19,7 @@ import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
+import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
 /// The full set of admin root modules the drawer can open, in the required
@@ -27,7 +28,7 @@ import 'package:respawnd1/core/widgets/app_messages.dart';
 /// `shelterResources` removed — it was a permanent no-op placeholder with
 /// no destination page at all; shelter-capacity now lives in Organization
 /// Profile. `audit` added for the new Audit module.
-enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit, organizationReview }
+enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit, organizationReview, members }
 
 /// Pops back to AdminHomeScreen (the app's first/root route) before pushing
 /// the requested module — every drawer module item uses this so switching
@@ -111,9 +112,14 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final organizationId = uid == null
-          ? null
-          : await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
+      // The header above already resolved the id (it watches
+      // currentOrganizationIdProvider); look it up only if it hasn't.
+      final known = ref.read(currentOrganizationIdProvider).asData;
+      final organizationId = known != null
+          ? known.value
+          : uid == null
+              ? null
+              : await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
 
       if (!mounted) return;
       Navigator.pop(context); // close the drawer only once the destination is ready
@@ -185,6 +191,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
   @override
   Widget build(BuildContext context) {
     final header = ref.watch(currentOrganizationHeaderProvider).asData?.value;
+    final orgId = ref.watch(currentOrganizationIdProvider).asData?.value;
     final orgName = header?.name ?? 'Organization';
     final avatarUrl = header?.avatarUrl;
     // Modules follow the member's permissions. Platform staff with no
@@ -203,8 +210,10 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Profile header
-            Padding(
+            // Organization header — opens the Organization Profile.
+            InkWell(
+              onTap: _openingOrgProfile ? null : _handleOpenOrganizationProfile,
+              child: Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
                 children: [
@@ -230,7 +239,13 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  _openingOrgProfile
+                      ? const SizedBox(
+                          width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
+                      : const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
                 ],
+              ),
               ),
             ),
 
@@ -273,7 +288,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
               onTap: () => _openModule(context, (_) => const AdoptionApplicationReviewPage()),
             ),
             if (caps.canViewFinances || caps.canRunCampaigns) _DrawerItem(
-              label: 'Donations',
+              label: 'Donations & Sponsorships',
               selected: widget.active == AdminModule.donations,
               onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
             ),
@@ -317,12 +332,16 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                 selected: widget.active == AdminModule.organizationReview,
                 onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
               ),
-            const Divider(color: Colors.white24),
-            _DrawerItem(
-              label: 'Organization Profile',
-              loading: _openingOrgProfile,
-              onTap: _openingOrgProfile ? null : _handleOpenOrganizationProfile,
-            ),
+            // The organization's team (invite, access, remove); Admins only.
+            // Organization Profile opens from the header above.
+            if (caps.canManageTeam && orgId != null) ...[
+              const Divider(color: Colors.white24),
+              _DrawerItem(
+                label: 'Members',
+                selected: widget.active == AdminModule.members,
+                onTap: () => _openModule(context, (_) => StaffMembersPage(organizationId: orgId)),
+              ),
+            ],
 
             const Spacer(),
 
@@ -362,15 +381,10 @@ class _DrawerItem extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
   final bool selected;
-  // Shows a spinner instead of the chevron and disables taps — used by
-  // Organization Profile while its async membership lookup resolves, so a
-  // slow lookup reads as "in progress" instead of "nothing happened",
-  // and can't be re-triggered by an impatient repeated tap.
-  final bool loading;
   // Items waiting for action (organizations to review); hidden when 0.
   final int? count;
 
-  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.loading = false, this.count});
+  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.count});
 
   @override
   Widget build(BuildContext context) {
@@ -384,21 +398,19 @@ class _DrawerItem extends StatelessWidget {
                 fontSize: 15,
                 color: AppColors.background,
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w500)),
-        trailing: loading
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if ((count ?? 0) > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                      decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(10)),
-                      child: Text('$count',
-                          style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-                    ),
-                  const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
-                ],
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if ((count ?? 0) > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(10)),
+                child: Text('$count',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
               ),
+            const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+          ],
+        ),
         dense: true,
       ),
     );

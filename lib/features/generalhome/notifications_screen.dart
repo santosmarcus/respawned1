@@ -52,6 +52,7 @@ const Map<String, String> _kDonationNotifLabels = {
   'adoption_no_show_closed': 'Adoption',
   'adoption_booking_reminder': 'Adoption',
   'adoption_booking_withdrawn': 'Adoption',
+  'adoption_interview_confirmed': 'Adoption',
   // escalateCriticalReports (functions/index.js): opens the case.
   'critical_report_escalated': 'Urgent Rescue',
 };

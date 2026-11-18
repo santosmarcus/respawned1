@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
@@ -97,6 +98,13 @@ class SponsorAnimalPickerPage extends ConsumerStatefulWidget {
 class _SponsorAnimalPickerPageState extends ConsumerState<SponsorAnimalPickerPage> {
   String _query = '';
   String _species = 'All';
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   bool _matches(AnimalRecord a) {
     if (_species != 'All' && a.species.toLowerCase() != _species.toLowerCase()) return false;
@@ -125,21 +133,11 @@ class _SponsorAnimalPickerPageState extends ConsumerState<SponsorAnimalPickerPag
                 'filled in from its animal record — photo, name, species, description and suggested use of funds. '
                 'Review it, set the monthly amount and publish.',
           ),
-          Padding(
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: 'Search by name or breed',
+            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: TextField(
-              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-              style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: 'Search by name or breed',
-                hintStyle: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary),
-                prefixIcon: const Icon(Icons.search, color: AppColors.textPrimary),
-                filled: true,
-                fillColor: const Color(0xFFFFF1C7),
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-              ),
-            ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
@@ -209,7 +207,7 @@ class _SponsorAnimalPickerPageState extends ConsumerState<SponsorAnimalPickerPag
                         SponsorAnimalTile(
                           animal: a,
                           dimmed: true,
-                          trailing: StatusChip(open[a.id]!.status),
+                          trailing: CampaignStatusChip(open[a.id]!.status),
                           onTap: () => Navigator.push(context,
                               MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: open[a.id]!.id))),
                         ),

@@ -82,6 +82,11 @@ class RescueCaseCard extends StatelessWidget {
   /// other tab.
   final ClosureCardInfo? closureInfo;
 
+  /// Closed-tab only — one bold line saying how the case left the pipeline:
+  /// "Referred to X · waiting 5h", "Intaked", "Cancelled". Computed by the
+  /// caller; null on every other tab.
+  final String? outcomeNote;
+
   /// Restricts the species-summary/animal-count line to only the animals
   /// currently in this stage (spec §7: "card/page must show only the
   /// animals relevant to that stage") — e.g. 'intake' on the Intake tab so
@@ -99,6 +104,7 @@ class RescueCaseCard extends StatelessWidget {
     this.pendingOfferNote,
     this.rejectionInfo,
     this.closureInfo,
+    this.outcomeNote,
     this.stageFilter,
   });
 
@@ -225,6 +231,17 @@ class RescueCaseCard extends StatelessWidget {
                     ),
                   if (dateTimeLine.isNotEmpty)
                     Text(dateTimeLine, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                  if (outcomeNote != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        outcomeNote!,
+                        style: GoogleFonts.zain(
+                            fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   if (rejectionInfo != null) ..._rejectionInfoLines(rejectionInfo!),
                   if (closureInfo != null) ..._closureInfoLines(closureInfo!),
                   const SizedBox(height: 4),

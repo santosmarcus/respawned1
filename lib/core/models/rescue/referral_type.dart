@@ -22,6 +22,9 @@ enum ReferralStatus {
   // The receiving organization didn't answer in time; the case went back
   // to the referring organization (functions/index.js followUpCaseReferrals).
   expired,
+  // The referring organization took the case back before it was answered
+  // (CaseReferralRepository.withdraw).
+  withdrawn,
   notified; // used for LGU referrals, which are one-way notifications
 
   static ReferralStatus fromName(String? value) => ReferralStatus.values

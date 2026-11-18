@@ -48,7 +48,7 @@ void main() {
   test('transporter status labels', () {
     expect(transporterStatusLabel('approved'), 'Verified');
     expect(transporterStatusLabel('pending'), 'Waiting for organization review');
-    expect(transporterStatusLabel('rejected'), 'Not approved');
+    expect(transporterStatusLabel('rejected'), 'Rejected');
     expect(transporterStatusLabel(''), 'Documents not submitted');
   });
 

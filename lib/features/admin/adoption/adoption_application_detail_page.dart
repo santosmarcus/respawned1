@@ -37,9 +37,6 @@ class AdoptionApplicationDetailPage extends ConsumerStatefulWidget {
 }
 
 class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicationDetailPage> {
-  bool _responsesExpanded = false;
-  bool _historyExpanded = false;
-  bool _fitAssessmentExpanded = false;
   bool _busy = false;
   final _noteController = TextEditingController();
 
@@ -78,6 +75,18 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     await _run(() => ref
         .read(adoptionApplicationRepositoryProvider)
         .completeInterview(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
+  }
+
+  Future<void> _confirmInterview(AdoptionApplication app) async {
+    final when = '${_fmtDate(app.appointmentDate)}${app.appointmentTime != null ? ' · ${app.appointmentTime}' : ''}';
+    final confirmed = await showConfirmActionDialog(context,
+        title: 'Confirm Interview?',
+        message: 'This moves the application to Interview and tells ${app.adopterName} their interview on $when is confirmed.',
+        confirmLabel: 'Confirm Interview');
+    if (!confirmed) return;
+    await _run(() => ref
+        .read(adoptionApplicationRepositoryProvider)
+        .confirmInterview(applicationId: app.id, actorUid: _actorUid, actorName: _actorName));
   }
 
   Future<void> _markNoShow(AdoptionApplication app) async {
@@ -288,78 +297,300 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _AnimalHeaderCard(app: app),
-                  const SizedBox(height: 16),
-
-                  SectionCard(title: 'Details', child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        Expanded(child: _InfoItem('Name', app.adopterName)),
-                        Expanded(child: _InfoItem('Location', app.adopterCity ?? kNotProvided)),
-                      ]),
-                      Row(children: [
-                        Expanded(child: _InfoItem('Email', app.adopterEmail)),
-                        Expanded(child: _InfoItem('Phone', app.adopterPhone)),
-                      ]),
-                    ],
-                  )),
-
-                  const SizedBox(height: 12),
-                  _FitAssessmentCard(
-                    app: app,
-                    expanded: _fitAssessmentExpanded,
-                    onToggle: () => setState(() => _fitAssessmentExpanded = !_fitAssessmentExpanded),
-                  ),
-
-                  const SizedBox(height: 12),
-                  _ApplicantHistorySection(
-                    app: app,
-                    expanded: _historyExpanded,
-                    onToggle: () => setState(() => _historyExpanded = !_historyExpanded),
-                  ),
-
-                  const SizedBox(height: 12),
-                  _ResponsesSection(
-                    app: app,
-                    expanded: _responsesExpanded,
-                    onToggle: () => setState(() => _responsesExpanded = !_responsesExpanded),
-                  ),
-
-                  const SizedBox(height: 12),
-                  _DocumentsSection(app: app),
-
-                  const SizedBox(height: 12),
-                  _AppointmentSection(
-                    app: app,
-                    busy: _busy,
-                    onCompleteInterview: () => _completeInterview(app),
-                    onReschedule: () => _reschedule(app),
-                    onNoShow: () => _markNoShow(app),
-                  ),
-
-                  const SizedBox(height: 12),
-                  _NotesSection(app: app, controller: _noteController, busy: _busy, onSave: () => _saveNote(app)),
-
-                  const SizedBox(height: 20),
-                  _ActionsSection(
-                    app: app,
-                    busy: _busy,
-                    onAccept: () => _accept(app),
-                    onReject: () => _reject(app),
-                    onReserve: () => _reserve(app),
-                    onUnreserve: () => _unreserve(app),
-                    onRelease: () => _release(app),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
+              child: _buildBody(app),
             ),
     );
   }
+
+  /// One page for every phase: a stepper and a "current step" card holding
+  /// what staff act on now, then the reference sections. The existing
+  /// section widgets are each placed exactly once — inside the current-step
+  /// card when they are this phase's work, otherwise further down.
+  Widget _buildBody(AdoptionApplication app) {
+    final status = app.status;
+    // While the application is still being reviewed, the review material
+    // starts open; once it has moved on it is reference, so it starts
+    // collapsed. Keys carry the status so a phase change (e.g. Accept)
+    // resets each section to the new phase's default.
+    final reviewing = status == AdoptionStatus.pending;
+    final interviewIsCurrent = status == AdoptionStatus.interview;
+
+    final appointment = _AppointmentSection(
+      app: app,
+      busy: _busy,
+      onCompleteInterview: () => _completeInterview(app),
+      onReschedule: () => _reschedule(app),
+      onNoShow: () => _markNoShow(app),
+    );
+    final notes = _NotesSection(app: app, controller: _noteController, busy: _busy, onSave: () => _saveNote(app));
+    final actions = _ActionsSection(
+      app: app,
+      busy: _busy,
+      onConfirmInterview: () => _confirmInterview(app),
+      onAccept: () => _accept(app),
+      onReject: () => _reject(app),
+      onReserve: () => _reserve(app),
+      onUnreserve: () => _unreserve(app),
+      onRelease: () => _release(app),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _AnimalHeaderCard(app: app),
+        const SizedBox(height: 14),
+        _PhaseStepper(status: status),
+        const SizedBox(height: 14),
+
+        _CurrentStepCard(
+          app: app,
+          children: [
+            if (status == AdoptionStatus.pending) _PendingReviewChecklist(app: app),
+            if (interviewIsCurrent) ...[appointment, notes],
+            actions,
+          ],
+        ),
+
+        const SizedBox(height: 16),
+        SectionCard(title: 'Details', child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Expanded(child: _InfoItem('Name', app.adopterName)),
+              Expanded(child: _InfoItem('Location', app.adopterCity ?? kNotProvided)),
+            ]),
+            Row(children: [
+              Expanded(child: _InfoItem('Email', app.adopterEmail)),
+              Expanded(child: _InfoItem('Phone', app.adopterPhone)),
+            ]),
+          ],
+        )),
+
+        const SizedBox(height: 12),
+        _FitAssessmentCard(key: ValueKey('fit-${status.name}'), app: app, initiallyExpanded: false),
+
+        const SizedBox(height: 12),
+        _ApplicantHistorySection(key: ValueKey('history-${status.name}'), app: app, initiallyExpanded: false),
+
+        const SizedBox(height: 12),
+        _ResponsesSection(key: ValueKey('responses-${status.name}'), app: app, initiallyExpanded: reviewing),
+
+        const SizedBox(height: 12),
+        _DocumentsSection(key: ValueKey('documents-${status.name}'), app: app, initiallyExpanded: reviewing),
+
+        if (!interviewIsCurrent) ...[
+          const SizedBox(height: 12),
+          appointment,
+          const SizedBox(height: 12),
+          notes,
+        ],
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
+// ---- Phase stepper + current step ----------------------------------------
+
+const _kPhaseLabels = ['Pending', 'Interview', 'Release', 'Adopted'];
+
+/// Index into [_kPhaseLabels]; null for a closed (rejected/withdrawn)
+/// application, which sits outside the pipeline.
+int? _phaseIndex(AdoptionStatus status) => switch (status) {
+      AdoptionStatus.pending => 0,
+      AdoptionStatus.interview => 1,
+      AdoptionStatus.approved => 2,
+      AdoptionStatus.adopted => 3,
+      AdoptionStatus.rejected || AdoptionStatus.withdrawn => null,
+    };
+
+class _PhaseStepper extends StatelessWidget {
+  final AdoptionStatus status;
+  const _PhaseStepper({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final current = _phaseIndex(status);
+    final closed = current == null;
+    return Opacity(
+      opacity: closed ? 0.5 : 1,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < _kPhaseLabels.length; i++)
+            Expanded(
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: i == 0 ? const SizedBox() : _line(done: !closed && i <= current)),
+                      _dot(i, current),
+                      Expanded(child: i == _kPhaseLabels.length - 1 ? const SizedBox() : _line(done: !closed && i < current)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _kPhaseLabels[i],
+                    style: GoogleFonts.zain(
+                      fontSize: 11,
+                      fontWeight: i == current ? FontWeight.w700 : FontWeight.w500,
+                      color: i == current ? AppColors.textPrimary : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _line({required bool done}) =>
+      Container(height: 2, color: done ? AppColors.greenrspwn : AppColors.slaterspwn);
+
+  Widget _dot(int i, int? current) {
+    final done = current != null && i < current;
+    final isCurrent = i == current;
+    return Container(
+      width: 22,
+      height: 22,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: done ? AppColors.greenrspwn : (isCurrent ? AppColors.yellowrspwn : Colors.white),
+        border: Border.all(color: done ? AppColors.greenrspwn : (isCurrent ? AppColors.textPrimary : AppColors.slaterspwn)),
+      ),
+      child: done
+          ? const Icon(Icons.check, size: 14, color: Colors.white)
+          : Text('${i + 1}', style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+    );
+  }
+}
+
+/// The highlighted block at the top of the page: what staff do in this
+/// phase. It only frames the existing section widgets and actions passed
+/// in as [children]; it adds no actions of its own.
+class _CurrentStepCard extends StatelessWidget {
+  final AdoptionApplication app;
+  final List<Widget> children;
+  const _CurrentStepCard({required this.app, required this.children});
+
+  (String, String) get _copy => switch (app.status) {
+        AdoptionStatus.pending => (
+            'Review the application',
+            'Review the responses and documents, then confirm the interview the applicant booked.',
+          ),
+        AdoptionStatus.interview => (
+            'Hold the interview',
+            'Complete the interview and record your notes, then Accept or Reject.',
+          ),
+        AdoptionStatus.approved => (
+            'Release the animal',
+            'Reserve the animal for this adopter, then set the release date and follow-ups.',
+          ),
+        AdoptionStatus.adopted => (
+            'Post-adoption',
+            'The animal is home. Follow-ups and returns are handled on the Post-Adoption page.',
+          ),
+        AdoptionStatus.rejected || AdoptionStatus.withdrawn => (
+            'Closed',
+            'This application is no longer active.',
+          ),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final (title, hint) = _copy;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.yellowrspwn.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.yellowrspwn),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('CURRENT STEP', style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: AppColors.textSecondary)),
+          Text(title, style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+          const SizedBox(height: 2),
+          Text(hint, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          for (final child in children) ...[
+            const SizedBox(height: 12),
+            child,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Pending phase: a glance at what there is to review before deciding.
+class _PendingReviewChecklist extends StatelessWidget {
+  final AdoptionApplication app;
+  const _PendingReviewChecklist({required this.app});
+
+  @override
+  Widget build(BuildContext context) {
+    final uploads = (app.raw['uploads'] as Map?) ?? const {};
+    final docsProvided = _DocumentsSection.providedCount(uploads);
+    final booked = app.appointmentDate != null;
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _row(Icons.description_outlined, 'Responses', 'Application form completed', true),
+          _row(Icons.folder_open_outlined, 'Documents', '$docsProvided of ${_DocumentsSection.kDocumentCount} provided',
+              docsProvided == _DocumentsSection.kDocumentCount),
+          _row(
+            Icons.event_outlined,
+            'Interview',
+            booked
+                ? 'Booked for ${_fmtDate(app.appointmentDate)}${app.appointmentTime != null ? ' · ${app.appointmentTime}' : ''}'
+                : 'Not booked yet',
+            booked,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(IconData icon, String label, String value, bool ok) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: ok ? AppColors.greenrspwn : AppColors.textSecondary),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 80,
+              child: Text(label, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            ),
+            Expanded(child: Text(value, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))),
+          ],
+        ),
+      );
+}
+
+/// Header row shared by the collapsible sections: title + chevron.
+class _CollapsibleHeader extends StatelessWidget {
+  final String title;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final double fontSize;
+  const _CollapsibleHeader({required this.title, required this.expanded, required this.onToggle, this.fontSize = 15});
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onToggle,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title, style: GoogleFonts.tiltWarp(fontSize: fontSize, color: AppColors.textPrimary)),
+            Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textSecondary),
+          ],
+        ),
+      );
 }
 
 class _AnimalHeaderCard extends ConsumerWidget {
@@ -424,11 +655,21 @@ class _InfoItem extends StatelessWidget {
 
 // ---- Fit Assessment -----------------------------------------------------
 
-class _FitAssessmentCard extends ConsumerWidget {
+/// Collapsed shows the score/band; expanded adds the breakdown.
+class _FitAssessmentCard extends ConsumerStatefulWidget {
   final AdoptionApplication app;
-  final bool expanded;
-  final VoidCallback onToggle;
-  const _FitAssessmentCard({required this.app, required this.expanded, required this.onToggle});
+  final bool initiallyExpanded;
+  const _FitAssessmentCard({super.key, required this.app, this.initiallyExpanded = false});
+
+  @override
+  ConsumerState<_FitAssessmentCard> createState() => _FitAssessmentCardState();
+}
+
+class _FitAssessmentCardState extends ConsumerState<_FitAssessmentCard> {
+  late bool expanded = widget.initiallyExpanded;
+
+  AdoptionApplication get app => widget.app;
+  void onToggle() => setState(() => expanded = !expanded);
 
   Color _bandColor(FitAssessmentBand band) => switch (band) {
         FitAssessmentBand.strong => AppColors.greenrspwn,
@@ -438,7 +679,7 @@ class _FitAssessmentCard extends ConsumerWidget {
       };
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     // Once staff accepted or rejected the application, show the score they
     // saw then (saved with the decision), never a recalculated one.
     final saved = app.fitAtDecision;
@@ -638,15 +879,21 @@ class _SavedFitAssessment extends StatelessWidget {
 
 // ---- Responses (collapsible) --------------------------------------------
 
-class _ResponsesSection extends StatelessWidget {
+class _ResponsesSection extends StatefulWidget {
   final AdoptionApplication app;
-  final bool expanded;
-  final VoidCallback onToggle;
-  const _ResponsesSection({required this.app, required this.expanded, required this.onToggle});
+  final bool initiallyExpanded;
+  const _ResponsesSection({super.key, required this.app, this.initiallyExpanded = false});
+
+  @override
+  State<_ResponsesSection> createState() => _ResponsesSectionState();
+}
+
+class _ResponsesSectionState extends State<_ResponsesSection> {
+  late bool expanded = widget.initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
-    final sections = buildAdoptionResponseSections(app.raw);
+    final sections = buildAdoptionResponseSections(widget.app.raw);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -654,16 +901,7 @@ class _ResponsesSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            onTap: onToggle,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Responses', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textSecondary),
-              ],
-            ),
-          ),
+          _CollapsibleHeader(title: 'Responses', expanded: expanded, onToggle: () => setState(() => expanded = !expanded)),
           if (!expanded)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -690,14 +928,21 @@ class _ResponsesSection extends StatelessWidget {
 
 // ---- Applicant History ---------------------------------------------------
 
-class _ApplicantHistorySection extends ConsumerWidget {
+class _ApplicantHistorySection extends ConsumerStatefulWidget {
   final AdoptionApplication app;
-  final bool expanded;
-  final VoidCallback onToggle;
-  const _ApplicantHistorySection({required this.app, required this.expanded, required this.onToggle});
+  final bool initiallyExpanded;
+  const _ApplicantHistorySection({super.key, required this.app, this.initiallyExpanded = false});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ApplicantHistorySection> createState() => _ApplicantHistorySectionState();
+}
+
+class _ApplicantHistorySectionState extends ConsumerState<_ApplicantHistorySection> {
+  late bool expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = widget.app;
     if (app.adopterId.isEmpty) return const SizedBox.shrink();
     // Watched unconditionally (not gated on `expanded`) so Riverpod keeps
     // one cached subscription regardless of how many times the tile is
@@ -718,16 +963,8 @@ class _ApplicantHistorySection extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            onTap: onToggle,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Application History', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppColors.textSecondary),
-              ],
-            ),
-          ),
+          _CollapsibleHeader(
+              title: 'Application History', expanded: expanded, onToggle: () => setState(() => expanded = !expanded)),
           if (expanded) ...[
             const SizedBox(height: 10),
             if (historyAsync.isLoading)
@@ -772,11 +1009,22 @@ class _ApplicantHistorySection extends ConsumerWidget {
 
 // ---- Documents ------------------------------------------------------------
 
-class _DocumentsSection extends StatelessWidget {
+class _DocumentsSection extends StatefulWidget {
   final AdoptionApplication app;
-  const _DocumentsSection({required this.app});
+  final bool initiallyExpanded;
+  const _DocumentsSection({super.key, required this.app, this.initiallyExpanded = false});
 
-  bool _looksLikeUrl(String v) => v.startsWith('http://') || v.startsWith('https://');
+  /// Government ID, Proof of Address, Home Photos.
+  static const kDocumentCount = 3;
+
+  /// How many of the [kDocumentCount] documents have at least one file.
+  static int providedCount(Map uploads) => [
+        _urlsFor(uploads['governmentId']),
+        _urlsFor(uploads['proofOfAddress']),
+        _urlsFor(uploads['homePhotos']),
+      ].where((urls) => urls.isNotEmpty).length;
+
+  static bool _looksLikeUrl(String v) => v.startsWith('http://') || v.startsWith('https://');
 
   /// Accepts every shape a value under `uploads.*` has actually been
   /// written as: null, a single URL string, a list of URL strings, or (for
@@ -784,7 +1032,7 @@ class _DocumentsSection extends StatelessWidget {
   /// url/downloadUrl/imageUrl key. Never crashes on an unexpected shape —
   /// anything that isn't recognizably a URL is silently dropped rather than
   /// shown broken.
-  List<String> _urlsFor(dynamic value) {
+  static List<String> _urlsFor(dynamic value) {
     if (value == null) return const [];
     if (value is String) return _looksLikeUrl(value) ? [value] : const [];
     if (value is List) {
@@ -807,36 +1055,57 @@ class _DocumentsSection extends StatelessWidget {
   }
 
   @override
+  State<_DocumentsSection> createState() => _DocumentsSectionState();
+}
+
+class _DocumentsSectionState extends State<_DocumentsSection> {
+  late bool expanded = widget.initiallyExpanded;
+
+  @override
   Widget build(BuildContext context) {
-    final uploads = (app.raw['uploads'] as Map?) ?? const {};
-    final governmentId = _urlsFor(uploads['governmentId']);
-    final proofOfAddress = _urlsFor(uploads['proofOfAddress']);
+    final uploads = (widget.app.raw['uploads'] as Map?) ?? const {};
+    final governmentId = _DocumentsSection._urlsFor(uploads['governmentId']);
+    final proofOfAddress = _DocumentsSection._urlsFor(uploads['proofOfAddress']);
     // Never read from anything but uploads.homePhotos — never
     // applicationDocuments, treatmentMedia, receipts, or the Animal
     // Record's own images.
-    final homePhotos = _urlsFor(uploads['homePhotos']);
+    final homePhotos = _DocumentsSection._urlsFor(uploads['homePhotos']);
 
     return SectionCard(
-      title: 'Required Documents',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _DocumentRow(label: 'Government ID', urls: governmentId),
-          _DocumentRow(label: 'Proof of Address', urls: proofOfAddress),
-          const SizedBox(height: 4),
-          Text('Home Photos${homePhotos.length > 1 ? ' (${homePhotos.length})' : ''}',
-              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
-          if (homePhotos.isEmpty)
+          _CollapsibleHeader(
+            title: 'Required Documents',
+            fontSize: 14,
+            expanded: expanded,
+            onToggle: () => setState(() => expanded = !expanded),
+          ),
+          if (!expanded)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Text(kNotProvided, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: PhotoThumbnailStrip(photoUrls: homePhotos),
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('${_DocumentsSection.providedCount(uploads)} of ${_DocumentsSection.kDocumentCount} provided',
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
             ),
+          if (expanded) ...[
+            const SizedBox(height: 8),
+            _DocumentRow(label: 'Government ID', urls: governmentId),
+            _DocumentRow(label: 'Proof of Address', urls: proofOfAddress),
+            const SizedBox(height: 4),
+            Text('Home Photos${homePhotos.length > 1 ? ' (${homePhotos.length})' : ''}',
+                style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            if (homePhotos.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(kNotProvided, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: PhotoThumbnailStrip(photoUrls: homePhotos),
+              ),
+          ],
         ],
       ),
     );
@@ -996,7 +1265,9 @@ class _AppointmentSection extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (app.interviewCompletedAt == null && app.noShowAt == null)
+                // Completing waits until staff confirmed the interview
+                // (Pending → Interview via Confirm Interview).
+                if (app.status == AdoptionStatus.interview && app.interviewCompletedAt == null && app.noShowAt == null)
                   ElevatedButton(
                     onPressed: busy ? null : onCompleteInterview,
                     style: _yellowButton(),
@@ -1098,6 +1369,7 @@ class _NotesSection extends ConsumerWidget {
 class _ActionsSection extends ConsumerWidget {
   final AdoptionApplication app;
   final bool busy;
+  final VoidCallback onConfirmInterview;
   final VoidCallback onAccept;
   final VoidCallback onReject;
   final VoidCallback onReserve;
@@ -1106,6 +1378,7 @@ class _ActionsSection extends ConsumerWidget {
   const _ActionsSection({
     required this.app,
     required this.busy,
+    required this.onConfirmInterview,
     required this.onAccept,
     required this.onReject,
     required this.onReserve,
@@ -1165,39 +1438,54 @@ class _ActionsSection extends ConsumerWidget {
           ],
         );
       case AdoptionStatus.pending:
+        // Pending → Interview: staff confirm the slot the applicant booked.
+        final booked = app.appointmentDate != null;
+        return _decisionRow(
+          hint: booked ? null : 'Waiting for the applicant to book an interview.',
+          primaryLabel: 'Confirm Interview',
+          onPrimary: (busy || !booked) ? null : onConfirmInterview,
+        );
       case AdoptionStatus.interview:
-        final canAccept = app.status == AdoptionStatus.interview && app.interviewCompletedAt != null;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!canAccept)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text('Accept becomes available once the interview is completed.',
-                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-              ),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: busy ? null : onReject,
-                    style: AppButtons.dangerOutline,
-                    child: const Text('Reject'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: (busy || !canAccept) ? null : onAccept,
-                    style: AppButtons.primary,
-                    child: const Text('Accept'),
-                  ),
-                ),
-              ],
-            ),
-          ],
+        final canAccept = app.interviewCompletedAt != null;
+        return _decisionRow(
+          hint: canAccept ? null : 'Accept becomes available once the interview is completed.',
+          primaryLabel: 'Accept',
+          onPrimary: (busy || !canAccept) ? null : onAccept,
         );
     }
+  }
+
+  /// Reject on the left, the phase's forward action on the right.
+  Widget _decisionRow({required String? hint, required String primaryLabel, required VoidCallback? onPrimary}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hint != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(hint, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+          ),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: busy ? null : onReject,
+                style: AppButtons.dangerOutline,
+                child: const Text('Reject'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: onPrimary,
+                style: AppButtons.primary,
+                child: Text(primaryLabel),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 

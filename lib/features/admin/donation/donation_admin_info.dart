@@ -26,7 +26,7 @@ class DonationAdminInfoPage extends ConsumerWidget {
       body: Column(
         children: [
           const DonationAdminHeader(
-            title: 'Donation/Sponsorship',
+            title: 'Donations & Sponsorships',
             helpText: 'Total Received counts only verified money: PayMongo payments confirmed by the server and offline '
                 'payments recorded by a financial administrator. Available Balance = received + transfers in − '
                 'allocations − transfers out.',
@@ -90,7 +90,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           children: [
             Expanded(child: Text(c.title, style: GoogleFonts.tiltWarp(fontSize: 19, color: AppColors.textPrimary))),
             const SizedBox(width: 8),
-            StatusChip(c.status),
+            CampaignStatusChip(c.status),
           ],
         ),
         const SizedBox(height: 4),

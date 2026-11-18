@@ -28,7 +28,7 @@ import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
-import 'package:respawnd1/features/admin/donation/refund_request_page.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 
 /// The "Today" tab, top to bottom: Priority actions, Rescue readiness for
 /// today, Rescue, Shelter care, Adoption, Donations & funds and Volunteer
@@ -1112,7 +1112,7 @@ class _FundsBody extends ConsumerWidget {
                       InkWell(
                         onTap: () => Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const RefundRequestsPage()),
+                          MaterialPageRoute(builder: (_) => const DonationAdminHomeScreen(openOnRefunds: true)),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),

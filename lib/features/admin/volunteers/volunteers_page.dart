@@ -303,13 +303,13 @@ Widget _pill(String text, Color color) => Container(
       child: Text(text, style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
     );
 
-/// Verified / Under review / Not approved / Not submitted, from the
+/// Verified / Under review / Rejected / Not submitted, from the
 /// transporter's users doc.
 Widget transporterVerificationPill(PetTransporter t) {
   if (t.isVerified || t.verificationStatus == 'approved') return _pill('Verified', AppColors.greenrspwn);
   return switch (t.verificationStatus) {
     'pending' => _pill('Under review', const Color(0xFFE0A800)),
-    'rejected' => _pill('Not approved', AppColors.error),
+    'rejected' => _pill('Rejected', AppColors.error),
     _ => _pill('Not submitted', AppColors.slaterspwn),
   };
 }

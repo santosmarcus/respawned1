@@ -125,32 +125,28 @@ const double kDefaultServiceAreaRadiusKm = 10;
 /// service area that doesn't have one yet, by geocoding "`<city>, <region>`,
 /// Philippines". functions/index.js tags each new rescue case with the
 /// organizations whose geofence contains it. Areas that can't be geocoded
-/// are saved unchanged.
-Future<List<ServiceArea>> withCoverageGeofences(List<ServiceArea> areas) async {
-  final result = <ServiceArea>[];
-  for (final area in areas) {
-    if (area.hasGeofence) {
-      result.add(area);
-      continue;
-    }
+/// are saved unchanged. New areas are geocoded at the same time, in order.
+Future<List<ServiceArea>> withCoverageGeofences(List<ServiceArea> areas) {
+  Future<ServiceArea> withGeofence(ServiceArea area) async {
+    if (area.hasGeofence) return area;
     try {
       final region = area.administrativeArea;
       final query = [area.name, if (region != null && region.isNotEmpty) region, 'Philippines'].join(', ');
       final hits = await locationFromAddress(query).timeout(const Duration(seconds: 8));
       if (hits.isNotEmpty) {
-        result.add(area.withGeofence(
+        return area.withGeofence(
           lat: hits.first.latitude,
           lng: hits.first.longitude,
           radiusKm: kDefaultServiceAreaRadiusKm,
-        ));
-        continue;
+        );
       }
     } catch (_) {
       // fall through: keep the area without a geofence
     }
-    result.add(area);
+    return area;
   }
-  return result;
+
+  return Future.wait(areas.map(withGeofence));
 }
 
 /// One organization in platform staff's verification review queue.

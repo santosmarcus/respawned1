@@ -1073,13 +1073,23 @@ service cloud.firestore {
           request.resource.data.get('organizationId', '') == '') ||
         canRecordOf(request.resource.data.get('organizationId', ''), ['rescue'])
       );
+      // CaseReferralRepository.withdraw: only the referring side (staff of
+      // the organization that owns the case, with rescue, or the shared
+      // pool for an unowned case) takes a referral back; the organization
+      // it was referred to answers it with accept or decline instead.
+      function referralWithdrawOk() {
+        return request.resource.data.get('referralOutcome', {}).get('status', '') != 'withdrawn' ||
+          !changedAny(['referralOutcome']) ||
+          canRecordOf(resource.data.get('organizationId', ''), ['rescue']);
+      }
+
       // The cheap, document-only checks run first so the ones with lookups
       // stay inside Firestore's 1,000-expression budget
       // (rules-tests/tests/expression-budget.test.js).
       allow update: if signedIn() && (
         communityClaimUpdate() ||
         clearOfferPointer() ||
-        (canStaffCase(resource.data) && orgStampOk(['rescue'])) ||
+        (canStaffCase(resource.data) && orgStampOk(['rescue']) && referralWithdrawOk()) ||
         reporterUpdate() ||
         transporterUpdate() ||
         willingAdopterUpdate() ||

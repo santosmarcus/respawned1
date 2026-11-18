@@ -40,7 +40,7 @@ const _tabs = [
   (OrgVerificationStatus.pending, 'Under review'),
   (OrgVerificationStatus.requiresChanges, 'Needs changes'),
   (OrgVerificationStatus.approved, 'Approved'),
-  (OrgVerificationStatus.rejected, 'Not approved'),
+  (OrgVerificationStatus.rejected, 'Rejected'),
 ];
 
 class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
@@ -80,10 +80,10 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
       case OrgVerificationStatus.rejected:
         note = await showTextInputDialog(
           context,
-          title: 'Not approve $name?',
+          title: 'Reject $name?',
           message: 'The owner sees this status and your note.',
           label: 'Reason',
-          confirmLabel: 'Not approve',
+          confirmLabel: 'Reject',
           required: true,
           destructive: true,
         );
@@ -100,7 +100,7 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
         switch (decision) {
           OrgVerificationStatus.approved => 'Organization approved.',
           OrgVerificationStatus.requiresChanges => 'Changes requested.',
-          _ => 'Organization not approved.',
+          _ => 'Organization rejected.',
         },
         kind: AppMessageKind.success,
       ));

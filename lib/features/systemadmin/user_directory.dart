@@ -113,7 +113,7 @@ AccountGroup groupOf(DirectoryUser u) => switch (u.role) {
 String transporterStatusLabel(String status) => switch (status) {
       'approved' => 'Verified',
       'pending' => 'Waiting for organization review',
-      'rejected' => 'Not approved',
+      'rejected' => 'Rejected',
       _ => 'Documents not submitted',
     };
 

@@ -22,7 +22,9 @@ import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -817,8 +819,60 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             .asData
             ?.value;
 
+        final c = RescueCase.fromMap(widget.caseId, data);
+        final isIntakeMode = widget.mode == TrackingMode.intakeTransfer;
+        final reachedClinic = _kArrivedAtClinicStatuses.contains(data['status']);
+        final hasReceivedIntake = data['intakeReceivedAt'] != null;
+        // Change Clinic and Close Case used to sit in the app bar's menu;
+        // they're the action bar's overflow now.
+        final overflow = <CaseAction>[
+          // Testing without GPS, before the transporter reaches the clinic.
+          if (!isIntakeMode && !reachedClinic)
+            CaseAction('Fast-forward to Clinic (Test)', _fastForwardToClinic, icon: Icons.fast_forward),
+          if (data['vetClinicName'] != null)
+            CaseAction('Change Clinic', _closing ? null : () => _changeClinic(c), icon: Icons.local_hospital_outlined),
+          // Controlled Close Case (spec §3) — full reason picker, no
+          // preset; an animal-moved location update only ever comes from an
+          // approved Community Report.
+          CaseAction('Close Case', _closing ? null : () => _closeCase(c), icon: Icons.block, destructive: true),
+        ];
+        // Intake transport confirms arrival at the shelter (that doesn't move
+        // the case past Intake); a rescue pickup proceeds to treatment only
+        // once the transporter has actually reached the clinic.
+        final CaseAction? primary = isIntakeMode
+            ? (hasReceivedIntake ? null : CaseAction('Confirm Animal Received', () => _confirmAnimalReceived(assignment)))
+            : CaseAction('Proceed to Treatment',
+                reachedClinic && !_isProceedingToTreatment ? () => _proceedToTreatment(data) : null);
+        final banner = isIntakeMode
+            ? (hasReceivedIntake
+                ? const CaseOutcomeBanner(tone: CaseBannerTone.success, title: 'Animal received at the shelter.')
+                : const CaseOutcomeBanner(
+                    tone: CaseBannerTone.info,
+                    icon: Icons.local_shipping_outlined,
+                    title: 'On the way to the shelter',
+                    message: 'Confirm when the animal arrives; quarantine and the animal record continue on Intake Details.',
+                  ))
+            : reachedClinic
+                ? const CaseOutcomeBanner(
+                    tone: CaseBannerTone.success,
+                    icon: Icons.local_hospital_outlined,
+                    title: 'Transporter is at the clinic',
+                    message: 'Proceed to Treatment to start the treatment log.',
+                  )
+                : const CaseOutcomeBanner(
+                    tone: CaseBannerTone.info,
+                    icon: Icons.local_shipping_outlined,
+                    title: 'Waiting for the transporter to reach the clinic…',
+                    message: 'Proceed to Treatment unlocks on arrival.',
+                  );
+
         return Scaffold(
           backgroundColor: AppColors.background,
+          bottomNavigationBar: CaseActionBar(
+            primary: primary,
+            overflow: overflow,
+            busy: _isProceedingToTreatment,
+          ),
           appBar: AppBar(
             backgroundColor: AppColors.textPrimary,
             leading: IconButton(
@@ -834,39 +888,6 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                 color: AppColors.background,
               ),
             ),
-            actions: [
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: AppColors.background),
-                enabled: !_closing,
-                onSelected: (value) {
-                  final c = RescueCase.fromMap(widget.caseId, data);
-                  if (value == 'change_clinic') {
-                    _changeClinic(c);
-                  } else if (value == 'close_case') {
-                    // Controlled Close Case (spec §3) — full reason picker,
-                    // no preset. The old "Animal Moved / Could Not Be
-                    // Located" one-tap shortcut that used to live here is
-                    // gone: an actual animal-moved location update now only
-                    // ever comes from an approved Community Report, and any
-                    // OTHER reason for closing this Ongoing case (including
-                    // "animal moved / could not be located" as a genuine
-                    // closure reason) goes through this same full sheet.
-                    _closeCase(c);
-                  }
-                },
-                itemBuilder: (context) => [
-                  if (data['vetClinicName'] != null)
-                    const PopupMenuItem(
-                      value: 'change_clinic',
-                      child: Text('Change Clinic'),
-                    ),
-                  const PopupMenuItem(
-                    value: 'close_case',
-                    child: Text('Close Case'),
-                  ),
-                ],
-              ),
-            ],
           ),
           // One coherent scrollable layout below the map — see
           // _CollapsibleTransporterCard / _handleScroll for how the
@@ -935,28 +956,28 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
 
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '#${shortCaseId(widget.caseId)}',
-                              style: GoogleFonts.tiltWarp(
-                                fontSize: 18,
-                                color: AppColors.textPrimary,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              CaseHeaderCard(
+                                title: c.speciesSummary,
+                                caseId: shortCaseId(widget.caseId),
+                                status: c.status,
+                                urgency: c.urgency,
+                                reporterName: isIntakeMode ? null : c.reporterName,
+                                reportedAt: isIntakeMode ? null : c.createdAt,
                               ),
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: RescueRiskBanner(
-                            highRiskAnimals: highRiskAnimalsIn(
-                              animals: data['animals'] as List?,
-                              legacyBiteRisk: data['biteRisk'] as String?,
-                              legacyEscapeRisk: data['escapeRisk'] as String?,
-                            ),
+                              const SizedBox(height: 8),
+                              RescueRiskBanner(
+                                highRiskAnimals: highRiskAnimalsIn(
+                                  animals: data['animals'] as List?,
+                                  legacyBiteRisk: data['biteRisk'] as String?,
+                                  legacyEscapeRisk: data['escapeRisk'] as String?,
+                                ),
+                              ),
+                              banner,
+                              const SizedBox(height: 12),
+                            ],
                           ),
                         ),
 
@@ -967,21 +988,7 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                           caseId: widget.caseId,
                           messageController: _messageController,
                           onSend: _sendMessage,
-                          isIntakeMode:
-                          widget.mode == TrackingMode.intakeTransfer,
-                          transporterHasReachedClinic:
-                          _kArrivedAtClinicStatuses.contains(
-                            data['status'],
-                          ),
-                          isProceedingToTreatment:
-                          _isProceedingToTreatment,
-                          onProceedToTreatment: () =>
-                              _proceedToTreatment(data),
-                          onFastForward: _fastForwardToClinic,
-                          hasReceivedIntake:
-                          data['intakeReceivedAt'] != null,
-                          onConfirmAnimalReceived: () =>
-                              _confirmAnimalReceived(assignment),
+                          isIntakeMode: isIntakeMode,
                           hideCommunityContent:
                           data['sourceType'] ==
                               'animalRecordAdmission',
@@ -1048,13 +1055,7 @@ class _AdminTrackingTab extends StatefulWidget {
   final String caseId;
   final TextEditingController messageController;
   final VoidCallback onSend;
-  final bool transporterHasReachedClinic;
-  final bool isProceedingToTreatment;
-  final VoidCallback onProceedToTreatment;
-  final VoidCallback onFastForward;
   final bool isIntakeMode;
-  final bool hasReceivedIntake;
-  final VoidCallback onConfirmAnimalReceived;
 
   /// True for an animal-record medical admission (see
   /// RescueCaseRepository.createAdmissionCase / data['sourceType']) —
@@ -1069,14 +1070,8 @@ class _AdminTrackingTab extends StatefulWidget {
     required this.caseId,
     required this.messageController,
     required this.onSend,
-    required this.transporterHasReachedClinic,
-    required this.isProceedingToTreatment,
-    required this.onProceedToTreatment,
     this.hideCommunityContent = false,
-    required this.onFastForward,
     required this.isIntakeMode,
-    required this.hasReceivedIntake,
-    required this.onConfirmAnimalReceived,
   });
 
   @override
@@ -1095,12 +1090,8 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
     final item = statusHistory[index];
     final isLast = index == statusHistory.length - 1;
     final ts = item['timestamp'] as Timestamp?;
-    final timeStr = ts != null
-        ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-        : '';
-    final dateStr = ts != null
-        ? 'February ${ts.toDate().day}, ${ts.toDate().year}'
-        : '';
+    final timeStr = ts != null ? formatTime(ts.toDate()) : '';
+    final dateStr = ts != null ? formatDate(ts.toDate()) : '';
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1120,7 +1111,7 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
                   : null,
             ),
             if (index < statusHistory.length - 1)
-              Container(width: 2, height: 40, color: AppColors.textPrimary),
+              Container(width: 2, height: 28, color: AppColors.textPrimary),
           ],
         ),
         const SizedBox(width: 12),
@@ -1182,12 +1173,26 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (var i = 0; i < statusHistory.length; i++)
-                _buildTimelineItem(i),
+              CaseCard(
+                title: 'Status timeline',
+                child: statusHistory.isEmpty
+                    ? Text('No updates yet.', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
+                    : Column(
+                        children: [
+                          for (var i = 0; i < statusHistory.length; i++) _buildTimelineItem(i),
+                        ],
+                      ),
+              ),
               const SizedBox(height: 8),
               if (!widget.isIntakeMode && !widget.hideCommunityContent)
-                CommunityReportsSection(caseId: widget.caseId),
+                CollapsibleSection(
+                  title: 'Community reports',
+                  icon: Icons.campaign_outlined,
+                  summary: 'Sightings and updates from the public',
+                  child: CommunityReportsSection(caseId: widget.caseId),
+                ),
               const SizedBox(height: 8),
             ],
           ),
@@ -1365,123 +1370,6 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
           },
         ),
 
-        // Intake transport's own confirmation action, replacing the
-        // rescue-pickup "Proceed to Treatment"/fast-forward controls
-        // entirely — arriving at the shelter doesn't move the case past
-        // Intake, it just unlocks quarantine/animal-record steps back on
-        // Intake Details (see RescueCaseRepository.confirmAnimalReceived).
-        if (widget.isIntakeMode)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: widget.hasReceivedIntake
-                ? Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.greenrspwn.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Center(
-                child: Text(
-                  'Animal received at the shelter.',
-                  style: GoogleFonts.zain(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-            )
-                : ElevatedButton(
-              onPressed: widget.onConfirmAnimalReceived,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                minimumSize: const Size(double.infinity, 48),
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-              ),
-              child: Text(
-                'Confirm Animal Received',
-                style: GoogleFonts.tiltWarp(
-                  fontSize: 15,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          )
-        // Proceed to Treatment — only enabled once the transporter has
-        // actually reached the clinic (status 'dropoff'/'in_transit_shelter').
-        // Before that, show a fast-forward control for testing without GPS.
-        else if (widget.transporterHasReachedClinic)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: ElevatedButton(
-              onPressed: widget.isProceedingToTreatment
-                  ? null
-                  : widget.onProceedToTreatment,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellowrspwn,
-                disabledBackgroundColor: AppColors.slaterspwn,
-                minimumSize: const Size(double.infinity, 48),
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-              ),
-              child: widget.isProceedingToTreatment
-                  ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.textPrimary,
-                ),
-              )
-                  : Text(
-                'Proceed to Treatment',
-                style: GoogleFonts.tiltWarp(
-                  fontSize: 15,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          )
-        else
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              children: [
-                Text(
-                  'Waiting for the transporter to reach the clinic…',
-                  style: GoogleFonts.zain(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: widget.onFastForward,
-                  icon: const Icon(Icons.fast_forward, size: 18),
-                  label: Text(
-                    'Fast-forward to Clinic (Test)',
-                    style: GoogleFonts.zain(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textSecondary,
-                    side: const BorderSide(color: AppColors.slaterspwn),
-                    minimumSize: const Size(double.infinity, 44),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }
@@ -1497,65 +1385,31 @@ class _AdminCaseDetailTab extends StatelessWidget {
     // AdminTrackCasePage's single outer scroll (see _AdminTrackingTab's
     // class doc comment for why nested independent scroll regions were
     // removed).
+    String? v(Object? x) => x?.toString();
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Row('Reporter Name', data['reporterName']),
-          _Row('Reporter Mobile Number', data['reporterPhone']),
-          _Row('Pet Transporter Name', data['assignedVolunteerName']),
-          _Row('Pet Transporter Mobile Number', '-'),
-          _Row('Address', data['address']),
-          _Row('Description', data['condition']),
-          _Row(
-            'Type of Animal',
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      child: CaseInfoGrid(
+        items: [
+          CaseInfoItem('Reporter name', v(data['reporterName']) ?? '-'),
+          CaseInfoItem('Reporter mobile', v(data['reporterPhone']) ?? '-'),
+          CaseInfoItem('Pet transporter', v(data['assignedVolunteerName']) ?? '-'),
+          const CaseInfoItem('Transporter mobile', '-'),
+          CaseInfoItem(
+            'Type of animal',
             species_summary_util.summarizeSpecies(
               animals: data['animals'] as List?,
               legacyAnimalType: data['animalType'] as String?,
             ),
           ),
-          _Row('Urgency', data['urgency']),
-          _Row('Coordination', data['coordinateWithShelter']),
+          CaseInfoItem('Urgency', v(data['urgency']) ?? '-'),
+          CaseInfoItem('Coordination', v(data['coordinateWithShelter']) ?? '-'),
+          CaseInfoItem('Interest to adopt', v(data['interestedToAdopt']) ?? '-'),
           if (data['coordinateWithShelter'] == 'no') ...[
-            _Row('Witness Name', data['witnessName']),
-            _Row('Witness Mobile Number', data['witnessPhone']),
+            CaseInfoItem('Witness name', v(data['witnessName']) ?? '-'),
+            CaseInfoItem('Witness mobile', v(data['witnessPhone']) ?? '-'),
           ],
-          _Row('Interest to adopt', data['interestedToAdopt']),
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-}
-
-class _Row extends StatelessWidget {
-  final String label;
-  final String? value;
-  const _Row(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          Text(
-            value ?? '-',
-            style: GoogleFonts.zain(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-            ),
-          ),
+          CaseInfoItem('Address', v(data['address']) ?? '-', wide: true),
+          CaseInfoItem('Description', v(data['condition']) ?? '-', wide: true),
         ],
       ),
     );

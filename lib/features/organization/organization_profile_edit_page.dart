@@ -178,23 +178,73 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     }
   }
 
+  /// The organization doc and capacity as last loaded or saved; Cancel
+  /// restores the form from these instead of reading everything again.
+  Map<String, dynamic> _loadedData = const {};
+  String _loadedEmail = '';
+  int? _loadedCapacity;
+
   Future<void> _load() async {
     final orgId = _organizationId;
     if (orgId == null) {
       if (mounted) setState(() => _loading = false);
       return;
     }
-    final doc = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    // The three reads don't depend on each other: run them together.
+    final (doc, capabilities, shelterData) = await (
+      FirebaseFirestore.instance.collection('organizations').doc(orgId).get(),
+      // Editing the profile (and shelter capacity) is for the
+      // organization's Admins; Staff see it read-only (firestore.rules
+      // organizations/{orgId} update).
+      uid == null ? Future.value(null) : OrgMembershipService().resolveCapabilities(uid),
+      _shelterSettings(orgId),
+    ).wait;
     final data = doc.data() ?? const <String, dynamic>{};
+
+    var email = (data['email'] as String? ?? '').trim();
+    if (email.isEmpty) {
+      // No contact email saved yet — default to the owner's account email
+      // so the field isn't blank. Only persisted if the admin saves.
+      email = await _ownerEmail(data['ownerId'] as String?) ?? '';
+    }
+
+    // Organization Invitations spec §3 — an organization that predates the
+    // membership model (or whose owner's membership write never landed)
+    // gets an Admin membership for its `ownerId`. Only the owner can need
+    // it, and nothing on this page waits for it.
+    if (uid != null && data['ownerId'] == uid) {
+      _repo.ensureOwnerMembership(orgId).catchError((Object e) {
+        debugPrint('[OrganizationProfile] ensureOwnerMembership failed: $e');
+      });
+    }
+
+    _loadedData = data;
+    _loadedEmail = email;
+    _loadedCapacity = (shelterData?['maxCapacity'] as num?)?.toInt();
+    if (capabilities != null) {
+      _isOrgAdmin = capabilities.canManageTeam;
+      _canManageFacebook = capabilities.canManageFacebookConnection;
+    }
+    _applyLoaded();
+    if (mounted) setState(() => _loading = false);
+  }
+
+  /// The organization's own shelter settings, or the old platform-wide
+  /// document until they are migrated (shelter_settings.dart).
+  Future<Map<String, dynamic>?> _shelterSettings(String orgId) async {
+    final own = await shelterSettingsDoc(orgId).get();
+    if (own.exists) return own.data();
+    return (await FirebaseFirestore.instance.collection('settings').doc('shelter').get()).data();
+  }
+
+  /// Fills the form from the last loaded snapshot.
+  void _applyLoaded() {
+    final data = _loadedData;
     _nameController.text = data['name'] as String? ?? '';
     _descriptionController.text = data['description'] as String? ?? '';
     _locationController.text = data['location'] as String? ?? '';
-    _emailController.text = data['email'] as String? ?? '';
-    if (_emailController.text.trim().isEmpty) {
-      // No contact email saved yet — default to the owner's account email
-      // so the field isn't blank. Only persisted if the admin saves.
-      _emailController.text = await _ownerEmail(data['ownerId'] as String?) ?? '';
-    }
+    _emailController.text = _loadedEmail;
     _phoneController.text = (data['contactNumber'] as String?) ?? (data['phone'] as String?) ?? '';
     _facebookController.text = data['facebookUrl'] as String? ?? '';
     _websiteController.text = data['website'] as String? ?? '';
@@ -202,35 +252,10 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     _serviceAreas = (data['serviceAreas'] as List? ?? const [])
         .map((e) => ServiceArea.fromMap(Map<String, dynamic>.from(e as Map)))
         .toList();
-    _acceptedSpecies.addAll(List<String>.from(data['acceptedSpecies'] ?? const []));
-
-    // Organization Invitations spec §3 — a one-shot, idempotent check (this
-    // method itself is only ever called from initState/_joinInvitation,
-    // never from build()) so an organization that predates the membership
-    // model — or whose owner's original membership write never landed —
-    // always ends up with an active Admin membership for its `ownerId`,
-    // without ever touching `ownerId` itself or duplicating the doc.
-    await _repo.ensureOwnerMembership(orgId);
-
-    // Editing the profile (and shelter capacity) is for the organization's
-    // Admins; Staff see it read-only (firestore.rules organizations/{orgId}
-    // update). Resolved through the shared capability model.
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      final capabilities = await OrgMembershipService().resolveCapabilities(uid);
-      _isOrgAdmin = capabilities.canManageTeam;
-      _canManageFacebook = capabilities.canManageFacebookConnection;
-    }
-    // The organization's own shelter settings, or the old platform-wide
-    // document until they are migrated (shelter_settings.dart).
-    final ownShelter = await shelterSettingsDoc(orgId).get();
-    final shelterData = ownShelter.exists
-        ? ownShelter.data()
-        : (await FirebaseFirestore.instance.collection('settings').doc('shelter').get()).data();
-    final maxCapacity = (shelterData?['maxCapacity'] as num?)?.toInt();
-    _capacityController.text = maxCapacity?.toString() ?? '';
-
-    if (mounted) setState(() => _loading = false);
+    _acceptedSpecies
+      ..clear()
+      ..addAll(List<String>.from(data['acceptedSpecies'] ?? const []));
+    _capacityController.text = _loadedCapacity?.toString() ?? '';
   }
 
   /// The organization owner's account email: their `users` doc first, then
@@ -250,16 +275,14 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     return currentUser?.email;
   }
 
-  /// Leaves edit mode without saving: reloads the stored profile so any
-  /// unsaved edits are discarded.
-  Future<void> _cancelEditing() async {
+  /// Leaves edit mode without saving: puts the form back to the stored
+  /// profile so any unsaved edits are discarded.
+  void _cancelEditing() {
     setState(() {
       _editing = false;
-      _loading = true;
       _pendingAvatar = null;
-      _acceptedSpecies.clear();
+      _applyLoaded();
     });
-    await _load();
   }
 
   @override
@@ -276,7 +299,8 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   }
 
   Future<void> _pickAvatar() async {
-    final picked = await pickImageWithSource(context, _picker, imageQuality: 85);
+    // A profile picture is shown small: a 512 px image uploads quickly.
+    final picked = await pickImageWithSource(context, _picker, imageQuality: 80, maxWidth: 512);
     if (picked == null) return;
     setState(() => _pendingAvatar = File(picked.path));
   }
@@ -284,12 +308,10 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   Future<void> _editLocation() async {
     final orgId = _organizationId;
     if (orgId == null) return; // no org yet during bootstrap — see the plain text field used instead
-    // Read the currently-saved structured location first so the picker can
-    // show it as already-selected on the map, instead of opening blank
-    // every time (spec §12: "Show the current saved location on the map").
-    final currentDoc = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
-    final currentData = currentDoc.data() ?? const <String, dynamic>{};
-    if (!mounted) return;
+    // The saved pin (already loaded with the profile) opens selected on the
+    // map (spec §12: "Show the current saved location on the map"), with no
+    // read before the picker appears.
+    final currentData = _loadedData;
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -304,8 +326,20 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       ),
     );
     if (saved == true) {
-      final doc = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
-      final address = doc.data()?['shelterAddress'] as String?;
+      // The picker just wrote the pin, so the local cache has it.
+      final ref = FirebaseFirestore.instance.collection('organizations').doc(orgId);
+      DocumentSnapshot<Map<String, dynamic>> doc;
+      try {
+        doc = await ref.get(const GetOptions(source: Source.cache));
+      } catch (_) {
+        doc = await ref.get();
+      }
+      final data = doc.data() ?? const <String, dynamic>{};
+      _loadedData = {
+        ..._loadedData,
+        for (final k in ['shelterName', 'shelterAddress', 'shelterPlaceId', 'shelterLat', 'shelterLng']) k: data[k],
+      };
+      final address = data['shelterAddress'] as String?;
       if (address != null && address.isNotEmpty && mounted) {
         setState(() => _locationController.text = address);
       }
@@ -484,10 +518,12 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     // a real shelter can genuinely be over its configured capacity.
     int? capacityValue;
     bool clearCapacity = false;
+    var capacityChanged = false;
     if (_isOrgAdmin) {
       final capacityText = _capacityController.text.trim();
       if (capacityText.isEmpty) {
         clearCapacity = true;
+        capacityChanged = _loadedCapacity != null || _isBootstrapping;
       } else {
         capacityValue = int.tryParse(capacityText);
         if (capacityValue == null || capacityValue < 0) {
@@ -496,7 +532,18 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
           );
           return;
         }
-        final occupancy = await currentShelterOccupancy();
+        capacityChanged = capacityValue != _loadedCapacity || _isBootstrapping;
+      }
+      // Only a changed capacity needs the occupancy check (it reads every
+      // housed animal) and the settings write.
+      if (capacityChanged && capacityValue != null) {
+        setState(() => _saving = true);
+        final int occupancy;
+        try {
+          occupancy = await currentShelterOccupancy();
+        } finally {
+          if (mounted) setState(() => _saving = false);
+        }
         if (occupancy > capacityValue) {
           if (!mounted) return;
           final confirmed = await showConfirmActionDialog(
@@ -510,23 +557,22 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
       }
     }
 
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
-      if (_isOrgAdmin) {
-        // The organization's shelter settings are the single source both
-        // this field and the dashboard Capacity card read/write — updating
-        // it here reflects live on the dashboard via
-        // shelterMaxCapacityProvider. updatedBy/updatedAt is the only audit
-        // trail available. A brand-new organization has no id yet; its
-        // capacity is set after it exists.
+      // The organization's shelter settings are the single source both this
+      // field and the dashboard Capacity card read/write — updating it here
+      // reflects live on the dashboard via shelterMaxCapacityProvider.
+      // updatedBy/updatedAt is the only audit trail available. A brand-new
+      // organization has no id yet; its capacity is set after it exists.
+      Future<void> saveCapacity() async {
         final orgId = _organizationId;
-        if (orgId != null) {
-          await shelterSettingsDoc(orgId).set({
-            'maxCapacity': clearCapacity ? null : capacityValue,
-            'updatedAt': FieldValue.serverTimestamp(),
-            'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-          }, SetOptions(merge: true));
-        }
+        if (!_isOrgAdmin || !capacityChanged || orgId == null) return;
+        await shelterSettingsDoc(orgId).set({
+          'maxCapacity': clearCapacity ? null : capacityValue,
+          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+        }, SetOptions(merge: true));
       }
 
       if (_isBootstrapping) {
@@ -576,37 +622,69 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
         return;
       }
 
-      var avatarUrl = _avatarUrl;
-      if (_pendingAvatar != null) {
+      // The picture upload goes first (a refused upload then leaves nothing
+      // half-saved) and alongside the capacity write.
+      Future<String?> uploadAvatar() async {
+        final file = _pendingAvatar;
+        if (file == null) return _avatarUrl;
         final ref = FirebaseStorage.instance.ref('organizations/${_organizationId!}/profile/avatar.jpg');
-        await ref.putFile(_pendingAvatar!);
-        avatarUrl = await ref.getDownloadURL();
+        try {
+          await ref.putFile(file);
+        } on FirebaseException catch (e) {
+          if (e.code == 'unauthorized') {
+            throw StateError('Only the organization\'s Admins can change its picture.');
+          }
+          rethrow;
+        }
+        return ref.getDownloadURL();
       }
 
+      final (avatarUrl, _) = await (uploadAvatar(), saveCapacity()).wait;
+
+      final email = _emailController.text.trim();
+      final phone = _phoneController.text.trim();
       await _repo.updateProfile(
         organizationId: _organizationId!,
         name: name,
         description: _descriptionController.text.trim(),
         avatarUrl: avatarUrl,
         location: location,
-        email: _emailController.text.trim(),
-        phone: _phoneController.text.trim(),
+        email: email,
+        phone: phone,
         facebookUrl: _facebookController.text.trim(),
         website: _websiteController.text.trim(),
         serviceAreas: _serviceAreas,
         acceptedSpecies: _acceptedSpecies.toList(),
       );
-      await AuditLogRepository().log(
-        category: AuditCategory.organizationStaff,
-        action: 'Organization profile edited',
-        actorId: FirebaseAuth.instance.currentUser?.uid,
-        organizationId: _organizationId,
-        targetType: 'Organization',
-        targetId: _organizationId,
-        metadata: _isOrgAdmin && (clearCapacity || capacityValue != null)
-            ? {'shelterCapacityChanged': true}
-            : null,
-      );
+      // The audit entry doesn't hold up the screen.
+      AuditLogRepository()
+          .log(
+            category: AuditCategory.organizationStaff,
+            action: 'Organization profile edited',
+            actorId: FirebaseAuth.instance.currentUser?.uid,
+            organizationId: _organizationId,
+            targetType: 'Organization',
+            targetId: _organizationId,
+            metadata: capacityChanged ? {'shelterCapacityChanged': true} : null,
+          )
+          .catchError((Object e) => debugPrint('[OrganizationProfile] audit log failed: $e'));
+
+      _loadedData = {
+        ..._loadedData,
+        'name': name,
+        'description': _descriptionController.text.trim(),
+        'location': location,
+        'email': email,
+        'contactNumber': phone,
+        'phone': phone,
+        'facebookUrl': _facebookController.text.trim(),
+        'website': _websiteController.text.trim(),
+        'avatarUrl': avatarUrl,
+        'serviceAreas': _serviceAreas.map((s) => s.toMap()).toList(),
+        'acceptedSpecies': _acceptedSpecies.toList(),
+      };
+      _loadedEmail = email;
+      if (capacityChanged) _loadedCapacity = clearCapacity ? null : capacityValue;
 
       if (mounted) {
         setState(() {
@@ -620,7 +698,8 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not save: $e', kind: AppMessageKind.error));
+        final message = e is StateError ? e.message : 'Could not save: $e';
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(message, kind: AppMessageKind.error));
       }
     }
   }
@@ -645,20 +724,20 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                     tooltip: 'Edit profile',
                     onPressed: () => setState(() => _editing = true),
                   ),
-          // Organization Invitations spec §8 — always reachable, even
-          // before an organization exists: an invited account with no
-          // membership yet still needs somewhere to see and act on "My
-          // Pending Invitations". StaffMembersPage itself hides the
-          // organization-scoped sections (Staff Members / Organization
-          // Pending Invitations) when organizationId is null.
-          IconButton(
-            icon: const Icon(Icons.people_outline, color: AppColors.background),
-            tooltip: 'Staff Members',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => StaffMembersPage(organizationId: _organizationId)),
+          // Members has its own drawer item once there is an organization.
+          // Before one exists, an invited account with no membership still
+          // needs somewhere to see and act on "My Pending Invitations"
+          // (Organization Invitations spec §8); StaffMembersPage hides the
+          // organization-scoped sections when organizationId is null.
+          if (_isBootstrapping)
+            IconButton(
+              icon: const Icon(Icons.people_outline, color: AppColors.background),
+              tooltip: 'Invitations',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const StaffMembersPage(organizationId: null)),
+              ),
             ),
-          ),
         ],
       ),
       body: _buildBody(),

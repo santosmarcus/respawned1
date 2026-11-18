@@ -43,8 +43,16 @@ function bookingStepDue({clockStartMs, nowMs, sent}) {
   return null;
 }
 
+/// True when staff just confirmed the booked interview: the application
+/// moved from Pending (canonical or legacy value) into Interview
+/// (AdoptionApplicationRepository.confirmInterview).
+function isInterviewConfirmed(beforeStatus, afterStatus) {
+  return (beforeStatus === 'pending' || beforeStatus === 'pending_appointment') && afterStatus === 'interview';
+}
+
 module.exports = {
   MAX_INTERVIEW_NO_SHOWS,
+  isInterviewConfirmed,
   BOOKING_REMINDER_DAYS,
   BOOKING_WITHDRAW_DAYS,
   noShowOutcome,

@@ -29,25 +29,51 @@ class TransporterApplicationRepository {
   /// transporter's account in one batch, so the two can't disagree:
   /// approved -> `isVerified: true`, rejected -> `isVerified: false` (the
   /// transporter's profile then offers to resubmit).
+  ///
+  /// firestore.rules only lets staff change `users/{uid}` while it is a
+  /// pet transporter account. An applicant whose account was deleted or
+  /// switched to another role (org invitation, role change) can't be
+  /// approved — that throws [TransporterReviewException] — and a refusal
+  /// then updates the application alone.
   Future<void> review({
     required String uid,
     required bool approve,
     required String reviewerUid,
     String? note,
-  }) {
+  }) async {
     final status = approve ? TransporterApplicationStatus.approved : TransporterApplicationStatus.rejected;
     final trimmed = note?.trim();
+    final userRef = _db.collection('users').doc(uid);
+    final user = await userRef.get();
+    final isTransporter = user.exists && user.data()?['role'] == 'pet_transporter';
+    if (approve && !isTransporter) {
+      throw TransporterReviewException(user.exists
+          ? 'This account is no longer a pet transporter, so it can\'t be verified. '
+              'Reject the application instead.'
+          : 'This applicant\'s account no longer exists. Reject the application instead.');
+    }
     final batch = _db.batch()
       ..update(_apps.doc(uid), {
         'status': status.name,
         'reviewedBy': reviewerUid,
         'reviewedAt': FieldValue.serverTimestamp(),
         'reviewNote': (trimmed == null || trimmed.isEmpty) ? FieldValue.delete() : trimmed,
-      })
-      ..update(_db.collection('users').doc(uid), {
+      });
+    if (isTransporter) {
+      batch.update(userRef, {
         'isVerified': approve,
         'transporterVerificationStatus': status.name,
       });
-    return batch.commit();
+    }
+    await batch.commit();
   }
+}
+
+/// A review that can't be saved as asked; [message] is shown to staff.
+class TransporterReviewException implements Exception {
+  const TransporterReviewException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
 }

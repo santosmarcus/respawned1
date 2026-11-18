@@ -337,6 +337,62 @@ describe('cases', () => {
   });
 });
 
+describe('withdrawing a referral (CaseReferralRepository.withdraw)', () => {
+  // The writes withdraw makes, in one batch.
+  const withdraw = (uid, caseId, referralId) => {
+    const db = as(uid);
+    const batch = db.batch();
+    batch.update(db.doc(`cases/${caseId}`), {
+      status: 'pending',
+      referredToOrgId: FieldValue.delete(),
+      referralOutcome: { status: 'withdrawn', referralId, reason: 'Handling it ourselves', byUid: uid },
+      statusHistory: FieldValue.arrayUnion({ status: 'Referral withdrawn. The case is open again.' }),
+    });
+    batch.update(db.doc(`cases/${caseId}/referrals/${referralId}`), {
+      status: 'withdrawn', respondedByUid: uid, withdrawReason: 'Handling it ourselves',
+    });
+    batch.set(db.collection(`cases/${caseId}/activityLogs`).doc(), {
+      action: 'referral_withdrawn', actorUid: uid, details: { referralId },
+    });
+    return batch.commit();
+  };
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('cases/refOrg').set({
+        reporterId: 'reporter', status: 'referred', organizationId: 'orgA', referredToOrgId: 'orgB',
+        referral: { referralId: 'r1', targetOrgId: 'orgB', fromOrgId: 'orgA', previousStatus: 'pending' },
+      });
+      await db.doc('cases/refOrg/referrals/r1').set({ type: 'anotherOrganization', status: 'referredPending', fromOrgId: 'orgA', targetOrgId: 'orgB' });
+      await db.doc('cases/refLgu').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA' });
+      await db.doc('cases/refLgu/referrals/l1').set({ type: 'localGovernmentUnit', status: 'notified', barangay: 'San Isidro' });
+    });
+  });
+
+  test("the referring organization's rescue staff reopen an organization referral", async () => {
+    await assertSucceeds(withdraw('rescueA', 'refOrg', 'r1'));
+  });
+
+  test('an LGU referral can be withdrawn too', async () => {
+    await assertSucceeds(withdraw('staffA', 'refLgu', 'l1'));
+  });
+
+  test('staff without rescue, other organizations and the reporter cannot', async () => {
+    await assertFails(withdraw('careA', 'refOrg', 'r1'));
+    await assertFails(withdraw('stranger', 'refOrg', 'r1'));
+    await assertFails(withdraw('reporter', 'refOrg', 'r1'));
+  });
+
+  test('the organization it was referred to declines instead of withdrawing', async () => {
+    await assertFails(withdraw('staffB', 'refOrg', 'r1'));
+    await assertSucceeds(as('staffB').doc('cases/refOrg').update({
+      status: 'pending', referredToOrgId: FieldValue.delete(),
+      referralOutcome: { status: 'declined', reason: 'No space' },
+    }));
+  });
+});
+
 describe('report verification', () => {
   test('a report can carry its evidence, which the reporter cannot rewrite', async () => {
     await assertSucceeds(as('reporter').collection('cases').add({
@@ -734,6 +790,13 @@ describe('transporter applications', () => {
     await assertFails(as('staffA').doc('users/rider2').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
     await seedApp('stranger');
     await assertFails(as('staffA').doc('users/stranger').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+  });
+
+  test('an applicant who is no longer a transporter can still be rejected (application only)', async () => {
+    await seedApp('stranger');
+    // TransporterApplicationRepository.review writes only the application then.
+    await assertSucceeds(as('staffA').doc('transporterApplications/stranger')
+      .update({ status: 'rejected', reviewedBy: 'staffA' }));
   });
 
   test('carers, draft-org staff and transporters cannot verify', async () => {

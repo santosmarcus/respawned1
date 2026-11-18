@@ -286,12 +286,14 @@ class NotificationService {
         if (adoptionId == null || adoptionId.isEmpty) return null;
         return PostAdoptionDetailsPage(applicationId: adoptionId);
 
-    // functions/adoptions.js tellApplicant: no-show, booking reminder or
-    // withdrawal of the applicant's own application.
+      // functions/adoptions.js tellApplicant: no-show, booking reminder or
+      // withdrawal of the applicant's own application, or their interview
+      // being confirmed.
       case 'adoption_no_show_rebook':
       case 'adoption_no_show_closed':
       case 'adoption_booking_reminder':
       case 'adoption_booking_withdrawn':
+      case 'adoption_interview_confirmed':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
         return adopterPageForAdoption(adoptionId);

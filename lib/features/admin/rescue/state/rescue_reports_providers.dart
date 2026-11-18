@@ -320,7 +320,17 @@ enum RescuePipelineTab {
         // tab intentionally shows only true rejections, not those other
         // terminal buckets.
         RescuePipelineTab.rejected => const [RescueStatus.rejected],
-        RescuePipelineTab.closed => const [RescueStatus.cancelled],
+        // Everything that has left this organization's hands: closed
+        // through Close Case (cancelled), finished (completed, including
+        // the literal 'closed' a deceased/community-claimed case gets), and
+        // referred away (still reopenable from Rescue Details with
+        // "Withdraw referral & reopen", or by itself after 48 hours with
+        // no answer for an organization referral).
+        RescuePipelineTab.closed => const [
+            RescueStatus.cancelled,
+            RescueStatus.completed,
+            RescueStatus.referred,
+          ],
       };
 }
 
@@ -356,16 +366,13 @@ final casesForTabProvider =
 });
 
 /// Extra statuses reachable only through the status filter (not one of the
-/// pipeline tabs above) — referral/duplicate/terminal states. Rejected and
-/// Cancelled are deliberately NOT listed here anymore now that each has
-/// its own pipeline tab (RescuePipelineTab.rejected / .closed) — keeping
-/// them in both places would just make the filter-sheet override
-/// redundant with the tab.
+/// pipeline tabs above) — duplicate/merge states. Rejected, Cancelled,
+/// Completed and Referred are deliberately NOT listed here now that the
+/// Rejected and Closed tabs cover them — keeping them in both places would
+/// just make the filter-sheet override redundant with the tab.
 const List<RescueStatus> kSecondaryStatuses = [
-  RescueStatus.referred,
   RescueStatus.possibleDuplicate,
   RescueStatus.merged,
-  RescueStatus.completed,
 ];
 
 class RescueFilters {
@@ -377,8 +384,8 @@ class RescueFilters {
   final String? locationQuery;
 
   /// When set, overrides the active pipeline tab's status list — lets the
-  /// filter bar reach referred/possibleDuplicate/merged/completed/cancelled
-  /// cases that the six quick tabs don't cover (rejected has its own tab).
+  /// filter bar narrow to one status, e.g. the possibleDuplicate/merged
+  /// cases that the pipeline tabs don't cover.
   final RescueStatus? statusOverride;
 
   const RescueFilters({
@@ -516,8 +523,8 @@ final effectiveStatusesProvider = Provider<List<RescueStatus>>((ref) {
 /// Cases for the effective status selection, with all client-side filters
 /// from [rescueFilterProvider] applied.
 ///
-/// The filter bar's explicit status override (referred/possibleDuplicate/
-/// merged/completed/cancelled — [kSecondaryStatuses], none of
+/// The filter bar's explicit status override (possibleDuplicate/merged —
+/// [kSecondaryStatuses], none of
 /// which are affected by per-animal stage splitting) still queries
 /// directly by status. Otherwise this follows the active pipeline tab via
 /// [casesForTabProvider], which is stage-aware for Intake (spec §7).

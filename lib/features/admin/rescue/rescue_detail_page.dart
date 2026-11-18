@@ -19,7 +19,11 @@ import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/models/rescue/community_report.dart';
+import 'package:respawnd1/core/models/rescue/report_verification.dart';
+import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/accept_case_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_messages_section.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
@@ -36,7 +40,6 @@ import 'package:respawnd1/features/admin/rescue/widgets/report_verification_sect
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/status_chip.dart';
 import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/success_dialog.dart';
 import 'package:respawnd1/core/geofence/geofence_config.dart';
@@ -522,7 +525,401 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     );
   }
 
-  String _formatDateTime(DateTime? d) => formatDateTimeOr(d, '');
+  /// The referring organization takes an unanswered referral back (org or
+  /// LGU). The case returns to the status it had before, and the refer
+  /// sheet can then send it somewhere else.
+  Future<void> _withdrawReferral(RescueCase c) async {
+    if (_isLoading) return;
+    final target = (c.raw['referredToOrgId'] as String? ?? '').isEmpty
+        ? 'the LGU/barangay'
+        : (_referralInfo(c)['targetOrgName'] as String? ?? 'the receiving organization');
+    final reason = await showTextInputDialog(
+      context,
+      title: 'Withdraw referral & reopen',
+      message: 'The referral to $target is cancelled and the case comes back to you as it was before. '
+          'You can then handle it or refer it to someone else.',
+      label: 'Reason',
+      hint: 'e.g. no answer yet and the animal needs help now',
+      confirmLabel: 'Withdraw & reopen',
+      required: true,
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).withdrawReferral(
+            caseId: c.id,
+            reason: reason,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Referral withdrawn. The case is open again.'),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final msg = e is StateError ? e.message : '$e';
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not withdraw the referral: $msg', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _exportTransfer(RescueCase c) => showExportTransferSheet(
+        context,
+        rescueCase: c,
+        transferredByUid: _actorUid,
+        transferredByName: _actorName,
+      );
+
+  void _openMedia(RescueCase c, int index) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        backgroundColor: Colors.transparent,
+        child: Stack(
+          children: [
+            _PhotoCarousel(
+              photoUrls: c.photoUrls,
+              videoUrls: c.videoUrls,
+              initialIndex: index,
+              height: MediaQuery.of(ctx).size.height * 0.6,
+            ),
+            Positioned(
+              top: 6,
+              right: 6,
+              child: IconButton.filled(
+                style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _push(Widget page) => Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+
+  /// Statuses a case can be referred from, where a returned/withdrawn
+  /// referral is still worth mentioning.
+  static const _reviewStatuses = {
+    RescueStatus.pendingReview,
+    RescueStatus.verifying,
+    RescueStatus.accepted,
+    RescueStatus.transitEnded,
+    RescueStatus.needsSpecializedAssistance,
+  };
+
+  /// One primary, one secondary, the rest in the overflow — the same
+  /// actions, conditions and handlers the page has always offered for each
+  /// status.
+  ({CaseAction? primary, CaseAction? secondary, List<CaseAction> overflow}) _actionsFor(
+    RescueCase c, {
+    required bool canManageOrgActions,
+    required bool hasActiveAssignment,
+    required String? myOrgId,
+  }) {
+    CaseAction? primary;
+    CaseAction? secondary;
+    final overflow = <CaseAction>[];
+    final export = CaseAction('Export transfer details', () => _exportTransfer(c), icon: Icons.ios_share);
+    final reassignClinic = CaseAction(
+      c.vetClinicName == null ? 'Assign Clinic' : 'Reassign Clinic (${c.vetClinicName})',
+      () => _openClinicSheet(c, offerAssignRider: false),
+      icon: Icons.local_hospital_outlined,
+    );
+    final specializedTransport =
+        (c.raw['endReason'] as String?) == 'Animal requires specialized transport that I cannot provide';
+
+    switch (c.status) {
+      case RescueStatus.referred:
+        final target = c.raw['referredToOrgId'] as String? ?? '';
+        if (target.isNotEmpty && target == myOrgId) {
+          primary = CaseAction('Accept referral', () => _acceptReferral(c));
+          secondary = CaseAction('Decline', () => _declineReferral(c), destructive: true);
+        } else {
+          primary = CaseAction(
+            canManageOrgActions ? 'Withdraw referral & reopen' : 'Withdraw (Admin only)',
+            canManageOrgActions ? () => _withdrawReferral(c) : null,
+            icon: Icons.undo,
+          );
+        }
+      case RescueStatus.pendingReview:
+      case RescueStatus.verifying:
+        primary = CaseAction('Accept', () => _acceptCase(c));
+        secondary = CaseAction('Reject', () => _rejectCase(c), destructive: true);
+        overflow.addAll([
+          CaseAction(canManageOrgActions ? 'Refer' : 'Refer (Admin only)',
+              canManageOrgActions ? () => _referCase(c) : null, icon: Icons.forward_outlined),
+          CaseAction(canManageOrgActions ? 'Check for Duplicates / Merge' : 'Merge (Admin only)',
+              canManageOrgActions ? () => _mergeDuplicate(c) : null, icon: Icons.call_merge),
+        ]);
+      case RescueStatus.possibleDuplicate:
+        primary = CaseAction('Review Possible Duplicate', () => _mergeDuplicate(c));
+      case RescueStatus.accepted:
+      case RescueStatus.awaitingAssignment:
+        // Derived from saved case data, not local state: no clinic yet means
+        // Select Clinic (also covers animal-record admissions, which start at
+        // awaitingAssignment with no clinic); an outstanding offer routes to
+        // its status view instead of a second Assign Transporter.
+        if (!c.hasSavedClinic) {
+          primary = CaseAction('Select Clinic', () => _openClinicSheet(c, offerAssignRider: true));
+        } else if (hasActiveAssignment) {
+          primary = CaseAction('View Assignment Status', () => _push(AdminTrackCasePage(caseId: c.id, data: c.raw)));
+        } else {
+          primary = CaseAction('Assign Transporter', () => _push(AssignRiderPage(caseId: c.id, data: c.raw)));
+        }
+      case RescueStatus.ongoing when c.raw['organizationTransport'] is Map:
+        primary = CaseAction('Arrived — Start Treatment', () => _confirmOrganizationArrived(c));
+        secondary = CaseAction('Close Case', () => _closeCase(c), destructive: true);
+      case RescueStatus.ongoing:
+        primary = CaseAction('Track Case', () => _push(AdminTrackCasePage(caseId: c.id, data: c.raw)));
+        secondary = reassignClinic;
+        overflow.add(CaseAction('Close Case', () => _closeCase(c), icon: Icons.block, destructive: true));
+      case RescueStatus.treatment:
+        secondary = reassignClinic;
+      case RescueStatus.needsSpecializedAssistance:
+        primary = CaseAction('Retry with a Different Transporter', () => _retryWithDifferentTransporter(c));
+        secondary = CaseAction('Keep Transporter + Instructions', () => _keepTransporterWithInstructions(c));
+        overflow.addAll([
+          CaseAction('Escalate to Trained Responder / Authority', () => _referCase(c), icon: Icons.forward_outlined),
+          CaseAction(
+            specializedTransport
+                ? 'Close Case — Specialized Transport Unavailable'
+                : 'Close Case — Aggressive Animal / Unsafe Rescue',
+            () => _closeCase(c,
+                initialReason: specializedTransport ? ClosureReason.requiresTransport : ClosureReason.aggressive),
+            icon: Icons.block,
+            destructive: true,
+          ),
+        ]);
+      case RescueStatus.transitEnded:
+        final assignAnother = CaseAction('Assign Another Transporter', () => _returnToAssignAfterTransitEnded(c));
+        final refer = CaseAction('Refer Case', () => _referCase(c), icon: Icons.forward_outlined);
+        final close = CaseAction('Close Case', () => _closeCase(c), icon: Icons.block, destructive: true);
+        if (c.raw['endReasonKind'] == 'deceased') {
+          primary = CaseAction('Confirm Death', () => _closeCase(c, initialReason: ClosureReason.died));
+          secondary = assignAnother;
+          overflow.addAll([refer, close]);
+        } else {
+          primary = assignAnother;
+          secondary = refer;
+          overflow.add(close);
+        }
+      default:
+        break;
+    }
+    overflow.add(export);
+    return (primary: primary, secondary: secondary, overflow: overflow);
+  }
+
+  /// Where the case stands: the outcome for closed/rejected/referred
+  /// cases, the next step for active ones, warnings from the transporter.
+  Widget? _outcomeBanner(RescueCase c, {required String? myOrgId, required bool hasActiveAssignment}) {
+    final referral = _referralInfo(c);
+    switch (c.status) {
+      case RescueStatus.rejected:
+        return _RejectedBanner(rescueCase: c);
+      case RescueStatus.referred:
+        final target = c.raw['referredToOrgId'] as String? ?? '';
+        final at = referral['referredAt'] is Timestamp ? (referral['referredAt'] as Timestamp).toDate() : null;
+        final note = (referral['note'] as String?)?.trim() ?? '';
+        if (target.isEmpty) {
+          // LGU referrals keep only their status line on the case.
+          String? lguLine;
+          DateTime? lguAt;
+          for (final h in c.statusHistory.reversed) {
+            if (h.status.startsWith('Referred to the ') && h.status.contains('LGU/barangay')) {
+              lguLine = h.status;
+              lguAt = h.timestamp;
+              break;
+            }
+          }
+          return CaseOutcomeBanner(
+            tone: CaseBannerTone.warning,
+            icon: Icons.account_balance_outlined,
+            title: 'Referred to the LGU/barangay${lguAt == null ? '' : ' · ${caseAgeLabel(lguAt)} ago'}',
+            message: '${lguLine ?? 'This case was referred to the local government.'} '
+                'LGU referrals don\'t come back by themselves: withdraw it to take the case back.',
+          );
+        }
+        final targetName = (referral['targetOrgName'] as String?) ?? 'another organization';
+        final fromName = (referral['fromOrgName'] as String?) ?? '';
+        final isTarget = target == myOrgId;
+        return CaseOutcomeBanner(
+          tone: isTarget ? CaseBannerTone.info : CaseBannerTone.warning,
+          icon: Icons.forward_to_inbox_outlined,
+          title: isTarget
+              ? 'Referred to you${fromName.isEmpty ? '' : ' by $fromName'}'
+              : 'Waiting on $targetName${at == null ? '' : ' · ${caseAgeLabel(at)}'}',
+          message: isTarget
+              ? 'Accept to take it into your Rescue Review, or decline with a reason to send it back.'
+              : 'They are reminded after $kReferralReminderHours hours; with no answer after '
+                  '$kReferralReturnHours hours the case comes back to your Rescue Review. '
+                  'You can also withdraw it now and reopen the case.',
+          facts: [
+            if (at != null) ('Referred', formatDateTime(at)),
+            if ((referral['referredByName'] as String?)?.isNotEmpty ?? false) ('By', referral['referredByName'] as String),
+            if (note.isNotEmpty) ('Note', note),
+          ],
+        );
+      case RescueStatus.completed:
+        return _CompletedBanner(rescueCase: c);
+      case RescueStatus.cancelled:
+        final closedAt = c.raw['closedAt'] is Timestamp ? (c.raw['closedAt'] as Timestamp).toDate() : null;
+        final details = (c.raw['closureDetails'] as String?)?.trim() ?? '';
+        return CaseOutcomeBanner(
+          tone: CaseBannerTone.neutral,
+          icon: Icons.block,
+          title: 'Case closed',
+          facts: [
+            ('Reason', ClosureReason.fromName(c.raw['closureReason'] as String?).label),
+            if (closedAt != null) ('Closed', formatDateTime(closedAt)),
+            if ((c.raw['closedByName'] as String?)?.isNotEmpty ?? false) ('By', c.raw['closedByName'] as String),
+            if (details.isNotEmpty) ('Details', details),
+          ],
+        );
+      case RescueStatus.merged:
+        return const CaseOutcomeBanner(
+          tone: CaseBannerTone.neutral,
+          icon: Icons.call_merge,
+          title: 'Merged into another case',
+          message: 'See History below for the case it was merged into.',
+        );
+      case RescueStatus.needsSpecializedAssistance:
+        final specialized =
+            (c.raw['endReason'] as String?) == 'Animal requires specialized transport that I cannot provide';
+        final serviceType = c.raw['endReasonServiceType'] as String?;
+        final notes = c.raw['endReasonNotes'] as String?;
+        return CaseOutcomeBanner(
+          tone: CaseBannerTone.danger,
+          title: specialized ? 'Specialized transport needed' : 'Safety warning',
+          message: specialized
+              ? 'The assigned transporter could not provide the transport this animal needs. Arrange the right '
+                  'vehicle/service before assigning a new transporter.'
+              : 'A previous transporter reported that the animal may be aggressive. Review the incident before '
+                  'assigning another transporter.',
+          facts: [
+            if (specialized && (serviceType?.isNotEmpty ?? false)) ('Service needed', serviceType!),
+            if (notes?.isNotEmpty ?? false) ('Reported', notes!),
+          ],
+        );
+      case RescueStatus.transitEnded:
+        final deceased = c.raw['endReasonKind'] == 'deceased';
+        final reason = c.raw['endReason'] as String?;
+        final notes = c.raw['endReasonNotes'] as String?;
+        return CaseOutcomeBanner(
+          tone: CaseBannerTone.danger,
+          title: deceased ? 'Animal reported deceased in transit' : 'Transporter stopped the trip',
+          message: deceased
+              ? 'Confirm the death to record it on the animal and close the case, or choose another step if the '
+                  'report was wrong.'
+              : 'Decide what happens next: offer the case to another transporter, refer it, or close it.',
+          facts: [
+            if (!deceased && (reason?.isNotEmpty ?? false)) ('Reason', reason!),
+            if (notes?.isNotEmpty ?? false) ('Reported', notes!),
+          ],
+        );
+      case RescueStatus.ongoing when c.raw['organizationTransport'] is Map:
+        return CaseOutcomeBanner(
+          tone: CaseBannerTone.info,
+          icon: Icons.local_shipping_outlined,
+          title: 'Your organization is transporting',
+          message: 'Bringing this animal to ${c.vetClinicName ?? 'the clinic'} (recorded by '
+              '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}). Confirm arrival to start treatment.',
+        );
+      case RescueStatus.accepted:
+      case RescueStatus.awaitingAssignment:
+        return CaseOutcomeBanner(
+          tone: CaseBannerTone.info,
+          icon: Icons.arrow_forward,
+          title: !c.hasSavedClinic
+              ? 'Next: select a clinic'
+              : hasActiveAssignment
+                  ? 'Waiting on the transporter'
+                  : 'Next: assign a transporter',
+          message: !c.hasSavedClinic
+              ? 'The case is accepted. Pick the clinic the animal goes to before assigning a transporter.'
+              : hasActiveAssignment
+                  ? 'An offer is out. Open the assignment status to follow it.'
+                  : 'Clinic saved: ${c.vetClinicName}.',
+        );
+      default:
+        break;
+    }
+    if (_reviewStatuses.contains(c.status)) return _referralReturnBanner(c);
+    if (c.status.isAwaitingReporterResponse) {
+      return CaseOutcomeBanner(
+        tone: CaseBannerTone.neutral,
+        icon: Icons.hourglass_empty,
+        title: c.status.label,
+        message: 'Waiting on the reporter. It closes by itself if they do not respond; no action is needed here.',
+      );
+    }
+    return null;
+  }
+
+  /// A case back with this organization after a referral: who declined it
+  /// and why, that nobody answered in time, or that it was withdrawn.
+  Widget? _referralReturnBanner(RescueCase c) {
+    final o = c.raw['referralOutcome'];
+    if (o is! Map) return null;
+    final status = o['status'] as String?;
+    if (status != 'declined' && status != 'expired' && status != 'withdrawn') return null;
+    final name = (o['targetOrgName'] as String?) ?? 'The receiving organization';
+    final reason = (o['reason'] as String?)?.trim() ?? '';
+    final by = (o['byName'] as String?)?.trim() ?? '';
+    return CaseOutcomeBanner(
+      tone: status == 'withdrawn' ? CaseBannerTone.neutral : CaseBannerTone.warning,
+      icon: Icons.undo,
+      title: switch (status) {
+        'declined' => '$name declined the referral',
+        'expired' => 'Referral returned: no answer',
+        _ => 'Referral withdrawn',
+      },
+      message: switch (status) {
+        'expired' => '$name did not answer within $kReferralReturnHours hours, so it came back to you.',
+        'withdrawn' => 'The referral to $name was taken back${by.isEmpty ? '' : ' by $by'}. '
+            'The case is open again; refer it elsewhere or handle it here.',
+        _ => null,
+      },
+      facts: [if (reason.isNotEmpty && status != 'expired') ('Reason', reason)],
+    );
+  }
+
+  List<CaseInfoItem> _reportItems(RescueCase c) {
+    final d = c.raw;
+    String? s(String key) => (d[key] as String?)?.trim();
+    final animals = d['animals'] as List?;
+    final breed = s('breed');
+    final animalBreeds = {
+      for (final a in animals ?? const []) if (a is Map) (a['breed'] as String?)?.trim(),
+    };
+    final hasWitness = d['coordinateWithShelter'] == 'no' && (s('witnessName')?.isNotEmpty ?? false);
+    return [
+      CaseInfoItem('Rescue type', s('rescueType')),
+      if (animals != null && animals.isNotEmpty && !animalBreeds.contains(breed)) CaseInfoItem('Breed', breed),
+      CaseInfoItem('Interest to adopt', c.interestedToAdopt == 'yes' ? 'Yes' : 'No'),
+      CaseInfoItem('QR/NFC',
+          (c.scannedTagId != null && c.scannedTagId!.isNotEmpty) ? 'Linked (${c.scannedTagId})' : 'No'),
+      CaseInfoItem('Containment / escape risk', s('containmentStatus')),
+      CaseInfoItem('Approachability / bite risk', s('strayTemperament')),
+      CaseInfoItem('Reporter on-site', s('onSite')),
+      CaseInfoItem('Best time to reach reporter', s('bestTimeToContact')),
+      if ((s('coordinateWithShelter') ?? '').isNotEmpty)
+        CaseInfoItem('Coordinates with shelter', d['coordinateWithShelter'] == 'yes' ? 'Yes' : 'No'),
+      if (hasWitness) CaseInfoItem('Additional witness', s('witnessName')),
+      if (hasWitness) CaseInfoItem('Witness number', s('witnessPhone') ?? '-'),
+      CaseInfoItem('Access instructions', s('accessInstructions'), wide: true),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -535,43 +932,36 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     if (c == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    final pendingLocationReports =
-        ref
+    final pendingLocationReports = ref
             .watch(caseCommunityReportsProvider(c.id))
             .asData
             ?.value
-            .where(
-              (r) =>
-          r.type == 'moved' &&
-              r.approvalStatus == 'pending' &&
-              r.newLat != null &&
-              r.newLng != null,
-        )
+            .where((r) => r.type == 'moved' && r.approvalStatus == 'pending' && r.newLat != null && r.newLng != null)
             .toList() ??
-            const [];
+        const [];
 
-    // Whether a transporter offer is currently pending/accepted for this
-    // case — used below to stop "Assign Transporter" from creating a
-    // second active offer while one is already outstanding (the
-    // repository's own transaction guards against this too; this just
-    // keeps the button itself honest about the case's real state).
-    final currentAssignment = ref
-        .watch(currentAssignmentProvider(c.id))
-        .asData
-        ?.value;
-    final hasActiveAssignment = currentAssignment?.isActive ?? false;
+    // Whether a transporter offer is currently pending/accepted — stops
+    // "Assign Transporter" from creating a second active offer (the
+    // repository's transaction guards against this too).
+    final hasActiveAssignment = ref.watch(currentAssignmentProvider(c.id)).asData?.value?.isActive ?? false;
 
-    // Temporary Organization Admin/Member Access Model spec — Merge/Refer
-    // are ordinary organization operations, not the narrowly-scoped
-    // Facebook-publish action, so Owner/Admin/Member all get parity here
-    // via the centralized capability resolver instead of a direct
-    // `membership.role == OrgRole.admin` comparison.
+    // Merge/Refer are ordinary organization operations: Owner/Admin/Member
+    // parity via the centralized capability resolver.
     final canManageOrgActions =
         ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canManageRescues ?? true;
+    final myOrgId = ref.watch(currentOrganizationIdProvider).asData?.value;
 
     final d = c.raw;
-    final rescueType = d['rescueType'] as String?;
-    final breed = d['breed'] as String?;
+    final verification = CaseVerification.fromMap(d['verification']);
+    final actions = _actionsFor(
+      c,
+      canManageOrgActions: canManageOrgActions,
+      hasActiveAssignment: hasActiveAssignment,
+      myOrgId: myOrgId,
+    );
+    final banner = _outcomeBanner(c, myOrgId: myOrgId, hasActiveAssignment: hasActiveAssignment);
+    final inReview = c.status == RescueStatus.pendingReview || c.status == RescueStatus.verifying;
+    const gap = SizedBox(height: kCaseGap);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -583,452 +973,128 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         ),
         title: Text(
           'Rescue Details',
-          style: GoogleFonts.tiltWarp(
-            fontSize: 18,
-            color: AppColors.background,
-          ),
+          style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background),
         ),
-        actions: [
-          // Transfer/Export spec — the shared export sheet, reachable
-          // regardless of case status (a closed/historical case can still
-          // need to be handed off, unlike the workflow actions below).
-          IconButton(
-            icon: const Icon(Icons.ios_share, color: AppColors.background),
-            tooltip: 'Export Transfer Details',
-            onPressed: () => showExportTransferSheet(
-              context,
-              rescueCase: c,
-              transferredByUid: _actorUid,
-              transferredByName: _actorName,
-            ),
-          ),
-        ],
+      ),
+      bottomNavigationBar: CaseActionBar.maybe(
+        primary: actions.primary,
+        secondary: actions.secondary,
+        overflow: actions.overflow,
+        busy: _isLoading,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    c.speciesSummary,
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    UrgencyChip(urgency: c.urgency),
-                    const SizedBox(height: 4),
-                    RescueStatusChip(status: c.status),
-                  ],
-                ),
+            CaseHeaderCard(
+              title: c.speciesSummary,
+              caseId: c.shortCaseId,
+              status: c.status,
+              urgency: c.urgency,
+              reporterName: c.reporterName,
+              reportedAt: c.createdAt,
+              photoUrls: c.photoUrls,
+              videoUrls: c.videoUrls,
+              onMediaTap: (i) => _openMedia(c, i),
+              badges: [
+                if (c.openForTransfer)
+                  const CaseBadge(label: 'Open for transfer', icon: Icons.swap_horiz),
+                if (verification?.isConfirmed ?? false)
+                  const CaseBadge(label: 'Verified', icon: Icons.verified, color: AppColors.success),
+                if (c.animalCount > 1) CaseBadge(label: '${c.animalCount} animals', icon: Icons.pets),
               ],
             ),
-            Text(
-              'CASE ID: ${c.shortCaseId}',
-              style: GoogleFonts.zain(
-                fontSize: 13,
-                color: AppColors.textSecondary,
-              ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (c.reporterName != null)
-                  Expanded(
-                    child: Text(
-                      'Reported by ${c.reporterName}',
-                      style: GoogleFonts.zain(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                if (c.createdAt != null)
-                  Text(
-                    _formatDateTime(c.createdAt),
-                    textAlign: TextAlign.right,
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            RescueRiskBanner(highRiskAnimals: c.highRiskAnimals),
+            if (c.highRiskAnimals.isNotEmpty) ...[
+              gap,
+              RescueRiskBanner(highRiskAnimals: c.highRiskAnimals),
+            ],
 
-            if (c.openForTransfer) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.lavenderrspwn,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.swap_horiz,
-                      size: 16,
-                      color: AppColors.textPrimary,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Open for Transfer to Another Organization',
-                      style: GoogleFonts.zain(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ],
-                ),
+            // The transporter stopped before the shelter leg: no shelter pin.
+            if (d['shelterLocationMissing'] is Map && (c.organizationId ?? '').isNotEmpty) ...[
+              gap,
+              ShelterPinPrompt(
+                organizationId: c.organizationId!,
+                canSet: ref.watch(isOrgAdminProvider).asData?.value ?? false,
+                message: 'The transporter cannot take this animal to the shelter: your organization has no '
+                    'shelter location saved. Set it, then the transporter can continue.',
               ),
             ],
 
-            const SizedBox(height: 16),
+            if (banner != null) ...[gap, banner],
 
-            if (c.photoUrls.isNotEmpty || c.videoUrls.isNotEmpty)
-              _PhotoCarousel(photoUrls: c.photoUrls, videoUrls: c.videoUrls)
-            else
-              Container(
-                height: 200,
-                decoration: BoxDecoration(
-                  color: AppColors.tearspwn,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.image_not_supported_outlined,
-                    size: 48,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
+            gap,
+            CaseInfoGrid(
+              title: 'Report',
+              items: _reportItems(c),
+              // Analytics gap 5: staff confirm or correct the reporter's
+              // "community cat" answer; Analytics counts the tagged reports.
+              trailing: c.allSpecies.any((s) => s.toLowerCase() == 'cat')
+                  ? SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      visualDensity: VisualDensity.compact,
+                      activeThumbColor: AppColors.textPrimary,
+                      title: Text('Community cat (outdoor, no owner)',
+                          style: GoogleFonts.zain(
+                              fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      value: d['communityCat'] == true,
+                      onChanged: (v) => FirebaseFirestore.instance
+                          .collection('cases')
+                          .doc(c.id)
+                          .update({'communityCat': v}).catchError((Object e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+                        }
+                      }),
+                    )
+                  : null,
+            ),
 
-            const SizedBox(height: 16),
-
-            if (rescueType != null && rescueType.isNotEmpty)
-              _DetailSection(label: 'Rescue Type', value: rescueType),
-
-            // Analytics gap 5: staff confirm or correct the reporter's
-            // "community cat" answer; Analytics counts the tagged reports.
-            if (c.allSpecies.any((s) => s.toLowerCase() == 'cat'))
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                activeThumbColor: AppColors.textPrimary,
-                title: Text('Community cat (outdoor, no owner)',
-                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                value: d['communityCat'] == true,
-                onChanged: (v) => FirebaseFirestore.instance
-                    .collection('cases')
-                    .doc(c.id)
-                    .update({'communityCat': v})
-                    .catchError((Object e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
-                  }
-                }),
-              ),
-
-            const SizedBox(height: 8),
-
-            _DetailSection(label: 'Description', value: c.condition ?? '-'),
-            if (breed != null && breed.isNotEmpty)
-              _DetailSection(label: 'Breed', value: breed),
-
-            const SizedBox(height: 8),
-
-            // Per-animal breakdown for multi-animal group reports (species/
-            // breed/sex/size/color) — falls back to this case's own animal
-            // fields when there's no group. Backward-compatible: older
-            // cases without a groupId just show the single-animal view.
+            gap,
+            // Per-animal details (species/breed/sex/size/color and the
+            // health & behavior assessment).
             _AnimalGroupSection(currentCase: c),
 
-            const SizedBox(height: 8),
+            gap,
+            _LocationCard(rescueCase: c, pendingLocationReports: pendingLocationReports),
 
-            // Full stray-report questionnaire — every field is optional so
-            // older reports saved before these questions existed still
-            // render without gaps or crashes.
-            if ((d['containmentStatus'] as String?)?.isNotEmpty ?? false)
-              _DetailSection(
-                label: 'Containment / Escape Risk',
-                value: d['containmentStatus'] as String,
+            gap,
+            CaseCard(
+              title: 'Description',
+              child: Text(
+                (c.condition?.trim().isNotEmpty ?? false) ? c.condition!.trim() : 'No description given.',
+                style: GoogleFonts.zain(fontSize: 13.5, height: 1.3, color: AppColors.textPrimary),
               ),
-            if ((d['strayTemperament'] as String?)?.isNotEmpty ?? false)
-              _DetailSection(
-                label: 'Approachability / Bite Risk',
-                value: d['strayTemperament'] as String,
-              ),
-            if ((d['onSite'] as String?)?.isNotEmpty ?? false)
-              _DetailSection(
-                label: 'Reporter On-Site',
-                value: d['onSite'] as String,
-              ),
-            if ((d['accessInstructions'] as String?)?.isNotEmpty ?? false)
-              _DetailSection(
-                label: 'Access Instructions',
-                value: d['accessInstructions'] as String,
-              ),
-            if ((d['bestTimeToContact'] as String?)?.isNotEmpty ?? false)
-              _DetailSection(
-                label: 'Best Time to Reach Reporter',
-                value: d['bestTimeToContact'] as String,
-              ),
-            if ((d['coordinateWithShelter'] as String?)?.isNotEmpty ?? false)
-              _DetailSection(
-                label: 'Willing to Coordinate with Shelter',
-                value: d['coordinateWithShelter'] == 'yes' ? 'Yes' : 'No',
-              ),
-
-            const SizedBox(height: 8),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _DetailSection(
-                    label: 'Interest to adopt',
-                    value: c.interestedToAdopt == 'yes' ? 'Yes' : 'No',
-                  ),
-                ),
-                Expanded(
-                  child: _DetailSection(
-                    label: 'QR/NFC',
-                    value:
-                    (c.scannedTagId != null && c.scannedTagId!.isNotEmpty)
-                        ? 'Linked (${c.scannedTagId})'
-                        : 'No',
-                  ),
-                ),
-              ],
             ),
-
-            if (d['coordinateWithShelter'] == 'no' &&
-                ((d['witnessName'] as String?)?.isNotEmpty ?? false)) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: _DetailSection(
-                      label: 'Additional Witness',
-                      value: d['witnessName'] as String,
-                    ),
-                  ),
-                  Expanded(
-                    child: _DetailSection(
-                      label: 'Witness Number',
-                      value: d['witnessPhone'] as String? ?? '-',
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            const SizedBox(height: 8),
-
-            _DetailSection(label: 'Location', value: c.address ?? '-'),
-            _ServiceAreaGeofenceNote(data: d),
-            Stack(
-              children: [
-                // Real map when we have coordinates — this used to be a
-                // static icon in a gray box regardless of whether lat/lng
-                // existed, which is why it always looked "blank". A fixed
-                // height + ClipRRect gives it concrete layout constraints
-                // so it can't collapse to zero size inside the scroll view.
-                if (c.lat != null && c.lng != null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      height: 180,
-                      child: GoogleMap(
-                        gestureRecognizers: {
-                          Factory<OneSequenceGestureRecognizer>(
-                                () => EagerGestureRecognizer(),
-                          ),
-                        },
-                        initialCameraPosition: CameraPosition(
-                          target: LatLng(c.lat!, c.lng!),
-                          zoom: 15,
-                        ),
-                        markers: {
-                          Marker(
-                            markerId: const MarkerId('rescue_location'),
-                            position: LatLng(c.lat!, c.lng!),
-                          ),
-                          for (final report in pendingLocationReports)
-                            Marker(
-                              markerId: MarkerId(
-                                'proposed_location_${report.id}',
-                              ),
-                              position: LatLng(report.newLat!, report.newLng!),
-                              icon: BitmapDescriptor.defaultMarkerWithHue(
-                                BitmapDescriptor.hueOrange,
-                              ),
-                              infoWindow: InfoWindow(
-                                title: 'Proposed location — awaiting approval',
-                                snippet: report.newAddress,
-                              ),
-                            ),
-                        },
-                        // On-device geofence around this case (GeofenceService).
-                        circles: {
-                          Circle(
-                            circleId: const CircleId('case_geofence'),
-                            center: LatLng(c.lat!, c.lng!),
-                            radius: GeofenceConfig.caseGeofenceRadiusMeters,
-                            strokeWidth: 2,
-                            strokeColor: AppColors.error,
-                            fillColor: AppColors.error.withValues(alpha: 0.10),
-                          ),
-                        },
-                        myLocationButtonEnabled: false,
-                        zoomControlsEnabled: false,
-                        mapToolbarEnabled: false,
-                      ),
-                    ),
-                  )
-                else
-                // Fallback for reports with no saved coordinates —
-                // avoids a broken/blank box instead of trying (and
-                // failing) to render a map with nothing to center on.
-                  Container(
-                    height: 160,
-                    decoration: BoxDecoration(
-                      color: AppColors.slaterspwn,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.location_off_outlined,
-                            size: 32,
-                            color: AppColors.textSecondary,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'No coordinates saved for this report.',
-                            style: GoogleFonts.zain(
-                              fontSize: 12,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (pendingLocationReports.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 16,
-                    runSpacing: 4,
-                    children: [
-                      _MapLegendItem(
-                        color: AppColors.error,
-                        label: 'Current location',
-                      ),
-                      _MapLegendItem(
-                        color: AppColors.warning,
-                        label: 'Proposed location — awaiting approval',
-                      ),
-                    ],
-                  ),
-                ],
-                if (c.address != null && c.address!.isNotEmpty)
-                  Positioned(
-                    left: 10,
-                    right: 10,
-                    bottom: 10,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.yellowrspwn,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        c.address!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.zain(
-                          fontSize: 12,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
 
             if (c.hasSavedClinic) ...[
-              SectionCard(
-                title: 'Selected Clinic',
+              gap,
+              CaseCard(
+                title: 'Clinic',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      c.vetClinicName!,
-                      style: GoogleFonts.zain(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    if (c.vetClinicAddress != null &&
-                        c.vetClinicAddress!.isNotEmpty)
-                      Text(
-                        c.vetClinicAddress!,
-                        style: GoogleFonts.zain(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    if (c.vetClinicPhone != null &&
-                        c.vetClinicPhone!.isNotEmpty)
-                      Text(
-                        c.vetClinicPhone!,
-                        style: GoogleFonts.zain(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
+                    Text(c.vetClinicName!,
+                        style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    for (final line in [c.vetClinicAddress, c.vetClinicPhone])
+                      if (line != null && line.isNotEmpty)
+                        Text(line, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
             ],
 
+            gap,
             _OwnershipSection(
               rescueCase: c,
               busy: _isLoading,
               onUpdate: () => _updateOwnership(c),
               onContactOwner: () => _contactOwner(c),
               onReferToLgu: () => _referCase(c),
-              onReturnToOwner: () =>
-                  _closeCase(c, initialReason: ClosureReason.reunited),
-              onCloseHasOwner: () =>
-                  _closeCase(c, initialReason: ClosureReason.reunited),
+              onReturnToOwner: () => _closeCase(c, initialReason: ClosureReason.reunited),
+              onCloseHasOwner: () => _closeCase(c, initialReason: ClosureReason.reunited),
             ),
-            const SizedBox(height: 12),
 
             // Rescue gaps 6/10: the interested adopter's request, the
             // organization's confirmation and the pickup window.
@@ -1038,623 +1104,152 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               actorName: _actorName,
               onRefer: () => _referCase(c),
             ),
-            MergeHistorySection(rescueCase: c, onOpenCase: _openCase),
-            const SizedBox(height: 12),
-            ReferralHistorySection(caseId: c.id),
 
+            gap,
             // Desk check before accepting: evidence, live proof from the
             // reporter, and the recorded result (including a rider visit).
-            ReportVerificationSection(
-              key: ValueKey('verification-${c.id}'),
-              rescueCase: c,
-              actorUid: _actorUid,
-              actorName: _actorName,
-            ),
-
-            const SizedBox(height: 24),
-
-            // The transporter stopped before the shelter leg: no shelter pin.
-            if (c.raw['shelterLocationMissing'] is Map && (c.organizationId ?? '').isNotEmpty)
-              ShelterPinPrompt(
-                organizationId: c.organizationId!,
-                canSet: ref.watch(isOrgAdminProvider).asData?.value ?? false,
-                message: 'The transporter cannot take this animal to the shelter: your organization has no '
-                    'shelter location saved. Set it, then the transporter can continue.',
-              ),
-
-            if (c.status == RescueStatus.pendingReview) _ReferralOutcomeBanner(rescueCase: c),
-
-            if (c.status == RescueStatus.referred) ...[
-              _ReferralPanel(
+            // Open while the report is still being reviewed.
+            CollapsibleSection(
+              title: 'Verification',
+              icon: Icons.fact_check_outlined,
+              summary: verification?.summary ?? 'Evidence, live proof and rider visits',
+              initiallyExpanded: inReview,
+              child: ReportVerificationSection(
+                key: ValueKey('verification-${c.id}'),
                 rescueCase: c,
-                myOrganizationId: ref.watch(currentOrganizationIdProvider).asData?.value,
-                busy: _isLoading,
-                onAccept: () => _acceptReferral(c),
-                onDecline: () => _declineReferral(c),
+                actorUid: _actorUid,
+                actorName: _actorName,
               ),
-            ] else if (c.status == RescueStatus.pendingReview || c.status == RescueStatus.verifying) ...[
-              Row(
+            ),
+            const SizedBox(height: 8),
+            CollapsibleSection(
+              title: 'Referral & merge history',
+              icon: Icons.history,
+              summary: [
+                if (c.mergedCaseIds.isNotEmpty) '${c.mergedCaseIds.length} merged',
+                if (c.mergedIntoCaseId != null) 'merged into another case',
+                if (d['referralOutcome'] is Map || d['referral'] is Map) 'has referrals',
+              ].join(' · '),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _isLoading ? null : () => _rejectCase(c),
-                      style: AppButtons.dangerOutline,
-                      child: Text(
-                        'Reject',
-                        style: GoogleFonts.tiltWarp(
-                          fontSize: 15,
-                          color: AppColors.error,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : () => _acceptCase(c),
-                      style: AppButtons.primary,
-                      child: _isLoading
-                          ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.textPrimary,
-                        ),
-                      )
-                          : Text(
-                        'Accept',
-                        style: GoogleFonts.tiltWarp(
-                          fontSize: 15,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ),
+                  MergeHistorySection(rescueCase: c, onOpenCase: _openCase),
+                  const SizedBox(height: 8),
+                  ReferralHistorySection(caseId: c.id),
                 ],
               ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: (_isLoading || !canManageOrgActions)
-                      ? null
-                      : () => _referCase(c),
-                  style: AppButtons.outline,
-                  child: Text(
-                    canManageOrgActions ? 'Refer' : 'Refer (Admin only)',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: (_isLoading || !canManageOrgActions)
-                      ? null
-                      : () => _mergeDuplicate(c),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textSecondary,
-                    side: const BorderSide(color: AppColors.slaterspwn),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: Text(
-                    canManageOrgActions
-                        ? 'Check for Duplicates / Merge'
-                        : 'Merge (Admin only)',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 14,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
-            ] else if (c.status == RescueStatus.possibleDuplicate) ...[
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : () => _mergeDuplicate(c),
-                  style: AppButtons.primary,
-                  child: Text(
-                    'Review Possible Duplicate',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-            ] else if (c.status == RescueStatus.accepted ||
-                c.status == RescueStatus.awaitingAssignment) ...[
-              // Accepted. Primary action is derived from saved case data —
-              // not local widget state — so reopening this screen always
-              // shows the right button: no clinic yet means Select Clinic,
-              // a saved clinic means Assign Transporter is unblocked.
-              // status == accepted specifically means "no clinic yet" (see
-              // acceptCase/assignClinic) — !c.hasSavedClinic covers it, but
-              // is kept as the single source of truth here rather than
-              // branching on status a second time, so this still behaves
-              // correctly for animal-record admissions which start at
-              // awaitingAssignment with no clinic (see createAdmissionCase).
-              if (!c.hasSavedClinic)
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () => _openClinicSheet(c, offerAssignRider: true),
-                    style: AppButtons.primary,
-                    child: Text(
-                      'Select Clinic',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 15,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                )
-              else if (hasActiveAssignment)
-              // A transporter offer already exists and hasn't been
-              // rejected — route through AdminTrackCasePage, which shows
-              // an inline "waiting for the transporter to respond" view
-              // for as long as it stays pending (never a second "Assign
-              // Transporter" while one is outstanding).
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            AdminTrackCasePage(caseId: c.id, data: c.raw),
-                      ),
-                    ),
-                    style: AppButtons.primary,
-                    child: Text(
-                      'View Assignment Status',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 15,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                )
-              else
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            AssignRiderPage(caseId: c.id, data: c.raw),
-                      ),
-                    ),
-                    style: AppButtons.primary,
-                    child: Text(
-                      'Assign Transporter',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 15,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                ),
-            ] else if (c.status == RescueStatus.ongoing && c.raw['organizationTransport'] is Map) ...[
-              // "Organization will transport" (Assign Transporter's no-
-              // transporter prompt): no rider to track, so staff confirm
-              // arrival here, which starts treatment like Proceed to
-              // Treatment does.
-              SectionCard(
-                child: Text(
-                  'Your organization is bringing this animal to '
-                      '${c.vetClinicName ?? 'the clinic'} (recorded by '
-                      '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}).',
-                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : () => _confirmOrganizationArrived(c),
-                  style: AppButtons.primary,
-                  child: Text(
-                    'Arrived at Clinic — Start Treatment',
-                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => _closeCase(c),
-                  style: AppButtons.dangerOutline,
-                  child: Text('Close Case', style: GoogleFonts.tiltWarp(fontSize: 15)),
-                ),
-              ),
-            ] else if (c.status == RescueStatus.ongoing) ...[
-              // Transporter assigned and en route — primary action is
-              // tracking the case; reassigning the clinic stays available
-              // as a secondary action (no Assign Transporter prompt here,
-              // a transporter is already on the case).
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          AdminTrackCasePage(caseId: c.id, data: c.raw),
-                    ),
-                  ),
-                  style: AppButtons.primary,
-                  child: Text(
-                    'Track Case',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () => _openClinicSheet(c, offerAssignRider: false),
-                  style: AppButtons.outline,
-                  child: Text(
-                    c.vetClinicName == null
-                        ? 'Assign Clinic'
-                        : 'Reassign Clinic (${c.vetClinicName})',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => _closeCase(c),
-                  style: AppButtons.dangerOutline,
-                  child: Text(
-                    'Close Case',
-                    style: GoogleFonts.tiltWarp(fontSize: 15),
-                  ),
-                ),
-              ),
-            ] else if (c.status == RescueStatus.treatment) ...[
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () => _openClinicSheet(c, offerAssignRider: false),
-                  style: AppButtons.outline,
-                  child: Text(
-                    c.vetClinicName == null
-                        ? 'Assign Clinic'
-                        : 'Reassign Clinic (${c.vetClinicName})',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-            ] else if (c.status == RescueStatus.needsSpecializedAssistance) ...[
-              // Set by the real transporter app's own End Reason flow
-              // (transit_progress_page.dart) — endReason/endReasonNotes/
-              // endReasonServiceType are read here, never re-derived or
-              // guessed. Two different escalation causes share this
-              // status (aggressive animal vs. a transport-capability
-              // mismatch), so the panel picks its copy/actions based on
-              // which one actually happened.
-              Builder(
-                builder: (context) {
-                  final endReason = c.raw['endReason'] as String?;
-                  final isSpecializedTransport =
-                      endReason ==
-                          'Animal requires specialized transport that I cannot provide';
-                  final serviceType = c.raw['endReasonServiceType'] as String?;
-
-                  return Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.error.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          isSpecializedTransport
-                              ? 'Specialized Transport Needed'
-                              : 'Safety warning',
-                          style: GoogleFonts.tiltWarp(
-                            fontSize: 14,
-                            color: AppColors.error,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          isSpecializedTransport
-                              ? 'The assigned transporter could not provide the transport this animal needs. Arrange the right vehicle/service before assigning a new transporter.'
-                              : 'A previous transporter reported that the animal may be aggressive. Review the incident before assigning another transporter.',
-                          style: GoogleFonts.zain(
-                            fontSize: 13,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        if (isSpecializedTransport &&
-                            (serviceType?.isNotEmpty ?? false)) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            'Service needed: $serviceType',
-                            style: GoogleFonts.zain(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ],
-                        if ((c.raw['endReasonNotes'] as String?)?.isNotEmpty ??
-                            false) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            'Reported: ${c.raw['endReasonNotes']}',
-                            style: GoogleFonts.zain(
-                              fontSize: 12,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () => _retryWithDifferentTransporter(c),
-                  style: AppButtons.primary,
-                  child: Text(
-                    'Retry with a Different Transporter',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () => _keepTransporterWithInstructions(c),
-                  style: AppButtons.outline,
-                  child: Text(
-                    'Keep Current Transporter + Instructions',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 14,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => _referCase(c),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textSecondary,
-                    side: const BorderSide(color: AppColors.slaterspwn),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: Text(
-                    'Escalate to Trained Responder / Authority',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 14,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () => _closeCase(
-                    c,
-                    initialReason:
-                    (c.raw['endReason'] as String?) ==
-                        'Animal requires specialized transport that I cannot provide'
-                        ? ClosureReason.requiresTransport
-                        : ClosureReason.aggressive,
-                  ),
-                  style: AppButtons.dangerOutline,
-                  child: Text(
-                    (c.raw['endReason'] as String?) ==
-                        'Animal requires specialized transport that I cannot provide'
-                        ? 'Close Case — Specialized Transport Unavailable'
-                        : 'Close Case — Aggressive Animal / Unsafe Rescue',
-                  ),
-                ),
-              ),
-            ] else if (c.status == RescueStatus.transitEnded) ...[
-              // The transporter stopped the trip with End Reason "Animal
-              // Deceased" or "Other" (transit_rules.dart). Staff decide.
-              Builder(
-                builder: (context) {
-                  final deceased = c.raw['endReasonKind'] == 'deceased';
-                  final reason = c.raw['endReason'] as String?;
-                  final notes = c.raw['endReasonNotes'] as String?;
-                  return Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.error.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          deceased ? 'Animal reported deceased in transit' : 'Transporter stopped the trip',
-                          style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.error),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          deceased
-                              ? 'Confirm the death to record it on the animal and close the case, or choose another step if the report was wrong.'
-                              : 'Decide what happens next: offer the case to another transporter, refer it, or close it.',
-                          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
-                        ),
-                        if (!deceased && (reason?.isNotEmpty ?? false)) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            'Reason: $reason',
-                            style: GoogleFonts.zain(
-                                fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-                          ),
-                        ],
-                        if (notes?.isNotEmpty ?? false) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            'Reported: $notes',
-                            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                          ),
-                        ],
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              if (c.raw['endReasonKind'] == 'deceased') ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : () => _closeCase(c, initialReason: ClosureReason.died),
-                    style: AppButtons.primary,
-                    child: Text(
-                      'Confirm Death',
-                      style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
-              SizedBox(
-                width: double.infinity,
-                child: c.raw['endReasonKind'] == 'deceased'
-                    ? OutlinedButton(
-                  onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
-                  style: AppButtons.outline,
-                  child: Text(
-                    'Assign Another Transporter',
-                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
-                  ),
-                )
-                    : ElevatedButton(
-                  onPressed: _isLoading ? null : () => _returnToAssignAfterTransitEnded(c),
-                  style: AppButtons.primary,
-                  child: Text(
-                    'Assign Another Transporter',
-                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => _referCase(c),
-                  style: AppButtons.outline,
-                  child: Text(
-                    'Refer Case',
-                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => _closeCase(c),
-                  style: AppButtons.dangerOutline,
-                  child: Text('Close Case', style: GoogleFonts.tiltWarp(fontSize: 15)),
-                ),
-              ),
-            ] else if (c.status == RescueStatus.rejected) ...[
-              _RejectionDetailsCard(rescueCase: c),
-            ] else
-              SectionCard(
-                child: Text(
-                  'This case is ${c.status.label.toLowerCase()} — no further action is needed here.',
-                  style: GoogleFonts.zain(
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-
-            // The blanket "Animal Moved / Could Not Be Located" and "Animal
-            // Deceased During Rescue" shortcuts that used to appear here for
-            // EVERY non-terminal status are gone — Animal Moved is now only
-            // ever submitted through Community Reports (with admin
-            // approval, see CommunityReportsSection below), and Animal
-            // Deceased is recorded through Treatment's Death Report flow or
-            // the controlled Close Case action on Ongoing/Treatment/Intake
-            // (see close_case_flow.dart) — never a one-tap button reachable
-            // from Review/Assign. Nothing was removed from ClosureReason/
-            // closeCase/close_case_sheet.dart themselves; both reasons stay
-            // selectable there for the pages that DO show a real Close Case
-            // button.
-            const SizedBox(height: 24),
-
-            CaseMessagesSection(caseId: c.id),
-
-            const SizedBox(height: 16),
-
-            CommunityReportsSection(caseId: c.id),
-
-            const SizedBox(height: 32),
+            ),
+            const SizedBox(height: 8),
+            CollapsibleSection(
+              title: 'Messages',
+              icon: Icons.chat_bubble_outline,
+              child: CaseMessagesSection(caseId: c.id),
+            ),
+            const SizedBox(height: 8),
+            CollapsibleSection(
+              title: 'Community reports',
+              icon: Icons.campaign_outlined,
+              summary: pendingLocationReports.isEmpty
+                  ? 'Sightings and updates from the public'
+                  : '${pendingLocationReports.length} location change${pendingLocationReports.length == 1 ? '' : 's'} to review',
+              attention: pendingLocationReports.isNotEmpty,
+              initiallyExpanded: pendingLocationReports.isNotEmpty,
+              child: CommunityReportsSection(caseId: c.id),
+            ),
           ],
         ),
       ),
     );
   }
 }
+
+/// Address, service-area note and a small map with the case pin, its
+/// geofence and any proposed new location awaiting approval.
+class _LocationCard extends StatelessWidget {
+  final RescueCase rescueCase;
+  final List<CommunityReport> pendingLocationReports;
+  const _LocationCard({required this.rescueCase, required this.pendingLocationReports});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = rescueCase;
+    return CaseCard(
+      title: 'Location',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            (c.address?.isNotEmpty ?? false) ? c.address! : 'No address given.',
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 4),
+          _ServiceAreaGeofenceNote(data: c.raw),
+          if (c.lat != null && c.lng != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                height: 150,
+                child: GoogleMap(
+                  gestureRecognizers: {
+                    Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                  },
+                  initialCameraPosition: CameraPosition(target: LatLng(c.lat!, c.lng!), zoom: 15),
+                  markers: {
+                    Marker(markerId: const MarkerId('rescue_location'), position: LatLng(c.lat!, c.lng!)),
+                    for (final report in pendingLocationReports)
+                      Marker(
+                        markerId: MarkerId('proposed_location_${report.id}'),
+                        position: LatLng(report.newLat!, report.newLng!),
+                        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+                        infoWindow: InfoWindow(
+                          title: 'Proposed location — awaiting approval',
+                          snippet: report.newAddress,
+                        ),
+                      ),
+                  },
+                  // On-device geofence around this case (GeofenceService).
+                  circles: {
+                    Circle(
+                      circleId: const CircleId('case_geofence'),
+                      center: LatLng(c.lat!, c.lng!),
+                      radius: GeofenceConfig.caseGeofenceRadiusMeters,
+                      strokeWidth: 2,
+                      strokeColor: AppColors.error,
+                      fillColor: AppColors.error.withValues(alpha: 0.10),
+                    ),
+                  },
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
+                ),
+              ),
+            )
+          else
+            Row(
+              children: [
+                const Icon(Icons.location_off_outlined, size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                Text('No coordinates saved for this report.',
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          if (pendingLocationReports.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Wrap(
+              spacing: 16,
+              runSpacing: 4,
+              children: [
+                _MapLegendItem(color: AppColors.error, label: 'Current location'),
+                _MapLegendItem(color: AppColors.warning, label: 'Proposed location — awaiting approval'),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 
 class _MapLegendItem extends StatelessWidget {
   final Color color;
@@ -1682,27 +1277,24 @@ class _MapLegendItem extends StatelessWidget {
   }
 }
 
-/// Rejected-case summary — reason, who rejected it and when, and whether
-/// the rejection makes the case Community-Adoption eligible. Rendered in
-/// place of the generic terminal-status message so a rejected report's
-/// "complete report details and rejection history" (Rejected Rescue
-/// Reports spec) are actually visible, not just a status label.
-class _RejectionDetailsCard extends ConsumerWidget {
+/// Rejected case: reason, who rejected it and when, and whether the
+/// rejection makes it Community-Adoption eligible.
+class _RejectedBanner extends ConsumerWidget {
   final RescueCase rescueCase;
-  const _RejectionDetailsCard({required this.rescueCase});
+  const _RejectedBanner({required this.rescueCase});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = rescueCase;
     final reason = c.rejectionReason;
     final reasonLabel = reason == RejectionReason.other
-        ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false
-        ? c.rejectionReasonOther!
-        : 'Other')
+        ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false ? c.rejectionReasonOther! : 'Other')
         : (reason?.label ?? 'Not specified');
 
-    final logsAsync = ref.watch(caseActivityLogsProvider(c.id));
-    final rejectionLog = logsAsync.asData?.value
+    final rejectionLog = ref
+        .watch(caseActivityLogsProvider(c.id))
+        .asData
+        ?.value
         .where((l) => l.action == 'rejected')
         .fold<ActivityLogEntry?>(null, (latest, entry) {
       if (latest == null) return entry;
@@ -1710,84 +1302,239 @@ class _RejectionDetailsCard extends ConsumerWidget {
       if (latest.timestamp == null) return entry;
       return entry.timestamp!.isAfter(latest.timestamp!) ? entry : latest;
     });
-
     final rejectedDate = rejectionLog?.timestamp;
-    final dateStr = rejectedDate != null
-        ? formatDate(rejectedDate)
-        : 'Unknown';
-
     final eligible = isCommunityAdoptionEligible(
       status: c.status.firestoreValue,
       rejectionReason: reason?.name,
       rescueType: c.raw['rescueType'] as String?,
     );
 
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Rejection Details',
-            style: GoogleFonts.tiltWarp(
-              fontSize: 14,
-              color: AppColors.textPrimary,
+    return CaseOutcomeBanner(
+      tone: CaseBannerTone.danger,
+      icon: Icons.cancel_outlined,
+      title: 'Rejected: $reasonLabel',
+      facts: [
+        ('Rejected', rejectedDate != null ? formatDate(rejectedDate) : 'Unknown'),
+        ('By', rejectionLog?.actorName ?? 'Unknown'),
+      ],
+      actions: [
+        if (eligible)
+          const CaseBadge(label: 'Community Adoption eligible', icon: Icons.volunteer_activism, color: AppColors.greenrspwn),
+      ],
+    );
+  }
+}
+
+/// Animal records created from this case at intake (`linkedCaseId`).
+final _caseAnimalRecordsProvider =
+    StreamProvider.autoDispose.family<List<({String id, String name})>, String>((ref, caseId) {
+  return FirebaseFirestore.instance
+      .collection('animals')
+      .where('linkedCaseId', isEqualTo: caseId)
+      .snapshots()
+      .map((s) => [
+            for (final d in s.docs)
+              (id: d.id, name: ((d.data()['name'] as String?)?.trim().isNotEmpty ?? false)
+                  ? (d.data()['name'] as String).trim()
+                  : 'Animal record'),
+          ]);
+});
+
+/// Completed case: intaked (with links to the animal records it created),
+/// or closed because the animal died / every animal was claimed.
+class _CompletedBanner extends ConsumerWidget {
+  final RescueCase rescueCase;
+  const _CompletedBanner({required this.rescueCase});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = rescueCase;
+    final raw = c.raw;
+    if (raw['status'] == 'closed') {
+      final claimed = (raw['communityAdoptionIds'] as List?)?.isNotEmpty ?? false;
+      final reason = raw['closureReason'] as String?;
+      final closedAt = raw['closedAt'] is Timestamp ? (raw['closedAt'] as Timestamp).toDate() : null;
+      return CaseOutcomeBanner(
+        tone: CaseBannerTone.neutral,
+        icon: claimed ? Icons.volunteer_activism : Icons.inventory_2_outlined,
+        title: claimed
+            ? 'Closed: every animal was claimed through Community Adoption'
+            : reason != null
+                ? 'Closed: ${ClosureReason.fromName(reason).label}'
+                : 'Closed: animal deceased',
+        facts: [
+          if (closedAt != null) ('Closed', formatDateTime(closedAt)),
+          if ((raw['closedByName'] as String?)?.isNotEmpty ?? false) ('By', raw['closedByName'] as String),
+        ],
+      );
+    }
+    final records = ref.watch(_caseAnimalRecordsProvider(c.id)).asData?.value ?? const [];
+    final shelter = (raw['shelterName'] as String?)?.trim();
+    return CaseOutcomeBanner(
+      tone: CaseBannerTone.success,
+      icon: Icons.home_outlined,
+      title: 'Intaked',
+      message: records.isEmpty
+          ? 'The rescue is complete.'
+          : 'The rescue is complete. ${records.length == 1 ? 'Its animal record' : 'Its ${records.length} animal records'} '
+              'hold the animal${records.length == 1 ? '' : 's'}\' care from here.',
+      facts: [
+        if (shelter != null && shelter.isNotEmpty) ('Shelter', shelter),
+        if (c.vetClinicName != null) ('Clinic', c.vetClinicName!),
+      ],
+      actions: [
+        for (final r in records)
+          ActionChip(
+            avatar: const Icon(Icons.pets, size: 16),
+            label: Text('Open ${r.name}', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700)),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => AnimalRecordDetailPage(animalId: r.id, data: const {})),
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// Per-animal details. Current submissions keep every animal of a report
+/// in this case's `animals` array; older group reports stored one case per
+/// animal linked by `groupId` (read from publicCases); single-animal cases
+/// show the case's own fields.
+class _AnimalGroupSection extends StatelessWidget {
+  final RescueCase currentCase;
+  const _AnimalGroupSection({required this.currentCase});
+
+  // Maps an `animals[]` entry onto the case-doc key shape.
+  Map<String, dynamic> _animalMap(Map raw) => {
+        'animalType': raw['species'],
+        'breed': raw['breed'],
+        'sex': raw['sex'],
+        'size': raw['size'],
+        'colorMarkings': raw['colorMarkings'],
+        'bodyCondition': raw['bodyCondition'],
+        'mobility': raw['mobility'],
+        'alertness': raw['alertness'],
+        'eyesNoseMouth': raw['eyesNoseMouth'],
+        'skinAndCoat': raw['skinAndCoat'],
+        'appetiteHydration': raw['appetiteHydration'],
+        'behavior': raw['behavior'],
+        'environmentSafety': raw['environmentSafety'],
+        'biteRisk': raw['biteRisk'],
+        'escapeRisk': raw['escapeRisk'],
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final animals = currentCase.raw['animals'] as List?;
+    if (animals != null && animals.isNotEmpty) {
+      return _AnimalsCard(animals: [for (final a in animals) _animalMap(a as Map)]);
+    }
+    final groupId = currentCase.raw['groupId'] as String?;
+    if (groupId == null || groupId.isEmpty) return _AnimalsCard(animals: [currentCase.raw]);
+
+    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      // The public copy carries the animal details and can be queried by
+      // groupId whoever owns the sibling reports.
+      future: FirebaseFirestore.instance.collection('publicCases').where('groupId', isEqualTo: groupId).get(),
+      builder: (context, snapshot) {
+        final docs = snapshot.data?.docs ?? const [];
+        // This case's own animal shows at once; the rest fill in.
+        if (docs.length <= 1) return _AnimalsCard(animals: [currentCase.raw]);
+        return _AnimalsCard(
+          animals: [for (final d in docs) d.data()],
+          highlightIndex: docs.indexWhere((d) => d.id == currentCase.id),
+        );
+      },
+    );
+  }
+}
+
+class _AnimalsCard extends StatelessWidget {
+  final List<Map<String, dynamic>> animals;
+  final int highlightIndex;
+  const _AnimalsCard({required this.animals, this.highlightIndex = -1});
+
+  // Tolerant parsing: a legacy value might be a single String instead of a
+  // List, or missing; unknown option values are shown as they are.
+  static List<String> _stringList(dynamic value) {
+    if (value is List) return value.whereType<String>().where((s) => s.trim().isNotEmpty).toList();
+    if (value is String && value.trim().isNotEmpty) return [value.trim()];
+    return const [];
+  }
+
+  static String? _s(Map<String, dynamic> data, String key) => (data[key] as String?)?.trim();
+
+  static List<CaseInfoItem> _basics(Map<String, dynamic> data) {
+    final bite = _s(data, 'biteRisk');
+    final escape = _s(data, 'escapeRisk');
+    return [
+      CaseInfoItem('Species', _s(data, 'animalType')),
+      CaseInfoItem('Breed / mixed', _s(data, 'breed')),
+      CaseInfoItem('Sex', _s(data, 'sex')),
+      CaseInfoItem('Size', _s(data, 'size')),
+      CaseInfoItem('Bite risk', (bite?.isNotEmpty ?? false) ? bite : 'Not assessed'),
+      CaseInfoItem('Escape risk', (escape?.isNotEmpty ?? false) ? escape : 'Not assessed'),
+      CaseInfoItem('Color / markings', _s(data, 'colorMarkings'), wide: true),
+    ];
+  }
+
+  static List<CaseInfoItem> _assessment(Map<String, dynamic> data) {
+    final behavior = _stringList(data['behavior']);
+    final environment = _stringList(data['environmentSafety']);
+    return [
+      CaseInfoItem('Body condition', _s(data, 'bodyCondition')),
+      CaseInfoItem('Mobility', _s(data, 'mobility')),
+      CaseInfoItem('Alertness', _s(data, 'alertness')),
+      CaseInfoItem('Eyes, nose, mouth', _s(data, 'eyesNoseMouth')),
+      CaseInfoItem('Skin and coat', _s(data, 'skinAndCoat')),
+      CaseInfoItem('Appetite and hydration', _s(data, 'appetiteHydration')),
+      CaseInfoItem('Behavior', behavior.join(', '), wide: true),
+      CaseInfoItem('Environment and safety', environment.join(', '), wide: true),
+    ];
+  }
+
+  Widget _animal(Map<String, dynamic> data) {
+    final assessment = _assessment(data);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CaseInfoGrid(card: false, items: _basics(data)),
+        if (assessment.any((i) => i.hasValue)) ...[
           const SizedBox(height: 10),
-          _rejectionRow('Reason', reasonLabel),
-          _rejectionRow('Rejected date', dateStr),
-          _rejectionRow('Rejected by', rejectionLog?.actorName ?? 'Unknown'),
-          if (eligible) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.greenrspwn.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                'Community Adoption eligible',
-                style: GoogleFonts.zain(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.greenrspwn,
+          Text('Health & behavior',
+              style: GoogleFonts.zain(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          CaseInfoGrid(card: false, items: assessment),
+        ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = animals.length;
+    return CaseCard(
+      title: total == 1 ? 'Animal' : 'Animals ($total)',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < total; i++) ...[
+            if (i > 0) const Divider(height: 20),
+            if (total > 1)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  'Animal ${i + 1} of $total${i == highlightIndex ? ' (this report)' : ''}',
+                  style: GoogleFonts.zain(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                 ),
               ),
-            ),
+            _animal(animals[i]),
           ],
         ],
       ),
     );
   }
-
-  Widget _rejectionRow(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 100,
-          child: Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
 }
 
 /// Owner-identification section (spec §1) — always visible (not just once
@@ -1901,15 +1648,28 @@ class _OwnershipSection extends StatelessWidget {
 class _PhotoCarousel extends StatefulWidget {
   final List<String> photoUrls;
   final List<String> videoUrls;
-  const _PhotoCarousel({required this.photoUrls, this.videoUrls = const []});
+  final int initialIndex;
+  final double height;
+  const _PhotoCarousel({
+    required this.photoUrls,
+    this.videoUrls = const [],
+    this.initialIndex = 0,
+    this.height = 220,
+  });
 
   @override
   State<_PhotoCarousel> createState() => _PhotoCarouselState();
 }
 
 class _PhotoCarouselState extends State<_PhotoCarousel> {
-  int _current = 0;
-  final PageController _ctrl = PageController();
+  late int _current = widget.initialIndex;
+  late final PageController _ctrl = PageController(initialPage: widget.initialIndex);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   // Photos first, then videos — matches the order they were shown while
   // being attached in the report form.
@@ -1921,7 +1681,7 @@ class _PhotoCarouselState extends State<_PhotoCarousel> {
     return Stack(
       children: [
         SizedBox(
-          height: 220,
+          height: widget.height,
           child: PageView.builder(
             controller: _ctrl,
             itemCount: _items.length,
@@ -2061,352 +1821,6 @@ class _NetworkVideoTileState extends State<_NetworkVideoTile> {
   }
 }
 
-class _DetailSection extends StatelessWidget {
-  final String label;
-  final String value;
-  const _DetailSection({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          if (value.isNotEmpty)
-            Text(
-              value,
-              style: GoogleFonts.zain(
-                fontSize: 13,
-                color: AppColors.textSecondary,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// "No. of Animals" + per-animal breakdown.
-///
-/// Current submissions: every animal in a group report lives in this one
-/// case doc's `animals` array — one Case ID for the whole report, however
-/// many animals (or species) were logged together.
-///
-/// Legacy fallback: cases created before this fix stored one case doc PER
-/// animal, linked only by a shared `groupId`; those are still read the old
-/// way (querying sibling docs) so historic group reports keep displaying
-/// correctly. Cases with neither `animals` nor `groupId` just show this
-/// case's own single animal.
-class _AnimalGroupSection extends StatelessWidget {
-  final RescueCase currentCase;
-  const _AnimalGroupSection({required this.currentCase});
-
-  // Maps an `animals[]` entry onto the same key shape
-  // `_AnimalCard._animalFields()` already expects from a full case doc
-  // (animalType/breed/sex/size/colorMarkings/ + Health & Behavior
-  // Assessment fields/biteRisk/escapeRisk).
-  Map<String, dynamic> _animalMap(Map raw) => {
-    'animalType': raw['species'],
-    'breed': raw['breed'],
-    'sex': raw['sex'],
-    'size': raw['size'],
-    'colorMarkings': raw['colorMarkings'],
-    'bodyCondition': raw['bodyCondition'],
-    'mobility': raw['mobility'],
-    'alertness': raw['alertness'],
-    'eyesNoseMouth': raw['eyesNoseMouth'],
-    'skinAndCoat': raw['skinAndCoat'],
-    'appetiteHydration': raw['appetiteHydration'],
-    'behavior': raw['behavior'],
-    'environmentSafety': raw['environmentSafety'],
-    'biteRisk': raw['biteRisk'],
-    'escapeRisk': raw['escapeRisk'],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final animals = currentCase.raw['animals'] as List?;
-    if (animals != null && animals.isNotEmpty) {
-      final total = animals.length;
-      if (total <= 1) {
-        return _AnimalCard(
-          data: _animalMap(animals.first as Map),
-          index: 1,
-          total: 1,
-          highlight: false,
-        );
-      }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _DetailSection(label: 'No. of Animals', value: '$total'),
-          const SizedBox(height: 4),
-          _responsiveAnimalCards([
-            for (var i = 0; i < animals.length; i++)
-              _AnimalCard(
-                data: _animalMap(animals[i] as Map),
-                index: i + 1,
-                total: total,
-                highlight: false,
-              ),
-          ]),
-        ],
-      );
-    }
-
-    final groupId = currentCase.raw['groupId'] as String?;
-    if (groupId == null || groupId.isEmpty) {
-      return _AnimalCard(
-        data: currentCase.raw,
-        index: 1,
-        total: 1,
-        highlight: false,
-      );
-    }
-
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      // The public copy carries the animal details and can be queried by
-      // groupId whoever owns the sibling reports.
-      future: FirebaseFirestore.instance
-          .collection('publicCases')
-          .where('groupId', isEqualTo: groupId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          // Show this case's own animal immediately rather than blocking
-          // on the group query — the count/other-animals list fills in
-          // once it resolves.
-          return _AnimalCard(
-            data: currentCase.raw,
-            index: 1,
-            total: 1,
-            highlight: false,
-          );
-        }
-        final docs = snapshot.data!.docs;
-        final total = docs.length;
-        if (total <= 1) {
-          return _AnimalCard(
-            data: currentCase.raw,
-            index: 1,
-            total: 1,
-            highlight: false,
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DetailSection(label: 'No. of Animals', value: '$total'),
-            const SizedBox(height: 4),
-            _responsiveAnimalCards([
-              for (var i = 0; i < docs.length; i++)
-                _AnimalCard(
-                  data: docs[i].data(),
-                  index: i + 1,
-                  total: total,
-                  highlight: docs[i].id == currentCase.id,
-                ),
-            ]),
-          ],
-        );
-      },
-    );
-  }
-
-  /// Full-width vertical stack on phone widths; a two-column grid of
-  /// equal-width, equal-padding cards once there's enough room for both to
-  /// stay legible — never a horizontally compressed single Row (which is
-  /// what made the second card too narrow to read).
-  Widget _responsiveAnimalCards(List<Widget> cards) {
-    const breakpoint = 480.0;
-    const gap = 8.0;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < breakpoint) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: cards,
-          );
-        }
-        final cardWidth = (constraints.maxWidth - gap) / 2;
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: [
-            for (final card in cards) SizedBox(width: cardWidth, child: card),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _AnimalCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final int index;
-  final int total;
-  final bool highlight;
-  const _AnimalCard({
-    required this.data,
-    required this.index,
-    required this.total,
-    required this.highlight,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Single-animal reports don't need a card wrapper — just the plain
-    // detail rows, matching how every other field on this screen renders.
-    if (total <= 1) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _DetailSection(label: 'No. of Animals', value: '1'),
-          ..._animalFields(),
-        ],
-      );
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: highlight
-            ? AppColors.tearspwn.withValues(alpha: 0.4)
-            : Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.slaterspwn),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Animal $index of $total${highlight ? ' (this report)' : ''}',
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          ..._animalFields(),
-        ],
-      ),
-    );
-  }
-
-  // Tolerant parsing (spec) — a legacy/malformed value might be a single
-  // String instead of a List, or missing/null entirely; either way this
-  // never throws, and an unrecognized option value is still shown as-is
-  // (never dropped just because it isn't one of the current predefined
-  // choices).
-  static List<String> _stringList(dynamic value) {
-    if (value == null) return const [];
-    if (value is List) {
-      return value
-          .whereType<String>()
-          .where((s) => s.trim().isNotEmpty)
-          .toList();
-    }
-    if (value is String && value.trim().isNotEmpty) return [value.trim()];
-    return const [];
-  }
-
-  List<Widget> _animalFields() {
-    final species = data['animalType'] as String?;
-    final breed = data['breed'] as String?;
-    final sex = data['sex'] as String?;
-    final size = data['size'] as String?;
-    final colorMarkings = data['colorMarkings'] as String?;
-    final bodyCondition = data['bodyCondition'] as String?;
-    final mobility = data['mobility'] as String?;
-    final alertness = data['alertness'] as String?;
-    final eyesNoseMouth = data['eyesNoseMouth'] as String?;
-    final skinAndCoat = data['skinAndCoat'] as String?;
-    final appetiteHydration = data['appetiteHydration'] as String?;
-    final behavior = _stringList(data['behavior']);
-    final environmentSafety = _stringList(data['environmentSafety']);
-    final biteRisk = data['biteRisk'] as String?;
-    final escapeRisk = data['escapeRisk'] as String?;
-
-    final hasAssessment =
-        (bodyCondition?.isNotEmpty ?? false) ||
-            (mobility?.isNotEmpty ?? false) ||
-            (alertness?.isNotEmpty ?? false) ||
-            (eyesNoseMouth?.isNotEmpty ?? false) ||
-            (skinAndCoat?.isNotEmpty ?? false) ||
-            (appetiteHydration?.isNotEmpty ?? false) ||
-            behavior.isNotEmpty ||
-            environmentSafety.isNotEmpty;
-
-    return [
-      if (species != null && species.isNotEmpty)
-        _DetailSection(label: 'Species', value: species),
-      if (breed != null && breed.isNotEmpty)
-        _DetailSection(label: 'Breed / Mixed', value: breed),
-      if (sex != null && sex.isNotEmpty)
-        _DetailSection(label: 'Sex', value: sex),
-      if (size != null && size.isNotEmpty)
-        _DetailSection(label: 'Size', value: size),
-      if (colorMarkings != null && colorMarkings.isNotEmpty)
-        _DetailSection(
-          label: 'Color / Distinguishing Markings',
-          value: colorMarkings,
-        ),
-      if (hasAssessment) ...[
-        const SizedBox(height: 6),
-        Text(
-          'Health & Behavior Assessment',
-          style: GoogleFonts.zain(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 2),
-        if (bodyCondition != null && bodyCondition.isNotEmpty)
-          _DetailSection(label: 'Body Condition', value: bodyCondition),
-        if (mobility != null && mobility.isNotEmpty)
-          _DetailSection(label: 'Mobility', value: mobility),
-        if (alertness != null && alertness.isNotEmpty)
-          _DetailSection(label: 'Alertness', value: alertness),
-        if (eyesNoseMouth != null && eyesNoseMouth.isNotEmpty)
-          _DetailSection(label: 'Eyes, Nose, Mouth', value: eyesNoseMouth),
-        if (skinAndCoat != null && skinAndCoat.isNotEmpty)
-          _DetailSection(label: 'Skin and Coat', value: skinAndCoat),
-        if (appetiteHydration != null && appetiteHydration.isNotEmpty)
-          _DetailSection(
-            label: 'Appetite and Hydration',
-            value: appetiteHydration,
-          ),
-        if (behavior.isNotEmpty)
-          _DetailSection(label: 'Behavior', value: behavior.join(', ')),
-        if (environmentSafety.isNotEmpty)
-          _DetailSection(
-            label: 'Environment and Safety',
-            value: environmentSafety.join(', '),
-          ),
-      ],
-      _DetailSection(
-        label: 'Bite Risk',
-        value: (biteRisk != null && biteRisk.isNotEmpty) ? biteRisk : 'Not assessed',
-      ),
-      _DetailSection(
-        label: 'Escape Risk',
-        value: (escapeRisk != null && escapeRisk.isNotEmpty) ? escapeRisk : 'Not assessed',
-      ),
-    ];
-  }
-}
 /// Result of the service-area geofence check done by notifyNewCaseReported
 /// (functions/index.js): which organizations' coverage contains this case,
 /// or a warning when it's outside every coverage area.
@@ -2440,115 +1854,6 @@ class _ServiceAreaGeofenceNote extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// A case referred to another organization. The receiving organization's
-/// staff accept or decline it; everyone else sees who it is waiting on.
-class _ReferralPanel extends StatelessWidget {
-  final RescueCase rescueCase;
-  final String? myOrganizationId;
-  final bool busy;
-  final VoidCallback onAccept;
-  final VoidCallback onDecline;
-
-  const _ReferralPanel({
-    required this.rescueCase,
-    required this.myOrganizationId,
-    required this.busy,
-    required this.onAccept,
-    required this.onDecline,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final r = rescueCase.raw['referral'] is Map
-        ? Map<String, dynamic>.from(rescueCase.raw['referral'] as Map)
-        : const <String, dynamic>{};
-    final target = rescueCase.raw['referredToOrgId'] as String? ?? '';
-    final targetName = (r['targetOrgName'] as String?) ?? 'another organization';
-    final fromName = (r['fromOrgName'] as String?) ?? '';
-    final note = (r['note'] as String?)?.trim() ?? '';
-    final at = r['referredAt'] is Timestamp ? (r['referredAt'] as Timestamp).toDate() : null;
-    final isTarget = target.isNotEmpty && target == myOrganizationId;
-    final muted = GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary);
-
-    if (target.isEmpty) {
-      return SectionCard(
-        child: Text('This case is referred. No further action is needed here.', style: muted),
-      );
-    }
-    return SectionCard(
-      title: isTarget ? 'Referral to your organization' : 'Waiting on $targetName',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            isTarget
-                ? '${fromName.isEmpty ? 'Another organization' : fromName} referred this case to you'
-                '${at == null ? '' : ' on ${formatDateTime(at)}'}. Accept to take it into your Rescue Review, '
-                'or decline with a reason to send it back.'
-                : 'Referred to $targetName${at == null ? '' : ' on ${formatDateTime(at)}'}. They are reminded after '
-                '$kReferralReminderHours hours; with no answer after $kReferralReturnHours hours the case comes '
-                'back to your Rescue Review.',
-            style: muted,
-          ),
-          if (note.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text('Note: $note', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-          ],
-          if (isTarget) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: busy ? null : onDecline,
-                    style: AppButtons.dangerOutline,
-                    child: Text('Decline', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.error)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: busy ? null : onAccept,
-                    style: AppButtons.primary,
-                    child: Text('Accept', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// On a case back in Rescue Review after a referral: who declined it and
-/// why, or that nobody answered in time.
-class _ReferralOutcomeBanner extends StatelessWidget {
-  final RescueCase rescueCase;
-  const _ReferralOutcomeBanner({required this.rescueCase});
-
-  @override
-  Widget build(BuildContext context) {
-    final o = rescueCase.raw['referralOutcome'];
-    if (o is! Map) return const SizedBox.shrink();
-    final status = o['status'] as String?;
-    if (status != 'declined' && status != 'expired') return const SizedBox.shrink();
-    final name = (o['targetOrgName'] as String?) ?? 'The receiving organization';
-    final reason = (o['reason'] as String?)?.trim() ?? '';
-    final text = status == 'declined'
-        ? '$name declined the referral.${reason.isEmpty ? '' : ' Reason: $reason'}'
-        : '$name did not answer the referral within $kReferralReturnHours hours, so it came back to you.';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: SectionCard(
-        title: 'Referral returned',
-        child: Text(text, style: GoogleFonts.zain(fontSize: 13, color: AppColors.warning)),
       ),
     );
   }

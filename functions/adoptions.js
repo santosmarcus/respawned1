@@ -229,6 +229,7 @@ const {
   noShowOutcome,
   bookingClockStart,
   bookingStepDue,
+  isInterviewConfirmed,
   BOOKING_WITHDRAW_DAYS,
 } = require('./adoption_stall_rules');
 
@@ -272,6 +273,28 @@ exports.notifyAdopterOfNoShow = onDocumentUpdated('adoptions/{adoptionId}', asyn
     body: `You missed your adoption interview for ${animal}. You can book one more interview from the app; `
       + 'missing it will close your application.',
     type: 'adoption_no_show_rebook',
+  });
+});
+
+// Staff confirmed the interview the applicant booked
+// (AdoptionApplicationRepository.confirmInterview: Pending -> Interview).
+exports.notifyAdopterOfInterviewConfirmed = onDocumentUpdated('adoptions/{adoptionId}', async (event) => {
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  if (!isInterviewConfirmed(before.status, after.status)) return;
+  const personal = after.personal || {};
+  const animal = personal.animalName || 'the animal';
+  const date = after.appointmentDate && typeof after.appointmentDate.toDate === 'function'
+    ? after.appointmentDate.toDate().toLocaleDateString('en-PH', {timeZone: 'Asia/Manila', dateStyle: 'medium'})
+    : null;
+  const when = [date, after.appointmentTime].filter(Boolean).join(' · ');
+  const type = after.appointmentType ? ` (${after.appointmentType})` : '';
+  await tellApplicant(personal.adopterId, event.params.adoptionId, {
+    title: 'Interview confirmed',
+    body: when
+      ? `Your adoption interview for ${animal} is confirmed for ${when}${type}.`
+      : `Your adoption interview for ${animal} is confirmed.`,
+    type: 'adoption_interview_confirmed',
   });
 });
 

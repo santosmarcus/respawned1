@@ -336,18 +336,36 @@ class AdoptionApplicationRepository {
   /// freshly-booked appointment) stay Pending until this runs; the user's
   /// own Book Appointment step only ever saves appointmentDate/Time/Type,
   /// it never sets status itself (see adoption_process.dart's
-  /// _saveAppointment).
+  /// _saveAppointment). Only a Pending application with an interview
+  /// booked can be confirmed. The applicant is told by
+  /// notifyAdopterOfInterviewConfirmed (functions/adoptions.js).
   Future<void> confirmInterview({
     required String applicationId,
+    required String actorUid,
     required String actorName,
   }) async {
-    await _adoptionDoc(applicationId).update({
-      'status': AdoptionStatus.interview.firestoreValue,
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Interview confirmed by organization.', 'timestamp': Timestamp.now()}
-      ]),
+    final ref = _adoptionDoc(applicationId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      final data = snap.data();
+      if (data == null) throw StateError('Application not found.');
+      if (AdoptionStatus.fromFirestoreValue(data['status'] as String?) != AdoptionStatus.pending) {
+        throw StateError('Only a pending application can be moved to Interview.');
+      }
+      if (data['appointmentDate'] == null) throw StateError('The applicant has not booked an interview yet.');
+      tx.update(ref, {
+        'status': AdoptionStatus.interview.firestoreValue,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Interview confirmed by organization.', 'timestamp': Timestamp.now()}
+        ]),
+      });
     });
-    await _logStep(action: 'Interview confirmed', actorName: actorName, targetId: applicationId, newValues: const {'status': 'interview'});
+    await _logStep(
+        action: 'Interview confirmed',
+        actorId: actorUid,
+        actorName: actorName,
+        targetId: applicationId,
+        newValues: const {'status': 'interview'});
   }
 
   /// Admin-side interview reschedule — edits the SAME appointment fields

@@ -155,7 +155,7 @@ Widget _transporterChip(String status) {
   final (label, color) = switch (status) {
     'approved' => ('Verified', AppColors.success),
     'pending' => ('Pending', AppColors.warning),
-    'rejected' => ('Not approved', AppColors.error),
+    'rejected' => ('Rejected', AppColors.error),
     _ => ('No documents', AppColors.textSecondary),
   };
   return _Chip(label, color);
@@ -227,7 +227,7 @@ Widget _orgStatusChip(OrgVerificationStatus s) => switch (s) {
       OrgVerificationStatus.approved => const _Chip('Approved', AppColors.success),
       OrgVerificationStatus.pending => const _Chip('Under review', AppColors.warning),
       OrgVerificationStatus.requiresChanges => const _Chip('Needs changes', AppColors.warning),
-      OrgVerificationStatus.rejected => const _Chip('Not approved', AppColors.error),
+      OrgVerificationStatus.rejected => const _Chip('Rejected', AppColors.error),
       OrgVerificationStatus.draft => const _Chip('Not submitted', AppColors.textSecondary),
     };
 

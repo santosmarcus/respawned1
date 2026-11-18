@@ -16,6 +16,7 @@ const Set<String> kApplicantAdoptionNotifTypes = {
   'adoption_no_show_closed',
   'adoption_booking_reminder',
   'adoption_booking_withdrawn',
+  'adoption_interview_confirmed',
 };
 
 /// The adopter's screen for one of their applications: the return pickup

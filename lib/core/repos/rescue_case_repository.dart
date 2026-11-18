@@ -409,6 +409,14 @@ class RescueCaseRepository {
     required String actorName,
   }) => referrals.declineReferral(caseId: caseId, reason: reason, actorUid: actorUid, actorName: actorName);
 
+  /// Delegates to [CaseReferralRepository.withdraw].
+  Future<void> withdrawReferral({
+    required String caseId,
+    required String reason,
+    required String actorUid,
+    required String actorName,
+  }) => referrals.withdraw(caseId: caseId, reason: reason, actorUid: actorUid, actorName: actorName);
+
   /// Delegates to [CaseReferralRepository.referToLgu].
   Future<String> referToLgu({
     required String caseId,

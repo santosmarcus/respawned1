@@ -29,7 +29,15 @@ class ShelterPinPrompt extends ConsumerWidget {
   const ShelterPinPrompt({super.key, required this.organizationId, required this.canSet, this.message});
 
   Future<void> _openPicker(BuildContext context) async {
-    final doc = await FirebaseFirestore.instance.collection('organizations').doc(organizationId).get();
+    // The prompt's own stream has this doc cached; read the cache first so
+    // the picker opens without a round trip.
+    final ref = FirebaseFirestore.instance.collection('organizations').doc(organizationId);
+    DocumentSnapshot<Map<String, dynamic>> doc;
+    try {
+      doc = await ref.get(const GetOptions(source: Source.cache));
+    } catch (_) {
+      doc = await ref.get();
+    }
     final d = doc.data() ?? const <String, dynamic>{};
     if (!context.mounted) return;
     await Navigator.push<bool>(

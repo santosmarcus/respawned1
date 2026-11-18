@@ -20,6 +20,7 @@ class ReferralHistorySection extends ConsumerWidget {
         ReferralStatus.accepted => 'Accepted',
         ReferralStatus.declined => 'Declined',
         ReferralStatus.expired => 'No answer (returned)',
+        ReferralStatus.withdrawn => 'Withdrawn',
         ReferralStatus.notified => 'Notified',
       };
 
