@@ -11,6 +11,7 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/transporter_trip_stats.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/widgets/delete_account.dart';
 
 class TransporterProfile extends StatelessWidget {
   const TransporterProfile({super.key});
@@ -278,6 +279,15 @@ class TransporterProfile extends StatelessWidget {
                           style: GoogleFonts.tiltWarp(
                               fontSize: 14, color: AppColors.error)),
                       style: AppButtons.dangerOutline,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => showDeleteAccountFlow(context),
+                      child: Text('Delete account',
+                          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary,
+                              decoration: TextDecoration.underline)),
                     ),
                   ),
                 ],

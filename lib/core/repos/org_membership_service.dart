@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:respawnd1/core/utils/stream_combine.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/organization/org_permission.dart';
@@ -130,9 +131,8 @@ class OrgMembershipService {
   }
 
   Stream<OrgMembership?> streamMembership(String uid) {
-    return _db.collection('users').doc(uid).snapshots().asyncExpand((userDoc) {
-      final orgId = userDoc.data()?['organizationId'] as String?;
-      if (orgId == null || orgId.isEmpty) return Stream.value(null);
+    return switchMap(_orgIdOf(uid), (String orgId) {
+      if (orgId.isEmpty) return Stream<OrgMembership?>.value(null);
       return _db
           .collection('organizations')
           .doc(orgId)
@@ -154,12 +154,22 @@ class OrgMembershipService {
   /// access, minus the owner/admin-only capabilities, matching
   /// firestore.rules.
   Stream<OrganizationCapabilities> streamCapabilities(String uid) {
-    return _db.collection('users').doc(uid).snapshots().asyncExpand((userDoc) {
-      final orgId = userDoc.data()?['organizationId'] as String?;
-      if (orgId == null || orgId.isEmpty) return Stream.value(OrganizationCapabilities.none);
+    return switchMap(_orgIdOf(uid), (String orgId) {
+      if (orgId.isEmpty) return Stream.value(OrganizationCapabilities.none);
       return _combineOrgAndMember(orgId: orgId, uid: uid);
     });
   }
+
+  /// `users/{uid}.organizationId` ('' when none), live, only when it
+  /// changes — so being removed from (or added to) an organization reaches
+  /// the streams above at once. They used asyncExpand, which never moved
+  /// past the first organization because a snapshot stream never ends.
+  Stream<String> _orgIdOf(String uid) => _db
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .map((d) => (d.data()?['organizationId'] as String?) ?? '')
+      .distinct();
 
   OrganizationCapabilities _resolveCapabilities({
     required String uid,

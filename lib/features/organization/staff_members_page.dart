@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/main.dart' show AuthWrapper, appNavigatorKey;
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
@@ -361,6 +362,14 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
         preserveAccountRole: true,
       );
       _snack('You joined ${_organizationNameFor(invite)}.');
+      // A member who had no organization yet: restart from AuthWrapper, which
+      // now opens their organization, so back doesn't return to invitations.
+      if (widget.organizationId == null && mounted) {
+        appNavigatorKey.currentState?.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AuthWrapper()),
+          (route) => false,
+        );
+      }
     } catch (e) {
       debugPrint('[StaffMembersPage] acceptInvitation failed: $e');
       _snack('Could not accept this invitation. Please try again.', error: true);

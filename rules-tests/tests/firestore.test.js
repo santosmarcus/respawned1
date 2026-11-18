@@ -509,7 +509,16 @@ describe('animal records and public profiles', () => {
     await assertFails(as('stranger').collection('animals').where('adoptionStatus', '==', 'adoptable').get());
   });
 
-  test('records for one case: allowed when scoped to the organization', async () => {
+  test('nobody suspends or un-suspends an account from the client', async () => {
+    // Only adminSetUserDisabled (Admin SDK) writes these.
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('users/stranger').update({ disabled: true }));
+    await assertFails(as('stranger').doc('users/stranger').update({ disabled: false }));
+    await assertFails(as('reporter').doc('users/reporter').update({ disabled: true }));
+    await assertFails(as('reporter').doc('users/reporter').update({ disabledReason: 'x' }));
+    await assertSucceeds(as('reporter').doc('users/reporter').update({ firstName: 'Rey' }));
+  });
+
+    test('records for one case: allowed when scoped to the organization', async () => {
     // AnimalRecordRepository.streamRecordsForCase (Create Animal Records
     // from intake) — the unscoped form was permission-denied.
     await env.withSecurityRulesDisabled((ctx) =>

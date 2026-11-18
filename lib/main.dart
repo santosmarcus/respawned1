@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/organization/organization_member_pending_page.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
@@ -189,6 +191,22 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
       NotificationService.markRouterReady();
     });
   }
+  /// Organization at the last profile update (null before the first).
+  String? _lastOrgId;
+
+  /// When this account leaves an organization while signed in (an Admin
+  /// removed them), screens pushed over the root belong to the old access:
+  /// close them so the root re-routes. Joining one (sign-up wizard, accepting
+  /// an invitation) is left alone; those flows navigate themselves.
+  void _popToRootIfAccountMoved(String role, String organizationId) {
+    final previous = _lastOrgId;
+    _lastOrgId = organizationId;
+    if (previous == null || previous.isEmpty || previous == organizationId) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      appNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    });
+  }
+
   Stream<DocumentSnapshot<Map<String, dynamic>>> _subscribe() =>
       FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(includeMetadataChanges: true);
 
@@ -239,6 +257,7 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
 
         final data = doc.data();
         final role = data?['role'] as String? ?? '';
+        _popToRootIfAccountMoved(role, data?['organizationId'] as String? ?? '');
 
         // Onboarding not finished yet (new user, or social sign-in with
         // no role) — only these users see the onboarding questions.
@@ -261,6 +280,14 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
         }
 
         _restoredUnfinishedUid = null;
+
+        // Disabled by a system admin: sign-in is already blocked, and this
+        // closes an app that was open at the time (its old token can still
+        // read for up to an hour otherwise).
+        if (data?['disabled'] == true) {
+          return const _DisabledAccountScreen();
+        }
+
         _startSignedInServices();
 
         // Existing user with role — route based on role
@@ -295,6 +322,16 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
               return const OrganizationAboutScreen();
             }
             return OrganizationRoleRouter(organizationId: organizationId);
+          // Joined by invitation: once linked to an organization they get the
+          // same org shell as any org account; until then, their invitations.
+          // (Without this case a member fell through to the general Home on
+          // every restart, with no way back to the organization.)
+          case 'organization_member':
+            final memberOrgId = data?['organizationId'] as String?;
+            if (memberOrgId == null || memberOrgId.isEmpty) {
+              return const OrganizationMemberPendingPage();
+            }
+            return OrganizationRoleRouter(organizationId: memberOrgId);
           case 'general':
           default:
             return const HomeScreen();
@@ -370,27 +407,102 @@ class OrganizationRoleRouter extends StatelessWidget {
 /// carers) get the care-tasks screen, Staff with no permissions a short
 /// "ask an Admin" page, everyone else the admin shell. Live, so a change an
 /// Admin makes applies without signing out.
-class _ApprovedOrgHome extends StatelessWidget {
+class _ApprovedOrgHome extends StatefulWidget {
   final String organizationId;
   const _ApprovedOrgHome({required this.organizationId});
 
   @override
+  State<_ApprovedOrgHome> createState() => _ApprovedOrgHomeState();
+}
+
+class _ApprovedOrgHomeState extends State<_ApprovedOrgHome> {
+  // Created once (a stream made in build() re-subscribed on every rebuild).
+  late final Stream<OrganizationCapabilities>? _caps = FirebaseAuth.instance.currentUser == null
+      ? null
+      : OrgMembershipService().streamCapabilities(FirebaseAuth.instance.currentUser!.uid);
+
+  /// What this member could do at the last update; null before the first.
+  String? _lastAccess;
+
+  static String _accessKey(OrganizationCapabilities c) {
+    final perms = c.permissions.map((p) => p.name).toList()..sort();
+    return '${c.isActive}|${c.role?.name}|${c.isAdmin}|${perms.join(',')}';
+  }
+
+  /// An Admin changed this member's access while the app was open: close
+  /// any module screens opened on top (they may no longer be allowed) and
+  /// say why, instead of leaving stale screens that now fail to load.
+  void _onAccessChanged(OrganizationCapabilities caps) {
+    final key = _accessKey(caps);
+    final previous = _lastAccess;
+    _lastAccess = key;
+    if (previous == null || previous == key) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final nav = appNavigatorKey.currentState;
+      if (nav == null) return;
+      nav.popUntil((route) => route.isFirst);
+      final ctx = appNavigatorKey.currentContext;
+      if (ctx != null) {
+        ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+          appSnackBar('Your access in this organization was changed by an Admin.'),
+        );
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const AdminHomeScreen();
+    final stream = _caps;
+    if (stream == null) return const AdminHomeScreen();
     return StreamBuilder<OrganizationCapabilities>(
-      stream: OrgMembershipService().streamCapabilities(uid),
+      stream: stream,
       builder: (context, snapshot) {
         final caps = snapshot.data;
         if (caps == null) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
+        _onAccessChanged(caps);
         return switch (orgHomeFor(caps)) {
-          OrgHome.care => CarerHomeScreen(organizationId: organizationId),
+          OrgHome.care => CarerHomeScreen(organizationId: widget.organizationId),
           OrgHome.noAccess => const _NoOrgAccessScreen(),
           OrgHome.admin => const AdminHomeScreen(),
         };
       },
+    );
+  }
+}
+
+class _DisabledAccountScreen extends StatelessWidget {
+  const _DisabledAccountScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.block, size: 48),
+                const SizedBox(height: 12),
+                const Text('Account disabled', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                const Text(
+                  'This account has been disabled by a ResPAWnd administrator. Contact support if you think this is a mistake.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => AuthService().signOut(),
+                  child: const Text('Log out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

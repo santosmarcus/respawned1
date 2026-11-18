@@ -15,6 +15,7 @@ import 'package:respawnd1/features/generalhome/profile/location_sharing_page.dar
 import 'package:respawnd1/features/generalhome/profile/communications_setting_page.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/volunteer_badges.dart';
+import 'package:respawnd1/core/widgets/delete_account.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -261,6 +262,14 @@ class _UserProfileState extends State<UserProfile> {
                 child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: AppColors.error,
                 ),
                 ),
+              ),
+            ),
+            Center(
+              child: TextButton(
+                onPressed: () => showDeleteAccountFlow(context),
+                child: Text('Delete account',
+                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary,
+                        decoration: TextDecoration.underline)),
               ),
             ),
 

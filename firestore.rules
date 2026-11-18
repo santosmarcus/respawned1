@@ -738,6 +738,7 @@ service cloud.firestore {
         return data.get('role', '') in selfRoles() &&
           !('volunteerStats' in data) &&
           !('transportStatus' in data) &&
+          !data.keys().hasAny(['disabled', 'disabledAt', 'disabledBy', 'disabledReason']) &&
           data.get('isVerified', false) == false &&
           data.get('transporterVerificationStatus', 'pending') == 'pending' &&
           (!('organizationId' in data) || data.organizationId == null || canLinkSelfTo(data.organizationId));
@@ -746,7 +747,7 @@ service cloud.firestore {
       function selfUpdateOk() {
         let data = request.resource.data;
         return (!changedAny(['role']) || data.get('role', '') in selfRoles()) &&
-          !changedAny(['volunteerStats', 'transportStatus']) &&
+          !changedAny(['volunteerStats', 'transportStatus', 'disabled', 'disabledAt', 'disabledBy', 'disabledReason']) &&
           (!changedAny(['isVerified']) || data.get('isVerified', false) == false) &&
           (!changedAny(['transporterVerificationStatus']) || data.get('transporterVerificationStatus', '') == 'pending') &&
           (!changedAny(['organizationId']) ||

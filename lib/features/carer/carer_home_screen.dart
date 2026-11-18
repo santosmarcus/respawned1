@@ -12,6 +12,7 @@ import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/care_updates_section.dart';
 import 'package:respawnd1/features/care/care_rounds_widgets.dart';
+import 'package:respawnd1/core/widgets/delete_account.dart';
 
 /// Home for organization members with the `carer` role. Carers give care and
 /// record doses; they don't get the admin shell (cases, records, adoptions,
@@ -45,6 +46,11 @@ class CarerHomeScreen extends ConsumerWidget {
             tooltip: 'Log out',
             icon: const Icon(Icons.logout, color: AppColors.textPrimary),
             onPressed: () => _signOut(context, ref),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: AppColors.textPrimary),
+            onSelected: (_) => showDeleteAccountFlow(context),
+            itemBuilder: (_) => const [PopupMenuItem(value: 'delete', child: Text('Delete account'))],
           ),
         ],
       ),

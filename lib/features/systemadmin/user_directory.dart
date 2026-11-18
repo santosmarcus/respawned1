@@ -22,7 +22,7 @@ enum AccountGroup {
   final String label;
 }
 
-/// One `users/{uid}` profile, as the directory shows it. Read-only.
+/// One `users/{uid}` profile, as the directory shows it.
 class DirectoryUser {
   const DirectoryUser({
     required this.uid,
@@ -34,6 +34,7 @@ class DirectoryUser {
     this.transporterStatus = '',
     this.createdAt,
     this.photoUrl,
+    this.disabled = false,
   });
 
   final String uid;
@@ -48,6 +49,13 @@ class DirectoryUser {
   final String transporterStatus;
   final DateTime? createdAt;
   final String? photoUrl;
+
+  /// Suspended by a system admin (adminSetUserDisabled): can't sign in.
+  final bool disabled;
+
+  /// Admin accounts are set in the Firebase console; the directory can't
+  /// disable or remove them.
+  bool get isManagedInConsole => const ['admin', 'ngo_staff', kSystemAdminRole].contains(role);
 
   factory DirectoryUser.fromMap(String uid, Map<String, dynamic> d) {
     String str(String key) => d[key] is String ? (d[key] as String).trim() : '';
@@ -65,6 +73,7 @@ class DirectoryUser {
       transporterStatus: str('transporterVerificationStatus'),
       createdAt: created is Timestamp ? created.toDate() : null,
       photoUrl: photo.startsWith('http') ? photo : null,
+      disabled: d['disabled'] == true,
     );
   }
 

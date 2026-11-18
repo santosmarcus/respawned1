@@ -1914,6 +1914,8 @@ Object.assign(exports, require('./adoptions'));
 Object.assign(exports, require('./audit_logs'));
 // Member access (Admin/Staff and permissions) — see functions/org_members.js.
 Object.assign(exports, require('./org_members'));
+// Delete my account, and system admins disabling/removing users — see functions/account_deletion.js.
+Object.assign(exports, require('./account_deletion'));
 // Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.

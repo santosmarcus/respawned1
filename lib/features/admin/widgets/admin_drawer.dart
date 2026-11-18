@@ -21,6 +21,7 @@ import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
 import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/delete_account.dart';
 
 /// The full set of admin root modules the drawer can open, in the required
 /// order — the single source of truth for labels/ordering/highlighting so
@@ -344,6 +345,21 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             ],
 
             const Spacer(),
+
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+              child: GestureDetector(
+                onTap: _signingOut
+                    ? null
+                    : () {
+                        final rootContext = Navigator.of(context, rootNavigator: true).context;
+                        Navigator.pop(context); // close the drawer
+                        showDeleteAccountFlow(rootContext);
+                      },
+                child: Text('Delete account',
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.background.withValues(alpha: 0.7))),
+              ),
+            ),
 
             // Log out
             Padding(

@@ -5,7 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
-import 'package:respawnd1/features/organization/organization_member_pending_page.dart';
+import 'package:respawnd1/main.dart' show AuthWrapper;
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
@@ -139,7 +139,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
           // the organization-creation wizard at all; they land straight on
           // the same "no organization joined yet" + invitations page
           // AuthWrapper would show on a restart for this role.
-          nextPage = const OrganizationMemberPendingPage();
+          nextPage = const AuthWrapper();
         } else {
           nextPage = const HomeScreen();
         }

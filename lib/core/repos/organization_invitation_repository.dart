@@ -557,11 +557,12 @@ class OrganizationInvitationRepository {
     String? actorId,
     String? actorName,
   }) async {
-    await _db.collection('organizations').doc(organizationId).collection('members').doc(uid).delete();
-    // Clears the account's org association so access is revoked on the
-    // next auth/provider refresh — never deletes the Firebase Auth account
-    // itself.
+    // Unlink the account FIRST: an org-linked account with no members doc is
+    // treated as legacy full staff (app and firestore.rules), so deleting
+    // the members doc first gave a removed member full access in between.
+    // Never deletes the Firebase Auth account itself.
     await _users.doc(uid).update({'organizationId': FieldValue.delete()});
+    await _db.collection('organizations').doc(organizationId).collection('members').doc(uid).delete();
     await _auditLog.log(
       category: AuditCategory.organizationStaff,
       action: 'Staff removed',
