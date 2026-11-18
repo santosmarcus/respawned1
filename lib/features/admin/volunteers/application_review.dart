@@ -104,9 +104,15 @@ class ApplicationReviewPage<A> extends StatefulWidget {
     required this.summarize,
     required this.approveMessage,
     required this.save,
+    this.showBackButton = true,
+    this.menuActions = const [],
   });
 
   final String title;
+
+  /// False when the page is a root tab (the system admin console).
+  final bool showBackButton;
+  final List<AdminMenuAction> menuActions;
 
   /// Plural, lower case: "volunteers".
   final String noun;
@@ -153,6 +159,8 @@ class _ApplicationReviewPageState<A> extends State<ApplicationReviewPage<A>> {
       appBar: AdminAppBar(
         title: widget.title,
         showDrawerButton: false,
+        showLeading: widget.showBackButton,
+        menuActions: widget.menuActions,
         bottom: AdminTabBar(
           tabs: [for (final t in ApplicationTab.values) AdminTab(t.label)],
           selectedIndex: _tab.index,

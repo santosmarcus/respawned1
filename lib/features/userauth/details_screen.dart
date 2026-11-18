@@ -26,9 +26,42 @@ class _EnterDetailsScreenState extends State<EnterDetailsScreen> {
 
   final bool _isLoading = false;
   String? _errorMessage;
+  bool _noticeOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AuthService.noAccountNotice.addListener(_maybeShowNoAccount);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowNoAccount());
+  }
+
+  /// Google sign-in from the login screen found no account: say so, then
+  /// this screen is where one gets created (or log out to switch account).
+  Future<void> _maybeShowNoAccount() async {
+    final email = AuthService.noAccountNotice.value;
+    if (email == null || _noticeOpen || !mounted) return;
+    _noticeOpen = true;
+    AuthService.noAccountNotice.value = null;
+    final create = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No account yet'),
+        content: Text("There's no ResPAWnd account for $email yet. "
+            'Fill in your details to create one, or log out to sign in with a different account.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Log out')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create account')),
+        ],
+      ),
+    );
+    _noticeOpen = false;
+    if (create == false) await authService.value.signOut();
+  }
 
   @override
   void dispose() {
+    AuthService.noAccountNotice.removeListener(_maybeShowNoAccount);
     _firstNameController.dispose();
     _lastNameController.dispose();
     _phoneController.dispose();

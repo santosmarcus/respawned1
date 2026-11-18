@@ -120,9 +120,10 @@ service firebase.storage {
     }
 
     // transporter_verification_screen.dart — ID and vehicle documents, read
-    // by the staff who verify transporters.
+    // by the staff and system admins who verify transporters.
     match /transporter_verifications/{uid}/{file=**} {
-      allow read: if isSelf(uid) || isPlatform() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatform() || myStaffWith(['volunteers']) ||
+        (signedIn() && userData().get('role', '') == 'system_admin');
       allow write: if isSelf(uid) && mediaUpload();
     }
 

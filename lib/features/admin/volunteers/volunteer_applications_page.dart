@@ -3,10 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_application.dart';
 import 'package:respawnd1/core/repos/volunteer_application_repository.dart';
 import 'package:respawnd1/features/admin/volunteers/application_review.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 
 /// Staff review of general volunteer applications (paper 1.4.5).
 class VolunteerApplicationsPage extends StatelessWidget {
-  const VolunteerApplicationsPage({super.key});
+  const VolunteerApplicationsPage({super.key, this.showBackButton = true, this.menuActions = const []});
+
+  final bool showBackButton;
+  final List<AdminMenuAction> menuActions;
 
   static VolunteerApplicationStatus _status(ApplicationTab t) => switch (t) {
         ApplicationTab.pending => VolunteerApplicationStatus.pending,
@@ -36,6 +40,8 @@ class VolunteerApplicationsPage extends StatelessWidget {
       ),
       approveMessage: (app) => '${app.name.isEmpty ? 'This applicant' : app.name} becomes an approved volunteer '
           'for the activities they applied for.',
+      showBackButton: showBackButton,
+      menuActions: menuActions,
       save: (app, approve, reviewer, note) =>
           repo.review(uid: app.uid, approve: approve, reviewerUid: reviewer, note: note),
     );

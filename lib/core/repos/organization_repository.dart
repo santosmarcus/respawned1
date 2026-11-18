@@ -255,6 +255,8 @@ class OrganizationRepository {
     required String name,
     required String address,
     required String contactNumber,
+    // The caller's own draft, so resuming a signup never matches itself.
+    String? excludeOrganizationId,
   }) async {
     final normName = normalizeForMatch(name);
     final normAddress = normalizeForMatch(address);
@@ -266,7 +268,11 @@ class OrganizationRepository {
     final snap = await _organizations.limit(300).get();
     final matches = <OrgDuplicateMatch>[];
     for (final doc in snap.docs) {
+      if (doc.id == excludeOrganizationId) continue;
       final data = doc.data();
+      // A draft was never submitted (abandoned or failed signups): it isn't
+      // a registered organization and must not block the name.
+      if (data['verificationStatus'] == OrgVerificationStatus.draft.name) continue;
       final docName = normalizeForMatch(data['name'] as String? ?? '');
       final docAddress = normalizeForMatch((data['location'] as String?) ?? (data['shelterAddress'] as String?) ?? '');
       final docPhone = normalizePhoneForMatch(data['phone'] as String? ?? data['contactNumber'] as String? ?? '');

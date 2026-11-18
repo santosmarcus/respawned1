@@ -262,7 +262,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 onTap: () async {
                   setState(() => _errorMessage = null);
                   try {
-                    final result = await _authService.signInWithGoogle();
+                    final result = await _authService.signInWithGoogle(fromLogin: true);
                     if (result != null && context.mounted) {
                       Navigator.of(context).popUntil((route) => route.isFirst);
                     }

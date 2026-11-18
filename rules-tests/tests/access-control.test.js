@@ -259,8 +259,30 @@ describe('system admin console', () => {
   });
 
   test('cannot change profiles or approve organizations directly', async () => {
-    await assertFails(as('sysadmin').doc('users/rider').update({ transporterVerificationStatus: 'approved', isVerified: true }));
+    await assertFails(as('sysadmin').doc('users/rider').update({ name: 'Changed' }));
+    await assertFails(as('sysadmin').doc('users/rider').update({ role: 'general' }));
     await assertFails(as('sysadmin').doc('organizations/orgD').update({ verificationStatus: 'approved' }));
+  });
+
+  test('reviews volunteer and transporter applications', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('volunteerApplications/stranger').set({ uid: 'stranger', status: 'pending' });
+      await db.doc('transporterApplications/rider').set({ uid: 'rider', status: 'pending' });
+    });
+    const review = (status) => ({ status, reviewedBy: 'sysadmin', reviewedAt: new Date() });
+
+    await assertSucceeds(as('sysadmin').collection('volunteerApplications').where('status', '==', 'pending').get());
+    await assertSucceeds(as('sysadmin').doc('volunteerApplications/stranger').update(review('approved')));
+    await assertFails(as('sysadmin').doc('volunteerApplications/stranger').update({ status: 'approved', reviewedBy: 'someoneElse' }));
+
+    await assertSucceeds(as('sysadmin').collection('transporterApplications').where('status', '==', 'pending').get());
+    await assertSucceeds(as('sysadmin').doc('transporterApplications/rider').update(review('approved')));
+    // Verifying the transporter's account: only the two verification fields.
+    await assertSucceeds(as('sysadmin').doc('users/rider').update({ transporterVerificationStatus: 'approved', isVerified: true }));
+    await assertFails(as('sysadmin').doc('users/rider').update({ transporterVerificationStatus: 'approved', isVerified: false }));
+    // Only an account that applied.
+    await assertFails(as('sysadmin').doc('users/rider2').update({ transporterVerificationStatus: 'approved', isVerified: true }));
   });
 
   test('nobody can give themselves the role', async () => {

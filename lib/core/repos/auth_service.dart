@@ -128,7 +128,16 @@ class AuthService {
     );
   }
 
-  Future<UserCredential?> signInWithGoogle() async {
+  /// Set when someone uses "Continue with Google" on the login screen with
+  /// a Google account that has no finished ResPAWnd account yet (value: the
+  /// account's email). EnterDetailsScreen shows "No account yet" once and
+  /// clears it. A notifier because AuthWrapper may show that screen before
+  /// sign-in returns here.
+  static final ValueNotifier<String?> noAccountNotice = ValueNotifier(null);
+
+  /// [fromLogin]: called from the login screen, where a missing account is
+  /// reported ([noAccountNotice]) before leading on to create one.
+  Future<UserCredential?> signInWithGoogle({bool fromLogin = false}) async {
     final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
     if (googleUser == null) return null; // user cancelled
 
@@ -141,7 +150,11 @@ class AuthService {
     );
 
     final userCredential = await firebaseAuth.signInWithCredential(credential);
-    await _createUserDocIfNew(userCredential.user!);
+    final user = userCredential.user!;
+    final data = await _createUserDocIfNew(user);
+    if (fromLogin && !hasCompletedOnboarding(data)) {
+      noAccountNotice.value = (user.email?.isNotEmpty ?? false) ? user.email : 'this Google account';
+    }
     await _logLogin(userCredential.user, method: 'google');
     return userCredential;
   }
@@ -239,12 +252,15 @@ class AuthService {
     await firebaseAuth.signOut();
   }
 
-  Future<void> _createUserDocIfNew(User user) async {
+  /// Returns the profile as it now stands (`{role: ''}` for a new one).
+  Future<Map<String, dynamic>?> _createUserDocIfNew(User user) async {
     final doc = _firestore.collection('users').doc(user.uid);
     final snapshot = await doc.get();
     if (!snapshot.exists) {
       await _createUserDoc(user);
+      return const {'role': ''};
     }
+    return snapshot.data();
   }
 
   Future<void> _createUserDoc(User user) async {
@@ -253,7 +269,11 @@ class AuthService {
       'name': user.displayName ?? '',
       'email': user.email ?? '',
       'phone': user.phoneNumber ?? '',
-      'role': 'general',        // default role — NGO staff change this manually
+      // No role until onboarding (Your Details -> account type) sets one:
+      // AuthWrapper sends role-less accounts there instead of to the
+      // general home, so a first Google/phone sign-in creates an account
+      // properly rather than silently becoming a General User.
+      'role': '',
       'isVerified': false,
       'photoUrl': user.photoURL ?? '',
       'createdAt': FieldValue.serverTimestamp(),

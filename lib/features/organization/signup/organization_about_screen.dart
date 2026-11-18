@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,12 +12,13 @@ import 'package:respawnd1/features/organization/signup/organization_verification
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
-/// Step 1 of the Organization signup flow (spec §2): collects the fields
-/// the draft `organizations/{orgId}` doc needs before verification uploads
-/// can start. Reopening this screen (back navigation, app restart) resumes
-/// the SAME draft doc via OrganizationRepository.currentOrganizationFor —
-/// it is never possible to end up with two organization documents for one
-/// account from this screen.
+/// Step 1 of the Organization signup flow (spec §2): collects the
+/// organization's details. Nothing is saved here: Next carries them to the
+/// verification step, and the organization is only written when its
+/// documents are submitted, so an abandoned signup leaves no organization
+/// behind. A draft left by a submit that failed part-way is reloaded here
+/// and reused (OrganizationRepository.currentOrganizationFor), never
+/// duplicated.
 class OrganizationAboutScreen extends StatefulWidget {
   const OrganizationAboutScreen({super.key});
 
@@ -32,6 +34,8 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
   final _repo = OrganizationRepository();
 
   bool _loadingDraft = true;
+  // A draft from an earlier submit that failed part-way (null normally).
+  String? _draftOrganizationId;
   // Map pin for the address (required). Saved as the shelter location.
   ClinicSearchResult? _pin;
   bool _showPinError = false;
@@ -46,9 +50,17 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
 
   Future<void> _loadDraft() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
+    // Prefilling is a convenience: if it can't load (offline), show an
+    // empty form rather than a spinner with no way out.
     if (uid != null) {
-      final existing = await _repo.currentOrganizationFor(uid);
+      DocumentSnapshot<Map<String, dynamic>>? existing;
+      try {
+        existing = await _repo.currentOrganizationFor(uid);
+      } catch (e) {
+        debugPrint('[OrganizationAbout] draft load failed: $e');
+      }
       if (existing != null && mounted) {
+        _draftOrganizationId = existing.id;
         final data = existing.data()!;
         _nameController.text = data['name'] as String? ?? '';
         _phoneController.text = (data['contactNumber'] as String?) ?? (data['phone'] as String?) ?? '';
@@ -123,7 +135,12 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
 
     setState(() => _submitting = true);
     try {
-      final duplicates = await _repo.findPossibleDuplicates(name: name, address: address, contactNumber: phone);
+      final duplicates = await _repo.findPossibleDuplicates(
+        name: name,
+        address: address,
+        contactNumber: phone,
+        excludeOrganizationId: _draftOrganizationId,
+      );
       final exact = duplicates.where((d) => d.exact).toList();
       if (exact.isNotEmpty) {
         if (mounted) {
@@ -141,28 +158,28 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
         setState(() => _submitting = true);
       }
 
-      final pin = _pin!;
-      final orgId = await _repo.createOrUpdateDraft(
-        uid: uid,
-        name: name,
-        contactNumber: phone,
-        address: address,
-        pinName: pin.name,
-        pinPlaceId: pin.placeId,
-        pinLat: pin.lat,
-        pinLng: pin.lng,
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      // Pushed (not replaced) so Back returns here to edit the details.
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => OrganizationVerificationScreen.signup(
+            details: OrganizationSignupDetails(
+              name: name,
+              contactNumber: phone,
+              address: address,
+              pin: _pin!,
+            ),
+            draftOrganizationId: _draftOrganizationId,
+          ),
+        ),
       );
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => OrganizationVerificationScreen(organizationId: orgId)),
-        );
-      }
     } catch (e) {
       if (mounted) {
         setState(() => _submitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Could not save your organization: $e', kind: AppMessageKind.error),
+          appSnackBar('Could not check your organization details: $e', kind: AppMessageKind.error),
         );
       }
     }
@@ -197,6 +214,8 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
         title: Text('About Your Organization', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
+        iconTheme: const IconThemeData(color: AppColors.background),
+        actions: const [SignupLogOutButton()],
       ),
       body: _loadingDraft
           ? const Center(child: CircularProgressIndicator())

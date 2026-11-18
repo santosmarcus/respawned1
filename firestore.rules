@@ -742,11 +742,12 @@ service cloud.firestore {
       }
 
       // TransporterApplicationRepository.review — organization staff with
-      // the volunteers permission (and platform staff) decide a pet transporter's verification, only for
-      // an account that actually applied, and only those two fields.
+      // the volunteers permission, platform staff and system admins decide
+      // a pet transporter's verification, only for an account that actually
+      // applied, and only those two fields.
       function staffTransporterReview() {
         let data = request.resource.data;
-        return (isPlatformStaff() || myStaffWith(['volunteers'])) &&
+        return (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
           resource.data.get('role', '') == 'pet_transporter' &&
           exists(/databases/$(database)/documents/transporterApplications/$(uid)) &&
           changedOnly(['isVerified', 'transporterVerificationStatus']) &&
@@ -1388,7 +1389,8 @@ service cloud.firestore {
     //
     // volunteerApplications/{uid}: the applicant writes their own, always as
     // pending (an edit goes back for review) and never the review fields.
-    // Approved organization staff (not carers) read and review them.
+    // Organization staff with the Volunteers permission, platform staff and
+    // system admins read and review them.
     match /volunteerApplications/{uid} {
       function applicantWriteOk() {
         return isSelf(uid) &&
@@ -1397,10 +1399,10 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers']);
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
-        (isPlatformStaff() || myStaffWith(['volunteers'])) &&
+        (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
         changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
         request.resource.data.status in ['approved', 'rejected'] &&
         request.resource.data.get('reviewedBy', '') == request.auth.uid
@@ -1425,10 +1427,10 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers']);
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
-        (isPlatformStaff() || myStaffWith(['volunteers'])) &&
+        (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
         changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
         request.resource.data.status in ['approved', 'rejected'] &&
         request.resource.data.get('reviewedBy', '') == request.auth.uid

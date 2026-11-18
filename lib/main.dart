@@ -11,7 +11,6 @@ import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
-import 'package:respawnd1/features/organization/signup/organization_verification_screen.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
@@ -314,19 +313,49 @@ class OrganizationRoleRouter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('organizations').doc(organizationId).get(),
+    // Live, so a status change (submitted, approved) re-routes without a
+    // restart. A failed read must not be mistaken for "draft" (that used to
+    // strand the user on the verification screen with no way back).
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('organizations').doc(organizationId).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Could not load your organization.'),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () => appNavigatorKey.currentState?.pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const AuthWrapper()),
+                      (route) => false,
+                    ),
+                    child: const Text('Retry'),
+                  ),
+                  TextButton(
+                    onPressed: () => AuthService().signOut(),
+                    child: const Text('Log out'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        final doc = snapshot.data;
+        if (doc == null) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        final data = snapshot.data?.data() as Map<String, dynamic>?;
+        final data = doc.data();
         final status = OrgVerificationStatus.fromName(data?['verificationStatus'] as String?);
         switch (status) {
           case OrgVerificationStatus.approved:
             return _ApprovedOrgHome(organizationId: organizationId);
           case OrgVerificationStatus.draft:
-            return OrganizationVerificationScreen(organizationId: organizationId);
+            // Never submitted: back to the details (prefilled from the
+            // draft), which leads on to the documents. Has Log out.
+            return const OrganizationAboutScreen();
           case OrgVerificationStatus.pending:
           case OrgVerificationStatus.rejected:
           case OrgVerificationStatus.requiresChanges:
