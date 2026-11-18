@@ -186,11 +186,26 @@ class NotificationService {
     }
   }
 
+  /// The screen a notification opens, or null when it opens nothing. The
+  /// in-app notifications list uses this too, so a notice opens the same
+  /// screen as its push.
+  static Future<Widget?> pageFor(Map<String, dynamic> data) => _pageFor(data);
+
   static Future<Widget?> _pageFor(Map<String, dynamic> data) async {
     final type = data['type'] as String? ?? '';
     final db = FirebaseFirestore.instance;
 
     switch (type) {
+    // escalateCriticalReports (functions/index.js): a Critical report has
+    // waited past the organization's threshold. Only organization admins
+    // receive it, so open the staff case screen directly instead of going
+    // through the role check in _casePageFor (which doesn't recognise
+    // organization_member accounts).
+      case 'critical_report_escalated':
+        final caseId = data['caseId'] as String?;
+        if (caseId == null || caseId.isEmpty) return null;
+        return _staffCasePageFor(caseId);
+
       case 'new_case_nearby':
       case 'new_case_nearby_responder':
       case 'new_case_service_area':
@@ -260,8 +275,8 @@ class NotificationService {
           isOwner: true,
         );
 
-      // sendFollowUpReminders (functions/index.js): the adopter's
-      // post-adoption check-ins, or staff's post-adoption details.
+    // sendFollowUpReminders (functions/index.js): the adopter's
+    // post-adoption check-ins, or staff's post-adoption details.
       case 'follow_up_reminder':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
@@ -271,8 +286,8 @@ class NotificationService {
         if (adoptionId == null || adoptionId.isEmpty) return null;
         return PostAdoptionDetailsPage(applicationId: adoptionId);
 
-      // functions/adoptions.js tellApplicant: no-show, booking reminder or
-      // withdrawal of the applicant's own application.
+    // functions/adoptions.js tellApplicant: no-show, booking reminder or
+    // withdrawal of the applicant's own application.
       case 'adoption_no_show_rebook':
       case 'adoption_no_show_closed':
       case 'adoption_booking_reminder':
@@ -281,7 +296,7 @@ class NotificationService {
         if (adoptionId == null || adoptionId.isEmpty) return null;
         return adopterPageForAdoption(adoptionId);
 
-      // reviewOrganization (functions/index.js): the owner's live status page.
+    // reviewOrganization (functions/index.js): the owner's live status page.
       case 'organization_review':
         final organizationId = data['organizationId'] as String?;
         if (organizationId == null || organizationId.isEmpty) return null;
@@ -291,6 +306,24 @@ class NotificationService {
       // e.g. tag_scanned_nearby: informational only, nothing to open.
         return null;
     }
+  }
+
+  /// The staff screen for a case in its current stage: Assign Transporter
+  /// while it waits for one, otherwise Rescue Details (which handles review,
+  /// verification, referral and the read-only terminal states). Falls back
+  /// to [_casePageFor] when the full case can't be read.
+  static Future<Widget?> _staffCasePageFor(String caseId) async {
+    Map<String, dynamic>? caseData;
+    try {
+      caseData = (await FirebaseFirestore.instance.collection('cases').doc(caseId).get()).data();
+    } on FirebaseException catch (e) {
+      debugPrint('NotificationService: could not read case $caseId: ${e.code}');
+    }
+    if (caseData == null) return _casePageFor(caseId);
+    if (RescueStatus.fromFirestoreValue(caseData['status'] as String?) == RescueStatus.awaitingAssignment) {
+      return AssignRiderPage(caseId: caseId, data: caseData);
+    }
+    return RescueDetailPage(caseId: caseId, data: caseData);
   }
 
   /// Responders get the accept-case screen, organization staff get the

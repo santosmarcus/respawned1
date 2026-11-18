@@ -8,7 +8,6 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
@@ -19,6 +18,11 @@ import 'package:respawnd1/features/organization/widgets/shelter_pin_prompt.dart'
 import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/features/admin/stock/stock_service.dart';
 import 'package:respawnd1/features/care/care_rounds.dart';
+import 'package:respawnd1/features/care/care_rounds_widgets.dart';
+import 'package:respawnd1/features/adminhome/dashboard/care_need_row.dart';
+import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
+import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
+import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
 
 /// The four transparent readiness states. There is no overall score: the
 /// card names which factors cause a constraint, and the decision to accept
@@ -67,59 +71,60 @@ const _freeColor = Color(0xFFE2DFD6);
 class RescueReadinessCard extends ConsumerWidget {
   const RescueReadinessCard({super.key});
 
+  /// Today's rescue availability: shelter space, transporters available
+  /// today, carers on shift and present, animals already needing
+  /// continuing care, and supplies. Each section names its own state; the
+  /// banner lists the ones that limit the next rescue.
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final occAsync = ref.watch(shelterOccupancyProvider);
     final settings = ref.watch(shelterSettingsProvider).asData?.value ?? ShelterSettings.empty;
     final snap = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
-    final supply = ref.watch(transportSupplyProvider).asData?.value;
+    final transportersAsync = ref.watch(petTransportersProvider);
+    final busyByRider = ref.watch(activeAssignmentsByRiderProvider).asData?.value;
     final records = ref.watch(allAnimalRecordsProvider).asData?.value;
-    // Funds: anyone who sees the money; the shelter pin: Admins.
-    final canManage = ref.watch(canViewFinancesProvider).asData?.value ?? false;
     final isAdmin = ref.watch(isOrgAdminProvider).asData?.value ?? false;
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
-    final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
-    final stock = ref.watch(stockItemsProvider).asData?.value;
+    final stockAsync = ref.watch(stockItemsProvider);
     final careSetup = orgId == null ? null : ref.watch(careSetupProvider(orgId)).asData?.value;
+    final now = DateTime.now();
+    final round = orgId == null ? null : ref.watch(careRoundProvider(careRoundKey(orgId, now))).asData?.value;
+    final plans = ref.watch(activeMedicationPlansByAnimalProvider).asData?.value;
+    final missed = ref.watch(missedDosesByAnimalProvider).asData?.value;
+    final vax = ref.watch(vaccinationsByAnimalProvider).asData?.value;
 
     return SectionCard(
       icon: Icons.dashboard,
       title: 'Rescue readiness',
-      trailing: const StatusChip('Admin to assess', tone: ChipTone.info, icon: Icons.psychology_outlined),
+      trailing: Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: StatusChip('Today · ${shortDate(now)}', tone: ChipTone.ink, icon: Icons.today),
+      ),
       child: DashAsync<ShelterOccupancy>(
         value: occAsync,
         what: 'shelter space',
         builder: (occ) {
-          final factors = RescueReadinessCard.buildFactors(
-            occ: occ,
-            settings: settings,
-            snap: snap,
-            supply: supply,
-            records: records,
-            canManage: canManage,
-            campaigns: campaigns,
-            stock: stock,
-            careSetup: careSetup,
-          );
-          final limiting = factors
-              .where((f) => f.state == ReadinessState.constrained)
-              .map((f) => f.name.toLowerCase())
-              .toList();
+          final space = _spaceSection(occ);
+          final transport = _transportSection(transportersAsync, busyByRider, snap, settings, now);
+          final carers = _carersSection(careSetup, round, now, orgId == null);
+          final needing = records == null
+              ? null
+              : animalsNeedingCare(records, plans: plans, missedDoses: missed, vaccinations: vax);
+          final care = _continuingCareSection(needing);
+          final supplies = _suppliesSection(stockAsync, settings);
+          final sections = [space, transport, carers, care, supplies];
+
+          final limiting = sections.where((s) => s.state == ReadinessState.constrained).map((s) => s.title).toList();
           final message = limiting.isNotEmpty
-              ? '${plural(limiting.length, 'factor')} ${limiting.length == 1 ? 'limits' : 'limit'} the next rescue: ${limiting.join(', ')}'
-              : factors.any((f) => f.state == ReadinessState.incomplete)
-              ? 'No constraint found, but some information is missing'
-              : 'No recorded factor limits the next rescue';
+              ? '${limiting.join(', ')} ${limiting.length == 1 ? 'limits' : 'limit'} today’s next rescue'
+              : sections.any((s) => s.state == ReadinessState.incomplete)
+              ? 'Nothing limits a rescue today, but some information is missing'
+              : 'Nothing recorded limits a rescue today';
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (orgId != null) ShelterPinPrompt(organizationId: orgId, canSet: isAdmin),
-              if (!settings.isConfigured)
-                _SetupPrompt(onTap: () => showShelterSetupSheet(context))
-              else
-                _Gauge(occ: occ),
-              const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 9),
                 decoration: BoxDecoration(color: AppColors.textPrimary, borderRadius: BorderRadius.circular(10)),
@@ -147,8 +152,52 @@ class RescueReadinessCard extends ConsumerWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
-              for (int i = 0; i < factors.length; i++) _FactorRow(factor: factors[i], first: i == 0),
+              const SizedBox(height: 4),
+              _SectionBlock(
+                section: space,
+                first: true,
+                body: settings.isConfigured ? _Gauge(occ: occ) : _SetupPrompt(onTap: () => showShelterSetupSheet(context)),
+              ),
+              _SectionBlock(section: transport),
+              _SectionBlock(
+                section: carers,
+                actions: [
+                  if (orgId != null)
+                    DashLinkButton(
+                      label: 'Care rounds',
+                      icon: Icons.checklist,
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CareRoundsPage(organizationId: orgId, canEditSetup: isAdmin),
+                        ),
+                      ),
+                    ),
+                  if (orgId != null && isAdmin)
+                    DashLinkButton(
+                      label: 'Roster',
+                      icon: Icons.edit_calendar,
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => CareRosterPage(organizationId: orgId)),
+                      ),
+                    ),
+                ],
+              ),
+              _SectionBlock(
+                section: care,
+                after: needing == null || needing.isEmpty
+                    ? null
+                    : ExpandableList(
+                  initialCount: 3,
+                  moreLabel: 'All animals needing care',
+                  children: [for (final (a, needs) in needing) CareNeedRow(animal: a, needs: needs)],
+                ),
+              ),
+              _SectionBlock(
+                section: supplies,
+                actions: [DashLinkButton(label: 'Stock', icon: Icons.inventory_2, onPressed: () => openStock(context))],
+              ),
               const SizedBox(height: 10),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
@@ -179,6 +228,188 @@ class RescueReadinessCard extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+
+  static _Section _spaceSection(ShelterOccupancy occ) {
+    final free = occ.free;
+    if (free == null) {
+      return const _Section(Icons.house, 'Shelter space', ReadinessState.incomplete, ['Shelter capacity not set']);
+    }
+    final iso = occ.isolationCapacity == null
+        ? 'Isolation capacity not set'
+        : (occ.isolationFull
+        ? 'Isolation full (${occ.isolation}/${occ.isolationCapacity})'
+        : 'Isolation ${occ.isolation}/${occ.isolationCapacity} in use');
+    return _Section(
+      Icons.house,
+      'Shelter space',
+      free <= 0 || occ.isolationFull ? ReadinessState.constrained : ReadinessState.confirmed,
+      [
+        free < 0 ? 'Over capacity by ${-free}' : '${plural(free, 'general space')} free',
+        if (occ.arriving > 0) '${plural(occ.arriving, 'animal')} arriving (already counted)',
+        iso,
+      ],
+    );
+  }
+
+  static _Section _transportSection(
+      AsyncValue<List<PetTransporter>> transportersAsync,
+      Map<String, TransportAssignmentStatus>? busyByRider,
+      RescueSnapshot? snap,
+      ShelterSettings settings,
+      DateTime now,
+      ) {
+    const title = 'Transporters today';
+    if (transportersAsync.hasError) {
+      return const _Section(Icons.local_shipping, title, ReadinessState.incomplete, ['Couldn’t load transporters']);
+    }
+    final list = transportersAsync.asData?.value;
+    if (list == null || busyByRider == null) {
+      return const _Section(Icons.local_shipping, title, ReadinessState.incomplete, ['Loading transporters…']);
+    }
+    bool busy(String uid) {
+      final s = busyByRider[uid];
+      return s == TransportAssignmentStatus.pending || s == TransportAssignmentStatus.accepted;
+    }
+
+    bool seenToday(PetTransporter t) {
+      final at = t.lastSeenAt;
+      return at != null && at.year == now.year && at.month == now.month && at.day == now.day;
+    }
+
+    final available = list.where((t) => t.isOnline && !busy(t.uid)).toList();
+    final onRide = list.where((t) => busy(t.uid)).toList();
+    final activeToday = list.where((t) => seenToday(t) || t.isOnline).length;
+    final waiting = snap?.count(RescueStage.transporter) ?? 0;
+    final target = settings.ridersNeeded;
+    String names(List<PetTransporter> l) =>
+        '${l.take(3).map((t) => t.name).join(', ')}${l.length > 3 ? ' +${l.length - 3}' : ''}';
+
+    return _Section(
+      Icons.local_shipping,
+      title,
+      available.isEmpty || waiting >= available.length || (target != null && available.length < target)
+          ? ReadinessState.constrained
+          : ReadinessState.confirmed,
+      [
+        available.isEmpty
+            ? 'No one online and free right now'
+            : '${available.length} available now: ${names(available)}',
+        if (onRide.isNotEmpty) '${onRide.length} on a ride: ${names(onRide)}',
+        '$activeToday of ${list.length} registered active today'
+            '${waiting > 0 ? ' · ${plural(waiting, 'case')} waiting for one' : ''}'
+            '${target == null ? '' : ' · target $target'}',
+      ],
+    );
+  }
+
+  static _Section _carersSection(CareSetup? setup, CareRound? round, DateTime now, bool noOrg) {
+    const title = 'Carers present';
+    if (noOrg) {
+      return const _Section(Icons.groups, title, ReadinessState.incomplete, [
+        'This account isn’t linked to an organization',
+      ]);
+    }
+    if (setup == null) {
+      return const _Section(Icons.groups, title, ReadinessState.incomplete, ['Loading roster…']);
+    }
+    // Present = logged at least one care round today.
+    final present = <String, String>{
+      for (final t in (round ?? CareRound.empty).done.values)
+        if (t.byUid != null) t.byUid!: t.byName,
+    };
+    if (!setup.hasRoster) {
+      return _Section(Icons.groups, title, ReadinessState.incomplete, [
+        'Carer roster not set',
+        if (present.isNotEmpty) 'Logged care rounds today: ${present.values.take(3).join(', ')}',
+      ]);
+    }
+    final lines = <String>[];
+    var uncovered = 0;
+    for (final shift in setup.shifts) {
+      final on = setup.onShift(now.weekday, shift.id);
+      if (on.isEmpty) uncovered++;
+      final times = shift.start.isEmpty ? '' : ' (${shift.start}–${shift.end})';
+      lines.add(on.isEmpty
+          ? '${shift.label}$times: no carer on the roster'
+          : '${shift.label}$times: ${on.map((e) => present.containsKey(e.uid) ? '${e.name} ✓' : e.name).join(', ')}');
+    }
+    final rostered = {for (final s in setup.shifts) ...setup.onShift(now.weekday, s.id).map((e) => e.uid)};
+    final presentRostered = rostered.where(present.containsKey).length;
+    lines.add(present.isEmpty
+        ? 'No care rounds logged yet today'
+        : '$presentRostered of ${rostered.length} rostered carers have logged rounds (✓)'
+        '${present.length > presentRostered ? ' · ${present.length - presentRostered} others helped' : ''}');
+    return _Section(
+      Icons.groups,
+      title,
+      uncovered > 0 ? ReadinessState.constrained : ReadinessState.confirmed,
+      lines,
+    );
+  }
+
+  static _Section _continuingCareSection(List<(AnimalRecord, List<CareNeed>)>? needing) {
+    const title = 'Continuing care';
+    if (needing == null) {
+      return const _Section(Icons.medical_services, title, ReadinessState.incomplete, ['Loading animals…']);
+    }
+    if (needing.isEmpty) {
+      return const _Section(Icons.medical_services, title, ReadinessState.confirmed, [
+        'No animal needs medication, isolation or treatment',
+      ]);
+    }
+    int count(bool Function(CareNeed) test) => needing.where((e) => e.$2.any(test)).length;
+    final breakdown = [
+      if (count((n) => n.label.startsWith('Medication')) case final n when n > 0) '$n on medication',
+      if (count((n) => n.label == 'Isolation') case final n when n > 0) '$n in isolation',
+      if (count((n) => n.label == 'In treatment') case final n when n > 0) '$n in treatment',
+    ];
+    return _Section(
+      Icons.medical_services,
+      title,
+      ReadinessState.adminAssess,
+      [
+        '${plural(needing.length, 'animal')} need continuing care${breakdown.isEmpty ? '' : ': ${breakdown.join(', ')}'}. '
+            'Tap one to open its record.',
+      ],
+    );
+  }
+
+  static _Section _suppliesSection(AsyncValue<List<StockItem>> stockAsync, ShelterSettings settings) {
+    const title = 'Supplies';
+    if (stockAsync.hasError) {
+      return const _Section(Icons.inventory_2, title, ReadinessState.incomplete, ['Couldn’t load stock']);
+    }
+    final stock = stockAsync.asData?.value;
+    if (stock == null) {
+      return const _Section(Icons.inventory_2, title, ReadinessState.incomplete, ['Loading stock…']);
+    }
+    if (stock.isEmpty) {
+      return const _Section(Icons.inventory_2, title, ReadinessState.incomplete, ['No stock recorded yet']);
+    }
+    final perDay = settings.foodPerDayKg;
+    final low = stock.where((i) => i.isLow).toList();
+    final out = stock.where((i) => i.quantity <= 0).toList();
+    final foodKg = stock.where((i) => i.isFood).fold<double>(0, (s, i) => s + (i.kilograms ?? 0));
+    final days = foodKg > 0 && perDay != null && perDay > 0 ? (foodKg / perDay).floor() : null;
+    bool isMedicine(StockItem i) => i.category.toLowerCase().contains('medicine');
+    final constrained = low.any((i) => i.isFood || isMedicine(i)) || (days != null && days < 3);
+    String names(List<StockItem> l) =>
+        '${l.take(3).map((i) => i.name).join(', ')}${l.length > 3 ? ' +${l.length - 3}' : ''}';
+    return _Section(
+      Icons.inventory_2,
+      title,
+      constrained ? ReadinessState.constrained : ReadinessState.confirmed,
+      [
+        if (days != null)
+          '${foodKg.round()} kg food ≈ ${plural(days, 'day')}'
+        else if (foodKg > 0)
+          '${foodKg.round()} kg food (set food use per day to see days left)',
+        if (out.isNotEmpty) 'Out of stock: ${names(out)}',
+        if (low.where((i) => i.quantity > 0).isNotEmpty) 'Running low: ${names(low.where((i) => i.quantity > 0).toList())}',
+        '${stock.length - low.length} of ${plural(stock.length, 'item')} above their low-stock level',
+      ],
     );
   }
 
@@ -254,19 +485,19 @@ class RescueReadinessCard extends ConsumerWidget {
       };
       care = gaps.isEmpty
           ? ReadinessFactor(
-              Icons.groups,
-              'Care coverage',
-              'Every shift covered this week · today: ${todayNames.take(3).join(', ')}'
-                  '${todayNames.length > 3 ? ' +${todayNames.length - 3}' : ''}',
-              ReadinessState.confirmed,
-            )
+        Icons.groups,
+        'Care coverage',
+        'Every shift covered this week · today: ${todayNames.take(3).join(', ')}'
+            '${todayNames.length > 3 ? ' +${todayNames.length - 3}' : ''}',
+        ReadinessState.confirmed,
+      )
           : ReadinessFactor(
-              Icons.groups,
-              'Care coverage',
-              '${plural(gaps.length, 'shift')} with no carer in 7 days · first: '
-                  '${kWeekdayShort[gaps.first.day.weekday - 1]} ${gaps.first.shift.label.toLowerCase()}',
-              ReadinessState.constrained,
-            );
+        Icons.groups,
+        'Care coverage',
+        '${plural(gaps.length, 'shift')} with no carer in 7 days · first: '
+            '${kWeekdayShort[gaps.first.day.weekday - 1]} ${gaps.first.shift.label.toLowerCase()}',
+        ReadinessState.constrained,
+      );
     }
 
     // Vet access — a clinic has been used on an active case.
@@ -348,38 +579,62 @@ class RescueReadinessCard extends ConsumerWidget {
   }
 }
 
-class _FactorRow extends StatelessWidget {
-  final ReadinessFactor factor;
+/// One part of today's readiness: a title, its state and what the records
+/// show.
+class _Section {
+  final IconData icon;
+  final String title;
+  final ReadinessState state;
+  final List<String> lines;
+  const _Section(this.icon, this.title, this.state, this.lines);
+}
+
+class _SectionBlock extends StatelessWidget {
+  final _Section section;
   final bool first;
-  const _FactorRow({required this.factor, required this.first});
+  final Widget? body;
+
+  /// Shown below the section's lines, e.g. the animals it is about.
+  final Widget? after;
+  final List<Widget> actions;
+  const _SectionBlock({required this.section, this.first = false, this.body, this.after, this.actions = const []});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
         border: first ? null : Border(top: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.14))),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(9)),
-            child: Icon(factor.icon, size: 18, color: AppColors.textPrimary),
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(9)),
+                child: Icon(section.icon, size: 18, color: AppColors.textPrimary),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(section.title, style: dashBody(size: 15, weight: FontWeight.w700))),
+              StatusChip(section.state.label, tone: section.state.tone, icon: section.state.icon),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(factor.name, style: dashBody(size: 14.5, weight: FontWeight.w700)),
-                Text(factor.detail, style: dashMuted(12.5)),
-              ],
+          const SizedBox(height: 6),
+          if (body != null) ...[body!, const SizedBox(height: 6)],
+          for (final line in section.lines)
+            Padding(
+              padding: const EdgeInsets.only(left: 42, bottom: 2),
+              child: Text(line, style: dashMuted(13)),
             ),
-          ),
-          const SizedBox(width: 6),
-          StatusChip(factor.state.label, tone: factor.state.tone, icon: factor.state.icon),
+          if (after != null) Padding(padding: const EdgeInsets.only(left: 42, top: 4), child: after),
+          if (actions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 42, top: 6),
+              child: Wrap(spacing: 6, runSpacing: 6, children: actions),
+            ),
         ],
       ),
     );

@@ -23,6 +23,7 @@ import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_seen.dart';
 
 String _friendlyCasesError(Object err) {
   if (err is FirebaseException && err.code == 'permission-denied') {
@@ -47,6 +48,8 @@ class RescueReportsPage extends ConsumerStatefulWidget {
 
 class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
   final _searchController = TextEditingController();
+  // Clears a step's number once it has been opened (admin_tab_seen.dart).
+  final _seenMarker = AdminTabSeenMarker('rescue');
 
   @override
   void dispose() {
@@ -77,9 +80,9 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     switch (c.status) {
       case RescueStatus.pendingReview:
       case RescueStatus.accepted:
-        // accepted means "accepted, no clinic saved yet" — stays on Rescue
-        // Details, which renders its own Select Clinic action for this
-        // status (see rescue_detail_page.dart).
+      // accepted means "accepted, no clinic saved yet" — stays on Rescue
+      // Details, which renders its own Select Clinic action for this
+      // status (see rescue_detail_page.dart).
         Navigator.push(context, MaterialPageRoute(
             builder: (_) => RescueDetailPage(caseId: c.id, data: c.raw)));
         break;
@@ -88,8 +91,8 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
             builder: (_) => AssignRiderPage(caseId: c.id, data: c.raw)));
         break;
       case RescueStatus.ongoing:
-        // "Organization will transport" has no rider to track; Rescue
-        // Details carries its "Arrived at Clinic" step.
+      // "Organization will transport" has no rider to track; Rescue
+      // Details carries its "Arrived at Clinic" step.
         Navigator.push(context, MaterialPageRoute(
             builder: (_) => c.raw['organizationTransport'] is Map
                 ? RescueDetailPage(caseId: c.id, data: c.raw)
@@ -104,9 +107,9 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
             builder: (_) => IntakeDetailPage(caseId: c.id, data: c.raw)));
         break;
       default:
-        // Rejected / referred / possibleDuplicate / merged / completed /
-        // cancelled all land on the read-oriented detail page, which shows
-        // referral/merge history instead of the accept/assign actions.
+      // Rejected / referred / possibleDuplicate / merged / completed /
+      // cancelled all land on the read-oriented detail page, which shows
+      // referral/merge history instead of the accept/assign actions.
         Navigator.push(context, MaterialPageRoute(
             builder: (_) => RescueDetailPage(caseId: c.id, data: c.raw)));
     }
@@ -117,6 +120,22 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     final selectedTab = ref.watch(rescuePipelineTabProvider);
     final filters = ref.watch(rescueFilterProvider);
     final casesAsync = ref.watch(filteredCasesProvider);
+
+    // The tab the admin is looking at, while it shows its own cases (not a
+    // status picked from the filter sheet). Its number is hidden, and every
+    // case in it is marked seen while this screen is on top, so the number
+    // stays gone until a new case arrives in that step.
+    final seen = ref.watch(adminTabSeenProvider('rescue'));
+    final viewingTab = filters.statusOverride == null ? selectedTab : null;
+    Iterable<String>? idsIn(RescuePipelineTab tab) =>
+        ref.watch(casesForTabProvider(tab)).asData?.value.map((c) => c.id);
+    if (viewingTab != null && (ModalRoute.of(context)?.isCurrent ?? true)) {
+      final ids = idsIn(viewingTab);
+      final seenByTab = seen.asData?.value;
+      if (ids != null && seenByTab != null) {
+        _seenMarker.markSeen(viewingTab.name, ids, seenByTab[viewingTab.name]);
+      }
+    }
 
     // Picking a tab (or re-tapping the current one) also drops a status
     // override set from the filter sheet, so the tab shows its own cases.
@@ -133,7 +152,10 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
         bottom: AdminTabBar(
           tabs: [
             for (final tab in RescuePipelineTab.values)
-              AdminTab(tab.label, count: ref.watch(casesForTabProvider(tab)).asData?.value.length ?? 0),
+              AdminTab(
+                tab.label,
+                count: tab == viewingTab ? null : unseenTabCount(seen, tab.name, idsIn(tab)),
+              ),
           ],
           selectedIndex: selectedTab.index,
           onSelected: selectTab,
@@ -184,189 +206,189 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
               count: RescuePipelineTab.values.length,
               onSelected: selectTab,
               child: RefreshIndicator(
-              onRefresh: () async => ref.invalidate(casesByStatusesProvider(ref.read(effectiveStatusesProvider))),
-              child: casesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                onRefresh: () async => ref.invalidate(casesByStatusesProvider(ref.read(effectiveStatusesProvider))),
+                child: casesAsync.when(
+                  loading: () => const Center(child: CircularProgressIndicator()),
+                  error: (err, _) => ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      const Icon(Icons.lock_outline, size: 32, color: AppColors.textSecondary),
-                      const SizedBox(height: 10),
-                      Text(
-                        _friendlyCasesError(err),
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
-                      ),
-                      const SizedBox(height: 14),
-                      OutlinedButton(
-                        // Invalidates only this one tab's family instance — a
-                        // deliberate manual re-subscribe, never an automatic
-                        // retry loop.
-                        onPressed: () => ref.invalidate(
-                            casesByStatusesProvider(ref.read(effectiveStatusesProvider))),
-                        child: const Text('Retry'),
+                      Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.lock_outline, size: 32, color: AppColors.textSecondary),
+                            const SizedBox(height: 10),
+                            Text(
+                              _friendlyCasesError(err),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+                            ),
+                            const SizedBox(height: 14),
+                            OutlinedButton(
+                              // Invalidates only this one tab's family instance — a
+                              // deliberate manual re-subscribe, never an automatic
+                              // retry loop.
+                              onPressed: () => ref.invalidate(
+                                  casesByStatusesProvider(ref.read(effectiveStatusesProvider))),
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                ),
-                ],
-              ),
-              data: (cases) {
-                if (cases.isEmpty) {
-                  return ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 80),
-                      child: Center(
-                        child: Text(
-                          filters.isEmpty
-                              ? 'No cases in this stage.'
-                              : 'No cases match your filters.',
-                          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
-                        ),
-                      ),
-                    ),
-                    ],
-                  );
-                }
-                return ListView.separated(
-                  // Navigation State spec §11 — keyed per tab/status-filter
-                  // so each pipeline tab keeps its own scroll offset instead
-                  // of sharing one position across differently-scoped lists.
-                  key: PageStorageKey('rescue_reports_list_${filters.statusOverride?.name ?? selectedTab.name}'),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: cases.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final c = cases[index];
-                    // accepted (no clinic saved yet) can never have a
-                    // transporter offer — offers only start from
-                    // AssignRiderPage, reached once status is
-                    // awaitingAssignment.
-                    final canHavePendingOffer = c.status == RescueStatus.awaitingAssignment;
-                    // Stage-filtered card display (spec §7) — only for the
-                    // two tabs a case can appear under via
-                    // activeAnimalStages while its own animals sit in
-                    // different phases.
-                    final stageFilter = filters.statusOverride == null
-                        ? switch (selectedTab) {
-                            RescuePipelineTab.treatment => 'in_treatment',
-                            RescuePipelineTab.intake => 'intake',
-                            _ => null,
-                          }
-                        : null;
-                    if (c.status == RescueStatus.rejected) {
-                      // Rejected-tab only: rejected-by comes from the
-                      // per-case activityLogs subcollection, so this is the
-                      // one card variant with its own listener (same
-                      // reasoning as the Assign-tab's pending-offer watch
-                      // below) — every other tab avoids it entirely.
-                      return Consumer(
-                        builder: (context, ref, _) {
-                          final logs =
-                              ref.watch(caseActivityLogsProvider(c.id)).asData?.value ?? const <ActivityLogEntry>[];
-                          ActivityLogEntry? rejectionLog;
-                          for (final l in logs) {
-                            if (l.action != 'rejected') continue;
-                            final current = rejectionLog;
-                            final lTimestamp = l.timestamp;
-                            final currentTimestamp = current?.timestamp;
-                            if (current == null ||
-                                (lTimestamp != null &&
-                                    (currentTimestamp == null || lTimestamp.isAfter(currentTimestamp)))) {
-                              rejectionLog = l;
-                            }
-                          }
-                          final reason = c.rejectionReason;
-                          final reasonLabel = reason == RejectionReason.other
-                              ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false
+                  data: (cases) {
+                    if (cases.isEmpty) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 80),
+                            child: Center(
+                              child: Text(
+                                filters.isEmpty
+                                    ? 'No cases in this stage.'
+                                    : 'No cases match your filters.',
+                                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+                    return ListView.separated(
+                      // Navigation State spec §11 — keyed per tab/status-filter
+                      // so each pipeline tab keeps its own scroll offset instead
+                      // of sharing one position across differently-scoped lists.
+                      key: PageStorageKey('rescue_reports_list_${filters.statusOverride?.name ?? selectedTab.name}'),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: cases.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final c = cases[index];
+                        // accepted (no clinic saved yet) can never have a
+                        // transporter offer — offers only start from
+                        // AssignRiderPage, reached once status is
+                        // awaitingAssignment.
+                        final canHavePendingOffer = c.status == RescueStatus.awaitingAssignment;
+                        // Stage-filtered card display (spec §7) — only for the
+                        // two tabs a case can appear under via
+                        // activeAnimalStages while its own animals sit in
+                        // different phases.
+                        final stageFilter = filters.statusOverride == null
+                            ? switch (selectedTab) {
+                          RescuePipelineTab.treatment => 'in_treatment',
+                          RescuePipelineTab.intake => 'intake',
+                          _ => null,
+                        }
+                            : null;
+                        if (c.status == RescueStatus.rejected) {
+                          // Rejected-tab only: rejected-by comes from the
+                          // per-case activityLogs subcollection, so this is the
+                          // one card variant with its own listener (same
+                          // reasoning as the Assign-tab's pending-offer watch
+                          // below) — every other tab avoids it entirely.
+                          return Consumer(
+                            builder: (context, ref, _) {
+                              final logs =
+                                  ref.watch(caseActivityLogsProvider(c.id)).asData?.value ?? const <ActivityLogEntry>[];
+                              ActivityLogEntry? rejectionLog;
+                              for (final l in logs) {
+                                if (l.action != 'rejected') continue;
+                                final current = rejectionLog;
+                                final lTimestamp = l.timestamp;
+                                final currentTimestamp = current?.timestamp;
+                                if (current == null ||
+                                    (lTimestamp != null &&
+                                        (currentTimestamp == null || lTimestamp.isAfter(currentTimestamp)))) {
+                                  rejectionLog = l;
+                                }
+                              }
+                              final reason = c.rejectionReason;
+                              final reasonLabel = reason == RejectionReason.other
+                                  ? (c.rejectionReasonOther?.trim().isNotEmpty ?? false
                                   ? c.rejectionReasonOther!
                                   : 'Other')
-                              : (reason?.label ?? 'Not specified');
-                          DateTime? rejectedDate;
-                          for (final h in c.statusHistory) {
-                            if (h.status.startsWith('Case rejected') && h.timestamp != null) {
-                              rejectedDate = h.timestamp;
-                            }
-                          }
-                          final eligible = isCommunityAdoptionEligible(
-                            status: c.status.firestoreValue,
-                            rejectionReason: reason?.name,
-                            rescueType: c.raw['rescueType'] as String?,
+                                  : (reason?.label ?? 'Not specified');
+                              DateTime? rejectedDate;
+                              for (final h in c.statusHistory) {
+                                if (h.status.startsWith('Case rejected') && h.timestamp != null) {
+                                  rejectedDate = h.timestamp;
+                                }
+                              }
+                              final eligible = isCommunityAdoptionEligible(
+                                status: c.status.firestoreValue,
+                                rejectionReason: reason?.name,
+                                rescueType: c.raw['rescueType'] as String?,
+                              );
+                              return RescueCaseCard(
+                                rescueCase: c,
+                                showStatusChip: filters.statusOverride != null,
+                                rejectionInfo: RejectionCardInfo(
+                                  reporterName: c.reporterName,
+                                  reasonLabel: reasonLabel,
+                                  rejectedDate: rejectedDate,
+                                  rejectedBy: rejectionLog?.actorName,
+                                  communityAdoptionEligible: eligible,
+                                ),
+                                onTap: () => _navigateToDetail(context, c),
+                              );
+                            },
                           );
+                        }
+                        if (c.status == RescueStatus.cancelled) {
+                          // Closed-tab only — closureReason/closedAt/
+                          // closedByName are written directly onto the case doc
+                          // by RescueCaseRepository.closeCase, no extra
+                          // subcollection lookup needed (unlike Rejected's
+                          // rejected-by, which lives in activityLogs).
+                          final closedAtRaw = c.raw['closedAt'];
+                          final closedAt = closedAtRaw is Timestamp ? closedAtRaw.toDate() : null;
+                          final reason = ClosureReason.fromName(c.raw['closureReason'] as String?);
                           return RescueCaseCard(
                             rescueCase: c,
                             showStatusChip: filters.statusOverride != null,
-                            rejectionInfo: RejectionCardInfo(
-                              reporterName: c.reporterName,
-                              reasonLabel: reasonLabel,
-                              rejectedDate: rejectedDate,
-                              rejectedBy: rejectionLog?.actorName,
-                              communityAdoptionEligible: eligible,
+                            closureInfo: ClosureCardInfo(
+                              reasonLabel: reason.label,
+                              closedDate: closedAt,
+                              closedBy: c.raw['closedByName'] as String?,
                             ),
                             onTap: () => _navigateToDetail(context, c),
                           );
-                        },
-                      );
-                    }
-                    if (c.status == RescueStatus.cancelled) {
-                      // Closed-tab only — closureReason/closedAt/
-                      // closedByName are written directly onto the case doc
-                      // by RescueCaseRepository.closeCase, no extra
-                      // subcollection lookup needed (unlike Rejected's
-                      // rejected-by, which lives in activityLogs).
-                      final closedAtRaw = c.raw['closedAt'];
-                      final closedAt = closedAtRaw is Timestamp ? closedAtRaw.toDate() : null;
-                      final reason = ClosureReason.fromName(c.raw['closureReason'] as String?);
-                      return RescueCaseCard(
-                        rescueCase: c,
-                        showStatusChip: filters.statusOverride != null,
-                        closureInfo: ClosureCardInfo(
-                          reasonLabel: reason.label,
-                          closedDate: closedAt,
-                          closedBy: c.raw['closedByName'] as String?,
-                        ),
-                        onTap: () => _navigateToDetail(context, c),
-                      );
-                    }
-                    if (!canHavePendingOffer) {
-                      return RescueCaseCard(
-                        rescueCase: c,
-                        showStatusChip: filters.statusOverride != null,
-                        highlightBorder: c.status == RescueStatus.pendingReview,
-                        stageFilter: stageFilter,
-                        onTap: () => _navigateToDetail(context, c, stageFilter: stageFilter),
-                      );
-                    }
-                    // Assign-tab cases only: watch the current offer so the
-                    // card never reads as completely unassigned while one
-                    // is outstanding (spec §5). Scoped to this branch so
-                    // every other tab avoids the extra per-card listener.
-                    return Consumer(
-                      builder: (context, ref, _) {
-                        final assignment = ref.watch(currentAssignmentProvider(c.id)).asData?.value;
-                        final pendingNote =
+                        }
+                        if (!canHavePendingOffer) {
+                          return RescueCaseCard(
+                            rescueCase: c,
+                            showStatusChip: filters.statusOverride != null,
+                            highlightBorder: c.status == RescueStatus.pendingReview,
+                            stageFilter: stageFilter,
+                            onTap: () => _navigateToDetail(context, c, stageFilter: stageFilter),
+                          );
+                        }
+                        // Assign-tab cases only: watch the current offer so the
+                        // card never reads as completely unassigned while one
+                        // is outstanding (spec §5). Scoped to this branch so
+                        // every other tab avoids the extra per-card listener.
+                        return Consumer(
+                          builder: (context, ref, _) {
+                            final assignment = ref.watch(currentAssignmentProvider(c.id)).asData?.value;
+                            final pendingNote =
                             assignment != null && assignment.status == TransportAssignmentStatus.pending
                                 ? 'Awaiting transporter response · Offered to: ${assignment.riderName}'
                                 : null;
-                        return RescueCaseCard(
-                          rescueCase: c,
-                          showStatusChip: filters.statusOverride != null,
-                          pendingOfferNote: pendingNote,
-                          onTap: () => _navigateToDetail(context, c),
+                            return RescueCaseCard(
+                              rescueCase: c,
+                              showStatusChip: filters.statusOverride != null,
+                              pendingOfferNote: pendingNote,
+                              onTap: () => _navigateToDetail(context, c),
+                            );
+                          },
                         );
                       },
                     );
                   },
-                );
-              },
-              ),
+                ),
               ),
             ),
           ),

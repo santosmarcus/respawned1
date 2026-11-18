@@ -20,6 +20,7 @@ import 'package:respawnd1/features/admin/animals/state/animal_records_providers.
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_seen.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 
@@ -265,6 +266,8 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
   String? _animalRecordIdFilter;
   late final _searchController = TextEditingController(text: widget.animalName ?? '');
   String _searchText = '';
+  // Clears a step's number once it has been opened (admin_tab_seen.dart).
+  final _seenMarker = AdminTabSeenMarker('adoption');
 
   @override
   void initState() {
@@ -580,20 +583,35 @@ class _AdoptionApplicationReviewPageState extends ConsumerState<AdoptionApplicat
     // from, same as every other detail/child screen.
     final isRootModule = widget.animalId == null;
 
-    // Same per-tab membership the list below uses, so a tab's count always
-    // matches what it shows.
-    int tabCount(_PageTab t) {
-      final tabApps =
-          ref.watch(adoptionsByStatusesProvider(statusFilter(t.queryStatus))).asData?.value ?? const <AdoptionApplication>[];
-      return switch (t) {
-        _PageTab.returns_ => tabApps.where((a) => isReturnActive(a.returnRequest)).length,
-        _PageTab.adopted =>
-        tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted).length,
-        _PageTab.complete =>
-        tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete).length,
-        _ => tabApps.length,
+    // Same per-tab membership the list below uses, so a tab's number always
+    // refers to what it shows. Null while the tab's applications load.
+    Iterable<String>? idsIn(_PageTab t) {
+      final tabApps = ref.watch(adoptionsByStatusesProvider(statusFilter(t.queryStatus))).asData?.value;
+      if (tabApps == null) return null;
+      final inTab = switch (t) {
+        _PageTab.returns_ => tabApps.where((a) => isReturnActive(a.returnRequest)),
+        _PageTab.adopted => tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.adopted),
+        _PageTab.complete => tabApps.where((a) => classifyAdoptionLifecycle(a) == AdoptionLifecycleStage.complete),
+        _ => tabApps,
       };
+      return inTab.map((a) => a.id);
     }
+
+    // A tab's number counts applications not yet seen in that step. The
+    // open tab shows none, and in the root module everything in it is
+    // marked seen while this screen is on top, so the number stays gone
+    // until a new application arrives in that step. The "View
+    // Applications" drill-down shows one animal's applications only, so it
+    // doesn't mark the whole step as seen.
+    final seen = ref.watch(adminTabSeenProvider('adoption'));
+    if (isRootModule && (ModalRoute.of(context)?.isCurrent ?? true)) {
+      final ids = idsIn(_tab);
+      final seenByTab = seen.asData?.value;
+      if (ids != null && seenByTab != null) {
+        _seenMarker.markSeen(_tab.name, ids, seenByTab[_tab.name]);
+      }
+    }
+    int? tabCount(_PageTab t) => t == _tab ? null : unseenTabCount(seen, t.name, idsIn(t));
 
     void selectTab(int index) => setState(() => _tab = _PageTab.values[index]);
 

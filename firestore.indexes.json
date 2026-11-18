@@ -531,6 +531,50 @@
           "queryScope": "COLLECTION_GROUP"
         }
       ]
+    },
+    {
+      "collectionGroup": "transportAssignments",
+      "fieldPath": "status",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "arrayConfig": "CONTAINS",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "followUps",
+      "fieldPath": "status",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "arrayConfig": "CONTAINS",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
     }
   ]
 }

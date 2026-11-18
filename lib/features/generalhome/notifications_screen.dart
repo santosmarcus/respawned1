@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/services/notification_service.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -51,6 +52,8 @@ const Map<String, String> _kDonationNotifLabels = {
   'adoption_no_show_closed': 'Adoption',
   'adoption_booking_reminder': 'Adoption',
   'adoption_booking_withdrawn': 'Adoption',
+  // escalateCriticalReports (functions/index.js): opens the case.
+  'critical_report_escalated': 'Urgent Rescue',
 };
 
 /// Notification types whose tap opens Profile → Certificates.
@@ -464,7 +467,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       final sourceType = data['type'] as String? ?? '';
       final title = data['title'] as String? ?? 'Update';
       items.add(_NotifItem(
-        refLabel: _kDonationNotifLabels[sourceType] ?? 'Donation',
+        // Staff case notices (notifyStaff in functions/index.js) carry a
+        // caseId; label them as rescue notices, not donations.
+        refLabel: _kDonationNotifLabels[sourceType] ??
+            (((data['caseId'] as String?) ?? '').isNotEmpty ? 'Rescue' : 'Donation'),
         type: title,
         message: data['message'] as String? ?? '',
         timestamp: ts.toDate(),
@@ -858,6 +864,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       }
       if (item.sourceType == 'sponsorship_renewal') {
         await _askToRenewSponsorship(item);
+        return;
+      }
+      // A notice about a rescue case (critical report escalation, referral,
+      // transit ended, ...) opens the same screen as its push, never the
+      // donation history.
+      final caseId = item.data?['caseId'] as String?;
+      if (caseId != null && caseId.isNotEmpty) {
+        Widget? page;
+        try {
+          page = await NotificationService.pageFor(item.data!);
+        } catch (_) {}
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => page ?? TrackCasePage(caseId: caseId)),
+        );
         return;
       }
       final adoptionId = item.data?['adoptionId'] as String?;

@@ -5,7 +5,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_view.dart';
-import 'package:respawnd1/features/adminhome/dashboard/dashboard_alerts.dart';
+import 'package:respawnd1/features/adminhome/dashboard/admin_notifications.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 import 'package:respawnd1/features/adminhome/dashboard/today_view.dart';
@@ -27,22 +27,10 @@ enum _DashTab {
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   _DashTab _tab = _DashTab.today;
-  final _priorityKey = GlobalKey();
 
-  /// Bell: switch to Today and scroll to Priority actions.
-  void _openPriorityActions() {
-    setState(() => _tab = _DashTab.today);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _priorityKey.currentContext;
-      if (ctx != null) {
-        Scrollable.ensureVisible(
-          ctx,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOut,
-          alignment: 0.02,
-        );
-      }
-    });
+  /// Bell: notices sent to this account and the recent activity.
+  void _openNotifications() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminNotificationsPage()));
   }
 
   @override
@@ -64,17 +52,16 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         actions: [
           Consumer(
             builder: (context, ref, _) {
-              final alerts = ref.watch(dashboardAlertsProvider);
-              final open = alerts.count(DashSeverity.critical) + alerts.count(DashSeverity.warning);
+              final count = ref.watch(adminBellCountProvider);
               return IconButton(
-                tooltip: open == 0 ? 'Priority actions' : '$open priority actions',
+                tooltip: count == 0 ? 'Notifications' : '$count new notifications',
                 icon: Badge(
-                  isLabelVisible: open > 0,
+                  isLabelVisible: count > 0,
                   backgroundColor: DashSeverity.critical.color,
-                  label: Text(open > 99 ? '99+' : '$open'),
+                  label: Text(count > 99 ? '99+' : '$count'),
                   child: const Icon(Icons.notifications_outlined, color: AppColors.background),
                 ),
-                onPressed: _openPriorityActions,
+                onPressed: _openNotifications,
               );
             },
           ),
@@ -94,7 +81,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(48, 0, 16, 14),
                     child:
-                        Text('Welcome, Admin', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background)),
+                    Text('Welcome, Admin', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background)),
                   ),
                 ),
               ),
@@ -133,7 +120,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     child: Align(alignment: Alignment.centerLeft, child: AnalyticsPeriodButton()),
                   ),
                 const SizedBox(height: 14),
-                if (_tab == _DashTab.today) TodayView(priorityKey: _priorityKey) else const AnalyticsView(),
+                if (_tab == _DashTab.today) const TodayView() else const AnalyticsView(),
               ],
             ),
           ),
