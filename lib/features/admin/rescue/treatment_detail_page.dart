@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
@@ -16,6 +17,7 @@ import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_create.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
@@ -557,8 +559,8 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
 
     final expensesAsync = ref.watch(expensesProvider(widget.caseId));
     final expenses = expensesAsync.asData?.value ?? const [];
-    final totalExpenses = expenses.fold<double>(0, (sum, e) => sum + e.amount);
-    final fundedAmount = expenses.fold<double>(0, (sum, e) => sum + e.fundedAmount);
+    final totalExpenses = expenses.fold<double>(0, (total, e) => total + e.amount);
+    final fundedAmount = expenses.fold<double>(0, (total, e) => total + e.fundedAmount);
     final outstandingBalance = totalExpenses - fundedAmount;
 
     final dateStr = c.dateAdmitted != null
@@ -1283,6 +1285,25 @@ class _DischargedNotice extends StatelessWidget {
   }
 }
 
+/// The newest fundraiser made for [caseId] (Create Fundraiser stamps
+/// `linkedCaseId`), or null when there is none yet.
+final _caseFundraiserIdProvider = StreamProvider.autoDispose.family<String?, String>((ref, caseId) {
+  return FirebaseFirestore.instance
+      .collection('campaigns')
+      .where('linkedCaseId', isEqualTo: caseId)
+      .snapshots()
+      .map((snap) {
+    if (snap.docs.isEmpty) return null;
+    final docs = [...snap.docs]..sort((a, b) {
+        final ta = a.data()['createdAt'], tb = b.data()['createdAt'];
+        final da = ta is Timestamp ? ta.toDate() : DateTime(0);
+        final db = tb is Timestamp ? tb.toDate() : DateTime(0);
+        return db.compareTo(da);
+      });
+    return docs.first.id;
+  });
+});
+
 class _CostTrackingSection extends ConsumerWidget {
   final String caseId;
   final RescueCase rescueCase;
@@ -1308,6 +1329,7 @@ class _CostTrackingSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Recording expenses is for financial administrators (firestore.rules).
     final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final fundraiserId = ref.watch(_caseFundraiserIdProvider(caseId)).asData?.value;
     // Total/Funded/Outstanding always reflect the whole case (never
     // filtered by animal — Close Case's own financial summary and every
     // other reader of these totals expects the case-wide figure). The
@@ -1419,6 +1441,21 @@ class _CostTrackingSection extends ConsumerWidget {
                     ),
                   ),
                 ),
+              // Once a fundraiser exists for this case, open it instead of
+              // offering to create another.
+              if (fundraiserId != null)
+                OutlinedButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: fundraiserId)),
+                  ),
+                  style: AppButtons.outline,
+                  child: Text(
+                    'View Fundraiser',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                )
+              else
               OutlinedButton(
                 onPressed: outstandingBalance <= 0
                     ? null

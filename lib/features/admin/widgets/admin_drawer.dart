@@ -330,21 +330,12 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                       selected: widget.active == AdminModule.organizationReview,
                       onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
                     ),
-                  // Members: the team (invite, access, remove; Admins only),
+                  // After the divider: Staff Members (invite, access, remove; Admins only),
                   // and the volunteers and transporters the organization works with.
                   const Divider(color: Colors.white24),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
-                    child: Text('MEMBERS',
-                        style: GoogleFonts.zain(
-                            fontSize: 11,
-                            letterSpacing: 1.2,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.background.withValues(alpha: 0.55))),
-                  ),
                   if (caps.canManageTeam && orgId != null)
                     _DrawerItem(
-                      label: 'Team',
+                      label: 'Staff Members',
                       selected: widget.active == AdminModule.members,
                       onTap: () => _openModule(context, (_) => StaffMembersPage(organizationId: orgId)),
                     ),

@@ -538,7 +538,9 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
             color: AppColors.background,
           ),
         ),
+        // Nothing left to change once the animal is at the shelter.
         actions: [
+          if (!selectedAnimalsReceived)
           CaseOverflowMenu(
             busy: _isConfirmingReceived || _isClosingCase,
             actions: [

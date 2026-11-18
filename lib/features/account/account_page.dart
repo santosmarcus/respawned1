@@ -72,11 +72,24 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     final user = FirebaseAuth.instance.currentUser;
     final caps = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value ?? OrganizationCapabilities.none;
     final orgName = ref.watch(currentOrganizationHeaderProvider).asData?.value?.name;
-    return Scaffold(
+    // Back (the arrow or the system gesture) always returns to the
+    // dashboard, the app's first screen.
+    void backToDashboard() => Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) backToDashboard();
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
         foregroundColor: AppColors.background,
+        leading: IconButton(
+          tooltip: 'Back to dashboard',
+          icon: const Icon(Icons.arrow_back, color: AppColors.background),
+          onPressed: backToDashboard,
+        ),
         title: Text('Account', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.background)),
       ),
       body: user == null
@@ -210,6 +223,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                 );
               },
             ),
+    ),
     );
   }
 

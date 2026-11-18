@@ -12,7 +12,6 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
-import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
@@ -32,6 +31,8 @@ import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 import 'package:respawnd1/core/repos/rescue_case/case_message_sender.dart';
 import 'package:respawnd1/core/utils/photo_marker.dart';
+import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 
 // Raw case-doc status values written by the pet-transporter app's own
 // transit flow (see transit_progress_page.dart) once it has physically
@@ -828,65 +829,13 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         (assignment.status == TransportAssignmentStatus.accepted ||
             assignment.status == TransportAssignmentStatus.completed);
     final route = _lastRoute;
-    final destination = _destinationFrom(data);
-    final eta = route?.duration;
-    final headline = eta != null ? _etaLabel(eta) : (route != null ? '${route.distanceKm.toStringAsFixed(1)} km' : null);
     const pad = EdgeInsets.symmetric(horizontal: 16);
 
     return [
-      // Status + ETA headline.
-      Padding(
-        padding: pad,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.slaterspwn),
-          ),
-          child: Row(
-            children: [
-              // The animal being moved, so the page reads at a glance.
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  width: 52,
-                  height: 52,
-                  child: c.photoUrls.isEmpty
-                      ? Container(color: AppColors.tearspwn, child: const Icon(Icons.pets, color: AppColors.textPrimary))
-                      : Image.network(c.photoUrls.first,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) =>
-                              Container(color: AppColors.tearspwn, child: const Icon(Icons.pets))),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (headline != null)
-                      Text(headline, style: GoogleFonts.tiltWarp(fontSize: 24, color: AppColors.textPrimary)),
-                    Text(
-                      _statusHeadline(data, isIntakeMode),
-                      style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-                    ),
-                    Text(
-                      route == null
-                          ? 'To ${destination.label}'
-                          : '${route.distanceKm.toStringAsFixed(1)} km to ${destination.label}'
-                              '${route.isRoadFollowing ? '' : ' (straight-line estimate)'}',
-                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              Text('#${shortCaseId(widget.caseId)}',
-                  style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-            ],
-          ),
-        ),
-      ),
+      // The outcome banner (blue on the way, green arrived) heads the
+      // sheet, with the ETA and distance; it replaced a separate status
+      // card that said the same thing.
+      Padding(padding: pad, child: banner),
       const SizedBox(height: 10),
       if (accepted) ...[
         Padding(
@@ -905,26 +854,33 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
       ],
       Padding(
         padding: pad,
-        child: _AnimalSummaryCard(rescueCase: c, caseData: data, showFullDetailsLink: !isIntakeMode),
-      ),
-      const SizedBox(height: 10),
-      Padding(
-        padding: pad,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            RescueRiskBanner(
-              highRiskAnimals: highRiskAnimalsIn(
-                animals: data['animals'] as List?,
-                legacyBiteRisk: data['biteRisk'] as String?,
-                legacyEscapeRisk: data['escapeRisk'] as String?,
-              ),
-            ),
-            banner,
-            const SizedBox(height: 10),
-          ],
+        child: _AnimalSummaryCard(
+          rescueCase: c,
+          caseData: data,
+          // An admission or adoption return has no report to open.
+          showFullDetailsLink: !isIntakeMode && !_isRecordCase(data),
         ),
       ),
+      const SizedBox(height: 10),
+      // Bite/escape risks come from a community report; an animal moved
+      // from its record has none.
+      if (!_isRecordCase(data))
+        Padding(
+          padding: pad,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              RescueRiskBanner(
+                highRiskAnimals: highRiskAnimalsIn(
+                  animals: data['animals'] as List?,
+                  legacyBiteRisk: data['biteRisk'] as String?,
+                  legacyEscapeRisk: data['escapeRisk'] as String?,
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
       _AdminTrackingTab(
         statusHistory: statusHistory,
         caseId: widget.caseId,
@@ -932,6 +888,30 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         onSend: _sendMessage,
         isIntakeMode: isIntakeMode,
         hideCommunityContent: data['sourceType'] == 'animalRecordAdmission',
+      ),
+    ];
+  }
+
+  /// A case opened from an existing animal record (Medical > Admit, or an
+  /// adoption return): no community report behind it, and the animal's
+  /// name and photo come from its record.
+  static bool _isRecordCase(Map<String, dynamic> data) =>
+      ((data['sourceAnimalRecordId'] as String?) ?? '').isNotEmpty &&
+      (data['sourceType'] == 'animalRecordAdmission' || data['sourceType'] == 'adoptionReturn');
+
+  /// ETA and distance lines for the outcome banner while the animal moves.
+  List<(String, String)> _etaFacts(Map<String, dynamic> data) {
+    final route = _lastRoute;
+    final destination = _destinationFrom(data);
+    final eta = route?.duration;
+    return [
+      if (eta != null) ('ETA', _etaLabel(eta)),
+      (
+        'To',
+        route == null
+            ? destination.label
+            : '${destination.label} · ${route.distanceKm.toStringAsFixed(1)} km'
+                '${route.isRoadFollowing ? '' : ' (straight line)'}',
       ),
     ];
   }
@@ -975,13 +955,21 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             ?.value;
 
         final c = RescueCase.fromMap(widget.caseId, data);
-        _loadAnimalPin(c.photoUrls.isNotEmpty ? c.photoUrls.first : null);
+        // The animal's own record (name, photo) when the case came from one.
+        final record = _isRecordCase(data)
+            ? ref.watch(animalRecordProvider(data['sourceAnimalRecordId'] as String)).asData?.value
+            : null;
+        final recordPhoto = record != null && record.photoUrls.isNotEmpty ? record.photoUrls.first : null;
+        _loadAnimalPin(recordPhoto ?? (c.photoUrls.isNotEmpty ? c.photoUrls.first : null));
         final isIntakeMode = widget.mode == TrackingMode.intakeTransfer;
         final reachedClinic = _kArrivedAtClinicStatuses.contains(data['status']);
         final hasReceivedIntake = data['intakeReceivedAt'] != null;
         // Change Clinic and Close Case used to sit in the app bar's menu;
         // they're in the app bar's menu (top right).
-        final overflow = <CaseAction>[
+        // Nothing left to change once the animal is at the shelter.
+        final overflow = isIntakeMode && hasReceivedIntake
+            ? const <CaseAction>[]
+            : <CaseAction>[
           // Testing without GPS, before the transporter reaches the clinic.
           if (kDebugMode && !isIntakeMode && !reachedClinic)
             CaseAction('Fast-forward to Clinic (Test)', _fastForwardToClinic, icon: Icons.fast_forward),
@@ -1002,11 +990,12 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
         final banner = isIntakeMode
             ? (hasReceivedIntake
                 ? const CaseOutcomeBanner(tone: CaseBannerTone.success, title: 'Animal received at the shelter.')
-                : const CaseOutcomeBanner(
+                : CaseOutcomeBanner(
                     tone: CaseBannerTone.info,
                     icon: Icons.local_shipping_outlined,
                     title: 'On the way to the shelter',
                     message: 'Confirm when the animal arrives; quarantine and the animal record continue on Intake Details.',
+                    facts: _etaFacts(data),
                   ))
             : reachedClinic
                 ? const CaseOutcomeBanner(
@@ -1015,11 +1004,12 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
                     title: 'Transporter is at the clinic',
                     message: 'Proceed to Treatment to start the treatment log.',
                   )
-                : const CaseOutcomeBanner(
+                : CaseOutcomeBanner(
                     tone: CaseBannerTone.info,
                     icon: Icons.local_shipping_outlined,
-                    title: 'Waiting for the transporter to reach the clinic…',
+                    title: _statusHeadline(data, false),
                     message: 'Proceed to Treatment unlocks on arrival.',
+                    facts: _etaFacts(data),
                   );
 
         return Scaffold(
@@ -1789,17 +1779,17 @@ class _ClinicCard extends StatelessWidget {
 /// Short animal summary — photo, species and the key facts — that expands
 /// to the full basics and the bold Health / Behavior sections, with a link
 /// to the full case.
-class _AnimalSummaryCard extends StatefulWidget {
+class _AnimalSummaryCard extends ConsumerStatefulWidget {
   final RescueCase rescueCase;
   final Map<String, dynamic> caseData;
   final bool showFullDetailsLink;
   const _AnimalSummaryCard({required this.rescueCase, required this.caseData, required this.showFullDetailsLink});
 
   @override
-  State<_AnimalSummaryCard> createState() => _AnimalSummaryCardState();
+  ConsumerState<_AnimalSummaryCard> createState() => _AnimalSummaryCardState();
 }
 
-class _AnimalSummaryCardState extends State<_AnimalSummaryCard> {
+class _AnimalSummaryCardState extends ConsumerState<_AnimalSummaryCard> {
   bool _expanded = false;
 
   String _facts() {
@@ -1819,7 +1809,21 @@ class _AnimalSummaryCardState extends State<_AnimalSummaryCard> {
   @override
   Widget build(BuildContext context) {
     final c = widget.rescueCase;
-    final photo = c.photoUrls.isNotEmpty ? c.photoUrls.first : null;
+    // A case opened from an animal record shows that record (its name,
+    // photo and details), not the case's generic species label.
+    final recordId = _AdminTrackCasePageState._isRecordCase(widget.caseData)
+        ? widget.caseData['sourceAnimalRecordId'] as String
+        : null;
+    final record = recordId == null ? null : ref.watch(animalRecordProvider(recordId)).asData?.value;
+    final photo = record != null && record.photoUrls.isNotEmpty
+        ? record.photoUrls.first
+        : (c.photoUrls.isNotEmpty ? c.photoUrls.first : null);
+    final title = record == null
+        ? c.speciesSummary
+        : (record.name.trim().isNotEmpty ? record.name.trim() : record.species);
+    final facts = record == null
+        ? _facts()
+        : [record.species, record.sex, record.breed].where((v) => v.trim().isNotEmpty).join(' · ');
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1853,9 +1857,9 @@ class _AnimalSummaryCardState extends State<_AnimalSummaryCard> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(c.speciesSummary,
+                        Text(title,
                             style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-                        Text(_facts(),
+                        Text(facts,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
@@ -1869,10 +1873,27 @@ class _AnimalSummaryCardState extends State<_AnimalSummaryCard> {
           ),
           if (_expanded) ...[
             const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-              child: CaseAnimalsSection(currentCase: c),
-            ),
+            if (recordId == null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+                child: CaseAnimalsSection(currentCase: c),
+              )
+            else
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: record == null
+                      ? null
+                      : () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AnimalRecordDetailPage(animalId: record.id, data: record.raw),
+                            ),
+                          ),
+                  child: Text('Animal record →',
+                      style: GoogleFonts.zain(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                ),
+              ),
             if (widget.showFullDetailsLink)
               Align(
                 alignment: Alignment.centerRight,
