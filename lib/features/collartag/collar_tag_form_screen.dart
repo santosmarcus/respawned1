@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:respawnd1/core/utils/user_autofill.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'collar_tag_data_model.dart';
@@ -58,9 +59,23 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
 
   final _picker = ImagePicker();
 
+  /// The owner's name, mobile and email from their account for a new tag
+  /// (an existing tag keeps what it has).
+  Future<void> _prefillOwner() async {
+    if (widget.existingTag != null) return;
+    final me = await UserAutofill.load();
+    if (me == null || !mounted) return;
+    setState(() {
+      fillIfEmpty(_ownerNameCtrl, me.fullName);
+      fillIfEmpty(_ownerMobileCtrl, me.phone);
+      fillIfEmpty(_ownerEmailCtrl, me.email);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    _prefillOwner();
 
     final tag = widget.existingTag;
     if (tag != null) {
@@ -438,7 +453,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
 
               const SizedBox(height: 14),
 
-            Text(
+              Text(
                 'Pet Type',
                 style: GoogleFonts.zain(
                   fontSize: 13,

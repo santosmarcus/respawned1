@@ -10,6 +10,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
+import 'package:respawnd1/core/utils/user_autofill.dart';
 import 'package:respawnd1/core/repos/adoption_application_repository.dart';
 import 'package:respawnd1/features/adoption/adoption_form_controller.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
@@ -150,6 +151,9 @@ class AdoptionApplicationService {
       final orgId = animalSnap.data()?['organizationId'] as String?;
       if (orgId != null && orgId.isNotEmpty) organizationId = orgId;
     }
+
+    // So the next form that asks for an address can fill it in.
+    UserAutofill.rememberAddress(form.homeAddressCtrl.text);
 
     await docRef.set({
     'organizationId': ?organizationId,

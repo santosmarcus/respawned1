@@ -1,3 +1,4 @@
+import 'package:respawnd1/core/utils/user_autofill.dart';
 import 'package:respawnd1/core/utils/photo_metadata.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -85,6 +86,18 @@ class _RescuePageState extends State<RescuePage> {
   void initState() {
     super.initState();
     _fetchCurrentLocation();
+    _prefillContact();
+  }
+
+  /// The reporter's own mobile number in the Lost Pet owner/finder contact
+  /// fields, so they don't have to type what they gave at sign-up.
+  Future<void> _prefillContact() async {
+    final me = await UserAutofill.load();
+    if (me == null || !mounted) return;
+    setState(() {
+      fillIfEmpty(_form.ownerContactController, me.phone);
+      fillIfEmpty(_form.finderContactController, me.phone);
+    });
   }
 
   @override
