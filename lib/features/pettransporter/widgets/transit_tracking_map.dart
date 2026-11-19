@@ -1,5 +1,6 @@
 // Extracted from transit_progress_page.dart (behavior-preserving refactor).
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +12,11 @@ import 'package:geolocator/geolocator.dart';
 
 import 'package:respawnd1/core/repos/directions_repository.dart';
 
-//Tracking map
+/// The transporter's in-app map: the driving route from where they are to
+/// the current stop (pick up, clinic or shelter), drawn from Google
+/// Directions like Google Maps' own route line, with the time and distance
+/// left. The route follows the transporter and refreshes as they drive;
+/// the Navigate button still opens turn-by-turn directions in Google Maps.
 class TransitTrackingMap extends StatefulWidget {
   final String caseId;
   final void Function(GoogleMapController) onMapCreated;
@@ -43,69 +48,120 @@ class _TrackingMapState extends State<TransitTrackingMap> {
       .limitToLast(100)
       .snapshots();
 
-  @override
-  void didUpdateWidget(TransitTrackingMap old) {
-    super.didUpdateWidget(old);
-    if (old.caseId != widget.caseId) _tracking = _trackingFor(widget.caseId);
-  }
-
   GoogleMapController? _controller;
-  bool _centered = false;
+
+  // The phone's own position, so the route can be drawn straight away
+  // instead of waiting for the first saved tracking point (saved at most
+  // every 10 s, and only once the trip has started).
+  LatLng? _me;
+  StreamSubscription<Position>? _positionSub;
 
   DirectionsRoute? _route;
   LatLng? _routeFetchedFor;
   LatLng? _routeFetchedFrom;
-  Timer? _routeRefreshTimer;
+  DateTime? _lastRouteAttempt;
+  bool _routeFailed = false;
+  bool _fetching = false;
+  LatLng? _fittedFor;
+
+  @override
+  void initState() {
+    super.initState();
+    _startLocation();
+  }
+
+  Future<void> _startLocation() async {
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) _onPosition(last);
+    } catch (_) {}
+    _positionSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      ),
+    ).listen(_onPosition, onError: (_) {});
+  }
+
+  void _onPosition(Position pos) {
+    if (!mounted) return;
+    setState(() => _me = LatLng(pos.latitude, pos.longitude));
+    _maybeRefreshRoute();
+  }
+
+  @override
+  void didUpdateWidget(TransitTrackingMap old) {
+    super.didUpdateWidget(old);
+    if (old.caseId != widget.caseId) _tracking = _trackingFor(widget.caseId);
+    if (old.destination != widget.destination) {
+      // New stop: forget the old route at once and fetch the new one.
+      _route = null;
+      _routeFailed = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeRefreshRoute());
+    }
+  }
 
   @override
   void dispose() {
-    _routeRefreshTimer?.cancel();
+    _positionSub?.cancel();
     super.dispose();
   }
 
-  void _maybeRefreshRoute(LatLng riderPosition) {
-    if (widget.destination == null) {
-      debugPrint('_maybeRefreshRoute: no destination set yet, skipping.');
-      return;
+  LatLng? _origin(List<LatLng> trail) => _me ?? (trail.isEmpty ? null : trail.last);
+
+  void _maybeRefreshRoute([List<LatLng> trail = const []]) {
+    final destination = widget.destination;
+    final origin = _origin(trail);
+    if (destination == null || origin == null || _fetching) return;
+
+    final destChanged = _routeFetchedFor != destination;
+    final movedFar = _routeFetchedFrom == null ||
+        Geolocator.distanceBetween(
+          _routeFetchedFrom!.latitude,
+          _routeFetchedFrom!.longitude,
+          origin.latitude,
+          origin.longitude,
+        ) >
+            200;
+    // A failed request is retried after 30 s rather than never.
+    final retryDue = _routeFailed &&
+        (_lastRouteAttempt == null ||
+            DateTime.now().difference(_lastRouteAttempt!) > const Duration(seconds: 30));
+    if (!destChanged && !movedFar && !retryDue) return;
+
+    _routeFetchedFor = destination;
+    _routeFetchedFrom = origin;
+    _lastRouteAttempt = DateTime.now();
+    _fetching = true;
+    fetchDirectionsRoute(origin, destination).then((route) {
+      if (!mounted) return;
+      setState(() {
+        _route = route ?? (destChanged ? null : _route);
+        _routeFailed = route == null;
+      });
+      if (route != null) _fitToRoute(route.points, destination);
+    }).whenComplete(() => _fetching = false);
+  }
+
+  /// Zooms the map out to show the whole route, once per destination.
+  void _fitToRoute(List<LatLng> points, LatLng destination) {
+    final controller = _controller;
+    if (controller == null || points.isEmpty || _fittedFor == destination) return;
+    _fittedFor = destination;
+    var minLat = points.first.latitude, maxLat = minLat;
+    var minLng = points.first.longitude, maxLng = minLng;
+    for (final p in points) {
+      minLat = math.min(minLat, p.latitude);
+      maxLat = math.max(maxLat, p.latitude);
+      minLng = math.min(minLng, p.longitude);
+      maxLng = math.max(maxLng, p.longitude);
     }
-
-    final destChanged =
-        _routeFetchedFor == null ||
-            _routeFetchedFor!.latitude != widget.destination!.latitude ||
-            _routeFetchedFor!.longitude != widget.destination!.longitude;
-
-    final movedFar =
-        _routeFetchedFrom == null ||
-            Geolocator.distanceBetween(
-              _routeFetchedFrom!.latitude,
-              _routeFetchedFrom!.longitude,
-              riderPosition.latitude,
-              riderPosition.longitude,
-            ) >
-                200;
-
-    if (!destChanged && !movedFar) return;
-
-    _routeFetchedFor = widget.destination;
-    _routeFetchedFrom = riderPosition;
-
-    debugPrint(
-      '_maybeRefreshRoute: fetching route from $riderPosition to '
-          '${widget.destination} (${widget.destinationLabel})',
+    controller.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng)),
+        60,
+      ),
     );
-
-    fetchDirectionsRoute(riderPosition, widget.destination!).then((route) {
-      if (route == null) {
-        debugPrint(
-          '_maybeRefreshRoute: fetchDirectionsRoute returned null — see '
-              'fetchDirectionsRoute logs above for the actual reason.',
-        );
-        return;
-      }
-      if (mounted) {
-        setState(() => _route = route);
-      }
-    });
   }
 
   @override
@@ -113,94 +169,99 @@ class _TrackingMapState extends State<TransitTrackingMap> {
     return StreamBuilder<QuerySnapshot>(
       stream: _tracking,
       builder: (context, snapshot) {
-        final points = <LatLng>[];
+        final trail = <LatLng>[];
         if (snapshot.hasData) {
           for (final doc in snapshot.data!.docs) {
             final d = doc.data() as Map<String, dynamic>;
             final lat = d['lat'];
             final lng = d['lng'];
             if (lat is num && lng is num) {
-              points.add(LatLng(lat.toDouble(), lng.toDouble()));
+              trail.add(LatLng(lat.toDouble(), lng.toDouble()));
             }
           }
         }
-
-        final initialCenter = points.isNotEmpty
-            ? points.last
-            : const LatLng(14.5995, 120.9842);
-
-        if (_controller != null && points.isNotEmpty && !_centered) {
-          _centered = true;
-          _controller!.animateCamera(
-            CameraUpdate.newLatLngZoom(points.last, 15),
-          );
+        final origin = _origin(trail);
+        if (_me == null && trail.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _maybeRefreshRoute(trail));
         }
 
-        if (points.isNotEmpty) {
-          WidgetsBinding.instance.addPostFrameCallback(
-                (_) => _maybeRefreshRoute(points.last),
-          );
-        }
-
-        final markers = <Marker>{};
-        if (points.isNotEmpty) {
-          markers.add(
+        final markers = <Marker>{
+          if (origin != null)
             Marker(
               markerId: const MarkerId('rider_current'),
-              position: points.last,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueAzure,
-              ),
+              position: origin,
+              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
               zIndexInt: 2,
               infoWindow: const InfoWindow(title: 'You'),
             ),
-          );
-        }
-        if (widget.destination != null) {
-          markers.add(
+          if (widget.destination != null)
             Marker(
               markerId: const MarkerId('destination'),
               position: widget.destination!,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueGreen,
-              ),
+              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
               infoWindow: InfoWindow(
                 title: widget.destinationLabel,
-                snippet: _route == null
-                    ? null
-                    : '${_route!.distanceText} • ${_route!.durationText}',
+                snippet: _route == null ? null : '${_route!.distanceText} • ${_route!.durationText}',
               ),
             ),
-          );
-        }
+        };
 
-        final polylines = <Polyline>{};
-        if (points.length >= 2) {
-          polylines.add(
+        final route = _route;
+        final polylines = <Polyline>{
+          // Where the transporter has already been.
+          if (trail.length >= 2)
             Polyline(
               polylineId: const PolylineId('route_trail'),
-              points: points,
+              points: trail,
               color: AppColors.textPrimary.withValues(alpha: 0.35),
               width: 3,
               zIndex: 0,
             ),
-          );
-        }
-
-        if (_route != null && _route!.points.length >= 2) {
-          polylines.add(
+          // Google's driving route to the stop, styled like Google Maps.
+          if (route != null && route.points.length >= 2) ...{
             Polyline(
-              polylineId: const PolylineId('directions_route'),
-              points: _route!.points,
-              color: const Color(0xFF4285F4),
-              width: 6,
+              polylineId: const PolylineId('directions_casing'),
+              points: route.points,
+              color: const Color(0xFF1A5DC8),
+              width: 9,
               zIndex: 1,
               jointType: JointType.round,
               startCap: Cap.roundCap,
               endCap: Cap.roundCap,
             ),
-          );
-        }
+            Polyline(
+              polylineId: const PolylineId('directions_route'),
+              points: route.points,
+              color: const Color(0xFF4285F4),
+              width: 6,
+              zIndex: 2,
+              jointType: JointType.round,
+              startCap: Cap.roundCap,
+              endCap: Cap.roundCap,
+            ),
+          }
+          // No route from Google yet: a dashed straight line so the stop's
+          // direction is still clear.
+          else if (origin != null && widget.destination != null)
+            Polyline(
+              polylineId: const PolylineId('straight_line'),
+              points: [origin, widget.destination!],
+              color: const Color(0xFF4285F4).withValues(alpha: 0.7),
+              width: 4,
+              zIndex: 1,
+              patterns: [PatternItem.dash(20), PatternItem.gap(12)],
+            ),
+        };
+
+        final banner = widget.destination == null
+            ? null
+            : route != null
+            ? '${route.durationText} to ${widget.destinationLabel} • ${route.distanceText}'
+            : _routeFailed
+            ? 'Route unavailable right now — retrying. Use Navigate for directions.'
+            : origin == null
+            ? 'Finding your location…'
+            : 'Loading route to ${widget.destinationLabel}…';
 
         return Stack(
           children: [
@@ -208,55 +269,56 @@ class _TrackingMapState extends State<TransitTrackingMap> {
               onMapCreated: (ctrl) {
                 _controller = ctrl;
                 widget.onMapCreated(ctrl);
+                final r = _route;
+                if (r != null && widget.destination != null) {
+                  _fitToRoute(r.points, widget.destination!);
+                } else if (origin != null) {
+                  ctrl.moveCamera(CameraUpdate.newLatLngZoom(origin, 15));
+                }
               },
               initialCameraPosition: CameraPosition(
-                target: initialCenter,
+                target: origin ?? widget.destination ?? const LatLng(14.5995, 120.9842),
                 zoom: 14,
               ),
               myLocationEnabled: true,
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
               mapToolbarEnabled: false,
+              trafficEnabled: true,
               markers: markers,
               polylines: polylines,
             ),
-
-            if (_route != null && widget.destination != null)
+            if (banner != null)
               Positioned(
                 bottom: 90,
-                left: 0,
-                right: 0,
+                left: 16,
+                right: 16,
                 child: Center(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.12),
-                          blurRadius: 6,
-                        ),
-                      ],
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 6)],
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
-                          Icons.access_time,
+                        Icon(
+                          route != null ? Icons.access_time : Icons.route,
                           size: 15,
                           color: AppColors.textPrimary,
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          '${_route!.durationText} to ${widget.destinationLabel} • ${_route!.distanceText}',
-                          style: GoogleFonts.zain(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
+                        Flexible(
+                          child: Text(
+                            banner,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.zain(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                         ),
                       ],
