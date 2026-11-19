@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
@@ -20,16 +21,16 @@ typedef MediaUploadProgress = void Function(int slot, double? progress);
 /// exception propagates to the page, which shows it as before.
 class RescueReportService {
   RescueReportService({FirebaseFirestore? firestore})
-    : _db = firestore ?? FirebaseFirestore.instance;
+      : _db = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
 
   /// Uploads every non-empty media slot to `cases/<caseId>/media_<i>.<ext>`.
   Future<({List<String> photoUrls, List<String> videoUrls})> uploadMedia(
-    List<RescueMediaItem?> mediaFiles,
-    String caseId, {
-    required MediaUploadProgress onProgress,
-  }) async {
+      List<RescueMediaItem?> mediaFiles,
+      String caseId, {
+        required MediaUploadProgress onProgress,
+      }) async {
     final photoUrls = <String>[];
     final videoUrls = <String>[];
 
@@ -71,6 +72,26 @@ class RescueReportService {
     return (photoUrls: photoUrls, videoUrls: videoUrls);
   }
 
+  /// Uploads Pet Surrender vet record photos to
+  /// `cases/<caseId>/vet_record_<i>.jpg` and returns their download URLs.
+  Future<List<String>> uploadVetRecords(
+      List<XFile> photos,
+      String caseId,
+      ) async {
+    final urls = <String>[];
+    for (var i = 0; i < photos.length; i++) {
+      final ref = FirebaseStorage.instance.ref().child(
+        'cases/$caseId/vet_record_$i.jpg',
+      );
+      await ref.putFile(
+        File(photos[i].path),
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+      urls.add(await ref.getDownloadURL());
+    }
+    return urls;
+  }
+
   /// Creates the rescue / surrender case (one doc for every animal), then
   /// uploads media and attaches the URLs. Returns the new case id.
   Future<String> submitRescueCase({
@@ -87,7 +108,7 @@ class RescueReportService {
     final userDoc = await _db.collection('users').doc(uid).get();
     final userData = userDoc.data();
     final reporterName =
-        '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
+    '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
     final casesCollection = _db.collection('cases');
 
@@ -118,95 +139,115 @@ class RescueReportService {
           'skinAndCoat': animal.skinAndCoat,
           'appetiteHydration': animal.appetiteHydration,
           'behavior': animal.behavior.toList(),
-          'environmentSafety': animal.environmentSafety.toList(),
+          // Not asked on Pet Surrender; drop any chips picked earlier
+          // under another rescue type.
+          'environmentSafety': form.isPetSurrenderType
+              ? <String>[]
+              : animal.environmentSafety.toList(),
           'biteRisk': animal.biteRisk,
           'escapeRisk': animal.escapeRisk,
         },
     ];
 
     final surrenderReasonValue =
-        form.surrenderReason == 'Other (please specify)'
+    form.surrenderReason == 'Other (please specify)'
         ? 'Other: ${form.surrenderReasonOtherController.text.trim()}'
         : form.surrenderReason;
 
     final docRef = await casesCollection.add({
-      // Not owned yet: the shared review pool (firestore.rules lets staff
-      // query it by organizationId == '').
-      'organizationId': '',
-      'reporterId': uid,
-      'reporterName': reporterName,
-      'reporterPhone': userData?['phone'] ?? '',
-      'animals': animalsArray,
-      // Legacy singular fields, kept for any code path that hasn't been
-      // migrated to read `animals[]` yet — mirrors the first animal,
-      // same as every other reader's own fallback convention.
-      'animalType': animalsArray.first['species'],
-      'breed': animalsArray.first['breed'],
-      'sex': animalsArray.first['sex'],
-      'size': animalsArray.first['size'],
-      'colorMarkings': animalsArray.first['colorMarkings'],
-      'biteRisk': animalsArray.first['biteRisk'],
-      'escapeRisk': animalsArray.first['escapeRisk'],
-      'rescueType': form.selectedRescueType,
-      'condition': condition,
-      'urgency': form.selectedUrgency,
-      if (!form.isPetSurrenderType) 'onSite': form.onSiteChoice,
-      if (!form.isPetSurrenderType)
-        'accessInstructions': form.accessInstructionsController.text.trim(),
-      if (!form.isPetSurrenderType)
-        'bestTimeToContact': form.bestTimeContactController.text.trim(),
-      if (form.asksCommunityCat && form.communityCat) 'communityCat': true,
-      'reportAnonymously': form.selectedRescueType == 'Neglect or Abuse'
-          ? form.reportAnonymously
-          : false,
-      'address': form.addressController.text.trim().isEmpty
-          ? pinnedAddress
-          : form.addressController.text.trim(),
-      'lat': location.latitude,
-      'lng': location.longitude,
-      if (!form.isPetSurrenderType)
-        'coordinateWithShelter': form.coordinateChoice,
-      if (!form.isPetSurrenderType)
-        'witnessName': form.witnessNameController.text.trim(),
-      if (!form.isPetSurrenderType)
-        'witnessPhone': form.witnessNumberController.text.trim(),
-      if (!form.isPetSurrenderType) 'interestedToAdopt': form.adoptionChoice,
-      // Pet Surrender's own question set — see SurrenderFields.
-      if (form.isPetSurrenderType)
-        'surrenderDuration': form.surrenderDurationController.text.trim(),
-      if (form.isPetSurrenderType)
-        'surrenderAge': form.surrenderAgeController.text.trim(),
-      if (form.isPetSurrenderType) 'surrenderReason': surrenderReasonValue,
-      if (form.isPetSurrenderType && form.surrenderNeedsExplanation)
-        'surrenderExplanation': form.surrenderExplanationController.text.trim(),
-      if (form.isPetSurrenderType)
-        'petAcquisitionSource': form.petAcquisitionSource,
-      'scannedTagId': form.scannedTagId,
-      'status': 'pending',
-      'statusHistory': [
-        {
-          'status': 'Rescue case is being reviewed.',
-          'timestamp': Timestamp.now(),
-        },
-      ],
-      'photoUrls': [],
-      // How the report was made, for the staff's desk check.
-      'reportEvidence': ?evidence?.toMap(),
-      'createdAt': Timestamp.now(),
-      'serverCreatedAt': FieldValue.serverTimestamp(),
+    // Not owned yet: the shared review pool (firestore.rules lets staff
+    // query it by organizationId == '').
+    'organizationId': '',
+    'reporterId': uid,
+    'reporterName': reporterName,
+    'reporterPhone': userData?['phone'] ?? '',
+    'animals': animalsArray,
+    // Legacy singular fields, kept for any code path that hasn't been
+    // migrated to read `animals[]` yet — mirrors the first animal,
+    // same as every other reader's own fallback convention.
+    'animalType': animalsArray.first['species'],
+    'breed': animalsArray.first['breed'],
+    'sex': animalsArray.first['sex'],
+    'size': animalsArray.first['size'],
+    'colorMarkings': animalsArray.first['colorMarkings'],
+    'biteRisk': animalsArray.first['biteRisk'],
+    'escapeRisk': animalsArray.first['escapeRisk'],
+    'rescueType': form.selectedRescueType,
+    'condition': condition,
+    'urgency': form.selectedUrgency,
+    if (!form.isPetSurrenderType) 'onSite': form.onSiteChoice,
+    if (!form.isPetSurrenderType)
+    'accessInstructions': form.accessInstructionsController.text.trim(),
+    if (!form.isPetSurrenderType)
+    'bestTimeToContact': form.bestTimeContactController.text.trim(),
+    if (form.asksCommunityCat && form.communityCat) 'communityCat': true,
+    'reportAnonymously': form.selectedRescueType == 'Neglect or Abuse'
+    ? form.reportAnonymously
+        : false,
+    'address': form.addressController.text.trim().isEmpty
+    ? pinnedAddress
+        : form.addressController.text.trim(),
+    'lat': location.latitude,
+    'lng': location.longitude,
+    if (!form.isPetSurrenderType)
+    'coordinateWithShelter': form.coordinateChoice,
+    if (!form.isPetSurrenderType)
+    'witnessName': form.witnessNameController.text.trim(),
+    if (!form.isPetSurrenderType)
+    'witnessPhone': form.witnessNumberController.text.trim(),
+    if (!form.isPetSurrenderType) 'interestedToAdopt': form.adoptionChoice,
+    // Pet Surrender's own question set — see SurrenderFields.
+    if (form.isPetSurrenderType)
+    'surrenderDuration': form.surrenderDurationController.text.trim(),
+    if (form.isPetSurrenderType)
+    'surrenderAge': form.surrenderAgeController.text.trim(),
+    if (form.isPetSurrenderType) 'surrenderReason': surrenderReasonValue,
+    if (form.isPetSurrenderType && form.surrenderNeedsExplanation)
+    'surrenderExplanation': form.surrenderExplanationController.text.trim(),
+    if (form.isPetSurrenderType)
+    'petAcquisitionSource': form.petAcquisitionSource,
+    if (form.isPetSurrenderType)
+    'surrenderVaccination': form.surrenderVaccination,
+    if (form.isPetSurrenderType)
+    'surrenderSpayNeuter': form.surrenderSpayNeuter,
+    if (form.isPetSurrenderType)
+    'surrenderCompatibility': form.surrenderCompatibility.toList(),
+    if (form.isPetSurrenderType)
+    'surrenderTimeline': form.surrenderTimeline,
+    // The reporter accepted the truthfulness declaration (rescue_page).
+    'truthfulnessDeclaredAt': Timestamp.now(),
+    'scannedTagId': form.scannedTagId,
+    'status': 'pending',
+    'statusHistory': [
+    {
+    'status': 'Rescue case is being reviewed.',
+    'timestamp': Timestamp.now(),
+    },
+    ],
+    'photoUrls': [],
+    // How the report was made, for the staff's desk check.
+    'reportEvidence': ?evidence?.toMap(),
+    'createdAt': Timestamp.now(),
+    'serverCreatedAt': FieldValue.serverTimestamp(),
     });
 
     final primaryCaseId = docRef.id;
     final media = await uploadMedia(
-      form.mediaFiles,
-      primaryCaseId,
-      onProgress: onProgress,
+    form.mediaFiles,
+    primaryCaseId,
+    onProgress: onProgress,
     );
-    if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
-      await casesCollection.doc(primaryCaseId).update({
-        'photoUrls': media.photoUrls,
-        'videoUrls': media.videoUrls,
-      });
+    final vetRecordUrls = form.isPetSurrenderType
+    ? await uploadVetRecords(form.vetRecordPhotos, primaryCaseId)
+        : const <String>[];
+    if (media.photoUrls.isNotEmpty ||
+    media.videoUrls.isNotEmpty ||
+    vetRecordUrls.isNotEmpty) {
+    await casesCollection.doc(primaryCaseId).update({
+    'photoUrls': media.photoUrls,
+    'videoUrls': media.videoUrls,
+    if (vetRecordUrls.isNotEmpty) 'vetRecordUrls': vetRecordUrls,
+    });
     }
 
     return primaryCaseId;
@@ -226,7 +267,7 @@ class RescueReportService {
     final userDoc = await _db.collection('users').doc(uid).get();
     final userData = userDoc.data();
     final reporterName =
-        '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
+    '${userData?['firstName'] ?? ''} ${userData?['lastName'] ?? ''}'.trim();
 
     final alertsCollection = _db.collection('petAlerts');
     String? groupId;
@@ -290,7 +331,7 @@ class RescueReportService {
           'statusHistory': [
             {
               'status':
-                  'Suspected lost pet reported — awaiting pickup assignment.',
+              'Suspected lost pet reported — awaiting pickup assignment.',
               'timestamp': Timestamp.now(),
             },
           ],

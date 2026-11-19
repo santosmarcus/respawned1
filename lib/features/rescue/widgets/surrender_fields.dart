@@ -1,6 +1,9 @@
 // Extracted from rescue_page.dart (behavior-preserving refactor).
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
@@ -11,7 +14,8 @@ import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 // Pet Surrender — its own question set, replacing the generic on-site /
 // coordinate-with-shelter / willing-to-adopt questions (none of which
 // make sense when the owner is voluntarily surrendering their own pet
-// and is already right there with it).
+// and is already right there with it). The Environment and Safety
+// section is hidden for the same reason.
 class SurrenderFields extends StatelessWidget {
   const SurrenderFields({
     super.key,
@@ -27,6 +31,35 @@ class SurrenderFields extends StatelessWidget {
   void _set(VoidCallback fn) {
     fn();
     onChanged();
+  }
+
+  Future<void> _addVetRecords() async {
+    final remaining = kMaxVetRecordPhotos - form.vetRecordPhotos.length;
+    if (remaining <= 0) return;
+    final picker = ImagePicker();
+    // pickMultiImage only accepts a limit of 2 or more.
+    final picked = remaining == 1
+    ? [?await picker.pickImage(source: ImageSource.gallery, imageQuality: 80)]
+        : await picker.pickMultiImage(imageQuality: 80, limit: remaining);
+    if (picked.isEmpty) return;
+    _set(() => form.vetRecordPhotos.addAll(picked.take(remaining)));
+  }
+
+  void _toggleCompatibility(String option) {
+    _set(() {
+      final set = form.surrenderCompatibility;
+      if (set.contains(option)) {
+        set.remove(option);
+        return;
+      }
+      // "Not sure" and the specific answers exclude each other.
+      if (option == kSurrenderCompatibilityUnknown) {
+        set.clear();
+      } else {
+        set.remove(kSurrenderCompatibilityUnknown);
+      }
+      set.add(option);
+    });
   }
 
   @override
@@ -45,11 +78,15 @@ class SurrenderFields extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Surrendering more than one? Add each animal below — they will '
-          'be tracked together as one case.',
+              'be tracked together as one case.',
           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 10),
-        FoundAnimalList(animals: form.foundAnimals, onChanged: onChanged),
+        FoundAnimalList(
+          animals: form.foundAnimals,
+          onChanged: onChanged,
+          showEnvironmentSafety: false,
+        ),
         const SizedBox(height: 20),
 
         RescueFieldLabel(
@@ -72,38 +109,113 @@ class SurrenderFields extends StatelessWidget {
         ),
         const SizedBox(height: 20),
 
-        RescueFieldLabel('Why are you surrendering this pet?', required: true),
+        RescueFieldLabel('Where did you acquire this pet?', required: true),
         const SizedBox(height: 6),
-        DropdownButtonFormField<String>(
-          key: ValueKey(form.surrenderReason),
-          initialValue: form.surrenderReason,
-          isDense: true,
-          isExpanded: true,
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: 'Select a reason',
-            hintStyle: GoogleFonts.zain(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-            ),
-            border: const UnderlineInputBorder(
-              borderSide: BorderSide(color: AppColors.textPrimary),
-            ),
+        _SurrenderDropdown(
+          field: 'acquisitionSource',
+          value: form.petAcquisitionSource,
+          hint: 'Select source',
+          options: kAcquisitionSourceOptions,
+          onChanged: (v) => _set(() => form.petAcquisitionSource = v),
+        ),
+        if (form.isRescueOrgAcquisition) ...[
+          const SizedBox(height: 12),
+          const _NoticeBox(
+            icon: Icons.info_outline,
+            text:
+            'Pets adopted from a rescue organization are usually covered '
+                'by a return agreement. Please contact the organization you '
+                'adopted from so they can arrange the return directly.',
           ),
-          items: [
-            for (final reason in kSurrenderReasonOptions)
-              DropdownMenuItem(
-                value: reason,
-                child: Text(
-                  reason,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.zain(
-                    fontSize: 14,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
+        ],
+        const SizedBox(height: 28),
+
+        // ---- Health records ------------------------------------------------
+        const _SectionTitle('Health Records'),
+        const SizedBox(height: 14),
+
+        RescueFieldLabel('Vaccination status', required: true),
+        const SizedBox(height: 6),
+        _SurrenderDropdown(
+          field: 'vaccination',
+          value: form.surrenderVaccination,
+          hint: 'Select vaccination status',
+          options: kSurrenderVaccinationOptions,
+          onChanged: (v) => _set(() => form.surrenderVaccination = v),
+        ),
+        const SizedBox(height: 20),
+
+        RescueFieldLabel('Is the pet spayed or neutered?', required: true),
+        const SizedBox(height: 4),
+        for (final option in kSurrenderSpayNeuterOptions)
+          RescueRadioOption(
+            option,
+            form.surrenderSpayNeuter,
+                (v) => _set(() => form.surrenderSpayNeuter = v),
+          ),
+        const SizedBox(height: 20),
+
+        RescueFieldLabel('Vaccination card or vet records (optional)'),
+        const SizedBox(height: 4),
+        Text(
+          'Upload up to $kMaxVetRecordPhotos photos. Records help our '
+              'veterinary team avoid repeat vaccinations and continue any '
+              'ongoing treatment.',
+          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (var i = 0; i < form.vetRecordPhotos.length; i++)
+              _VetRecordThumb(
+                file: form.vetRecordPhotos[i],
+                onRemove: () => _set(() => form.vetRecordPhotos.removeAt(i)),
+              ),
+            if (form.vetRecordPhotos.length < kMaxVetRecordPhotos)
+              _AddRecordTile(onTap: _addVetRecords),
+          ],
+        ),
+        const SizedBox(height: 28),
+
+        // ---- Behavior ------------------------------------------------------
+        const _SectionTitle('Behavior'),
+        const SizedBox(height: 14),
+
+        RescueFieldLabel('How does the pet get along with others?',
+            required: true),
+        const SizedBox(height: 4),
+        Text(
+          'Select all that apply.',
+          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in kSurrenderCompatibilityOptions)
+              RescueToggleChip(
+                label: option,
+                selected: form.surrenderCompatibility.contains(option),
+                onTap: () => _toggleCompatibility(option),
               ),
           ],
+        ),
+        const SizedBox(height: 28),
+
+        // ---- Surrender details ---------------------------------------------
+        const _SectionTitle('Surrender Details'),
+        const SizedBox(height: 14),
+
+        RescueFieldLabel('Why are you surrendering this pet?', required: true),
+        const SizedBox(height: 6),
+        _SurrenderDropdown(
+          field: 'surrenderReason',
+          value: form.surrenderReason,
+          hint: 'Select a reason',
+          options: kSurrenderReasonOptions,
           onChanged: (v) => _set(() => form.surrenderReason = v),
         ),
         if (form.surrenderReason == 'Other (please specify)') ...[
@@ -149,73 +261,214 @@ class SurrenderFields extends StatelessWidget {
           const SizedBox(height: 20),
         ],
 
-        RescueFieldLabel('Where did you acquire this pet?', required: true),
+        RescueFieldLabel(
+          'How soon does the pet need to be rehomed?',
+          required: true,
+        ),
         const SizedBox(height: 6),
-        DropdownButtonFormField<String>(
-          key: ValueKey(form.petAcquisitionSource),
-          initialValue: form.petAcquisitionSource,
-          isDense: true,
-          isExpanded: true,
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: 'Select source',
-            hintStyle: GoogleFonts.zain(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-            ),
-            border: const UnderlineInputBorder(
-              borderSide: BorderSide(color: AppColors.textPrimary),
+        _SurrenderDropdown(
+          field: 'timeline',
+          value: form.surrenderTimeline,
+          hint: 'Select a timeframe',
+          options: kSurrenderTimelineOptions,
+          onChanged: (v) => _set(() => form.surrenderTimeline = v),
+        ),
+      ],
+    );
+  }
+}
+
+/// Small bold heading that groups related surrender questions.
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          text,
+          style: GoogleFonts.tiltWarp(
+            fontSize: 14,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(height: 1, color: AppColors.slaterspwn),
+      ],
+    );
+  }
+}
+
+/// Underlined single-select dropdown. Keyed by [field] plus its value so
+/// sibling dropdowns never share a key (two null values once collided as
+/// ValueKey(null) and crashed the form), while a new value still resets
+/// `initialValue`.
+class _SurrenderDropdown extends StatelessWidget {
+  const _SurrenderDropdown({
+    required this.field,
+    required this.value,
+    required this.hint,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final String field;
+  final String? value;
+  final String hint;
+  final List<String> options;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String>(
+      key: ValueKey('$field:$value'),
+      initialValue: value,
+      isDense: true,
+      isExpanded: true,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hint,
+        hintStyle: GoogleFonts.zain(
+          fontSize: 13,
+          color: AppColors.textSecondary,
+        ),
+        border: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.textPrimary),
+        ),
+      ),
+      items: [
+        for (final option in options)
+          DropdownMenuItem(
+            value: option,
+            child: Text(
+              option,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.zain(
+                fontSize: 14,
+                color: AppColors.textPrimary,
+              ),
             ),
           ),
-          items: [
-            for (final source in kAcquisitionSourceOptions)
-              DropdownMenuItem(
-                value: source,
-                child: Text(
-                  source,
-                  style: GoogleFonts.zain(
-                    fontSize: 14,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-          ],
-          onChanged: (v) => _set(() => form.petAcquisitionSource = v),
-        ),
+      ],
+      onChanged: onChanged,
+    );
+  }
+}
 
-        if (form.isRescueOrgAcquisition) ...[
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.yellowrspwn.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(
-                  Icons.info_outline,
-                  size: 18,
-                  color: AppColors.textPrimary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Please contact the previous organization and inquire to them about return pets.',
-                    style: GoogleFonts.zain(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ],
+/// Yellow information box used for guidance inside the form.
+class _NoticeBox extends StatelessWidget {
+  const _NoticeBox({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.yellowrspwn.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: AppColors.textPrimary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _VetRecordThumb extends StatelessWidget {
+  const _VetRecordThumb({required this.file, required this.onRemove});
+
+  final XFile file;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.file(
+            File(file.path),
+            width: 72,
+            height: 72,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Container(
+              width: 72,
+              height: 72,
+              color: AppColors.slaterspwn.withValues(alpha: 0.3),
+              child: const Icon(Icons.description_outlined),
+            ),
+          ),
+        ),
+        Positioned(
+          top: -6,
+          right: -6,
+          child: GestureDetector(
+            onTap: onRemove,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                color: AppColors.textPrimary,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, size: 14, color: Colors.white),
+            ),
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _AddRecordTile extends StatelessWidget {
+  const _AddRecordTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 72,
+        height: 72,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.slaterspwn),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_a_photo_outlined,
+                size: 20, color: AppColors.textPrimary),
+            SizedBox(height: 4),
+            Text('Add', style: TextStyle(fontSize: 11)),
+          ],
+        ),
+      ),
     );
   }
 }

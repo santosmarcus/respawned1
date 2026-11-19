@@ -19,10 +19,15 @@ class HealthBehaviorAssessment extends StatelessWidget {
     super.key,
     required this.entry,
     required this.onChanged,
+    this.showEnvironmentSafety = true,
   });
 
   final FoundAnimalEntry entry;
   final VoidCallback onChanged;
+
+  /// False on Pet Surrender: the owner has the pet at home, so the
+  /// Environment and Safety questions do not apply.
+  final bool showEnvironmentSafety;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -126,8 +131,10 @@ class HealthBehaviorAssessment extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 12),
-        EnvironmentSafetySection(entry: entry, onChanged: () => _set(() {})),
+        if (showEnvironmentSafety) ...[
+          const SizedBox(height: 12),
+          EnvironmentSafetySection(entry: entry, onChanged: () => _set(() {})),
+        ],
       ],
     );
   }

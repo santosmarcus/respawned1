@@ -699,7 +699,32 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
+
+            // Declaration + notice, shown for every report type.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _TruthfulnessDeclaration(
+                    isSurrender: _form.isPetSurrenderType,
+                    accepted: _form.truthfulnessDeclared,
+                    onChanged: (v) =>
+                        setState(() => _form.truthfulnessDeclared = v),
+                  ),
+                  const SizedBox(height: 16),
+                  _SubmissionNotice(
+                    message: _submissionNoticeText(),
+                    highlight: _form.isPetSurrenderType
+                        ? kSurrenderNoticeHighlight
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
 
             // Submit Button
             Padding(
@@ -741,6 +766,30 @@ class _RescuePageState extends State<RescuePage> {
     );
   }
 
+  /// The notice above the Submit button, worded for the selected type.
+  String _submissionNoticeText() {
+    if (_form.isPetSurrenderType) {
+      return 'Surrender requests are reviewed according to shelter capacity '
+          'and the needs of the animals already in our care, so intake '
+          'cannot always be immediate. Please continue to provide food, '
+          'shelter, and care for your pet $kSurrenderNoticeHighlight.';
+    }
+    if (_form.isLostPetType) {
+      return 'Our team and the community will help look for your pet, but '
+          'a reunion cannot be guaranteed. Please continue searching '
+          'nearby areas, check with local shelters and your barangay, and '
+          'share your alert as widely as possible. Your own efforts remain '
+          'the most important part of bringing your pet home.';
+    }
+    return 'Our partner organizations review every report and will make '
+        'every effort to respond as quickly as possible. However, response '
+        'times depend on the availability of volunteers, transport, and '
+        'shelter space, so a rescue cannot be guaranteed. If it is safe to '
+        'do so, please stay near the animal, keep it in sight, and provide '
+        'water or shelter until help arrives. Your continued assistance can '
+        'make a critical difference.';
+  }
+
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       appSnackBar(message, kind: AppMessageKind.error),
@@ -775,6 +824,12 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Future<void> _handleSubmit() async {
+    final declarationError = _form.validateDeclaration();
+    if (declarationError != null) {
+      _showError(declarationError);
+      return;
+    }
+
     if (_form.isLostPetType) {
       await _submitLostPetReport();
       return;
@@ -800,7 +855,9 @@ class _RescuePageState extends State<RescuePage> {
     }
     for (var i = 0; i < validAnimals.length; i++) {
       final entry = validAnimals[i];
-      if (!entry.hasCompleteAssessment) {
+      if (!entry.isAssessmentComplete(
+        requireEnvironmentSafety: !_form.isPetSurrenderType,
+      )) {
         setState(() => entry.hasAssessmentError = true);
         _showError(
           'Complete the Health & Behavior Assessment for Animal ${i + 1}.',
@@ -935,5 +992,169 @@ class _RescuePageState extends State<RescuePage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+}
+
+
+/// The bold part of the Pet Surrender notice above the Submit button.
+const String kSurrenderNoticeHighlight =
+    'until the team approves your animal for community adoption';
+
+/// Checkbox declaring the report is truthful and accurate. Required before
+/// any report type can be submitted.
+class _TruthfulnessDeclaration extends StatelessWidget {
+  const _TruthfulnessDeclaration({
+    required this.isSurrender,
+    required this.accepted,
+    required this.onChanged,
+  });
+
+  /// Pet Surrender adds a declaration of ownership.
+  final bool isSurrender;
+  final bool accepted;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onChanged(!accepted),
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: Checkbox(
+              value: accepted,
+              onChanged: (v) => onChanged(v ?? false),
+              activeColor: AppColors.textPrimary,
+              side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(2),
+              ),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Declaration of Accuracy. ',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  TextSpan(
+                    text:
+                    'I certify that the information, photos, and videos '
+                        'in this report are true and accurate to the best of '
+                        'my knowledge. ',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  if (isSurrender)
+                    TextSpan(
+                      text:
+                      'I further declare that I am the lawful owner of the '
+                          'animal(s) being surrendered and have the right to '
+                          'transfer their ownership. ',
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  TextSpan(
+                    text:
+                    'I understand that false or misleading reports take '
+                        'rescue resources away from animals in genuine need '
+                        'and may result in this report being declined.',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Informational notice shown directly above the Submit button.
+class _SubmissionNotice extends StatelessWidget {
+  const _SubmissionNotice({required this.message, this.highlight});
+
+  final String message;
+
+  /// Part of [message] to show in bold, if any.
+  final String? highlight;
+
+  TextSpan _highlighted() {
+    final h = highlight;
+    final at = h == null ? -1 : message.indexOf(h);
+    if (h == null || at < 0) return TextSpan(text: message);
+    return TextSpan(
+      children: [
+        TextSpan(text: message.substring(0, at)),
+        TextSpan(
+          text: h,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        TextSpan(text: message.substring(at + h.length)),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.yellowrspwn.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Please note',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text.rich(
+                  _highlighted(),
+                  style: GoogleFonts.zain(
+                    fontSize: 12.5,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

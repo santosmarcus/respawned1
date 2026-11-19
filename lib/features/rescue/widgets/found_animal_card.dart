@@ -15,11 +15,15 @@ class FoundAnimalList extends StatelessWidget {
     super.key,
     required this.animals,
     required this.onChanged,
+    this.showEnvironmentSafety = true,
   });
 
   /// The form's live list; cards are added/removed in place.
   final List<FoundAnimalEntry> animals;
   final VoidCallback onChanged;
+
+  /// Passed to each card; false hides Environment and Safety.
+  final bool showEnvironmentSafety;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -44,6 +48,7 @@ class FoundAnimalList extends StatelessWidget {
               _set(() => animals.removeAt(i));
             },
             onChanged: onChanged,
+            showEnvironmentSafety: showEnvironmentSafety,
           ),
         Align(
           alignment: Alignment.centerLeft,
@@ -76,6 +81,7 @@ class FoundAnimalCard extends StatelessWidget {
     required this.canRemove,
     required this.onRemove,
     required this.onChanged,
+    this.showEnvironmentSafety = true,
   });
 
   final FoundAnimalEntry entry;
@@ -83,6 +89,7 @@ class FoundAnimalCard extends StatelessWidget {
   final bool canRemove;
   final VoidCallback onRemove;
   final VoidCallback onChanged;
+  final bool showEnvironmentSafety;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -231,7 +238,11 @@ class FoundAnimalCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 14),
-          HealthBehaviorAssessment(entry: entry, onChanged: onChanged),
+          HealthBehaviorAssessment(
+            entry: entry,
+            onChanged: onChanged,
+            showEnvironmentSafety: showEnvironmentSafety,
+          ),
           const SizedBox(height: 14),
           Text(
             'Risk Assessment',

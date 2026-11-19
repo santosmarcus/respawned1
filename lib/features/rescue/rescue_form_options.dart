@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 
 // Static option lists and lookups for the Report a Stray form.
 
@@ -76,6 +77,37 @@ const List<String> kAcquisitionSourceOptions = [
   'Born at home',
 ];
 
+// Pet Surrender: vaccination status.
+const List<String> kSurrenderVaccinationOptions = [
+  'Fully vaccinated (up to date)',
+  'Partially vaccinated',
+  'Not vaccinated',
+  'Unknown',
+];
+
+// Pet Surrender: spay / neuter status.
+const List<String> kSurrenderSpayNeuterOptions = ['Yes', 'No', 'Unknown'];
+
+// Pet Surrender: compatibility. Reuses the Animal Record's own
+// kCompatibilityValues so intake can carry the answers straight into the
+// record, plus one "not sure" choice for owners who have never tested it.
+const String kSurrenderCompatibilityUnknown = 'Not sure / Not yet tested';
+const List<String> kSurrenderCompatibilityOptions = [
+  ...kCompatibilityValues,
+  kSurrenderCompatibilityUnknown,
+];
+
+// Pet Surrender: how soon the pet needs to be rehomed.
+const List<String> kSurrenderTimelineOptions = [
+  'Urgent (within 48 hours)',
+  'Within a week',
+  'Within a month',
+  'Flexible',
+];
+
+// Most vet records a reporter can attach to a surrender.
+const int kMaxVetRecordPhotos = 3;
+
 // Rescue Type options — each type carries its own inherent urgency level,
 // so reporters are no longer asked to separately self-assess urgency.
 const List<Map<String, String>> kRescueTypeOptions = [
@@ -97,18 +129,12 @@ const List<Map<String, String>> kRescueTypeOptions = [
   {
     'label': 'Illness',
     'description':
-        'Appears weak, vomiting, coughing, skin disease; suspected illness',
+    'Appears weak, vomiting, coughing, skin disease; suspected illness',
     'urgency': 'Critical',
   },
   {
     'label': 'Injury',
     'description': 'Visible wounds, fractures, bleeding',
-    'urgency': 'Critical',
-  },
-
-  {
-    'label': 'Neglect or Abuse',
-    'description': 'Suspected animal cruelty, starvation, chaining, hoarding',
     'urgency': 'Critical',
   },
 

@@ -142,7 +142,11 @@ void main() {
         ..selectedRescueType = 'Pet Surrender'
         ..selectedUrgency = 'Low'
         ..surrenderReason = 'Other (please specify)'
-        ..petAcquisitionSource = 'Breeder';
+        ..petAcquisitionSource = 'Breeder'
+        ..surrenderVaccination = 'Unknown'
+        ..surrenderSpayNeuter = 'No'
+        ..surrenderTimeline = 'Within a month';
+      form.surrenderCompatibility.add('Good with children');
       form.conditionController.text = 'Healthy';
       form.surrenderDurationController.text = '2 years';
       form.surrenderAgeController.text = '3 years old';
@@ -158,9 +162,63 @@ void main() {
         "Please explain the issue and what you've tried.",
       );
       form.surrenderExplanationController.text =
-          'Bites visitors; tried training.';
+      'Bites visitors; tried training.';
       expect(form.validateRescueReport(), isNull);
     });
+  });
+
+  test('surrender requires the health, compatibility and timeline answers',
+          () {
+        final form = _form()
+          ..selectedRescueType = 'Pet Surrender'
+          ..selectedUrgency = 'Low'
+          ..surrenderReason = 'Lack of time'
+          ..petAcquisitionSource = 'Breeder';
+        form.conditionController.text = 'Healthy';
+        form.surrenderDurationController.text = '2 years';
+        form.surrenderAgeController.text = '3 years old';
+        form.foundAnimals.first.species = kDogSpecies;
+        expect(form.validateRescueReport(), 'Please fill in all required fields.');
+
+        form
+          ..surrenderVaccination = 'Fully vaccinated (up to date)'
+          ..surrenderSpayNeuter = 'Yes'
+          ..surrenderTimeline = 'Flexible';
+        expect(form.validateRescueReport(), 'Please fill in all required fields.');
+
+        form.surrenderCompatibility.add(kSurrenderCompatibilityUnknown);
+        expect(form.validateRescueReport(), isNull);
+      });
+
+  test('Neglect or Abuse is no longer a rescue type', () {
+    expect(
+      kRescueTypeOptions.map((o) => o['label']),
+      isNot(contains('Neglect or Abuse')),
+    );
+    expect(urgencyForRescueType('Neglect or Abuse'), isNull);
+  });
+
+  test('every report needs the truthfulness declaration', () {
+    final form = _form();
+    expect(form.validateDeclaration(), isNotNull);
+    form.truthfulnessDeclared = true;
+    expect(form.validateDeclaration(), isNull);
+  });
+
+  test('environment and safety can be skipped for surrender', () {
+    final entry = FoundAnimalEntry()
+      ..bodyCondition = 'a'
+      ..mobility = 'a'
+      ..alertness = 'a'
+      ..eyesNoseMouth = 'a'
+      ..skinAndCoat = 'a'
+      ..appetiteHydration = 'a'
+      ..biteRisk = 'Low'
+      ..escapeRisk = 'Low';
+    addTearDown(entry.dispose);
+    entry.behavior.add('Calm');
+    expect(entry.hasCompleteAssessment, isFalse);
+    expect(entry.isAssessmentComplete(requireEnvironmentSafety: false), isTrue);
   });
 
   test('FoundAnimalEntry.breedText resolves "Others" to the typed breed', () {

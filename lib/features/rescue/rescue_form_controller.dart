@@ -42,7 +42,7 @@ class FoundAnimalEntry {
   // list (see EnvironmentSafetySection).
   final Set<String> environmentSafety = {};
   final TextEditingController environmentSafetyOtherController =
-      TextEditingController();
+  TextEditingController();
 
   // Per-animal safety risk — never applied across other animals in the
   // same multi-animal report; each entry owns its own values.
@@ -56,17 +56,22 @@ class FoundAnimalEntry {
   final GlobalKey cardKey = GlobalKey();
   bool hasAssessmentError = false;
 
-  bool get hasCompleteAssessment =>
+  bool get hasCompleteAssessment => isAssessmentComplete();
+
+  /// Whether every assessment field is answered. Pet Surrender hides the
+  /// Environment and Safety section (the owner has the pet at home), so
+  /// that form passes [requireEnvironmentSafety] false.
+  bool isAssessmentComplete({bool requireEnvironmentSafety = true}) =>
       bodyCondition != null &&
-      mobility != null &&
-      alertness != null &&
-      eyesNoseMouth != null &&
-      skinAndCoat != null &&
-      appetiteHydration != null &&
-      behavior.isNotEmpty &&
-      environmentSafety.isNotEmpty &&
-      biteRisk != null &&
-      escapeRisk != null;
+          mobility != null &&
+          alertness != null &&
+          eyesNoseMouth != null &&
+          skinAndCoat != null &&
+          appetiteHydration != null &&
+          behavior.isNotEmpty &&
+          (!requireEnvironmentSafety || environmentSafety.isNotEmpty) &&
+          biteRisk != null &&
+          escapeRisk != null;
 
   void dispose() {
     breedOtherController.dispose();
@@ -96,9 +101,9 @@ class RescueFormController {
   final TextEditingController witnessNameController = TextEditingController();
   final TextEditingController witnessNumberController = TextEditingController();
   final TextEditingController accessInstructionsController =
-      TextEditingController();
+  TextEditingController();
   final TextEditingController bestTimeContactController =
-      TextEditingController();
+  TextEditingController();
 
   String? selectedUrgency;
   String? selectedRescueType;
@@ -126,7 +131,7 @@ class RescueFormController {
   final TextEditingController petNameController = TextEditingController();
   String? lostBreed;
   final TextEditingController lostBreedOtherController =
-      TextEditingController();
+  TextEditingController();
   final TextEditingController lostColorController = TextEditingController();
   DateTime? lastSeenDate;
   TimeOfDay? lastSeenTime;
@@ -145,21 +150,32 @@ class RescueFormController {
 
   // Pet Surrender — its own distinct question set (see SurrenderFields).
   final TextEditingController surrenderDurationController =
-      TextEditingController();
+  TextEditingController();
   final TextEditingController surrenderAgeController = TextEditingController();
   String? surrenderReason;
   final TextEditingController surrenderReasonOtherController =
-      TextEditingController();
+  TextEditingController();
   final TextEditingController surrenderExplanationController =
-      TextEditingController();
+  TextEditingController();
   String? petAcquisitionSource;
+  String? surrenderVaccination;
+  String? surrenderSpayNeuter;
+  final Set<String> surrenderCompatibility = {};
+  String? surrenderTimeline;
+
+  /// Optional photos of vaccination cards or vet records (Pet Surrender).
+  final List<XFile> vetRecordPhotos = [];
+
+  /// The reporter's declaration that the report is truthful and accurate.
+  /// Required before any report type is submitted.
+  bool truthfulnessDeclared = false;
 
   // Only these reasons need the reporter to explain what's actually wrong
   // and what they've already tried — a plain checkbox reason isn't enough
   // for staff to assess these two specifically.
   bool get surrenderNeedsExplanation =>
       surrenderReason == 'Medical issues (pet)' ||
-      surrenderReason == 'Behavioral issues';
+          surrenderReason == 'Behavioral issues';
 
   // Once the pet came from another rescue org, this flow is meant to stop
   // here and redirect the owner back to that org rather than collect a
@@ -187,8 +203,8 @@ class RescueFormController {
   /// The typed search address if any, otherwise the map pin's address.
   String resolvedAddress(String pinnedAddress) =>
       addressController.text.trim().isEmpty
-      ? pinnedAddress
-      : addressController.text.trim();
+          ? pinnedAddress
+          : addressController.text.trim();
 
   /// Required-field checks for a stray / surrender report, in the same
   /// order as before. Returns the message to show, or null when valid.
@@ -206,7 +222,11 @@ class RescueFormController {
           surrenderDurationController.text.trim().isEmpty ||
           surrenderAgeController.text.trim().isEmpty ||
           surrenderReason == null ||
-          petAcquisitionSource == null) {
+          petAcquisitionSource == null ||
+          surrenderVaccination == null ||
+          surrenderSpayNeuter == null ||
+          surrenderCompatibility.isEmpty ||
+          surrenderTimeline == null) {
         return 'Please fill in all required fields.';
       }
       if (surrenderReason == 'Other (please specify)' &&
@@ -246,6 +266,13 @@ class RescueFormController {
     }
     return null;
   }
+
+  /// The truthfulness declaration every report type must accept before
+  /// it is submitted. Returns the message to show, or null when accepted.
+  String? validateDeclaration() => truthfulnessDeclared
+      ? null
+      : 'Please confirm that the information you provided is truthful and '
+      'accurate.';
 
   /// Required-field checks for a Lost Pet report (owner or finder side), in
   /// the same order as before. Returns the message to show, or null.
