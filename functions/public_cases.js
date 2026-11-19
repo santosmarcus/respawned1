@@ -29,6 +29,9 @@ const PUBLIC_FIELDS = [
   'lat', 'lng', 'address',
   // Trip completion (transporter trip counts on staff screens).
   'transitCompletedAt', 'adopterPickupConfirmedAt',
+  // The reporter's Community Adoption profile for each animal, shown on
+  // the adoption page's Community Adoption section (community_profile.dart).
+  'communityListing',
 ];
 
 function isSurrender(data) {

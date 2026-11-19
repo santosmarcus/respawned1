@@ -11,6 +11,7 @@ import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'animal_page.dart';
+import 'community_adoption_list.dart';
 
 //Data Model
 enum AnimalGender { male, female }
@@ -258,6 +259,8 @@ class AdoptionPage extends ConsumerStatefulWidget {
 
 class _AdoptionPageState extends ConsumerState<AdoptionPage> {
   int _filterIndex = 0;
+  // 0: shelter animals (Animal Records); 1: Community Adoption listings.
+  int _section = 0;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -514,6 +517,42 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
             ),
           ),
 
+          const SizedBox(height: 12),
+
+          // Shelter animals or Community Adoption listings.
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                for (final (i, label) in [(0, 'Shelter Animals'), (1, 'Community Adoption')]) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _section = i),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _section == i ? AppColors.textPrimary : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.textPrimary),
+                        ),
+                        child: Text(
+                          label,
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: _section == i ? Colors.white : AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
           const SizedBox(height: 14),
 
           // Filter tabs
@@ -545,7 +584,16 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
           const SizedBox(height: 16),
 
           Expanded(
-            child: recordsAsync.when(
+            child: _section == 1
+                ? CommunityAdoptionList(
+              speciesFilter: switch (_filterIndex) {
+                1 => 'Dog',
+                2 => 'Cat',
+                _ => null,
+              },
+              searchQuery: _searchQuery,
+            )
+                : recordsAsync.when(
               loading: () => const _LoadingState(),
               error: (error, _) => _ErrorState(
                 onRetry: () => ref.invalidate(publicAnimalRecordsProvider),

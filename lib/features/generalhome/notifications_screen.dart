@@ -17,6 +17,10 @@ import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/features/adoption/adopter_adoption_route.dart';
+import 'package:respawnd1/core/models/adoption/community_adoption_request.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
+import 'package:respawnd1/features/adoption/community_adoption_request_page.dart';
+import 'package:respawnd1/features/adoption/community_listing_page.dart';
 
 const double _kNearbyRadiusKm = 5;
 
@@ -31,7 +35,7 @@ const List<String> _kDismissedCaseStatuses = [
 // sponsorship confirmations, in-kind received / cancelled / follow-up, goal
 // reached, sponsorship ended, and the applicant's no-show / booking
 // reminders, which open their application).
-enum _NotifKind { rescue, adoption, donation }
+enum _NotifKind { rescue, adoption, donation, communityAdoption }
 
 /// users/{uid}/notifications `type` → the label shown before the title.
 const Map<String, String> _kDonationNotifLabels = {
@@ -110,6 +114,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   final Map<String, StreamSubscription<QuerySnapshot>> _checkinSubs = {};
   final Map<String, StreamSubscription<QuerySnapshot>> _followUpSubs = {};
 
+  // Community Adoption: requests where the user is the reporter (lister)
+  // or the interested adopter, and each request's messages.
+  StreamSubscription<QuerySnapshot>? _listerRequestsSub;
+  StreamSubscription<QuerySnapshot>? _adopterRequestsSub;
+  final Map<String, StreamSubscription<QuerySnapshot>> _requestMessageSubs = {};
+  List<_NotifItem> _listingItems = [];
+  List<_NotifItem> _listerRequestItems = [];
+  List<_NotifItem> _adopterRequestItems = [];
+  final Map<String, List<_NotifItem>> _requestMessageItems = {};
+
   StreamSubscription<DocumentSnapshot>? _userDocSub;
   StreamSubscription<QuerySnapshot>? _nearbyCasesSub;
   final Map<String, StreamSubscription<QuerySnapshot>> _nearbyCommunityReportSubs = {};
@@ -168,6 +182,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         .where('reporterId', isEqualTo: uid)
         .snapshots()
         .listen(_onCasesUpdate);
+
+    final requests =
+    FirebaseFirestore.instance.collection('communityAdoptionRequests');
+    _listerRequestsSub = requests
+        .where('listerId', isEqualTo: uid)
+        .snapshots()
+        .listen((s) => _onRequestsUpdate(s, asLister: true), onError: (_) {});
+    _adopterRequestsSub = requests
+        .where('adopterId', isEqualTo: uid)
+        .snapshots()
+        .listen((s) => _onRequestsUpdate(s, asLister: false), onError: (_) {});
 
     _willingAdopterCasesSub = FirebaseFirestore.instance
         .collection('cases')
@@ -356,7 +381,116 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       }
     }
 
-    if (mounted) setState(() => _caseStatusItems = items);
+    // Reports open for Community Adoption: the reporter manages the
+    // listing instead of adopting.
+    final listing = <_NotifItem>[];
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (!isCommunityAdoptionEligible(
+        status: data['status'] as String?,
+        rejectionReason: data['rejectionReason'] as String?,
+        rescueType: data['rescueType'] as String?,
+      )) {
+        continue;
+      }
+      final history = (data['statusHistory'] as List?)?.cast<Map>() ?? [];
+      final last = history.isEmpty ? null : history.last['timestamp'];
+      listing.add(_NotifItem(
+        refLabel: '#${shortCaseId(doc.id)}',
+        type: 'Community Adoption',
+        message: 'Your report is now open for Community Adoption. Complete '
+            "the animal's adoption profile so interested adopters can find it.",
+        timestamp: last is Timestamp ? last.toDate() : DateTime.now(),
+        kind: _NotifKind.communityAdoption,
+        docId: doc.id,
+        sourceType: 'listing',
+      ));
+    }
+
+    if (mounted) {
+      setState(() {
+        _caseStatusItems = items;
+        _listingItems = listing;
+      });
+    }
+  }
+
+  void _onRequestsUpdate(QuerySnapshot snap, {required bool asLister}) {
+    final uid = _uid;
+    final items = <_NotifItem>[];
+    for (final doc in snap.docs) {
+      final r = CommunityAdoptionRequest.fromFirestore(
+        doc as DocumentSnapshot<Map<String, dynamic>>,
+      );
+      final label = '#${shortCaseId(r.caseId)}';
+      void add(DateTime? at, String type, String message) {
+        if (at == null) return;
+        items.add(_NotifItem(
+          refLabel: label,
+          type: type,
+          message: message,
+          timestamp: at,
+          kind: _NotifKind.communityAdoption,
+          docId: r.id,
+          sourceType: 'request',
+        ));
+      }
+
+      if (asLister) {
+        add(r.createdAt, 'New Adopter Interest',
+            '${r.adopterName} is interested in adopting ${r.animalsLabel}.');
+        add(r.adopterSignature?.signedAt, 'Agreement Signed',
+            '${r.adopterName} signed the adoption agreement.');
+      } else {
+        add(r.selectedAt, 'You Were Chosen',
+            'You were chosen to adopt ${r.animalsLabel}. Please sign the '
+                'adoption agreement.');
+        if (r.status == CommunityRequestStatus.declined) {
+          add(r.declinedAt, 'Community Adoption',
+              'The reporter went with another adopter for ${r.animalsLabel}.');
+        }
+        add(r.listerSignature?.signedAt, 'Agreement Signed',
+            '${r.listerName} signed the adoption agreement.');
+      }
+      add(r.completedAt, 'Adoption Complete',
+          '${r.animalsLabel} ${r.animalIndexes.length > 1 ? 'were' : 'was'} '
+              'adopted through Community Adoption.');
+
+      if (uid != null && !_requestMessageSubs.containsKey(r.id)) {
+        _requestMessageSubs[r.id] = doc.reference
+            .collection('messages')
+            .snapshots()
+            .listen((m) => _onRequestMessages(r.id, label, m), onError: (_) {});
+      }
+    }
+    if (mounted) {
+      setState(() {
+        if (asLister) {
+          _listerRequestItems = items;
+        } else {
+          _adopterRequestItems = items;
+        }
+      });
+    }
+  }
+
+  void _onRequestMessages(String requestId, String label, QuerySnapshot snap) {
+    final items = <_NotifItem>[];
+    for (final doc in snap.docs) {
+      final d = doc.data() as Map<String, dynamic>;
+      final at = d['sentAt'];
+      if (d['senderId'] == _uid || at is! Timestamp) continue;
+      items.add(_NotifItem(
+        refLabel: label,
+        type: 'New Message',
+        message: '${d['senderName'] ?? 'Someone'}: ${d['text'] ?? ''}',
+        timestamp: at.toDate(),
+        kind: _NotifKind.communityAdoption,
+        docId: requestId,
+        sourceType: 'request',
+      ));
+    }
+    if (mounted) setState(() => _requestMessageItems[requestId] = items);
   }
 
   String _classifyRescueStatusType(String message) {
@@ -642,6 +776,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void dispose() {
     _casesSub?.cancel();
+    _listerRequestsSub?.cancel();
+    _adopterRequestsSub?.cancel();
+    for (final s in _requestMessageSubs.values) {
+      s.cancel();
+    }
     _willingAdopterCasesSub?.cancel();
     _adoptionsSub?.cancel();
     _donationNotifsSub?.cancel();
@@ -668,6 +807,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<_NotifItem> get _allItems {
     final all = <_NotifItem>[
     ..._caseStatusItems,
+    ..._listingItems,
+    ..._listerRequestItems,
+    ..._adopterRequestItems,
+    for (final list in _requestMessageItems.values) ...list,
     ..._willingAdopterCaseItems,
     ..._adoptionStatusItems,
     ..._donationItems,
@@ -889,6 +1032,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               : const HistoryPage(initialTab: 2),
         ),
       );
+      return;
+    }
+
+    if (item.kind == _NotifKind.communityAdoption) {
+      if (item.sourceType == 'listing') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => CommunityListingPage(caseId: item.docId)),
+        );
+      } else {
+        openCommunityAdoptionRequest(context, item.docId);
+      }
       return;
     }
 

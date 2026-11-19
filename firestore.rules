@@ -1645,6 +1645,56 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    // ---- Community Adoption requests -----------------------------------------
+    // community_adoption_request_repository.dart. Someone interested in a
+    // report open for Community Adoption creates a request to that report's
+    // reporter (never their own report). Only the two of them read it and
+    // its messages. The reporter chooses or declines, the adopter can
+    // withdraw, each signs only their own side of the agreement, and the
+    // request is completed once both have signed.
+    match /communityAdoptionRequests/{requestId} {
+      function isParty(d) {
+        return signedIn() &&
+          (d.get('adopterId', '') == request.auth.uid || d.get('listerId', '') == request.auth.uid);
+      }
+      function requestDoc() {
+        return get(/databases/$(database)/documents/communityAdoptionRequests/$(requestId)).data;
+      }
+      function statusChangeOk() {
+        let before = resource.data.get('status', '');
+        let after = request.resource.data.get('status', '');
+        return !changedAny(['status']) ||
+          (request.auth.uid == resource.data.listerId &&
+            before in ['pending', 'selected'] && after in ['selected', 'declined']) ||
+          (request.auth.uid == resource.data.adopterId &&
+            before in ['pending', 'selected'] && after == 'withdrawn') ||
+          (before == 'selected' && after == 'completed' &&
+            request.resource.data.get('listerSignature', null) is map &&
+            request.resource.data.get('adopterSignature', null) is map);
+      }
+
+      allow read: if isParty(resource.data);
+      allow create: if signedIn() &&
+        request.resource.data.adopterId == request.auth.uid &&
+        request.resource.data.listerId != request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        get(/databases/$(database)/documents/cases/$(request.resource.data.caseId)).data.get('reporterId', '') ==
+          request.resource.data.listerId;
+      allow update: if isParty(resource.data) &&
+        !changedAny(['caseId', 'listerId', 'adopterId', 'animalIndexes', 'createdAt']) &&
+        (!changedAny(['listerSignature']) || request.auth.uid == resource.data.listerId) &&
+        (!changedAny(['adopterSignature']) || request.auth.uid == resource.data.adopterId) &&
+        (!changedAny(['listerSignature', 'adopterSignature']) || resource.data.status == 'selected') &&
+        statusChangeOk();
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isParty(requestDoc());
+        allow create: if isParty(requestDoc()) && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
     // ---- Collar tags / rescue sessions -------------------------------------
     // Not excluded from the catch-all below (see the header note), so these
     // only add to its open access today.
@@ -1700,6 +1750,7 @@ service cloud.firestore {
         'manualDonationRefs', 'paymongoWebhookEvents',
         'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
         'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns',
+        'communityAdoptionRequests',
         'referralShares'
       ]);
     }

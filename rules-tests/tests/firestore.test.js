@@ -638,6 +638,50 @@ describe('community adoption check-ins (Adoption gap 10)', () => {
   });
 });
 
+describe('community adoption requests', () => {
+  test("the reporter can't request their own report; only the two people involved read it", async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ca1').set({
+      reporterId: 'reporter', status: 'rejected', rejectionReason: 'healthyAnimalLowUrgency', organizationId: '',
+    }));
+    const request = (uid, data) => as(uid).collection('communityAdoptionRequests').doc('r1').set({
+      caseId: 'ca1', listerId: 'reporter', adopterId: uid, status: 'pending', animalIndexes: [0], ...data,
+    });
+    await assertFails(request('reporter'));
+    await assertFails(request('adopter', { listerId: 'stranger' }));
+    await assertFails(request('adopter', { status: 'selected' }));
+    await assertSucceeds(request('adopter'));
+
+    const doc = (uid) => as(uid).doc('communityAdoptionRequests/r1');
+    await assertSucceeds(doc('reporter').get());
+    await assertSucceeds(doc('adopter').get());
+    await assertFails(doc('stranger').get());
+
+    const msg = (uid, senderId) => doc(uid).collection('messages').add({ senderId, text: 'Hi' });
+    await assertSucceeds(msg('adopter', 'adopter'));
+    await assertSucceeds(msg('reporter', 'reporter'));
+    await assertFails(msg('adopter', 'reporter'));
+    await assertFails(msg('stranger', 'stranger'));
+    await assertFails(doc('stranger').collection('messages').get());
+  });
+
+  test('the reporter chooses, each side signs their own part, then it completes', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('communityAdoptionRequests/r2').set({
+      caseId: 'ca1', listerId: 'reporter', adopterId: 'adopter', status: 'pending', animalIndexes: [0],
+    }));
+    const doc = (uid) => as(uid).doc('communityAdoptionRequests/r2');
+    const sig = { name: 'Full Name', signedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    await assertFails(doc('adopter').update({ status: 'selected' }));
+    await assertFails(doc('adopter').update({ adopterSignature: sig }));
+    await assertSucceeds(doc('reporter').update({ status: 'selected' }));
+    await assertFails(doc('adopter').update({ listerSignature: sig }));
+    await assertFails(doc('adopter').update({ status: 'completed' }));
+    await assertSucceeds(doc('adopter').update({ adopterSignature: sig }));
+    await assertSucceeds(doc('reporter').update({ listerSignature: sig }));
+    await assertFails(doc('adopter').update({ adopterId: 'stranger' }));
+    await assertSucceeds(doc('adopter').update({ status: 'completed' }));
+  });
+});
+
 describe('adoption audit entries (Adoption gap 7)', () => {
   test("an entry carries the application's organization so its staff see it", async () => {
     const entry = (uid, data) => as(uid).collection('auditLogs').add({

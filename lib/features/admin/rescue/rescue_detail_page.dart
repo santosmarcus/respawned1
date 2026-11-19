@@ -23,7 +23,7 @@ import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/accept_case_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/case_animals_card.dart';
+import 'package:respawnd1/features/rescue/widgets/case_report_details.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/case_costs_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_messages_section.dart';
@@ -553,11 +553,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     setState(() => _isLoading = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).withdrawReferral(
-            caseId: c.id,
-            reason: reason,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: c.id,
+        reason: reason,
+        actorUid: _actorUid,
+        actorName: _actorName,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Referral withdrawn. The case is open again.'),
@@ -576,11 +576,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   }
 
   void _exportTransfer(RescueCase c) => showExportTransferSheet(
-        context,
-        rescueCase: c,
-        transferredByUid: _actorUid,
-        transferredByName: _actorName,
-      );
+    context,
+    rescueCase: c,
+    transferredByUid: _actorUid,
+    transferredByName: _actorName,
+  );
 
   void _openMedia(RescueCase c, int index) {
     showDialog<void>(
@@ -627,18 +627,18 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
   /// actions, conditions and handlers the page has always offered for each
   /// status.
   ({CaseAction? primary, CaseAction? secondary, List<CaseAction> overflow}) _actionsFor(
-    RescueCase c, {
-    required bool canManageOrgActions,
-    required bool hasActiveAssignment,
-    required String? myOrgId,
-  }) {
+      RescueCase c, {
+        required bool canManageOrgActions,
+        required bool hasActiveAssignment,
+        required String? myOrgId,
+      }) {
     CaseAction? primary;
     CaseAction? secondary;
     final overflow = <CaseAction>[];
     final export = CaseAction('Export transfer details', () => _exportTransfer(c), icon: Icons.ios_share);
     final reassignClinic = CaseAction(
       c.vetClinicName == null ? 'Assign Clinic' : 'Reassign Clinic (${c.vetClinicName})',
-      () => _openClinicSheet(c, offerAssignRider: false),
+          () => _openClinicSheet(c, offerAssignRider: false),
       icon: Icons.local_hospital_outlined,
     );
     final specializedTransport =
@@ -671,10 +671,10 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         primary = CaseAction('Review Possible Duplicate', () => _mergeDuplicate(c));
       case RescueStatus.accepted:
       case RescueStatus.awaitingAssignment:
-        // Derived from saved case data, not local state: no clinic yet means
-        // Select Clinic (also covers animal-record admissions, which start at
-        // awaitingAssignment with no clinic); an outstanding offer routes to
-        // its status view instead of a second Assign Transporter.
+      // Derived from saved case data, not local state: no clinic yet means
+      // Select Clinic (also covers animal-record admissions, which start at
+      // awaitingAssignment with no clinic); an outstanding offer routes to
+      // its status view instead of a second Assign Transporter.
         if (!c.hasSavedClinic) {
           primary = CaseAction('Assign Transport', () => _push(AssignRiderPage(caseId: c.id, data: c.raw)));
         } else if (hasActiveAssignment) {
@@ -700,7 +700,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             specializedTransport
                 ? 'Close Case — Specialized Transport Unavailable'
                 : 'Close Case — Aggressive Animal / Unsafe Rescue',
-            () => _closeCase(c,
+                () => _closeCase(c,
                 initialReason: specializedTransport ? ClosureReason.requiresTransport : ClosureReason.aggressive),
             icon: Icons.block,
             destructive: true,
@@ -768,8 +768,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           message: isTarget
               ? 'Accept to take it into your Rescue Review, or decline with a reason to send it back.'
               : 'They are reminded after $kReferralReminderHours hours; with no answer after '
-                  '$kReferralReturnHours hours the case comes back to your Rescue Review. '
-                  'You can also withdraw it now and reopen the case.',
+              '$kReferralReturnHours hours the case comes back to your Rescue Review. '
+              'You can also withdraw it now and reopen the case.',
           facts: [
             if (at != null) ('Referred', formatDateTime(at)),
             if ((referral['referredByName'] as String?)?.isNotEmpty ?? false) ('By', referral['referredByName'] as String),
@@ -809,9 +809,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           title: specialized ? 'Specialized transport needed' : 'Safety warning',
           message: specialized
               ? 'The assigned transporter could not provide the transport this animal needs. Arrange the right '
-                  'vehicle/service before assigning a new transporter.'
+              'vehicle/service before assigning a new transporter.'
               : 'A previous transporter reported that the animal may be aggressive. Review the incident before '
-                  'assigning another transporter.',
+              'assigning another transporter.',
           facts: [
             if (specialized && (serviceType?.isNotEmpty ?? false)) ('Service needed', serviceType!),
             if (notes?.isNotEmpty ?? false) ('Reported', notes!),
@@ -826,7 +826,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           title: deceased ? 'Animal reported deceased in transit' : 'Transporter stopped the trip',
           message: deceased
               ? 'Confirm the death to record it on the animal and close the case, or choose another step if the '
-                  'report was wrong.'
+              'report was wrong.'
               : 'Decide what happens next: offer the case to another transporter, refer it, or close it.',
           facts: [
             if (!deceased && (reason?.isNotEmpty ?? false)) ('Reason', reason!),
@@ -849,13 +849,13 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           title: !c.hasSavedClinic
               ? 'Next: select a clinic'
               : hasActiveAssignment
-                  ? 'Waiting on the transporter'
-                  : 'Next: assign a transporter',
+              ? 'Waiting on the transporter'
+              : 'Next: assign a transporter',
           message: !c.hasSavedClinic
               ? 'The case is accepted. Pick the clinic the animal goes to before assigning a transporter.'
               : hasActiveAssignment
-                  ? 'An offer is out. Open the assignment status to follow it.'
-                  : 'Clinic saved: ${c.vetClinicName}.',
+              ? 'An offer is out. Open the assignment status to follow it.'
+              : 'Clinic saved: ${c.vetClinicName}.',
         );
       default:
         break;
@@ -900,30 +900,19 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     );
   }
 
+  /// Staff-only facts not on the rescue form. Everything the reporter
+  /// entered is in the Report Details card (CaseReportDetails).
   List<CaseInfoItem> _reportItems(RescueCase c) {
     final d = c.raw;
     String? s(String key) => (d[key] as String?)?.trim();
-    final animals = d['animals'] as List?;
-    final breed = s('breed');
-    final animalBreeds = {
-      for (final a in animals ?? const []) if (a is Map) (a['breed'] as String?)?.trim(),
-    };
-    final hasWitness = d['coordinateWithShelter'] == 'no' && (s('witnessName')?.isNotEmpty ?? false);
     return [
-      CaseInfoItem('Rescue type', s('rescueType')),
-      if (animals != null && animals.isNotEmpty && !animalBreeds.contains(breed)) CaseInfoItem('Breed', breed),
-      CaseInfoItem('Interest to adopt', c.interestedToAdopt == 'yes' ? 'Yes' : 'No'),
       CaseInfoItem('QR/NFC',
           (c.scannedTagId != null && c.scannedTagId!.isNotEmpty) ? 'Linked (${c.scannedTagId})' : 'No'),
-      CaseInfoItem('Containment / escape risk', s('containmentStatus')),
-      CaseInfoItem('Approachability / bite risk', s('strayTemperament')),
-      CaseInfoItem('Reporter on-site', s('onSite')),
-      CaseInfoItem('Best time to reach reporter', s('bestTimeToContact')),
-      if ((s('coordinateWithShelter') ?? '').isNotEmpty)
-        CaseInfoItem('Coordinates with shelter', d['coordinateWithShelter'] == 'yes' ? 'Yes' : 'No'),
-      if (hasWitness) CaseInfoItem('Additional witness', s('witnessName')),
-      if (hasWitness) CaseInfoItem('Witness number', s('witnessPhone') ?? '-'),
-      CaseInfoItem('Access instructions', s('accessInstructions'), wide: true),
+      // Older reports only.
+      if ((s('containmentStatus') ?? '').isNotEmpty)
+        CaseInfoItem('Containment / escape risk', s('containmentStatus')),
+      if ((s('strayTemperament') ?? '').isNotEmpty)
+        CaseInfoItem('Approachability / bite risk', s('strayTemperament')),
     ];
   }
 
@@ -939,11 +928,11 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final pendingLocationReports = ref
-            .watch(caseCommunityReportsProvider(c.id))
-            .asData
-            ?.value
-            .where((r) => r.type == 'moved' && r.approvalStatus == 'pending' && r.newLat != null && r.newLng != null)
-            .toList() ??
+        .watch(caseCommunityReportsProvider(c.id))
+        .asData
+        ?.value
+        .where((r) => r.type == 'moved' && r.approvalStatus == 'pending' && r.newLat != null && r.newLng != null)
+        .toList() ??
         const [];
 
     // Whether a transporter offer is currently pending/accepted — stops
@@ -1037,42 +1026,38 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
               // "community cat" answer; Analytics counts the tagged reports.
               trailing: c.allSpecies.any((s) => s.toLowerCase() == 'cat')
                   ? SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      visualDensity: VisualDensity.compact,
-                      activeThumbColor: AppColors.textPrimary,
-                      title: Text('Community cat (outdoor, no owner)',
-                          style: GoogleFonts.zain(
-                              fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      value: d['communityCat'] == true,
-                      onChanged: (v) => FirebaseFirestore.instance
-                          .collection('cases')
-                          .doc(c.id)
-                          .update({'communityCat': v}).catchError((Object e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
-                        }
-                      }),
-                    )
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                activeThumbColor: AppColors.textPrimary,
+                title: Text('Community cat (outdoor, no owner)',
+                    style: GoogleFonts.zain(
+                        fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                value: d['communityCat'] == true,
+                onChanged: (v) => FirebaseFirestore.instance
+                    .collection('cases')
+                    .doc(c.id)
+                    .update({'communityCat': v}).catchError((Object e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+                  }
+                }),
+              )
                   : null,
             ),
 
             gap,
-            // Per-animal details (species/breed/sex/size/color and the
-            // health & behavior assessment).
-            CaseAnimalsSection(currentCase: c),
+            // Everything the reporter entered on the rescue form, laid out
+            // for this report's rescue type — the same section the
+            // reporter sees on Track Case. Two or more animals show as
+            // collapsed cards.
+            CaseCard(
+              title: 'Report Details',
+              child: CaseReportDetails(caseId: c.id, data: c.raw),
+            ),
 
             gap,
             _LocationCard(rescueCase: c, pendingLocationReports: pendingLocationReports),
-
-            gap,
-            CaseCard(
-              title: 'Description',
-              child: Text(
-                (c.condition?.trim().isNotEmpty ?? false) ? c.condition!.trim() : 'No description given.',
-                style: GoogleFonts.zain(fontSize: 13.5, height: 1.3, color: AppColors.textPrimary),
-              ),
-            ),
 
             if (c.hasSavedClinic) ...[
               gap,
@@ -1336,11 +1321,11 @@ class _RejectedBanner extends ConsumerWidget {
 
 /// Animal records created from this case at intake (`linkedCaseId`).
 final _caseAnimalRecordsProvider =
-    StreamProvider.autoDispose.family<List<({String id, String name})>, String>((ref, caseId) {
+StreamProvider.autoDispose.family<List<({String id, String name})>, String>((ref, caseId) {
   // Org-scoped: an unfiltered `animals` query is denied for org staff.
   return ref.watch(animalRecordRepositoryProvider).streamRecordsForCase(caseId).map((records) => [
-        for (final r in records) (id: r.id, name: r.name.trim().isNotEmpty ? r.name.trim() : 'Animal record'),
-      ]);
+    for (final r in records) (id: r.id, name: r.name.trim().isNotEmpty ? r.name.trim() : 'Animal record'),
+  ]);
 });
 
 /// Completed case: intaked (with links to the animal records it created),
@@ -1363,8 +1348,8 @@ class _CompletedBanner extends ConsumerWidget {
         title: claimed
             ? 'Closed: every animal was claimed through Community Adoption'
             : reason != null
-                ? 'Closed: ${ClosureReason.fromName(reason).label}'
-                : 'Closed: animal deceased',
+            ? 'Closed: ${ClosureReason.fromName(reason).label}'
+            : 'Closed: animal deceased',
         facts: [
           if (closedAt != null) ('Closed', formatDateTime(closedAt)),
           if ((raw['closedByName'] as String?)?.isNotEmpty ?? false) ('By', raw['closedByName'] as String),
@@ -1380,7 +1365,7 @@ class _CompletedBanner extends ConsumerWidget {
       message: records.isEmpty
           ? 'The rescue is complete.'
           : 'The rescue is complete. ${records.length == 1 ? 'Its animal record' : 'Its ${records.length} animal records'} '
-              'hold the animal${records.length == 1 ? '' : 's'}\' care from here.',
+          'hold the animal${records.length == 1 ? '' : 's'}\' care from here.',
       facts: [
         if (shelter != null && shelter.isNotEmpty) ('Shelter', shelter),
         if (c.vetClinicName != null) ('Clinic', c.vetClinicName!),
