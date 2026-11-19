@@ -257,33 +257,32 @@ void main() {
     expect(form.validateDeclaration(), isNull);
   });
 
-  test('surrender cards need their own details instead of environment',
-          () {
-        final entry = FoundAnimalEntry()
-          ..bodyCondition = 'a'
-          ..mobility = 'a'
-          ..alertness = 'a'
-          ..eyesNoseMouth = 'a'
-          ..skinAndCoat = 'a'
-          ..appetiteHydration = 'a'
-          ..biteRisk = 'Low'
-          ..escapeRisk = 'Low';
-        addTearDown(entry.dispose);
-        entry.behavior.add('Calm');
-        expect(entry.hasCompleteAssessment, isFalse);
-        expect(entry.isAssessmentComplete(isSurrender: true), isFalse);
+  test('surrender cards need their own details instead of environment', () {
+    final entry = FoundAnimalEntry()
+      ..bodyCondition = 'a'
+      ..mobility = 'a'
+      ..alertness = 'a'
+      ..eyesNoseMouth = 'a'
+      ..skinAndCoat = 'a'
+      ..appetiteHydration = 'a'
+      ..biteRisk = 'Low'
+      ..escapeRisk = 'Low';
+    addTearDown(entry.dispose);
+    entry.behavior.add('Calm');
+    expect(entry.hasCompleteAssessment, isFalse);
+    expect(entry.isAssessmentComplete(isSurrender: true), isFalse);
 
-        entry
-          ..acquisitionSource = 'Breeder'
-          ..vaccination = 'Unknown'
-          ..spayNeuter = 'No';
-        entry.ageController.text = '3 years old';
-        entry.stayDurationController.text = '2 years';
-        expect(entry.isAssessmentComplete(isSurrender: true), isFalse);
-        entry.compatibility.add(kSurrenderCompatibilityUnknown);
-        expect(entry.isAssessmentComplete(isSurrender: true), isTrue);
-        expect(entry.hasCompleteAssessment, isFalse);
-      });
+    entry
+      ..acquisitionSource = 'Breeder'
+      ..vaccination = 'Unknown'
+      ..spayNeuter = 'No';
+    entry.ageController.text = '3 years old';
+    entry.stayDurationController.text = '2 years';
+    expect(entry.isAssessmentComplete(isSurrender: true), isFalse);
+    entry.compatibility.add(kSurrenderCompatibilityUnknown);
+    expect(entry.isAssessmentComplete(isSurrender: true), isTrue);
+    expect(entry.hasCompleteAssessment, isFalse);
+  });
 
   test('neglect cards need harm signs and medical attention', () {
     final entry = FoundAnimalEntry()
@@ -299,11 +298,50 @@ void main() {
     entry.behavior.add('Calm');
     entry.environmentSafety.add('Exposed to sun or rain');
     expect(entry.hasCompleteAssessment, isTrue);
-    expect(entry.isAssessmentComplete(isNeglectAbuse: true), isFalse);
-    entry.harmSigns.add(kNeglectSignsNone);
-    expect(entry.isAssessmentComplete(isNeglectAbuse: true), isFalse);
+    expect(entry.isAssessmentComplete(requireVisibleSigns: true), isFalse);
+    entry.visibleSigns.add(kNeglectSignsNone);
+    expect(entry.isAssessmentComplete(requireVisibleSigns: true), isFalse);
     entry.needsMedical = 'Not sure';
-    expect(entry.isAssessmentComplete(isNeglectAbuse: true), isTrue);
+    expect(entry.isAssessmentComplete(requireVisibleSigns: true), isTrue);
+  });
+
+  test('injury, illness and neglect ask visible signs; others do not', () {
+    expect(
+      visibleSignsOptionsFor('Injury'),
+      contains('Likely hit by a vehicle'),
+    );
+    expect(visibleSignsOptionsFor('Illness'), contains('Vomiting'));
+    expect(visibleSignsOptionsFor('Neglect or Abuse'), isNotNull);
+    expect(visibleSignsOptionsFor('Abandonment'), isNull);
+    expect(visibleSignsOptionsFor('Pet Surrender'), isNull);
+    expect(visibleSignsLabelFor('Illness'), 'Visible signs of illness');
+    final form = _form()..selectedRescueType = 'Injury';
+    expect(form.asksVisibleSigns, isTrue);
+    form.selectedRescueType = 'Abandonment';
+    expect(form.asksVisibleSigns, isFalse);
+  });
+
+  test('aggressive animal gets its own signs, environment and question', () {
+    expect(
+      visibleSignsOptionsFor('Aggressive Animal'),
+      kAggressionSignsOptions,
+    );
+    expect(
+      visibleSignsLabelFor('Aggressive Animal'),
+      'Visible signs of aggression',
+    );
+    expect(
+      environmentExtrasFor('Aggressive Animal'),
+      kAggressiveEnvironmentOptions,
+    );
+    expect(environmentExtrasFor('Injury'), kNeglectEnvironmentOptions);
+    expect(environmentExtrasFor('Abandonment'), isEmpty);
+    expect(
+      medicalQuestionFor('Aggressive Animal'),
+      contains('injured or sick'),
+    );
+    final form = _form()..selectedRescueType = 'Aggressive Animal';
+    expect(form.asksVisibleSigns, isTrue);
   });
 
   test('FoundAnimalEntry.breedText resolves "Others" to the typed breed', () {

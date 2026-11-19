@@ -151,9 +151,9 @@ class RescueReportService {
               : animal.environmentSafety.toList(),
           'biteRisk': animal.biteRisk,
           'escapeRisk': animal.escapeRisk,
-          // Neglect or Abuse — asked per animal inside its card.
-          if (form.isNeglectAbuseType) ...{
-            'harmSigns': animal.harmSigns.toList(),
+          // Injury, Illness, Neglect or Abuse — asked per animal.
+          if (form.asksVisibleSigns) ...{
+            'visibleSigns': animal.visibleSigns.toList(),
             'needsMedical': animal.needsMedical,
           },
           // Pet Surrender — asked per animal inside its card.

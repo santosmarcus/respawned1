@@ -185,6 +185,112 @@ const List<String> kNeglectEnvironmentOptions = [
   'Kept with sick or dead animals',
 ];
 
+// Injury, per animal: visible signs common in injured dogs and cats.
+const List<String> kInjurySignsOptions = [
+  'Open wound or deep cut',
+  'Active or heavy bleeding',
+  'Bite wounds from a fight',
+  'Wound with maggots (myiasis)',
+  'Limping or not using a leg',
+  'Suspected broken bone',
+  'Swelling or lump',
+  'Burns',
+  'Eye injury',
+  'Head or face injury',
+  'Unable to stand or walk',
+  'Trapped in a snare, wire or net',
+  'Likely hit by a vehicle',
+  kNeglectSignsNone,
+];
+
+// Illness, per animal: visible signs common in sick dogs and cats
+// (e.g. parvovirus, distemper, mange, tick-borne disease).
+const List<String> kIllnessSignsOptions = [
+  'Vomiting',
+  'Diarrhea (with or without blood)',
+  'Coughing or sneezing',
+  'Nasal or eye discharge',
+  'Difficulty breathing',
+  'Not eating, weak or lethargic',
+  'Seizures, twitching or tremors',
+  'Skin disease or hair loss (mange)',
+  'Heavy ticks or fleas',
+  'Pale or yellow gums',
+  'Swollen belly',
+  'Excessive drooling',
+  kNeglectSignsNone,
+];
+
+// Aggressive Animal, per animal: signs of aggression in dogs and cats,
+// including fear and pain aggression and signs that can point to rabies.
+const String kAggressiveAnimalType = 'Aggressive Animal';
+
+const List<String> kAggressionSignsOptions = [
+  'Growling, snarling or hissing',
+  'Baring teeth',
+  'Raised hackles or puffed-up fur',
+  'Stiff body or fixed stare',
+  'Lunging or charging',
+  'Snapping or biting at people',
+  'Attacking other animals',
+  'Chasing people or vehicles',
+  'Guarding food, an area or its young',
+  'Ears pinned back or tail tucked (fearful)',
+  'Foaming or drooling at the mouth',
+  'Disoriented, wandering or staggering',
+  'Biting at objects or the air',
+  'Appears injured or in pain',
+  kNeglectSignsNone,
+];
+
+// Aggressive Animal, per animal: Environment and Safety choices about the
+// risk the animal poses where it is.
+const List<String> kAggressiveEnvironmentOptions = [
+  'Near children or a school',
+  'In a crowded public area',
+  'Roaming near homes or a market',
+  'Part of a pack of animals',
+  'Tied up or confined',
+  'Cornered in an enclosed space',
+];
+
+/// The per-animal "visible signs" choices for [rescueType], or null when
+/// that type doesn't ask (only Injury, Illness, Neglect or Abuse and
+/// Aggressive Animal do). These types also ask whether the animal needs
+/// immediate medical attention and add their own choices to Environment
+/// and Safety.
+List<String>? visibleSignsOptionsFor(String? rescueType) =>
+    switch (rescueType) {
+      'Injury' => kInjurySignsOptions,
+      'Illness' => kIllnessSignsOptions,
+      kNeglectAbuseType => kNeglectAnimalSignsOptions,
+      kAggressiveAnimalType => kAggressionSignsOptions,
+      _ => null,
+    };
+
+/// Label for the per-animal "visible signs" question.
+String visibleSignsLabelFor(String? rescueType) => switch (rescueType) {
+  'Injury' => 'Visible signs of injury',
+  'Illness' => 'Visible signs of illness',
+  kAggressiveAnimalType => 'Visible signs of aggression',
+  _ => 'Visible signs of harm',
+};
+
+/// Choices added to Environment and Safety for [rescueType].
+List<String> environmentExtrasFor(String? rescueType) => switch (rescueType) {
+  kAggressiveAnimalType => kAggressiveEnvironmentOptions,
+  'Injury' || 'Illness' || kNeglectAbuseType => kNeglectEnvironmentOptions,
+  _ => const [],
+};
+
+/// The per-animal medical-attention question for [rescueType].
+String medicalQuestionFor(String? rescueType) => switch (rescueType) {
+  kAggressiveAnimalType =>
+  'Does the animal appear injured or sick and need immediate medical '
+      'attention?',
+  _ => 'Does the animal need immediate medical attention?',
+};
+
 // Rescue Type options — each type carries its own inherent urgency level,
 // so reporters are no longer asked to separately self-assess urgency.
 const List<Map<String, String>> kRescueTypeOptions = [

@@ -49,8 +49,9 @@ class FoundAnimalEntry {
   String? biteRisk;
   String? escapeRisk;
 
-  // Neglect or Abuse only — asked per animal inside its card.
-  final Set<String> harmSigns = {};
+  // Injury, Illness and Neglect or Abuse — asked per animal inside its
+  // card (see visibleSignsOptionsFor).
+  final Set<String> visibleSigns = {};
   String? needsMedical;
 
   // Pet Surrender only — asked per animal inside its card.
@@ -84,9 +85,10 @@ class FoundAnimalEntry {
   /// has the pet at home) and the surrender questions are required instead.
   bool isAssessmentComplete({
     bool isSurrender = false,
-    bool isNeglectAbuse = false,
+    bool requireVisibleSigns = false,
   }) =>
-      (!isNeglectAbuse || (harmSigns.isNotEmpty && needsMedical != null)) &&
+      (!requireVisibleSigns ||
+          (visibleSigns.isNotEmpty && needsMedical != null)) &&
           bodyCondition != null &&
           mobility != null &&
           alertness != null &&
@@ -250,6 +252,11 @@ class RescueFormController {
   String? neglectWillingWitness;
 
   bool get isNeglectAbuseType => selectedRescueType == kNeglectAbuseType;
+
+  /// Injury, Illness and Neglect or Abuse ask each animal's visible signs
+  /// and whether it needs immediate medical attention.
+  bool get asksVisibleSigns =>
+      visibleSignsOptionsFor(selectedRescueType) != null;
 
   /// Only asked when the animal may be without food or water.
   bool get asksAbandonmentCanProvideFood =>

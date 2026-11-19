@@ -16,7 +16,7 @@ class FoundAnimalList extends StatelessWidget {
     required this.animals,
     required this.onChanged,
     this.isSurrender = false,
-    this.isNeglectAbuse = false,
+    this.rescueType,
   });
 
   /// The form's live list; cards are added/removed in place.
@@ -27,7 +27,7 @@ class FoundAnimalList extends StatelessWidget {
   final bool isSurrender;
 
   /// Passed down to the Health & Behavior Assessment.
-  final bool isNeglectAbuse;
+  final String? rescueType;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -53,7 +53,7 @@ class FoundAnimalList extends StatelessWidget {
             },
             onChanged: onChanged,
             isSurrender: isSurrender,
-            isNeglectAbuse: isNeglectAbuse,
+            rescueType: rescueType,
           ),
         Align(
           alignment: Alignment.centerLeft,
@@ -93,7 +93,7 @@ class FoundAnimalCard extends StatelessWidget {
     required this.onRemove,
     required this.onChanged,
     this.isSurrender = false,
-    this.isNeglectAbuse = false,
+    this.rescueType,
   });
 
   final FoundAnimalEntry entry;
@@ -104,7 +104,7 @@ class FoundAnimalCard extends StatelessWidget {
   final bool isSurrender;
 
   /// Passed down to the Health & Behavior Assessment.
-  final bool isNeglectAbuse;
+  final String? rescueType;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -315,7 +315,7 @@ class FoundAnimalCard extends StatelessWidget {
         entry: entry,
         onChanged: onChanged,
         isSurrender: isSurrender,
-        isNeglectAbuse: isNeglectAbuse,
+        rescueType: rescueType,
       ),
       const SizedBox(height: 14),
       Text(

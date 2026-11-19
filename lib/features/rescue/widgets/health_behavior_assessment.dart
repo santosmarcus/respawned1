@@ -21,7 +21,7 @@ class HealthBehaviorAssessment extends StatelessWidget {
     required this.entry,
     required this.onChanged,
     this.isSurrender = false,
-    this.isNeglectAbuse = false,
+    this.rescueType,
   });
 
   final FoundAnimalEntry entry;
@@ -32,9 +32,12 @@ class HealthBehaviorAssessment extends StatelessWidget {
   /// stay and compatibility questions for this animal.
   final bool isSurrender;
 
-  /// Neglect or Abuse: adds visible signs of harm, the living-condition
-  /// choices in Environment and Safety, and the medical-attention question.
-  final bool isNeglectAbuse;
+  /// Injury, Illness and Neglect or Abuse add the animal's visible signs
+  /// (choices per type), the living-condition choices in Environment and
+  /// Safety, and the medical-attention question.
+  final String? rescueType;
+
+  List<String>? get _signOptions => visibleSignsOptionsFor(rescueType);
 
   Widget _subLabel(String text) => Text(
     text,
@@ -119,20 +122,20 @@ class HealthBehaviorAssessment extends StatelessWidget {
           options: kAppetiteHydrationOptions,
           onChanged: (v) => _set(() => entry.appetiteHydration = v),
         ),
-        if (isNeglectAbuse) ...[
+        if (_signOptions case final signOptions?) ...[
           const SizedBox(height: 12),
-          _subLabel('Visible signs of harm'),
+          _subLabel(visibleSignsLabelFor(rescueType)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final option in kNeglectAnimalSignsOptions)
+              for (final option in signOptions)
                 RescueToggleChip(
                   label: option,
-                  selected: entry.harmSigns.contains(option),
+                  selected: entry.visibleSigns.contains(option),
                   onTap: () => _set(() {
-                    final set = entry.harmSigns;
+                    final set = entry.visibleSigns;
                     if (set.remove(option)) return;
                     // "No visible signs" and the specific signs exclude
                     // each other.
@@ -146,6 +149,10 @@ class HealthBehaviorAssessment extends StatelessWidget {
                 ),
             ],
           ),
+          if (rescueType == kAggressiveAnimalType) ...[
+            const SizedBox(height: 10),
+            const _BiteSafetyNote(),
+          ],
         ],
         if (isSurrender) ...[
           const SizedBox(height: 10),
@@ -247,14 +254,12 @@ class HealthBehaviorAssessment extends StatelessWidget {
           EnvironmentSafetySection(
             entry: entry,
             onChanged: () => _set(() {}),
-            extraOptions: isNeglectAbuse
-                ? kNeglectEnvironmentOptions
-                : const [],
+            extraOptions: environmentExtrasFor(rescueType),
           ),
         ],
-        if (isNeglectAbuse) ...[
+        if (_signOptions != null) ...[
           const SizedBox(height: 12),
-          _subLabel('Does the animal need immediate medical attention?'),
+          _subLabel(medicalQuestionFor(rescueType)),
           const SizedBox(height: 2),
           for (final option in kYesNoNotSureOptions)
             RescueRadioOption(
@@ -264,6 +269,49 @@ class HealthBehaviorAssessment extends StatelessWidget {
             ),
         ],
       ],
+    );
+  }
+}
+
+/// Aggressive Animal: keep away from the animal, and first aid for bites
+/// and scratches (rabies risk).
+class _BiteSafetyNote extends StatelessWidget {
+  const _BiteSafetyNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 18,
+            color: AppColors.error,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Keep a safe distance and do not try to catch or corner the '
+                  'animal. If anyone was bitten or scratched, wash the wound '
+                  'right away with soap and running water for at least 15 '
+                  'minutes, then go to the nearest Animal Bite Treatment Center '
+                  'for rabies care.',
+              style: GoogleFonts.zain(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

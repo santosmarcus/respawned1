@@ -112,7 +112,7 @@ class StrayReportFields extends StatelessWidget {
         FoundAnimalList(
           animals: form.foundAnimals,
           onChanged: onChanged,
-          isNeglectAbuse: form.isNeglectAbuseType,
+          rescueType: form.selectedRescueType,
         ),
 
         const SizedBox(height: 20),

@@ -857,7 +857,7 @@ class _RescuePageState extends State<RescuePage> {
       final entry = validAnimals[i];
       if (!entry.isAssessmentComplete(
         isSurrender: _form.isPetSurrenderType,
-        isNeglectAbuse: _form.isNeglectAbuseType,
+        requireVisibleSigns: _form.asksVisibleSigns,
       )) {
         setState(() {
           entry.hasAssessmentError = true;

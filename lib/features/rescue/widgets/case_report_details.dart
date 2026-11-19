@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 /// Everything the reporter entered on the rescue form, laid out per rescue
 /// type so Case Detail mirrors the form that was filled in:
@@ -156,7 +157,16 @@ class _AnimalsSection extends StatelessWidget {
     final animals = data['animals'] as List?;
     if (animals != null && animals.isNotEmpty) {
       return _AnimalList(
-        animals: [for (final a in animals) Map<String, dynamic>.from(a as Map)],
+        animals: [
+          for (final a in animals)
+            {
+              ...Map<String, dynamic>.from(a as Map),
+              // "Visible signs of injury / illness / harm" by rescue type.
+              'visibleSignsLabel': _titleCase(
+                visibleSignsLabelFor(data['rescueType'] as String?),
+              ),
+            },
+        ],
         isSurrender: isSurrender,
       );
     }
@@ -257,8 +267,11 @@ List<Widget> _animalRows(Map<String, dynamic> a, bool isSurrender) {
       CaseDetailRow('Eyes, Nose, Mouth', a['eyesNoseMouth']),
       CaseDetailRow('Skin and Coat', a['skinAndCoat']),
       CaseDetailRow('Appetite and Hydration', a['appetiteHydration']),
-      // Neglect or Abuse only.
-      CaseDetailRow.optional('Visible Signs of Harm', _list(a['harmSigns'])),
+      // Injury, Illness and Neglect or Abuse only.
+      CaseDetailRow.optional(
+        a['visibleSignsLabel'] as String? ?? 'Visible Signs',
+        _list(a['visibleSigns']),
+      ),
       if (isSurrender) ...[
         CaseDetailRow.optional('Vaccination Status', a['vaccination']),
         CaseDetailRow.optional('Spayed / Neutered', a['spayNeuter']),
@@ -348,6 +361,11 @@ String? _yesNo(Object? v) => switch (v) {
   'no' => 'No',
   _ => v as String?,
 };
+
+String _titleCase(String s) => s
+    .split(' ')
+    .map((w) => w.length <= 2 ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+    .join(' ');
 
 String? _list(Object? v) {
   if (v is! List || v.isEmpty) return null;
