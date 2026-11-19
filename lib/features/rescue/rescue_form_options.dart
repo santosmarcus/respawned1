@@ -138,6 +138,53 @@ const List<String> kAbandonmentWitnessOptions = [
   'I found the animal alone',
 ];
 
+// Neglect or Abuse: follow-up questions shown only for that rescue type.
+const String kNeglectAbuseType = 'Neglect or Abuse';
+
+const String kNeglectObservedOther = 'Other';
+const List<String> kNeglectObservedOptions = [
+  'Physical harm (beating, kicking, burning)',
+  'Starvation or no food and water',
+  'Constantly chained or caged',
+  'No shelter from sun or rain',
+  'Too many animals (hoarding)',
+  'Poisoning',
+  'Slaughter or meat trade',
+  kNeglectObservedOther,
+];
+
+const List<String> kNeglectFrequencyOptions = [
+  'Once',
+  'Several times',
+  'Ongoing for weeks or longer',
+];
+
+const List<String> kYesNoNotSureOptions = ['Yes', 'No', 'Not sure'];
+
+// Neglect or Abuse, per animal: visible signs of harm.
+const String kNeglectSignsNone = 'No visible signs';
+const List<String> kNeglectAnimalSignsOptions = [
+  'Open wounds or injuries',
+  'Severely thin (visible ribs or bones)',
+  'Signs of dehydration',
+  'Untreated skin disease or hair loss',
+  'Embedded collar or chain wounds',
+  'Overgrown nails or heavily matted coat',
+  'Limping or unable to stand',
+  'Fearful, cowering or withdrawn',
+  kNeglectSignsNone,
+];
+
+// Neglect or Abuse, per animal: living-condition choices added to the
+// Environment and Safety section.
+const List<String> kNeglectEnvironmentOptions = [
+  'Exposed to sun or rain',
+  'Dirty, flooded or surrounded by waste',
+  'Cramped cage or very short chain',
+  'No food or water in sight',
+  'Kept with sick or dead animals',
+];
+
 // Rescue Type options — each type carries its own inherent urgency level,
 // so reporters are no longer asked to separately self-assess urgency.
 const List<Map<String, String>> kRescueTypeOptions = [
@@ -165,6 +212,12 @@ const List<Map<String, String>> kRescueTypeOptions = [
   {
     'label': 'Injury',
     'description': 'Visible wounds, fractures, bleeding',
+    'urgency': 'Critical',
+  },
+
+  {
+    'label': 'Neglect or Abuse',
+    'description': 'Suspected animal cruelty, starvation, chaining, hoarding',
     'urgency': 'Critical',
   },
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:respawnd1/features/rescue/widgets/case_report_details.dart';
 import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/features/rescue/rescue_adoption_form_page.dart';
@@ -1628,16 +1629,9 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           const SizedBox(height: 16),
           _DetailRow('Reporter Name', data['reporterName']),
           _DetailRow('Address', data['address']),
-          _DetailRow('Rescue Type', data['rescueType']),
-          _DetailRow('Urgency', data['urgency']),
-          _DetailRow('Description', data['condition']),
-          _AnimalGroupSection(caseId: widget.caseId, data: data),
-          _DetailRow('Coordination', data['coordinateWithShelter']),
-          if (data['coordinateWithShelter'] == 'no') ...[
-            _DetailRow('Witness Name', data['witnessName']),
-            _DetailRow('Witness Mobile Number', data['witnessPhone']),
-          ],
-          _DetailRow('Interest to adopt', data['interestedToAdopt']),
+          // Every field from the rescue form, laid out for this report's
+          // rescue type (see CaseReportDetails).
+          CaseReportDetails(caseId: widget.caseId, data: data),
           const SizedBox(height: 12),
 
           // Rescue gaps 6/10: the interested adopter sends an adoption
@@ -1713,10 +1707,13 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
             const SizedBox(height: 12),
           ],
 
-          // The reporter already answered "no" to adopting on the report
-          // form, so don't prompt them again. Everyone else still sees it.
-          if (!_hasWillingAdopter &&
-              !(widget.isReporter && data['interestedToAdopt'] == 'no')) ...[
+          // Never offered to the reporter: they answered the adoption
+          // question on the report form ("yes" already makes them the
+          // willing adopter), and a Pet Surrender's reporter is the owner
+          // giving the animal up — that form doesn't ask, so the answer
+          // is blank and must not reopen the offer. Everyone else still
+          // sees it.
+          if (!_hasWillingAdopter && !widget.isReporter) ...[
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
@@ -1768,133 +1765,6 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
             ),
 
           const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-}
-
-// Restores each animal's own detail block from the rescue form's
-// `animals[]` array — mirrors case_summary_page.dart's _AnimalGroupSection
-// so Track Case and the post-completion summary always agree on the
-// latest rescue-form data instead of falling back to legacy singular
-// fields only.
-class _AnimalGroupSection extends StatelessWidget {
-  final String caseId;
-  final Map<String, dynamic> data;
-  const _AnimalGroupSection({required this.caseId, required this.data});
-
-  Map<String, dynamic> _animalMap(Map raw) => {
-    'animalType': raw['species'],
-    'breed': raw['breed'],
-    'sex': raw['sex'],
-    'size': raw['size'],
-    'colorMarkings': raw['colorMarkings'],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final animals = data['animals'] as List?;
-    if (animals != null && animals.isNotEmpty) {
-      final total = animals.length;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _DetailRow('No. of Animals', '$total'),
-          for (var i = 0; i < animals.length; i++)
-            _AnimalDetailBlock(
-              data: _animalMap(animals[i] as Map),
-              index: i + 1,
-              total: total,
-            ),
-        ],
-      );
-    }
-
-    final groupId = data['groupId'] as String?;
-    if (groupId == null || groupId.isEmpty) {
-      return _AnimalDetailBlock(data: data, index: 1, total: 1);
-    }
-
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('publicCases')
-          .where('groupId', isEqualTo: groupId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1);
-        }
-        final docs = snapshot.data!.docs;
-        final total = docs.length;
-        if (total <= 1) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1);
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DetailRow('No. of Animals', '$total'),
-            for (var i = 0; i < docs.length; i++)
-              _AnimalDetailBlock(
-                data: docs[i].data(),
-                index: i + 1,
-                total: total,
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _AnimalDetailBlock extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final int index;
-  final int total;
-  const _AnimalDetailBlock({
-    required this.data,
-    required this.index,
-    required this.total,
-  });
-
-  List<Widget> _fields() => [
-    _DetailRow('Species', data['animalType']),
-    _DetailRow('Breed / Mixed', data['breed']),
-    _DetailRow('Sex', data['sex']),
-    _DetailRow('Size', data['size']),
-    _DetailRow('Color / Distinguishing Markings', data['colorMarkings']),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    if (total <= 1) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: _fields(),
-      );
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.slaterspwn),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Animal $index of $total',
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          ..._fields(),
         ],
       ),
     );

@@ -7,6 +7,7 @@ import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 import 'package:respawnd1/features/rescue/widgets/abandonment_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/found_animal_card.dart';
+import 'package:respawnd1/features/rescue/widgets/neglect_abuse_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 
@@ -68,6 +69,13 @@ class StrayReportFields extends StatelessWidget {
           ),
           const SizedBox(height: 20),
         ],
+        // Neglect or Abuse opens with its guidance note and "What are you
+        // seeing?" before the condition and the animals.
+        if (form.isNeglectAbuseType) ...[
+          NeglectAbuseIntro(form: form, onChanged: onChanged),
+          const SizedBox(height: 20),
+        ],
+
         // Describe Condition
         RescueFieldLabel('Describe Condition', required: true),
         const SizedBox(height: 6),
@@ -101,9 +109,18 @@ class StrayReportFields extends StatelessWidget {
           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 10),
-        FoundAnimalList(animals: form.foundAnimals, onChanged: onChanged),
+        FoundAnimalList(
+          animals: form.foundAnimals,
+          onChanged: onChanged,
+          isNeglectAbuse: form.isNeglectAbuseType,
+        ),
 
         const SizedBox(height: 20),
+
+        if (form.isNeglectAbuseType) ...[
+          NeglectAbuseFields(form: form, onChanged: onChanged),
+          const SizedBox(height: 20),
+        ],
 
         if (form.isAbandonmentType) ...[
           AbandonmentFields(form: form, onChanged: onChanged),

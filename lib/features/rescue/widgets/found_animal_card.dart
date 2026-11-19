@@ -16,6 +16,7 @@ class FoundAnimalList extends StatelessWidget {
     required this.animals,
     required this.onChanged,
     this.isSurrender = false,
+    this.isNeglectAbuse = false,
   });
 
   /// The form's live list; cards are added/removed in place.
@@ -24,6 +25,9 @@ class FoundAnimalList extends StatelessWidget {
 
   /// Passed to each card; true shows the Pet Surrender questions.
   final bool isSurrender;
+
+  /// Passed down to the Health & Behavior Assessment.
+  final bool isNeglectAbuse;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -49,11 +53,18 @@ class FoundAnimalList extends StatelessWidget {
             },
             onChanged: onChanged,
             isSurrender: isSurrender,
+            isNeglectAbuse: isNeglectAbuse,
           ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: () => _set(() => animals.add(FoundAnimalEntry())),
+            // Collapse the cards already filled so the new one is in view.
+            onPressed: () => _set(() {
+              for (final a in animals) {
+                a.expanded = false;
+              }
+              animals.add(FoundAnimalEntry());
+            }),
             icon: const Icon(Icons.add, size: 18, color: AppColors.textPrimary),
             label: Text(
               'Add another animal',
@@ -82,6 +93,7 @@ class FoundAnimalCard extends StatelessWidget {
     required this.onRemove,
     required this.onChanged,
     this.isSurrender = false,
+    this.isNeglectAbuse = false,
   });
 
   final FoundAnimalEntry entry;
@@ -90,6 +102,9 @@ class FoundAnimalCard extends StatelessWidget {
   final VoidCallback onRemove;
   final VoidCallback onChanged;
   final bool isSurrender;
+
+  /// Passed down to the Health & Behavior Assessment.
+  final bool isNeglectAbuse;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -117,154 +132,202 @@ class FoundAnimalCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Animal ${index + 1}',
-                style: GoogleFonts.zain(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              if (canRemove)
-                GestureDetector(
-                  onTap: onRemove,
-                  child: const Icon(
-                    Icons.close,
-                    size: 18,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: SpeciesDropdown(
-                  value: entry.species,
-                  onChanged: (v) => _set(() {
-                    entry.species = v;
-                    entry.breed = null;
-                  }),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: BreedDropdown(
-                  species: entry.species,
-                  breedValue: entry.breed,
-                  onChanged: (v) => _set(() => entry.breed = v),
-                  otherController: entry.breedOtherController,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey(entry.sex),
-                  initialValue: entry.sex,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Sex',
-                    border: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppColors.textPrimary),
-                    ),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'Male', child: Text('Male')),
-                    DropdownMenuItem(value: 'Female', child: Text('Female')),
-                    DropdownMenuItem(value: 'Unsure', child: Text('Unsure')),
-                  ],
-                  onChanged: (v) => _set(() => entry.sex = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey(entry.size),
-                  initialValue: entry.size,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Size',
-                    border: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppColors.textPrimary),
-                    ),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'Small', child: Text('Small')),
-                    DropdownMenuItem(value: 'Medium', child: Text('Medium')),
-                    DropdownMenuItem(value: 'Large', child: Text('Large')),
-                  ],
-                  onChanged: (v) => _set(() => entry.size = v),
-                ),
-              ),
-            ],
-          ),
-          if (isSurrender) ...[
-            const SizedBox(height: 10),
-            RescueTextField(
-              entry.ageController,
-              'Age (e.g. 3 years old, 6 months)',
-            ),
-          ],
-          const SizedBox(height: 10),
-          RescueTextField(
-            entry.colorController,
-            'Color / Distinguishing markings',
-          ),
-          if (entry.hasAssessmentError) ...[
-            const SizedBox(height: 10),
-            Row(
+          // With two or more animals (canRemove) the header opens and
+          // closes the card; a single animal is always open.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: canRemove
+                ? () => _set(() => entry.expanded = !entry.expanded)
+                : null,
+            child: Row(
               children: [
-                const Icon(
-                  Icons.error_outline,
-                  size: 14,
-                  color: AppColors.error,
-                ),
-                const SizedBox(width: 6),
                 Expanded(
-                  child: Text(
-                    isSurrender
-                        ? 'Complete all details for this animal.'
-                        : 'Complete the Health & Behavior Assessment for this animal.',
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.error,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Animal ${index + 1}',
+                        style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      if (canRemove && !entry.expanded && _summary.isNotEmpty)
+                        Text(
+                          _summary,
+                          style: GoogleFonts.zain(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
+                if (canRemove) ...[
+                  Icon(
+                    entry.expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: AppColors.textPrimary,
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: onRemove,
+                    child: const Icon(
+                      Icons.close,
+                      size: 18,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
               ],
             ),
-          ],
-          const SizedBox(height: 14),
-          HealthBehaviorAssessment(
-            entry: entry,
-            onChanged: onChanged,
-            isSurrender: isSurrender,
           ),
-          const SizedBox(height: 14),
-          Text(
-            'Risk Assessment',
-            style: GoogleFonts.zain(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
+          if (!canRemove || entry.expanded) ..._body(),
+          if (canRemove && !entry.expanded && entry.hasAssessmentError) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Incomplete — tap to finish this animal.',
+              style: GoogleFonts.zain(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.error,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          RiskFieldsRow(entry: entry, onChanged: onChanged),
+          ],
         ],
       ),
     );
+  }
+
+  /// "Dog · Aspin · Male", shown on a collapsed card's header.
+  String get _summary => [
+    entry.species,
+    entry.breedText,
+    entry.sex,
+  ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
+
+  List<Widget> _body() {
+    return [
+      const SizedBox(height: 8),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: SpeciesDropdown(
+              value: entry.species,
+              onChanged: (v) => _set(() {
+                entry.species = v;
+                entry.breed = null;
+              }),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: BreedDropdown(
+              species: entry.species,
+              breedValue: entry.breed,
+              onChanged: (v) => _set(() => entry.breed = v),
+              otherController: entry.breedOtherController,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(entry.sex),
+              initialValue: entry.sex,
+              isDense: true,
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: 'Sex',
+                border: UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.textPrimary),
+                ),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'Male', child: Text('Male')),
+                DropdownMenuItem(value: 'Female', child: Text('Female')),
+                DropdownMenuItem(value: 'Unsure', child: Text('Unsure')),
+              ],
+              onChanged: (v) => _set(() => entry.sex = v),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(entry.size),
+              initialValue: entry.size,
+              isDense: true,
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: 'Size',
+                border: UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.textPrimary),
+                ),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'Small', child: Text('Small')),
+                DropdownMenuItem(value: 'Medium', child: Text('Medium')),
+                DropdownMenuItem(value: 'Large', child: Text('Large')),
+              ],
+              onChanged: (v) => _set(() => entry.size = v),
+            ),
+          ),
+        ],
+      ),
+      if (isSurrender) ...[
+        const SizedBox(height: 10),
+        RescueTextField(
+          entry.ageController,
+          'Age (e.g. 3 years old, 6 months)',
+        ),
+      ],
+      const SizedBox(height: 10),
+      RescueTextField(entry.colorController, 'Color / Distinguishing markings'),
+      if (entry.hasAssessmentError) ...[
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            const Icon(Icons.error_outline, size: 14, color: AppColors.error),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                isSurrender
+                    ? 'Complete all details for this animal.'
+                    : 'Complete the Health & Behavior Assessment for this animal.',
+                style: GoogleFonts.zain(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.error,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+      const SizedBox(height: 14),
+      HealthBehaviorAssessment(
+        entry: entry,
+        onChanged: onChanged,
+        isSurrender: isSurrender,
+        isNeglectAbuse: isNeglectAbuse,
+      ),
+      const SizedBox(height: 14),
+      Text(
+        'Risk Assessment',
+        style: GoogleFonts.zain(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textPrimary,
+        ),
+      ),
+      const SizedBox(height: 8),
+      RiskFieldsRow(entry: entry, onChanged: onChanged),
+    ];
   }
 }

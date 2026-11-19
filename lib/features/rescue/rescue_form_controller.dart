@@ -49,6 +49,10 @@ class FoundAnimalEntry {
   String? biteRisk;
   String? escapeRisk;
 
+  // Neglect or Abuse only — asked per animal inside its card.
+  final Set<String> harmSigns = {};
+  String? needsMedical;
+
   // Pet Surrender only — asked per animal inside its card.
   final TextEditingController ageController = TextEditingController();
   final TextEditingController stayDurationController = TextEditingController();
@@ -68,13 +72,22 @@ class FoundAnimalEntry {
   final GlobalKey cardKey = GlobalKey();
   bool hasAssessmentError = false;
 
+  /// Whether this animal's card is open. Only matters when the report has
+  /// two or more animals: the card being filled stays open and the rest
+  /// collapse to their header until tapped.
+  bool expanded = true;
+
   bool get hasCompleteAssessment => isAssessmentComplete();
 
   /// Whether every field in this animal's card is answered. On Pet
   /// Surrender ([isSurrender]) Environment and Safety is hidden (the owner
   /// has the pet at home) and the surrender questions are required instead.
-  bool isAssessmentComplete({bool isSurrender = false}) =>
-      bodyCondition != null &&
+  bool isAssessmentComplete({
+    bool isSurrender = false,
+    bool isNeglectAbuse = false,
+  }) =>
+      (!isNeglectAbuse || (harmSigns.isNotEmpty && needsMedical != null)) &&
+          bodyCondition != null &&
           mobility != null &&
           alertness != null &&
           eyesNoseMouth != null &&
@@ -222,6 +235,22 @@ class RescueFormController {
 
   bool get isAbandonmentType => selectedRescueType == kAbandonmentType;
 
+  // Neglect or Abuse — follow-up questions (see NeglectAbuseFields).
+  final Set<String> neglectObserved = {};
+  final TextEditingController neglectObservedOtherController =
+  TextEditingController();
+  String? neglectHappeningNow;
+  String? neglectOwnerKnown;
+  final TextEditingController neglectOwnerDetailsController =
+  TextEditingController();
+  String? neglectFrequency;
+  String? neglectReportedToAuthorities;
+  final TextEditingController neglectReportReferenceController =
+  TextEditingController();
+  String? neglectWillingWitness;
+
+  bool get isNeglectAbuseType => selectedRescueType == kNeglectAbuseType;
+
   /// Only asked when the animal may be without food or water.
   bool get asksAbandonmentCanProvideFood =>
       abandonmentFoodWater != null && abandonmentFoodWater != 'Yes';
@@ -289,6 +318,21 @@ class RescueFormController {
             abandonmentBelongings == null)) {
       return 'Please fill in all required fields.';
     }
+    if (isNeglectAbuseType) {
+      if (neglectObserved.isEmpty ||
+          neglectHappeningNow == null ||
+          neglectOwnerKnown == null ||
+          neglectFrequency == null ||
+          neglectReportedToAuthorities == null ||
+          neglectWillingWitness == null) {
+        return 'Please fill in all required fields.';
+      }
+      if (neglectObserved.contains(kNeglectObservedOther) &&
+          neglectObservedOtherController.text.trim().isEmpty) {
+        return 'Please describe what you are seeing.';
+      }
+    }
+
     if (isAbandonmentType &&
         abandonmentLocation == kAbandonmentLocationOther &&
         abandonmentLocationOtherController.text.trim().isEmpty) {
@@ -388,6 +432,9 @@ class RescueFormController {
     surrenderReasonOtherController.dispose();
     abandonmentWitnessDetailsController.dispose();
     abandonmentLocationOtherController.dispose();
+    neglectObservedOtherController.dispose();
+    neglectOwnerDetailsController.dispose();
+    neglectReportReferenceController.dispose();
     abandonmentBelongingsDetailsController.dispose();
     surrenderExplanationController.dispose();
     for (final a in foundAnimals) {

@@ -21,6 +21,7 @@ class HealthBehaviorAssessment extends StatelessWidget {
     required this.entry,
     required this.onChanged,
     this.isSurrender = false,
+    this.isNeglectAbuse = false,
   });
 
   final FoundAnimalEntry entry;
@@ -30,6 +31,19 @@ class HealthBehaviorAssessment extends StatelessWidget {
   /// home) and adds the owner's health records, acquisition, length of
   /// stay and compatibility questions for this animal.
   final bool isSurrender;
+
+  /// Neglect or Abuse: adds visible signs of harm, the living-condition
+  /// choices in Environment and Safety, and the medical-attention question.
+  final bool isNeglectAbuse;
+
+  Widget _subLabel(String text) => Text(
+    text,
+    style: GoogleFonts.zain(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: AppColors.textPrimary,
+    ),
+  );
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -105,6 +119,34 @@ class HealthBehaviorAssessment extends StatelessWidget {
           options: kAppetiteHydrationOptions,
           onChanged: (v) => _set(() => entry.appetiteHydration = v),
         ),
+        if (isNeglectAbuse) ...[
+          const SizedBox(height: 12),
+          _subLabel('Visible signs of harm'),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in kNeglectAnimalSignsOptions)
+                RescueToggleChip(
+                  label: option,
+                  selected: entry.harmSigns.contains(option),
+                  onTap: () => _set(() {
+                    final set = entry.harmSigns;
+                    if (set.remove(option)) return;
+                    // "No visible signs" and the specific signs exclude
+                    // each other.
+                    if (option == kNeglectSignsNone) {
+                      set.clear();
+                    } else {
+                      set.remove(kNeglectSignsNone);
+                    }
+                    set.add(option);
+                  }),
+                ),
+            ],
+          ),
+        ],
         if (isSurrender) ...[
           const SizedBox(height: 10),
           AssessmentDropdown(
@@ -202,7 +244,24 @@ class HealthBehaviorAssessment extends StatelessWidget {
           ),
         ] else ...[
           const SizedBox(height: 12),
-          EnvironmentSafetySection(entry: entry, onChanged: () => _set(() {})),
+          EnvironmentSafetySection(
+            entry: entry,
+            onChanged: () => _set(() {}),
+            extraOptions: isNeglectAbuse
+                ? kNeglectEnvironmentOptions
+                : const [],
+          ),
+        ],
+        if (isNeglectAbuse) ...[
+          const SizedBox(height: 12),
+          _subLabel('Does the animal need immediate medical attention?'),
+          const SizedBox(height: 2),
+          for (final option in kYesNoNotSureOptions)
+            RescueRadioOption(
+              option,
+              entry.needsMedical,
+                  (v) => _set(() => entry.needsMedical = v),
+            ),
         ],
       ],
     );
@@ -225,7 +284,11 @@ class _RescueOrgNotice extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+          const Icon(
+            Icons.info_outline,
+            size: 18,
+            color: AppColors.textPrimary,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

@@ -855,8 +855,14 @@ class _RescuePageState extends State<RescuePage> {
     }
     for (var i = 0; i < validAnimals.length; i++) {
       final entry = validAnimals[i];
-      if (!entry.isAssessmentComplete(isSurrender: _form.isPetSurrenderType)) {
-        setState(() => entry.hasAssessmentError = true);
+      if (!entry.isAssessmentComplete(
+        isSurrender: _form.isPetSurrenderType,
+        isNeglectAbuse: _form.isNeglectAbuseType,
+      )) {
+        setState(() {
+          entry.hasAssessmentError = true;
+          entry.expanded = true; // open it so the missing fields show
+        });
         _showError(
           _form.isPetSurrenderType
               ? 'Complete all details for Animal ${i + 1}.'

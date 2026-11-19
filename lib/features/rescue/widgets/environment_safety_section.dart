@@ -13,10 +13,15 @@ import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 class EnvironmentSafetySection extends StatefulWidget {
   final FoundAnimalEntry entry;
   final VoidCallback onChanged;
+
+  /// Choices offered after the standard ones (Neglect or Abuse adds its
+  /// living-condition choices here).
+  final List<String> extraOptions;
   const EnvironmentSafetySection({
     super.key,
     required this.entry,
     required this.onChanged,
+    this.extraOptions = const [],
   });
 
   @override
@@ -27,6 +32,11 @@ class EnvironmentSafetySection extends StatefulWidget {
 class _EnvironmentSafetySectionState extends State<EnvironmentSafetySection> {
   bool _addingCustom = false;
 
+  List<String> get _options => [
+    ...kEnvironmentSafetyOptions,
+    ...widget.extraOptions,
+  ];
+
   void _addCustomValue() {
     final value = widget.entry.environmentSafetyOtherController.text.trim();
     if (value.isEmpty) return;
@@ -34,11 +44,9 @@ class _EnvironmentSafetySectionState extends State<EnvironmentSafetySection> {
     // whatever custom values this animal already has.
     final alreadyPresent =
         widget.entry.environmentSafety.any(
-          (v) => v.toLowerCase() == value.toLowerCase(),
+              (v) => v.toLowerCase() == value.toLowerCase(),
         ) ||
-        kEnvironmentSafetyOptions.any(
-          (v) => v.toLowerCase() == value.toLowerCase(),
-        );
+            _options.any((v) => v.toLowerCase() == value.toLowerCase());
     if (alreadyPresent) {
       widget.entry.environmentSafetyOtherController.clear();
       setState(() => _addingCustom = false);
@@ -56,7 +64,7 @@ class _EnvironmentSafetySectionState extends State<EnvironmentSafetySection> {
     // Custom values are whatever's in the set beyond the predefined list —
     // shown as their own removable chips alongside it.
     final customValues = entry.environmentSafety
-        .where((v) => !kEnvironmentSafetyOptions.contains(v))
+        .where((v) => !_options.contains(v))
         .toList();
 
     return Column(
@@ -75,7 +83,7 @@ class _EnvironmentSafetySectionState extends State<EnvironmentSafetySection> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final option in kEnvironmentSafetyOptions)
+            for (final option in _options)
               GestureDetector(
                 onTap: () {
                   setState(() {

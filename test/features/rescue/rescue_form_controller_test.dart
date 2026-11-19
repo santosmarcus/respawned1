@@ -204,6 +204,14 @@ void main() {
     form.abandonmentCanProvideFood = 'Yes';
     expect(form.validateRescueReport(), isNull);
 
+    form.abandonmentLocation = kAbandonmentLocationOther;
+    expect(
+      form.validateRescueReport(),
+      'Please specify where the animal was left.',
+    );
+    form.abandonmentLocationOtherController.text = 'Under a bridge';
+    expect(form.validateRescueReport(), isNull);
+
     form
       ..abandonmentFoodWater = 'Yes'
       ..abandonmentCanProvideFood = null;
@@ -211,12 +219,35 @@ void main() {
     expect(form.validateRescueReport(), isNull);
   });
 
-  test('Neglect or Abuse is no longer a rescue type', () {
-    expect(
-      kRescueTypeOptions.map((o) => o['label']),
-      isNot(contains('Neglect or Abuse')),
-    );
-    expect(urgencyForRescueType('Neglect or Abuse'), isNull);
+  test('Neglect or Abuse is a Critical rescue type', () {
+    expect(urgencyForRescueType('Neglect or Abuse'), 'Critical');
+  });
+
+  test('neglect or abuse requires its follow-up answers', () {
+    final form = _form()
+      ..selectedRescueType = 'Neglect or Abuse'
+      ..selectedUrgency = 'Critical'
+      ..onSiteChoice = 'No, I am reporting remotely'
+      ..coordinateChoice = 'yes'
+      ..adoptionChoice = 'no';
+    form.conditionController.text = 'Chained, thin';
+    form.foundAnimals.first.species = kDogSpecies;
+    expect(form.validateRescueReport(), 'Please fill in all required fields.');
+
+    form
+      ..neglectHappeningNow = 'No'
+      ..neglectOwnerKnown = 'Yes'
+      ..neglectFrequency = 'Ongoing for weeks or longer'
+      ..neglectReportedToAuthorities = 'No'
+      ..neglectWillingWitness = 'Yes';
+    expect(form.validateRescueReport(), 'Please fill in all required fields.');
+    form.neglectObserved.add('Constantly chained or caged');
+    expect(form.validateRescueReport(), isNull);
+
+    form.neglectObserved.add(kNeglectObservedOther);
+    expect(form.validateRescueReport(), 'Please describe what you are seeing.');
+    form.neglectObservedOtherController.text = 'Ears cropped';
+    expect(form.validateRescueReport(), isNull);
   });
 
   test('every report needs the truthfulness declaration', () {
@@ -253,6 +284,27 @@ void main() {
         expect(entry.isAssessmentComplete(isSurrender: true), isTrue);
         expect(entry.hasCompleteAssessment, isFalse);
       });
+
+  test('neglect cards need harm signs and medical attention', () {
+    final entry = FoundAnimalEntry()
+      ..bodyCondition = 'a'
+      ..mobility = 'a'
+      ..alertness = 'a'
+      ..eyesNoseMouth = 'a'
+      ..skinAndCoat = 'a'
+      ..appetiteHydration = 'a'
+      ..biteRisk = 'Low'
+      ..escapeRisk = 'Low';
+    addTearDown(entry.dispose);
+    entry.behavior.add('Calm');
+    entry.environmentSafety.add('Exposed to sun or rain');
+    expect(entry.hasCompleteAssessment, isTrue);
+    expect(entry.isAssessmentComplete(isNeglectAbuse: true), isFalse);
+    entry.harmSigns.add(kNeglectSignsNone);
+    expect(entry.isAssessmentComplete(isNeglectAbuse: true), isFalse);
+    entry.needsMedical = 'Not sure';
+    expect(entry.isAssessmentComplete(isNeglectAbuse: true), isTrue);
+  });
 
   test('FoundAnimalEntry.breedText resolves "Others" to the typed breed', () {
     final entry = FoundAnimalEntry();
