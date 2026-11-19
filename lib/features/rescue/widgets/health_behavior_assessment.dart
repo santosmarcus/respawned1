@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
+import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 import 'package:respawnd1/features/rescue/widgets/environment_safety_section.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 
@@ -19,21 +20,34 @@ class HealthBehaviorAssessment extends StatelessWidget {
     super.key,
     required this.entry,
     required this.onChanged,
-    this.showEnvironmentSafety = true,
+    this.isSurrender = false,
   });
 
   final FoundAnimalEntry entry;
   final VoidCallback onChanged;
 
-  /// False on Pet Surrender: the owner has the pet at home, so the
-  /// Environment and Safety questions do not apply.
-  final bool showEnvironmentSafety;
+  /// Pet Surrender: hides Environment and Safety (the owner has the pet at
+  /// home) and adds the owner's health records, acquisition, length of
+  /// stay and compatibility questions for this animal.
+  final bool isSurrender;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
   void _set(VoidCallback fn) {
     fn();
     onChanged();
+  }
+
+  // "Not sure" and the specific compatibility answers exclude each other.
+  void _toggleCompatibility(String option) {
+    final set = entry.compatibility;
+    if (set.remove(option)) return;
+    if (option == kSurrenderCompatibilityUnknown) {
+      set.clear();
+    } else {
+      set.remove(kSurrenderCompatibilityUnknown);
+    }
+    set.add(option);
   }
 
   @override
@@ -91,6 +105,38 @@ class HealthBehaviorAssessment extends StatelessWidget {
           options: kAppetiteHydrationOptions,
           onChanged: (v) => _set(() => entry.appetiteHydration = v),
         ),
+        if (isSurrender) ...[
+          const SizedBox(height: 10),
+          AssessmentDropdown(
+            hintText: 'Vaccination status',
+            value: entry.vaccination,
+            options: kSurrenderVaccinationOptions,
+            onChanged: (v) => _set(() => entry.vaccination = v),
+          ),
+          const SizedBox(height: 10),
+          AssessmentDropdown(
+            hintText: 'Spayed / Neutered',
+            value: entry.spayNeuter,
+            options: kSurrenderSpayNeuterOptions,
+            onChanged: (v) => _set(() => entry.spayNeuter = v),
+          ),
+          const SizedBox(height: 10),
+          AssessmentDropdown(
+            hintText: 'Where did you acquire this pet?',
+            value: entry.acquisitionSource,
+            options: kAcquisitionSourceOptions,
+            onChanged: (v) => _set(() => entry.acquisitionSource = v),
+          ),
+          if (entry.isRescueOrgAcquisition) ...[
+            const SizedBox(height: 10),
+            const _RescueOrgNotice(),
+          ],
+          const SizedBox(height: 10),
+          RescueTextField(
+            entry.stayDurationController,
+            'How long has the pet stayed with you? (e.g. 2 years)',
+          ),
+        ],
         const SizedBox(height: 12),
         Text(
           'Behavior',
@@ -131,11 +177,70 @@ class HealthBehaviorAssessment extends StatelessWidget {
               ),
           ],
         ),
-        if (showEnvironmentSafety) ...[
+        if (isSurrender) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Gets along with',
+            style: GoogleFonts.zain(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in kSurrenderCompatibilityOptions)
+                RescueToggleChip(
+                  label: option,
+                  selected: entry.compatibility.contains(option),
+                  onTap: () => _set(() => _toggleCompatibility(option)),
+                ),
+            ],
+          ),
+        ] else ...[
           const SizedBox(height: 12),
           EnvironmentSafetySection(entry: entry, onChanged: () => _set(() {})),
         ],
       ],
+    );
+  }
+}
+
+/// Shown when the pet came from another rescue organization.
+class _RescueOrgNotice extends StatelessWidget {
+  const _RescueOrgNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.yellowrspwn.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Pets adopted from a rescue organization are usually covered '
+                  'by a return agreement. Please contact the organization you '
+                  'adopted from so they can arrange the return directly.',
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

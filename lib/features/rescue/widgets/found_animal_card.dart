@@ -15,15 +15,15 @@ class FoundAnimalList extends StatelessWidget {
     super.key,
     required this.animals,
     required this.onChanged,
-    this.showEnvironmentSafety = true,
+    this.isSurrender = false,
   });
 
   /// The form's live list; cards are added/removed in place.
   final List<FoundAnimalEntry> animals;
   final VoidCallback onChanged;
 
-  /// Passed to each card; false hides Environment and Safety.
-  final bool showEnvironmentSafety;
+  /// Passed to each card; true shows the Pet Surrender questions.
+  final bool isSurrender;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -48,7 +48,7 @@ class FoundAnimalList extends StatelessWidget {
               _set(() => animals.removeAt(i));
             },
             onChanged: onChanged,
-            showEnvironmentSafety: showEnvironmentSafety,
+            isSurrender: isSurrender,
           ),
         Align(
           alignment: Alignment.centerLeft,
@@ -81,7 +81,7 @@ class FoundAnimalCard extends StatelessWidget {
     required this.canRemove,
     required this.onRemove,
     required this.onChanged,
-    this.showEnvironmentSafety = true,
+    this.isSurrender = false,
   });
 
   final FoundAnimalEntry entry;
@@ -89,7 +89,7 @@ class FoundAnimalCard extends StatelessWidget {
   final bool canRemove;
   final VoidCallback onRemove;
   final VoidCallback onChanged;
-  final bool showEnvironmentSafety;
+  final bool isSurrender;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -209,6 +209,13 @@ class FoundAnimalCard extends StatelessWidget {
               ),
             ],
           ),
+          if (isSurrender) ...[
+            const SizedBox(height: 10),
+            RescueTextField(
+              entry.ageController,
+              'Age (e.g. 3 years old, 6 months)',
+            ),
+          ],
           const SizedBox(height: 10),
           RescueTextField(
             entry.colorController,
@@ -226,7 +233,9 @@ class FoundAnimalCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Complete the Health & Behavior Assessment for this animal.',
+                    isSurrender
+                        ? 'Complete all details for this animal.'
+                        : 'Complete the Health & Behavior Assessment for this animal.',
                     style: GoogleFonts.zain(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -241,7 +250,7 @@ class FoundAnimalCard extends StatelessWidget {
           HealthBehaviorAssessment(
             entry: entry,
             onChanged: onChanged,
-            showEnvironmentSafety: showEnvironmentSafety,
+            isSurrender: isSurrender,
           ),
           const SizedBox(height: 14),
           Text(

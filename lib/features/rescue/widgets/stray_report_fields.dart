@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
+import 'package:respawnd1/features/rescue/widgets/abandonment_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/found_animal_card.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 import 'package:respawnd1/core/utils/validators.dart';
@@ -96,13 +97,18 @@ class StrayReportFields extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Found more than one? Add each animal below — they will '
-          'be tracked together as one case.',
+              'be tracked together as one case.',
           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 10),
         FoundAnimalList(animals: form.foundAnimals, onChanged: onChanged),
 
         const SizedBox(height: 20),
+
+        if (form.isAbandonmentType) ...[
+          AbandonmentFields(form: form, onChanged: onChanged),
+          const SizedBox(height: 20),
+        ],
 
         // On-site presence
         RescueFieldLabel(
@@ -113,12 +119,12 @@ class StrayReportFields extends StatelessWidget {
         RescueRadioOption(
           'Yes, I am on-site',
           form.onSiteChoice,
-          (val) => _set(() => form.onSiteChoice = val),
+              (val) => _set(() => form.onSiteChoice = val),
         ),
         RescueRadioOption(
           'No, I am reporting remotely',
           form.onSiteChoice,
-          (val) => _set(() => form.onSiteChoice = val),
+              (val) => _set(() => form.onSiteChoice = val),
         ),
 
         const SizedBox(height: 20),
@@ -395,10 +401,10 @@ class StrayReportFields extends StatelessWidget {
               Expanded(
                 child: Text(
                   'By agreeing to this, you confirm that you are '
-                  'willing to cover any necessary veterinary '
-                  'expenses, participate in the adoption interview '
-                  'process, comply with the adoption agreement, and '
-                  'provide post-adoption updates as required.',
+                      'willing to cover any necessary veterinary '
+                      'expenses, participate in the adoption interview '
+                      'process, comply with the adoption agreement, and '
+                      'provide post-adoption updates as required.',
                   style: GoogleFonts.zain(
                     fontWeight: FontWeight.w600,
                     fontSize: 16,
@@ -420,8 +426,8 @@ class StrayReportFields extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             'Once the animal is in treatment, the organization will '
-            'visit you at the veterinary clinic to discuss the '
-            'adoption process with you.',
+                'visit you at the veterinary clinic to discuss the '
+                'adoption process with you.',
             style: GoogleFonts.zain(
               fontSize: 11,
               color: AppColors.textSecondary,
@@ -430,8 +436,8 @@ class StrayReportFields extends StatelessWidget {
           const SizedBox(height: 8),
           GestureDetector(
             onTap: () => _set(
-              () => form.adoptionCommitmentAccepted =
-                  !form.adoptionCommitmentAccepted,
+                  () => form.adoptionCommitmentAccepted =
+              !form.adoptionCommitmentAccepted,
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -442,7 +448,7 @@ class StrayReportFields extends StatelessWidget {
                   child: Checkbox(
                     value: form.adoptionCommitmentAccepted,
                     onChanged: (val) => _set(
-                      () => form.adoptionCommitmentAccepted = val ?? false,
+                          () => form.adoptionCommitmentAccepted = val ?? false,
                     ),
                     activeColor: AppColors.textPrimary,
                     side: const BorderSide(

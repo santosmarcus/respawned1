@@ -108,6 +108,36 @@ const List<String> kSurrenderTimelineOptions = [
 // Most vet records a reporter can attach to a surrender.
 const int kMaxVetRecordPhotos = 3;
 
+// Abandonment: follow-up questions shown only for that rescue type.
+const String kAbandonmentType = 'Abandonment';
+
+const List<String> kAbandonmentDurationOptions = [
+  'Less than 24 hours',
+  '1–3 days',
+  'More than 3 days',
+  'Not sure',
+];
+
+const String kAbandonmentLocationOther = 'Others (please specify)';
+
+const List<String> kAbandonmentLocationOptions = [
+  'Inside a locked house or property',
+  'Tied or caged outside',
+  'Dumped in a box or sack',
+  'Roaming freely',
+  kAbandonmentLocationOther,
+];
+
+const List<String> kAbandonmentFoodWaterOptions = ['Yes', 'No', 'Unknown'];
+
+const List<String> kYesNoOptions = ['Yes', 'No'];
+
+const List<String> kAbandonmentWitnessOptions = [
+  'I saw it happen',
+  'Neighbors told me',
+  'I found the animal alone',
+];
+
 // Rescue Type options — each type carries its own inherent urgency level,
 // so reporters are no longer asked to separately self-assess urgency.
 const List<Map<String, String>> kRescueTypeOptions = [

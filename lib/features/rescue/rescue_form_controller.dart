@@ -49,6 +49,18 @@ class FoundAnimalEntry {
   String? biteRisk;
   String? escapeRisk;
 
+  // Pet Surrender only — asked per animal inside its card.
+  final TextEditingController ageController = TextEditingController();
+  final TextEditingController stayDurationController = TextEditingController();
+  String? acquisitionSource;
+  String? vaccination;
+  String? spayNeuter;
+  final Set<String> compatibility = {};
+
+  /// Came from another rescue org: the surrender flow stops and the owner
+  /// is redirected back to that org instead.
+  bool get isRescueOrgAcquisition => acquisitionSource == 'Rescue Org';
+
   // Scroll target + error-highlight flag for this animal's card — set on a
   // failed submit so the form can scroll to and visually flag exactly
   // which animal still needs its Health & Behavior Assessment completed,
@@ -58,10 +70,10 @@ class FoundAnimalEntry {
 
   bool get hasCompleteAssessment => isAssessmentComplete();
 
-  /// Whether every assessment field is answered. Pet Surrender hides the
-  /// Environment and Safety section (the owner has the pet at home), so
-  /// that form passes [requireEnvironmentSafety] false.
-  bool isAssessmentComplete({bool requireEnvironmentSafety = true}) =>
+  /// Whether every field in this animal's card is answered. On Pet
+  /// Surrender ([isSurrender]) Environment and Safety is hidden (the owner
+  /// has the pet at home) and the surrender questions are required instead.
+  bool isAssessmentComplete({bool isSurrender = false}) =>
       bodyCondition != null &&
           mobility != null &&
           alertness != null &&
@@ -69,14 +81,24 @@ class FoundAnimalEntry {
           skinAndCoat != null &&
           appetiteHydration != null &&
           behavior.isNotEmpty &&
-          (!requireEnvironmentSafety || environmentSafety.isNotEmpty) &&
           biteRisk != null &&
-          escapeRisk != null;
+          escapeRisk != null &&
+          (isSurrender ? hasSurrenderDetails : environmentSafety.isNotEmpty);
+
+  bool get hasSurrenderDetails =>
+      ageController.text.trim().isNotEmpty &&
+          stayDurationController.text.trim().isNotEmpty &&
+          acquisitionSource != null &&
+          vaccination != null &&
+          spayNeuter != null &&
+          compatibility.isNotEmpty;
 
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
     environmentSafetyOtherController.dispose();
+    ageController.dispose();
+    stayDurationController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -149,18 +171,13 @@ class RescueFormController {
   }
 
   // Pet Surrender — its own distinct question set (see SurrenderFields).
-  final TextEditingController surrenderDurationController =
-  TextEditingController();
-  final TextEditingController surrenderAgeController = TextEditingController();
+  // Age, stay, acquisition, vaccination, spay/neuter and compatibility are
+  // asked per animal (FoundAnimalEntry).
   String? surrenderReason;
   final TextEditingController surrenderReasonOtherController =
   TextEditingController();
   final TextEditingController surrenderExplanationController =
   TextEditingController();
-  String? petAcquisitionSource;
-  String? surrenderVaccination;
-  String? surrenderSpayNeuter;
-  final Set<String> surrenderCompatibility = {};
   String? surrenderTimeline;
 
   /// Optional photos of vaccination cards or vet records (Pet Surrender).
@@ -180,13 +197,34 @@ class RescueFormController {
   // Once the pet came from another rescue org, this flow is meant to stop
   // here and redirect the owner back to that org rather than collect a
   // full surrender case for this one.
-  bool get isRescueOrgAcquisition => petAcquisitionSource == 'Rescue Org';
+  bool get isRescueOrgAcquisition =>
+      foundAnimals.any((a) => a.isRescueOrgAcquisition);
 
   // Finder-side: one card per animal found (supports a multi-animal group case)
   final List<FoundAnimalEntry> foundAnimals = [FoundAnimalEntry()];
   final TextEditingController finderContactController = TextEditingController();
   String? animalStatus; // 'with_finder' | 'still_roaming' | 'brought_to_vet'
   bool finderNeedsRescue = false;
+
+  // Abandonment — follow-up questions (see AbandonmentFields).
+  String? abandonmentDuration;
+  String? abandonmentLocation;
+  final TextEditingController abandonmentLocationOtherController =
+  TextEditingController();
+  String? abandonmentFoodWater;
+  String? abandonmentCanProvideFood;
+  String? abandonmentWitness;
+  final TextEditingController abandonmentWitnessDetailsController =
+  TextEditingController();
+  String? abandonmentBelongings;
+  final TextEditingController abandonmentBelongingsDetailsController =
+  TextEditingController();
+
+  bool get isAbandonmentType => selectedRescueType == kAbandonmentType;
+
+  /// Only asked when the animal may be without food or water.
+  bool get asksAbandonmentCanProvideFood =>
+      abandonmentFoodWater != null && abandonmentFoodWater != 'Yes';
 
   bool get isLostPetType => selectedRescueType == 'Lost Pet';
   bool get isPetSurrenderType => selectedRescueType == 'Pet Surrender';
@@ -219,13 +257,7 @@ class RescueFormController {
       if (condition.isEmpty ||
           selectedUrgency == null ||
           valid.isEmpty ||
-          surrenderDurationController.text.trim().isEmpty ||
-          surrenderAgeController.text.trim().isEmpty ||
           surrenderReason == null ||
-          petAcquisitionSource == null ||
-          surrenderVaccination == null ||
-          surrenderSpayNeuter == null ||
-          surrenderCompatibility.isEmpty ||
           surrenderTimeline == null) {
         return 'Please fill in all required fields.';
       }
@@ -245,6 +277,22 @@ class RescueFormController {
         coordinateChoice == null ||
         adoptionChoice == null) {
       return 'Please fill in all required fields.';
+    }
+
+    if (isAbandonmentType &&
+        (abandonmentDuration == null ||
+            abandonmentLocation == null ||
+            abandonmentFoodWater == null ||
+            (asksAbandonmentCanProvideFood &&
+                abandonmentCanProvideFood == null) ||
+            abandonmentWitness == null ||
+            abandonmentBelongings == null)) {
+      return 'Please fill in all required fields.';
+    }
+    if (isAbandonmentType &&
+        abandonmentLocation == kAbandonmentLocationOther &&
+        abandonmentLocationOtherController.text.trim().isEmpty) {
+      return 'Please specify where the animal was left.';
     }
 
     if (!isPetSurrenderType &&
@@ -337,9 +385,10 @@ class RescueFormController {
     rewardAmountController.dispose();
     ownerContactController.dispose();
     finderContactController.dispose();
-    surrenderDurationController.dispose();
-    surrenderAgeController.dispose();
     surrenderReasonOtherController.dispose();
+    abandonmentWitnessDetailsController.dispose();
+    abandonmentLocationOtherController.dispose();
+    abandonmentBelongingsDetailsController.dispose();
     surrenderExplanationController.dispose();
     for (final a in foundAnimals) {
       a.dispose();

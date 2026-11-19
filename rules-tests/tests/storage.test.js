@@ -34,6 +34,17 @@ describe('storage', () => {
     await assertSucceeds(upload('stranger', 'cases/ownedA/communityReports/r1.jpg'));
   });
 
+  test("lost/found pet alert media: only the alert's reporter uploads", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('petAlerts/alert1').set({ type: 'lost', reporterId: 'reporter' });
+    });
+    await assertSucceeds(upload('reporter', 'petAlerts/alert1/media_0.jpg'));
+    await assertFails(upload('stranger', 'petAlerts/alert1/media_0.jpg'));
+    await assertFails(upload('reporter', 'petAlerts/missing/media_0.jpg'));
+    // The old path never matched a case, so it stays refused.
+    await assertFails(upload('reporter', 'cases/lostpet_alert1/media_0.jpg'));
+  });
+
   test('profile photos are the owner\'s', async () => {
     await assertSucceeds(upload('reporter', 'users/reporter/profile.jpg'));
     await assertFails(upload('stranger', 'users/reporter/profile.jpg'));

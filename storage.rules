@@ -133,6 +133,17 @@ service firebase.storage {
       allow write: if isSelf(uid) && mediaUpload();
     }
 
+    // ---- Lost / found pet alerts --------------------------------------------
+
+    // rescue_report_service.dart (submitLostPetReport) — photos and videos
+    // for a lost or found pet alert, stored under the group's first alert.
+    // Only that alert's reporter uploads; anyone signed in can view them.
+    match /petAlerts/{alertId}/{file} {
+      allow read: if signedIn();
+      allow write: if signedIn() && mediaUpload() &&
+        firestore.get(/databases/(default)/documents/petAlerts/$(alertId)).data.get('reporterId', '') == request.auth.uid;
+    }
+
     // ---- Rescue cases --------------------------------------------------------
 
     match /cases/{caseId} {

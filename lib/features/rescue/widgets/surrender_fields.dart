@@ -45,23 +45,6 @@ class SurrenderFields extends StatelessWidget {
     _set(() => form.vetRecordPhotos.addAll(picked.take(remaining)));
   }
 
-  void _toggleCompatibility(String option) {
-    _set(() {
-      final set = form.surrenderCompatibility;
-      if (set.contains(option)) {
-        set.remove(option);
-        return;
-      }
-      // "Not sure" and the specific answers exclude each other.
-      if (option == kSurrenderCompatibilityUnknown) {
-        set.clear();
-      } else {
-        set.remove(kSurrenderCompatibilityUnknown);
-      }
-      set.add(option);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -85,75 +68,13 @@ class SurrenderFields extends StatelessWidget {
         FoundAnimalList(
           animals: form.foundAnimals,
           onChanged: onChanged,
-          showEnvironmentSafety: false,
+          isSurrender: true,
         ),
         const SizedBox(height: 20),
-
-        RescueFieldLabel(
-          'How long has the pet been staying with you?',
-          required: true,
-        ),
-        const SizedBox(height: 6),
-        RescueTextField(
-          form.surrenderDurationController,
-          'e.g. 2 years, since it was a puppy',
-        ),
-        const SizedBox(height: 20),
-
-        RescueFieldLabel('Age of the pet', required: true),
-        const SizedBox(height: 6),
-        RescueTextField(
-          form.surrenderAgeController,
-          'e.g. 3 years old, 6 months',
-          keyboardType: TextInputType.text,
-        ),
-        const SizedBox(height: 20),
-
-        RescueFieldLabel('Where did you acquire this pet?', required: true),
-        const SizedBox(height: 6),
-        _SurrenderDropdown(
-          field: 'acquisitionSource',
-          value: form.petAcquisitionSource,
-          hint: 'Select source',
-          options: kAcquisitionSourceOptions,
-          onChanged: (v) => _set(() => form.petAcquisitionSource = v),
-        ),
-        if (form.isRescueOrgAcquisition) ...[
-          const SizedBox(height: 12),
-          const _NoticeBox(
-            icon: Icons.info_outline,
-            text:
-            'Pets adopted from a rescue organization are usually covered '
-                'by a return agreement. Please contact the organization you '
-                'adopted from so they can arrange the return directly.',
-          ),
-        ],
-        const SizedBox(height: 28),
 
         // ---- Health records ------------------------------------------------
         const _SectionTitle('Health Records'),
         const SizedBox(height: 14),
-
-        RescueFieldLabel('Vaccination status', required: true),
-        const SizedBox(height: 6),
-        _SurrenderDropdown(
-          field: 'vaccination',
-          value: form.surrenderVaccination,
-          hint: 'Select vaccination status',
-          options: kSurrenderVaccinationOptions,
-          onChanged: (v) => _set(() => form.surrenderVaccination = v),
-        ),
-        const SizedBox(height: 20),
-
-        RescueFieldLabel('Is the pet spayed or neutered?', required: true),
-        const SizedBox(height: 4),
-        for (final option in kSurrenderSpayNeuterOptions)
-          RescueRadioOption(
-            option,
-            form.surrenderSpayNeuter,
-                (v) => _set(() => form.surrenderSpayNeuter = v),
-          ),
-        const SizedBox(height: 20),
 
         RescueFieldLabel('Vaccination card or vet records (optional)'),
         const SizedBox(height: 4),
@@ -175,32 +96,6 @@ class SurrenderFields extends StatelessWidget {
               ),
             if (form.vetRecordPhotos.length < kMaxVetRecordPhotos)
               _AddRecordTile(onTap: _addVetRecords),
-          ],
-        ),
-        const SizedBox(height: 28),
-
-        // ---- Behavior ------------------------------------------------------
-        const _SectionTitle('Behavior'),
-        const SizedBox(height: 14),
-
-        RescueFieldLabel('How does the pet get along with others?',
-            required: true),
-        const SizedBox(height: 4),
-        Text(
-          'Select all that apply.',
-          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final option in kSurrenderCompatibilityOptions)
-              RescueToggleChip(
-                label: option,
-                selected: form.surrenderCompatibility.contains(option),
-                onTap: () => _toggleCompatibility(option),
-              ),
           ],
         ),
         const SizedBox(height: 28),
@@ -355,43 +250,6 @@ class _SurrenderDropdown extends StatelessWidget {
           ),
       ],
       onChanged: onChanged,
-    );
-  }
-}
-
-/// Yellow information box used for guidance inside the form.
-class _NoticeBox extends StatelessWidget {
-  const _NoticeBox({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.yellowrspwn.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: AppColors.textPrimary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: GoogleFonts.zain(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

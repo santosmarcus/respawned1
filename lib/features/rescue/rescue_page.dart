@@ -855,12 +855,12 @@ class _RescuePageState extends State<RescuePage> {
     }
     for (var i = 0; i < validAnimals.length; i++) {
       final entry = validAnimals[i];
-      if (!entry.isAssessmentComplete(
-        requireEnvironmentSafety: !_form.isPetSurrenderType,
-      )) {
+      if (!entry.isAssessmentComplete(isSurrender: _form.isPetSurrenderType)) {
         setState(() => entry.hasAssessmentError = true);
         _showError(
-          'Complete the Health & Behavior Assessment for Animal ${i + 1}.',
+          _form.isPetSurrenderType
+              ? 'Complete all details for Animal ${i + 1}.'
+              : 'Complete the Health & Behavior Assessment for Animal ${i + 1}.',
         );
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final cardContext = entry.cardKey.currentContext;

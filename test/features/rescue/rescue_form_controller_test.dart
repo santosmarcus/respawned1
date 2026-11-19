@@ -142,14 +142,8 @@ void main() {
         ..selectedRescueType = 'Pet Surrender'
         ..selectedUrgency = 'Low'
         ..surrenderReason = 'Other (please specify)'
-        ..petAcquisitionSource = 'Breeder'
-        ..surrenderVaccination = 'Unknown'
-        ..surrenderSpayNeuter = 'No'
         ..surrenderTimeline = 'Within a month';
-      form.surrenderCompatibility.add('Good with children');
       form.conditionController.text = 'Healthy';
-      form.surrenderDurationController.text = '2 years';
-      form.surrenderAgeController.text = '3 years old';
       form.foundAnimals.first.species = kCatSpecies;
       expect(
         form.validateRescueReport(),
@@ -167,28 +161,55 @@ void main() {
     });
   });
 
-  test('surrender requires the health, compatibility and timeline answers',
-          () {
-        final form = _form()
-          ..selectedRescueType = 'Pet Surrender'
-          ..selectedUrgency = 'Low'
-          ..surrenderReason = 'Lack of time'
-          ..petAcquisitionSource = 'Breeder';
-        form.conditionController.text = 'Healthy';
-        form.surrenderDurationController.text = '2 years';
-        form.surrenderAgeController.text = '3 years old';
-        form.foundAnimals.first.species = kDogSpecies;
-        expect(form.validateRescueReport(), 'Please fill in all required fields.');
+  test('surrender requires the reason and timeline', () {
+    final form = _form()
+      ..selectedRescueType = 'Pet Surrender'
+      ..selectedUrgency = 'Low'
+      ..surrenderReason = 'Lack of time';
+    form.conditionController.text = 'Healthy';
+    form.foundAnimals.first.species = kDogSpecies;
+    expect(form.validateRescueReport(), 'Please fill in all required fields.');
+    form.surrenderTimeline = 'Flexible';
+    expect(form.validateRescueReport(), isNull);
+  });
 
-        form
-          ..surrenderVaccination = 'Fully vaccinated (up to date)'
-          ..surrenderSpayNeuter = 'Yes'
-          ..surrenderTimeline = 'Flexible';
-        expect(form.validateRescueReport(), 'Please fill in all required fields.');
+  test('a rescue-org acquisition on any animal stops the surrender', () {
+    final form = _form()..selectedRescueType = 'Pet Surrender';
+    form.foundAnimals.add(FoundAnimalEntry());
+    expect(form.isRescueOrgAcquisition, isFalse);
+    form.foundAnimals.last.acquisitionSource = 'Rescue Org';
+    expect(form.isRescueOrgAcquisition, isTrue);
+  });
 
-        form.surrenderCompatibility.add(kSurrenderCompatibilityUnknown);
-        expect(form.validateRescueReport(), isNull);
-      });
+  test('abandonment requires its follow-up answers', () {
+    final form = _form()
+      ..selectedRescueType = 'Abandonment'
+      ..selectedUrgency = 'Medium'
+      ..onSiteChoice = 'Yes, I am on-site'
+      ..coordinateChoice = 'yes'
+      ..adoptionChoice = 'no';
+    form.conditionController.text = 'Thin, scared';
+    form.foundAnimals.first.species = kDogSpecies;
+    expect(form.validateRescueReport(), 'Please fill in all required fields.');
+
+    form
+      ..abandonmentDuration = '1–3 days'
+      ..abandonmentLocation = 'Tied or caged outside'
+      ..abandonmentFoodWater = 'No'
+      ..abandonmentWitness = 'I found the animal alone'
+      ..abandonmentBelongings = 'No';
+    // No food or water: asks whether the reporter can provide some.
+    expect(form.asksAbandonmentCanProvideFood, isTrue);
+    expect(form.validateRescueReport(), 'Please fill in all required fields.');
+    form.abandonmentCanProvideFood = 'Yes';
+    expect(form.validateRescueReport(), isNull);
+
+    form
+      ..abandonmentFoodWater = 'Yes'
+      ..abandonmentCanProvideFood = null;
+    expect(form.asksAbandonmentCanProvideFood, isFalse);
+    expect(form.validateRescueReport(), isNull);
+  });
 
   test('Neglect or Abuse is no longer a rescue type', () {
     expect(
@@ -205,21 +226,33 @@ void main() {
     expect(form.validateDeclaration(), isNull);
   });
 
-  test('environment and safety can be skipped for surrender', () {
-    final entry = FoundAnimalEntry()
-      ..bodyCondition = 'a'
-      ..mobility = 'a'
-      ..alertness = 'a'
-      ..eyesNoseMouth = 'a'
-      ..skinAndCoat = 'a'
-      ..appetiteHydration = 'a'
-      ..biteRisk = 'Low'
-      ..escapeRisk = 'Low';
-    addTearDown(entry.dispose);
-    entry.behavior.add('Calm');
-    expect(entry.hasCompleteAssessment, isFalse);
-    expect(entry.isAssessmentComplete(requireEnvironmentSafety: false), isTrue);
-  });
+  test('surrender cards need their own details instead of environment',
+          () {
+        final entry = FoundAnimalEntry()
+          ..bodyCondition = 'a'
+          ..mobility = 'a'
+          ..alertness = 'a'
+          ..eyesNoseMouth = 'a'
+          ..skinAndCoat = 'a'
+          ..appetiteHydration = 'a'
+          ..biteRisk = 'Low'
+          ..escapeRisk = 'Low';
+        addTearDown(entry.dispose);
+        entry.behavior.add('Calm');
+        expect(entry.hasCompleteAssessment, isFalse);
+        expect(entry.isAssessmentComplete(isSurrender: true), isFalse);
+
+        entry
+          ..acquisitionSource = 'Breeder'
+          ..vaccination = 'Unknown'
+          ..spayNeuter = 'No';
+        entry.ageController.text = '3 years old';
+        entry.stayDurationController.text = '2 years';
+        expect(entry.isAssessmentComplete(isSurrender: true), isFalse);
+        entry.compatibility.add(kSurrenderCompatibilityUnknown);
+        expect(entry.isAssessmentComplete(isSurrender: true), isTrue);
+        expect(entry.hasCompleteAssessment, isFalse);
+      });
 
   test('FoundAnimalEntry.breedText resolves "Others" to the typed breed', () {
     final entry = FoundAnimalEntry();

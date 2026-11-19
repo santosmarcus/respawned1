@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
+import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 /// Per-slot upload progress callback: [progress] is 0..1 while uploading
 /// and null once that slot has finished.
@@ -25,11 +26,15 @@ class RescueReportService {
 
   final FirebaseFirestore _db;
 
-  /// Uploads every non-empty media slot to `cases/<caseId>/media_<i>.<ext>`.
+  /// Uploads every non-empty media slot to `<folder>/<id>/media_<i>.<ext>`.
+  /// [folder] is `cases` for rescue cases and `petAlerts` for lost/found
+  /// pet alerts; storage.rules checks the matching Firestore doc's
+  /// reporter, so the two must never be mixed.
   Future<({List<String> photoUrls, List<String> videoUrls})> uploadMedia(
       List<RescueMediaItem?> mediaFiles,
       String caseId, {
         required MediaUploadProgress onProgress,
+        String folder = 'cases',
       }) async {
     final photoUrls = <String>[];
     final videoUrls = <String>[];
@@ -40,7 +45,7 @@ class RescueReportService {
 
       final ext = item.isVideo ? 'mp4' : 'jpg';
       final ref = FirebaseStorage.instance.ref().child(
-        'cases/$caseId/media_$i.$ext',
+        '$folder/$caseId/media_$i.$ext',
       );
 
       final task = ref.putFile(
@@ -146,6 +151,15 @@ class RescueReportService {
               : animal.environmentSafety.toList(),
           'biteRisk': animal.biteRisk,
           'escapeRisk': animal.escapeRisk,
+          // Pet Surrender — asked per animal inside its card.
+          if (form.isPetSurrenderType) ...{
+            'age': animal.ageController.text.trim(),
+            'stayDuration': animal.stayDurationController.text.trim(),
+            'acquisitionSource': animal.acquisitionSource,
+            'vaccination': animal.vaccination,
+            'spayNeuter': animal.spayNeuter,
+            'compatibility': animal.compatibility.toList(),
+          },
         },
     ];
 
@@ -197,23 +211,28 @@ class RescueReportService {
     'witnessPhone': form.witnessNumberController.text.trim(),
     if (!form.isPetSurrenderType) 'interestedToAdopt': form.adoptionChoice,
     // Pet Surrender's own question set — see SurrenderFields.
-    if (form.isPetSurrenderType)
-    'surrenderDuration': form.surrenderDurationController.text.trim(),
-    if (form.isPetSurrenderType)
-    'surrenderAge': form.surrenderAgeController.text.trim(),
     if (form.isPetSurrenderType) 'surrenderReason': surrenderReasonValue,
     if (form.isPetSurrenderType && form.surrenderNeedsExplanation)
     'surrenderExplanation': form.surrenderExplanationController.text.trim(),
     if (form.isPetSurrenderType)
-    'petAcquisitionSource': form.petAcquisitionSource,
-    if (form.isPetSurrenderType)
-    'surrenderVaccination': form.surrenderVaccination,
-    if (form.isPetSurrenderType)
-    'surrenderSpayNeuter': form.surrenderSpayNeuter,
-    if (form.isPetSurrenderType)
-    'surrenderCompatibility': form.surrenderCompatibility.toList(),
-    if (form.isPetSurrenderType)
     'surrenderTimeline': form.surrenderTimeline,
+    // Abandonment follow-up answers — see AbandonmentFields.
+    if (form.isAbandonmentType) 'abandonment': {
+    'duration': form.abandonmentDuration,
+    'location': form.abandonmentLocation == kAbandonmentLocationOther
+    ? 'Other: ${form.abandonmentLocationOtherController.text.trim()}'
+        : form.abandonmentLocation,
+    'hasFoodWater': form.abandonmentFoodWater,
+    if (form.asksAbandonmentCanProvideFood)
+    'canProvideFoodWater': form.abandonmentCanProvideFood,
+    'witness': form.abandonmentWitness,
+    'witnessDetails':
+    form.abandonmentWitnessDetailsController.text.trim(),
+    'belongingsLeft': form.abandonmentBelongings,
+    if (form.abandonmentBelongings == 'Yes')
+    'belongingsDetails':
+    form.abandonmentBelongingsDetailsController.text.trim(),
+    },
     // The reporter accepted the truthfulness declaration (rescue_page).
     'truthfulnessDeclaredAt': Timestamp.now(),
     'scannedTagId': form.scannedTagId,
@@ -379,11 +398,15 @@ class RescueReportService {
       }
     }
 
-    // Media is shared across the whole group (same sighting/animal(s)).
+    // Media is shared across the whole group (same sighting/animal(s)),
+    // stored under the group's first alert, whose reporter is this user.
+    // (It used to go to cases/lostpet_<id>, which storage.rules refuses
+    // because no case doc has that id.)
     final media = await uploadMedia(
       form.mediaFiles,
-      'lostpet_$groupId',
+      groupId!,
       onProgress: onProgress,
+      folder: 'petAlerts',
     );
     if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
       for (final id in createdDocIds) {
