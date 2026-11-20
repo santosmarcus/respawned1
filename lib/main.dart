@@ -3,7 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-//import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:respawnd1/core/constants/facebook_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
@@ -15,6 +17,7 @@ import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
+import 'package:respawnd1/features/adoption/animal_link_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -42,14 +45,16 @@ void main() async {
   // Foreground push display + notification tap routing (geofence alerts).
   await NotificationService.init(appNavigatorKey);
 
-  /*if (kIsWeb) {
+  // Facebook Page connect (Organization Profile). Android and iOS read the
+  // App ID from strings.xml / Info.plist; the web SDK needs it here.
+  if (kIsWeb) {
     await FacebookAuth.instance.webAndDesktopInitialize(
-      appId: "YOUR_FACEBOOK_APP_ID",
+      appId: FacebookConfig.appId,
       cookie: true,
       xfbml: true,
-      version: "v19.0",
+      version: FacebookConfig.webSdkVersion,
     );
-  }*/
+  }
 
 
   runApp(const ProviderScope(retry: appProviderRetry, child: ResPAWndApp()));
@@ -119,6 +124,10 @@ class _ResPAWndAppState extends State<ResPAWndApp> {
       theme: AppTheme.lightTheme,
       navigatorKey: appNavigatorKey,
       home: const AuthWrapper(), // use this instead of LoginScreen directly
+      // Links into the app (respawnd://open/animal/ID from an animal's public
+      // web page). A cold start opens it over the home screen.
+      onGenerateRoute: animalLinkRoute,
+      onUnknownRoute: unknownLinkRoute,
     );
   }
 }

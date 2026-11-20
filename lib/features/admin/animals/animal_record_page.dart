@@ -14,6 +14,7 @@ import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart' show kAgeGroupOptions, matchesAgeGroup;
 import 'animal_record_detail_page.dart';
+import 'facebook_share_page.dart';
 import 'widgets/link_intake_case_sheet.dart';
 
 // 'Recently Updated' removed — it overlapped with 'Newest Intake' (both
@@ -86,8 +87,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
 
   // Long-press multi-select — keyed by the real AnimalRecord doc id, never
   // a list index, so a selection stays valid even if filtering/sorting
-  // changes what's visible. No bulk actions wired up yet; this just makes
-  // the selection system itself ready for them.
+  // changes what's visible. Bulk action: Share to Facebook.
   final Set<String> _selectedIds = {};
   bool get _selecting => _selectedIds.isNotEmpty;
 
@@ -112,6 +112,14 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   }
 
   void _clearSelection() => setState(_selectedIds.clear);
+
+  Future<void> _shareSelected() async {
+    final all = ref.read(allAnimalRecordsProvider).asData?.value ?? const <AnimalRecord>[];
+    // In the order they appear in the full list, not the order tapped.
+    final picked = all.where((a) => _selectedIds.contains(a.id)).toList();
+    final shared = await openFacebookShare(context, picked);
+    if (shared && mounted) _clearSelection();
+  }
 
   // 'Closed' dropped — it never corresponded to any real AnimalRecord field
   // value (adoptionStatus is only not_ready/adoptable/reserved/adopted/
@@ -506,6 +514,12 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
         titleSize: _selecting ? 16 : 18,
         showLeading: !_selecting,
         actions: [
+          if (_selecting)
+            IconButton(
+              tooltip: 'Share to Facebook',
+              icon: const Icon(Icons.facebook, color: AppColors.background),
+              onPressed: _shareSelected,
+            ),
           if (_selecting)
             // Visible text label, not just a close icon — an icon alone
             // reads ambiguous (could look like "close the page").

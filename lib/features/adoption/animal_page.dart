@@ -236,6 +236,7 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
         children: [
           AnimalImageGallery(
             photoUrls: animal.photoUrls,
+            captions: animal.photoCaptions,
             height: 260,
             backgroundColor: animal.cardColor,
             overlays: [

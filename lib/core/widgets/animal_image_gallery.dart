@@ -14,6 +14,8 @@ import 'package:respawnd1/app_theme.dart';
 /// per-image, never one broken image taking down the whole gallery.
 class AnimalImageGallery extends StatefulWidget {
   final List<String> photoUrls;
+  /// Description per photo, keyed by URL; shown over the bottom of that photo.
+  final Map<String, String> captions;
   final double height;
   final Color backgroundColor;
   /// Optional overlay widgets (back/share/favorite buttons) positioned on
@@ -25,6 +27,7 @@ class AnimalImageGallery extends StatefulWidget {
   const AnimalImageGallery({
     super.key,
     required this.photoUrls,
+    this.captions = const {},
     this.height = 260,
     this.backgroundColor = AppColors.tearspwn,
     this.overlays = const [],
@@ -48,7 +51,11 @@ class _AnimalImageGalleryState extends State<AnimalImageGallery> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => FullscreenImageGallery(photoUrls: widget.photoUrls, initialIndex: initialIndex),
+        builder: (_) => FullscreenImageGallery(
+          photoUrls: widget.photoUrls,
+          captions: widget.captions,
+          initialIndex: initialIndex,
+        ),
         fullscreenDialog: true,
       ),
     );
@@ -62,6 +69,7 @@ class _AnimalImageGalleryState extends State<AnimalImageGallery> {
   @override
   Widget build(BuildContext context) {
     final urls = widget.photoUrls;
+    final caption = urls.isEmpty ? null : widget.captions[urls[_page.clamp(0, urls.length - 1)]];
 
     return SizedBox(
       height: widget.height,
@@ -93,6 +101,30 @@ class _AnimalImageGalleryState extends State<AnimalImageGallery> {
                 ),
               ),
             ),
+          if (caption != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(14, 24, 14, urls.length > 1 ? 40 : 12),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black.withValues(alpha: 0.65)],
+                    ),
+                  ),
+                  child: Text(
+                    caption,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.zain(fontSize: 14, height: 1.2, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
           if (urls.length > 1)
             Positioned(
               bottom: 12,
@@ -118,8 +150,14 @@ class _AnimalImageGalleryState extends State<AnimalImageGallery> {
 
 class FullscreenImageGallery extends StatefulWidget {
   final List<String> photoUrls;
+  final Map<String, String> captions;
   final int initialIndex;
-  const FullscreenImageGallery({super.key, required this.photoUrls, required this.initialIndex});
+  const FullscreenImageGallery({
+    super.key,
+    required this.photoUrls,
+    this.captions = const {},
+    required this.initialIndex,
+  });
 
   @override
   State<FullscreenImageGallery> createState() => FullscreenImageGalleryState();
@@ -158,16 +196,28 @@ class FullscreenImageGalleryState extends State<FullscreenImageGallery> {
                 onPressed: () => Navigator.pop(context),
               ),
             ),
-            if (widget.photoUrls.length > 1)
-              Positioned(
-                bottom: 16,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Text('${_page + 1} / ${widget.photoUrls.length}',
-                      style: GoogleFonts.zain(fontSize: 13, color: Colors.white)),
-                ),
+            Positioned(
+              bottom: 16,
+              left: 16,
+              right: 16,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.captions[widget.photoUrls[_page]] case final caption?)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        caption,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.zain(fontSize: 15, height: 1.25, color: Colors.white),
+                      ),
+                    ),
+                  if (widget.photoUrls.length > 1)
+                    Text('${_page + 1} / ${widget.photoUrls.length}',
+                        style: GoogleFonts.zain(fontSize: 13, color: Colors.white70)),
+                ],
               ),
+            ),
           ],
         ),
       ),

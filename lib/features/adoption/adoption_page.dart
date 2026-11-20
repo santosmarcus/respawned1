@@ -44,6 +44,8 @@ class Animal {
   final String? publicStatus;
   final String? photoUrl;
   final List<String> photoUrls;
+  /// Description per photo, keyed by URL.
+  final Map<String, String> photoCaptions;
 
   Animal({
     required this.id,
@@ -68,6 +70,7 @@ class Animal {
     this.publicStatus,
     this.photoUrl,
     this.photoUrls = const [],
+    this.photoCaptions = const {},
   });
 }
 
@@ -148,6 +151,7 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
     publicStatus: _publicStatusLabel(r),
     photoUrl: r.photoUrls.isNotEmpty ? r.photoUrls.first : null,
     photoUrls: r.photoUrls,
+    photoCaptions: r.photoCaptions,
   );
 }
 

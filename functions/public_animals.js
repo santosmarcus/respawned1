@@ -62,10 +62,16 @@ function publicAnimalOf(data) {
     if (data[key] !== undefined) out[key] = data[key];
   }
   out.photoUrls = photosOf(data);
+  // A description per photo ({url, caption}), for the public photos only.
+  const captions = Array.isArray(data.photoCaptions) ? data.photoCaptions : [];
+  out.photoCaptions = captions.filter((c) =>
+    c && out.photoUrls.includes(c.url) && typeof c.caption === 'string' && c.caption.trim(),
+  ).map((c) => ({url: c.url, caption: c.caption.trim()}));
   return out;
 }
 
 exports.publicAnimalOf = publicAnimalOf;
+exports.photosOf = photosOf;
 
 exports.syncPublicAnimal = onDocumentWritten('animals/{animalId}', async (event) => {
   const after = event.data && event.data.after.exists ? event.data.after.data() : null;

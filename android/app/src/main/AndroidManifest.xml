@@ -45,6 +45,16 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- "Open in the app" on an animal's public page
+                 (respawnd://open/animal/<id>, functions/public_animal_page_rules.js).
+                 Flutter hands the path to MaterialApp.onGenerateRoute (main.dart). -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="respawnd" android:host="open" />
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
@@ -118,5 +128,7 @@
                 <action android:name="android.intent.action.PROCESS_TEXT"/>
                 <data android:mimeType="text/plain"/>
             </intent>
+            <!-- Facebook app, for native Page login (flutter_facebook_auth). -->
+            <package android:name="com.facebook.katana" />
         </queries>
     </manifest>

@@ -142,7 +142,7 @@ class _AnimalRecordHeader extends StatelessWidget {
         // species/paw badge that used to sit bottom-right on top of the
         // gallery has been removed — it added nothing the gallery itself
         // (paging, tap-to-fullscreen, placeholder) doesn't already convey.
-        AnimalImageGallery(photoUrls: animal.photoUrls, height: 220),
+        AnimalImageGallery(photoUrls: animal.photoUrls, captions: animal.photoCaptions, height: 220),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Column(

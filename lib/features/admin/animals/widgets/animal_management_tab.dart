@@ -6,7 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
-import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
+import 'package:respawnd1/features/admin/animals/facebook_share_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_logs_section.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_record_export_sheet.dart';
@@ -185,50 +185,10 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     );
   }
 
-  // Facebook Page Publishing Compatibility spec — Animal Records viewing
-  // and every other management action here stays open to Owner/Admin/
-  // Member alike; only this one action is gated to Owner/active-Admin or a
-  // Member granted Facebook sharing (canPublishToFacebook), and the Cloud
-  // Function independently re-verifies that regardless of what this UI shows.
-  Future<void> _publishToFacebook() async {
-    final orgId = ref.read(currentOrganizationIdProvider).asData?.value;
-    if (orgId == null) return;
-    final message = await showTextInputDialog(
-      context,
-      title: 'Publish to Facebook Page',
-      label: 'Post caption',
-      initialValue: 'Meet ${widget.animal.name.isNotEmpty ? widget.animal.name : 'this animal'}, available for adoption!',
-      confirmLabel: 'Publish',
-      required: true,
-      maxLines: 4,
-    );
-    if (message == null || !mounted) return;
-    setState(() => _busy = true);
-    try {
-      await ref.read(facebookIntegrationRepositoryProvider).publishAnimalRecords(
-            organizationId: orgId,
-            animalRecordIds: [widget.animal.id],
-            message: message,
-          );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Published to Facebook Page.', kind: AppMessageKind.success),
-        );
-      }
-    } on FacebookOperationException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(e.message, kind: AppMessageKind.error));
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Could not publish to Facebook.', kind: AppMessageKind.error),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
+  // Composer: pick details, photos and descriptions, then post to the
+  // organization's Page (owner/Admin or Staff with facebookPublish, which
+  // the Cloud Function re-checks) or share through any app (anyone here).
+  Future<void> _shareToFacebook() => openFacebookShare(context, [widget.animal]);
 
   void _viewLogs() {
     showModalBottomSheet(
@@ -313,12 +273,12 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
           ),
           _ActionTile(
             icon: Icons.facebook,
-            label: 'Publish to Facebook Page',
-            enabled: !_busy && canPublishToFacebook,
+            label: 'Share to Facebook',
+            enabled: !_busy,
             subtitle: canPublishToFacebook
-                ? null
-                : 'Ask an Organization Admin to allow you to share to the connected Facebook Page.',
-            onTap: _publishToFacebook,
+                ? 'Post to the Page, or share a link to the full profile'
+                : 'Share a link to the full profile. Posting to the Page needs permission from an Organization Admin.',
+            onTap: _shareToFacebook,
           ),
           _ActionTile(
             icon: Icons.qr_code_2_outlined,

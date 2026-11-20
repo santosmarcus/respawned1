@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/utils/firestore_parsing.dart';
+import 'package:respawnd1/core/models/photo_captions.dart';
 
 /// Structured health fields (spec section 6) — every value defaults to
 /// "unknown"/absent rather than a guessed default; nothing here is ever
@@ -170,6 +171,9 @@ class AnimalRecord {
   final int? sourceAnimalIndex;
   final String rescuedBy;
   final List<String> photoUrls;
+  /// A description for each photo, keyed by its URL (see
+  /// core/models/photo_captions.dart). Photos without one are absent.
+  final Map<String, String> photoCaptions;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final String? currentCaseId;
@@ -233,6 +237,7 @@ class AnimalRecord {
     required this.sourceAnimalIndex,
     required this.rescuedBy,
     required this.photoUrls,
+    this.photoCaptions = const {},
     required this.createdAt,
     required this.updatedAt,
     required this.currentCaseId,
@@ -399,6 +404,7 @@ class AnimalRecord {
       sourceAnimalIndex: parseOptionalInt(data['sourceAnimalIndex']),
       rescuedBy: parseRequiredString(data['rescuedBy']),
       photoUrls: _parsePhotoUrls(data),
+      photoCaptions: parsePhotoCaptions(data['photoCaptions']),
       createdAt: createdAtRaw is Timestamp
           ? createdAtRaw.toDate()
           : (intakeDateRaw is Timestamp ? intakeDateRaw.toDate() : null),

@@ -1,6 +1,21 @@
 # Handoff
 
-_Latest: feedback round on `dev` (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: Facebook sharing and photo descriptions on `dev` (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Facebook sharing and photo descriptions (2026-11-20, functions + hosting deployed, not checked on a device)
+
+- **Facebook re-enabled:** `flutter_facebook_auth` 7.3.3 is back in pubspec; Organization Profile → Facebook Page Integration → Connect works again (classic login, `pages_*` permissions; Limited Login on iOS can't post to Pages). App ID `1764224901694464` (same as the `FB_APP_ID` secret) is in `lib/core/constants/facebook_config.dart`, `strings.xml` and `Info.plist`. **The client token is still a placeholder** in `android/app/src/main/res/values/strings.xml` and `ios/Runner/Info.plist` (Meta dashboard → App settings → Advanced → Client token).
+- **Share to Facebook** (`lib/features/admin/animals/facebook_share_page.dart`): Animal Records → long-press to select (up to 10) → Facebook icon, or Management tab → Share to Facebook. Pick which details go in the text (`ShareField`, `lib/core/utils/facebook_post_composer.dart`), which photos to attach (up to 20) and each photo's description, opening/closing lines, and whether to add each animal's profile link. **Post to <Page>** (owner/Admin or `facebookPublish`; confirm dialog) or **Share…** (system share sheet; the text is copied because Facebook drops pre-filled text).
+- `facebookPublishAnimalRecords` now takes `items: [{animalId, photos: [{url, caption}]}]` and `link`; each photo must be one of that record's own photos, captions go on the Facebook photos. Older builds sending `animalRecordIds` still post each record's first photo. Checks in `functions/facebook_share_rules.js`.
+- **Public animal page** `/animal/<id>` (`functions/public_animal_page.js`, HTML in `public_animal_page_rules.js`, Hosting rewrite in firebase.json): server-rendered from `publicAnimals` only, with og: tags for the Facebook preview, photo captions, facts, health summary, organization contacts, and **Open in the ResPAWnd app** (`respawnd://open/animal/<id>`; Android intent URL falls back to the page). Archived/hidden/deceased animals show "Profile not available".
+- **In the app:** the `respawnd://open/...` scheme is registered (AndroidManifest, Info.plist); `MaterialApp.onGenerateRoute` → `AnimalLinkPage` (staff of the owning org get the full record, others the public profile, signed-out users a sign-in prompt).
+- **Photo descriptions:** `animals.photoCaptions: [{url, caption}]` (`lib/core/models/photo_captions.dart`), edited by tapping a photo in Create/Edit Animal Record, copied to `publicAnimals` for public photos, shown in the photo gallery (inline and fullscreen), on the web page and on Facebook photos. No rules change needed.
+
+**Deployed 2026-11-20:** the three functions below (by name) and Hosting; `/animal/<made-up id>` returns the not-found page (a real animal's page not checked: no local credentials to look one up). App build not installed anywhere yet.
+
+**How it was deployed:** `firebase deploy --only functions:publicAnimalPage,functions:facebookPublishAnimalRecords,functions:syncPublicAnimal` (by name, see the note on unlisted functions below), then `firebase deploy --only hosting`. Existing `publicAnimals` copies gain captions the next time each animal is saved (or rerun `functions/scripts/backfill_public_animals.js`). Posting to a Page needs the Meta app live with `pages_manage_posts` approved, or the posting account added as a tester/developer while it's in development mode.
+
+**Checks:** `flutter analyze` (pre-existing issues only), `flutter test` 275 pass (new `facebook_post_composer_test.dart`), functions `npm test` 85 pass (new `facebook_share.test.js`).
 
 ## Feedback round: view-only modules, account page, transport flow (2026-11-18, rules deployed, not checked on a device)
 

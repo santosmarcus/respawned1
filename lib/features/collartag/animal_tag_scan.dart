@@ -53,7 +53,7 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
 
   final record = AnimalRecord.fromFirestore(doc);
   final isStaff =
-      doc.reference.parent.id == 'animals' && await _isStaffOf(doc.data()['organizationId'] as String?);
+      doc.reference.parent.id == 'animals' && await isStaffOfOrganization(doc.data()['organizationId'] as String?);
   if (!context.mounted) return true;
 
   Navigator.push(
@@ -68,7 +68,7 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
 }
 
 /// Same split as firestore.rules isStaffOf: linked to the org, and not a carer.
-Future<bool> _isStaffOf(String? orgId) async {
+Future<bool> isStaffOfOrganization(String? orgId) async {
   final uid = FirebaseAuth.instance.currentUser?.uid;
   if (uid == null || orgId == null || orgId.isEmpty) return false;
   final db = FirebaseFirestore.instance;

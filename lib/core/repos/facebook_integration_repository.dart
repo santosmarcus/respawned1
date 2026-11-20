@@ -113,15 +113,20 @@ class FacebookIntegrationRepository {
     return _call('facebookDisconnectPage', {'organizationId': organizationId}, (_) {});
   }
 
+  /// Posts to the organization's connected Page: [items] are the records with
+  /// the photos to attach (each with its own description), [message] the
+  /// post text, [link] the profile link for a post with no photos.
   Future<({String postId, String postUrl})> publishAnimalRecords({
     required String organizationId,
-    required List<String> animalRecordIds,
+    required List<FacebookShareItem> items,
     String? message,
+    String? link,
   }) {
     return _call('facebookPublishAnimalRecords', {
       'organizationId': organizationId,
-      'animalRecordIds': animalRecordIds,
+      'items': [for (final i in items) i.toMap()],
       if (message != null && message.isNotEmpty) 'message': message,
+      'link': ?link,
     }, (data) => (postId: data['postId'] as String? ?? '', postUrl: data['postUrl'] as String? ?? ''));
   }
 
@@ -148,4 +153,19 @@ class FacebookIntegrationRepository {
       connectionStatus: 'connected',
     );
   }
+}
+
+/// One record in a Facebook post and the photos to attach for it, in order.
+class FacebookShareItem {
+  const FacebookShareItem({required this.animalId, required this.photos});
+
+  final String animalId;
+  final List<({String url, String caption})> photos;
+
+  Map<String, dynamic> toMap() => {
+        'animalId': animalId,
+        'photos': [
+          for (final p in photos) {'url': p.url, if (p.caption.trim().isNotEmpty) 'caption': p.caption.trim()},
+        ],
+      };
 }

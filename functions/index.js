@@ -1920,6 +1920,8 @@ Object.assign(exports, require('./account_deletion'));
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
+// Public web page for one animal (/animal/<id>), linked from Facebook posts — see functions/public_animal_page.js.
+exports.publicAnimalPage = require('./public_animal_page').publicAnimalPage;
 
 // ---- Organization verification review ------------------------------------
 //

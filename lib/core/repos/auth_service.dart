@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-//import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/core/services/geofence_service.dart';
 import 'package:respawnd1/core/services/notification_service.dart';
@@ -234,14 +234,16 @@ class AuthService {
       debugPrint('GoogleSignIn.disconnect failed (non-fatal): $e');
     }
 
-    /*try {
+    // The Facebook login used to connect a Page; the Page itself stays
+    // connected (its token is on the server).
+    try {
       final fbStatus = await FacebookAuth.instance.accessToken;
       if (fbStatus != null) {
         await FacebookAuth.instance.logOut();
       }
     } catch (e) {
       debugPrint('Facebook sign-out cleanup failed (non-fatal): $e');
-    }*/
+    }
 
     // Stop geofence alerts and pushes for this account on this device
     // before the session ends (needs the still-signed-in user).

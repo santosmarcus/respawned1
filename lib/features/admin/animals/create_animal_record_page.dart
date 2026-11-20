@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/photo_captions.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
+import 'package:respawnd1/core/widgets/photo_caption_sheet.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/utils/adoption_readiness.dart';
@@ -98,6 +100,11 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   late final List<String> _existingPhotoUrls = List<String>.from(
     widget.existingData?['photoUrls'] ?? const [],
   );
+  // Per-photo descriptions: existing photos keyed by URL, newly picked ones
+  // by the picked file until they're uploaded.
+  late final Map<String, String> _existingCaptions =
+      Map<String, String>.of(parsePhotoCaptions(widget.existingData?['photoCaptions']));
+  final Map<XFile, String> _pickedCaptions = {};
   bool _isUploadingImages = false;
   String? _imageError;
   // Scrolled/focused into view when submission fails the image check.
@@ -689,7 +696,35 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     }
   }
 
-  void _removeImage(int index) => setState(() => _pickedImages.removeAt(index));
+  void _removeImage(int index) => setState(() => _pickedCaptions.remove(_pickedImages.removeAt(index)));
+
+  Future<void> _editExistingCaption(String url) async {
+    final text = await showPhotoCaptionSheet(
+      context,
+      image: Image.network(url, fit: BoxFit.cover),
+      initialValue: _existingCaptions[url] ?? '',
+    );
+    if (text == null || !mounted) return;
+    setState(() => text.isEmpty ? _existingCaptions.remove(url) : _existingCaptions[url] = text);
+  }
+
+  Future<void> _editPickedCaption(XFile file) async {
+    final text = await showPhotoCaptionSheet(
+      context,
+      image: Image.file(File(file.path), fit: BoxFit.cover),
+      initialValue: _pickedCaptions[file] ?? '',
+    );
+    if (text == null || !mounted) return;
+    setState(() => text.isEmpty ? _pickedCaptions.remove(file) : _pickedCaptions[file] = text);
+  }
+
+  /// Every photo's description by URL, once the picked photos have
+  /// [uploadedUrls] (same order as [_pickedImages]).
+  Map<String, String> _captionsFor(List<String> uploadedUrls) => {
+        ..._existingCaptions,
+        for (var i = 0; i < uploadedUrls.length && i < _pickedImages.length; i++)
+          uploadedUrls[i]: ?_pickedCaptions[_pickedImages[i]],
+      };
 
   Future<String> _uploadImage(XFile file, String storagePath) async {
     final ref = FirebaseStorage.instance.ref(storagePath);
@@ -1034,10 +1069,14 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         if (readiness != null) 'readyForAdoptionAt': FieldValue.serverTimestamp(),
       };
 
+      final allPhotoUrls = [..._existingPhotoUrls, ...uploadedUrls];
+      final photoCaptions = photoCaptionsField(allPhotoUrls, _captionsFor(uploadedUrls));
+
       if (widget.isEditing) {
         await docRef.update({
           ...sharedFields,
-          'photoUrls': [..._existingPhotoUrls, ...uploadedUrls],
+          'photoUrls': allPhotoUrls,
+          'photoCaptions': photoCaptions,
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } else {
@@ -1051,7 +1090,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             'sourceAnimalIndex': widget.sourceAnimalIndex,
           'rescuedBy': _rescuedByLabel,
           'intakeStaffId': uid,
-          'photoUrls': [..._existingPhotoUrls, ...uploadedUrls],
+          'photoUrls': allPhotoUrls,
+          if (photoCaptions.isNotEmpty) 'photoCaptions': photoCaptions,
           'treatmentLog': [],
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
@@ -1263,6 +1303,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 for (var i = 0; i < _existingPhotoUrls.length; i++)
                   _ExistingImageThumb(
                     url: _existingPhotoUrls[i],
+                    hasCaption: _existingCaptions.containsKey(_existingPhotoUrls[i]),
+                    onTap: _isLoading ? null : () => _editExistingCaption(_existingPhotoUrls[i]),
                     onRemove: _isLoading
                         ? null
                         : () => setState(() => _existingPhotoUrls.removeAt(i)),
@@ -1270,6 +1312,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 for (var i = 0; i < _pickedImages.length; i++)
                   _PickedImageThumb(
                     file: _pickedImages[i],
+                    hasCaption: _pickedCaptions.containsKey(_pickedImages[i]),
+                    onTap: _isLoading ? null : () => _editPickedCaption(_pickedImages[i]),
                     onRemove: _isLoading ? null : () => _removeImage(i),
                   ),
                 GestureDetector(
@@ -1296,6 +1340,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 ),
               ],
             ),
+            if (_existingPhotoUrls.isNotEmpty || _pickedImages.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Tap a photo to add a description. It shows under the photo on the public profile and on Facebook posts.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ],
             if (_isUploadingImages) ...[
               const SizedBox(height: 8),
               Row(
@@ -2025,8 +2076,10 @@ class _SpeciesCheck extends StatelessWidget {
 
 class _ExistingImageThumb extends StatelessWidget {
   final String url;
+  final bool hasCaption;
+  final VoidCallback? onTap;
   final VoidCallback? onRemove;
-  const _ExistingImageThumb({required this.url, required this.onRemove});
+  const _ExistingImageThumb({required this.url, required this.hasCaption, required this.onTap, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
@@ -2036,7 +2089,9 @@ class _ExistingImageThumb extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          ClipRRect(
+          GestureDetector(
+            onTap: onTap,
+            child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.network(
               url,
@@ -2054,6 +2109,8 @@ class _ExistingImageThumb extends StatelessWidget {
               ),
             ),
           ),
+          ),
+          _CaptionBadge(hasCaption: hasCaption),
           if (onRemove != null)
             Positioned(
               top: -6,
@@ -2078,8 +2135,10 @@ class _ExistingImageThumb extends StatelessWidget {
 
 class _PickedImageThumb extends StatelessWidget {
   final XFile file;
+  final bool hasCaption;
+  final VoidCallback? onTap;
   final VoidCallback? onRemove;
-  const _PickedImageThumb({required this.file, required this.onRemove});
+  const _PickedImageThumb({required this.file, required this.hasCaption, required this.onTap, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
@@ -2089,15 +2148,19 @@ class _PickedImageThumb extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.file(
-              File(file.path),
-              width: 80,
-              height: 80,
-              fit: BoxFit.cover,
+          GestureDetector(
+            onTap: onTap,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(
+                File(file.path),
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+              ),
             ),
           ),
+          _CaptionBadge(hasCaption: hasCaption),
           if (onRemove != null)
             Positioned(
               top: -6,
@@ -2115,6 +2178,35 @@ class _PickedImageThumb extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Bottom-left marker on an image thumbnail: a filled note when the photo has
+/// a description, an outlined one inviting a tap when it doesn't.
+class _CaptionBadge extends StatelessWidget {
+  final bool hasCaption;
+  const _CaptionBadge({required this.hasCaption});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 4,
+      bottom: 4,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: hasCaption ? AppColors.yellowrspwn : Colors.black.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            hasCaption ? Icons.notes : Icons.edit_note,
+            size: 14,
+            color: hasCaption ? AppColors.textPrimary : Colors.white,
+          ),
+        ),
       ),
     );
   }

@@ -53,7 +53,7 @@ dependencies:
   fl_chart: ^0.69.2  # charts for the admin Analytics dashboard
   #sign in
   google_sign_in: ^6.2.1
-  #flutter_facebook_auth: ^7.1.5
+  flutter_facebook_auth: ^7.3.3 # Facebook Page connect (Organization Profile)
   # Geofencing + notifications
   native_geofence: ^1.5.1                # Google Geofencing API (Android) / region monitoring (iOS)
   flutter_local_notifications: ^22.3.3   # show pushes in foreground + geofence alerts
