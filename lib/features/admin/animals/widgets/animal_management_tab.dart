@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +18,7 @@ import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/reason_picker.dart';
+import 'package:respawnd1/features/collartag/animal_tag_scan.dart' show kAnimalTagPrefix;
 
 /// Organization-management actions — deliberately separate from the
 /// Medical tab's clinical content. Only enabled when they make sense for
@@ -54,32 +57,116 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
   }
 
+  // Firestore completes a write only once the server confirms it, so with a
+  // bad connection Add QR would otherwise wait with no sign of progress.
+  static const _qrSaveTimeout = Duration(seconds: 20);
+  bool _qrSaving = false;
+
+  /// Runs a QR tag write, showing what went wrong instead of failing
+  /// silently. Returns null when it failed.
+  Future<T?> _saveQr<T>(Future<T> Function() action) async {
+    if (_busy) return null;
+    setState(() {
+      _busy = true;
+      _qrSaving = true;
+    });
+    try {
+      return await action().timeout(_qrSaveTimeout);
+    } catch (e) {
+      final message = switch (e) {
+        TimeoutException() =>
+          "The QR tag hasn't reached the server yet. Check your connection: it finishes saving once you're back online.",
+        FirebaseException(code: 'permission-denied') =>
+          "You don't have permission to change this animal's QR tag. Ask an Organization Admin for animal records access.",
+        FirebaseException(:final message) => 'Couldn’t save the QR tag: ${message ?? e}',
+        _ => 'Couldn’t save the QR tag: $e',
+      };
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(message, kind: AppMessageKind.error));
+      }
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _qrSaving = false;
+        });
+      }
+    }
+  }
+
   Future<void> _showQrTag() async {
+    if (_busy) return;
     final animal = widget.animal;
-    String? tag;
-    await _run(() async {
-      tag = await ref.read(animalRecordRepositoryProvider).ensureQrTag(
+    final repo = ref.read(animalRecordRepositoryProvider);
+    final name = animal.name.isEmpty ? 'this animal' : animal.name;
+    var code = animal.qrTagId;
+    if (code == null || code.isEmpty) {
+      code = await _saveQr(() => repo.ensureQrTag(
             animalId: animal.id,
-            existing: animal.qrTagId,
+            existing: null,
             actorId: _actorId,
             actorName: _actorName,
             actorEmail: _actorEmail,
+          ));
+      if (code == null) return;
+    }
+
+    while (true) {
+      if (!mounted) return;
+      final shown = code!;
+      final choice = await showDialog<_QrTagAction>(
+        context: context,
+        builder: (_) => _QrTagDialog(title: 'QR tag for $name', code: shown),
+      );
+      if (!mounted) return;
+      switch (choice) {
+        case _QrTagAction.regenerate:
+          final ok = await showConfirmActionDialog(
+            context,
+            title: 'Replace this QR code?',
+            message: 'A new code replaces $shown. Tags already printed with $shown will stop opening '
+                '$name, so reprint and replace them. Use this when a tag was lost, damaged or misused.',
+            confirmLabel: 'Replace Code',
+            destructive: true,
           );
-    });
-    final code = tag;
-    if (code == null || !mounted) return;
-    await showInfoDialog(context, title: 'QR tag for ${animal.name.isEmpty ? 'this animal' : animal.name}', content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            QrImageView(data: 'RESPAWND-ANIMAL:$code', size: 220),
-            const SizedBox(height: 10),
-            SelectableText(code, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 6),
-            Text('Print or attach this code to the animal’s kennel or collar.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          ],
-        ));
+          if (!ok || !mounted) continue;
+          final next = await _saveQr(() => repo.regenerateQrTag(
+                animalId: animal.id,
+                previous: shown,
+                actorId: _actorId,
+                actorName: _actorName,
+                actorEmail: _actorEmail,
+              ));
+          if (next != null) code = next;
+        case _QrTagAction.remove:
+          final ok = await showConfirmActionDialog(
+            context,
+            title: 'Remove this QR code?',
+            message: 'Tags already printed with $shown will stop opening $name. '
+                'You can add a new QR tag later. The old code stays in View Logs.',
+            confirmLabel: 'Remove Code',
+            destructive: true,
+          );
+          if (!ok || !mounted) continue;
+          final removed = await _saveQr(() async {
+            await repo.removeQrTag(
+              animalId: animal.id,
+              previous: shown,
+              actorId: _actorId,
+              actorName: _actorName,
+              actorEmail: _actorEmail,
+            );
+            return true;
+          });
+          if (removed == true && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(appSnackBar('QR tag removed.'));
+          }
+          return;
+        case null:
+          return;
+      }
+    }
   }
 
   Future<void> _togglePublicProfile() async {
@@ -234,7 +321,8 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
           ),
           _ActionTile(
             icon: Icons.qr_code_2,
-            label: animal.qrTagId == null ? 'Add QR Tag' : 'Show QR Tag',
+            label: (animal.qrTagId ?? '').isEmpty ? 'Add QR Tag' : 'Show QR Tag',
+            subtitle: _qrSaving ? 'Saving QR tag…' : null,
             enabled: !_busy,
             onTap: _showQrTag,
           ),
@@ -329,6 +417,69 @@ class _ActionTile extends StatelessWidget {
         subtitle: subtitle != null ? Text(subtitle!, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)) : null,
         trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
       ),
+    );
+  }
+}
+
+enum _QrTagAction { regenerate, remove }
+
+/// Shows an animal's QR tag, with Replace and Remove. Pops a [_QrTagAction],
+/// or null for Close.
+class _QrTagDialog extends StatelessWidget {
+  final String title;
+  final String code;
+  const _QrTagDialog({required this.title, required this.code});
+
+  static const double _qrSize = 220;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.background,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text(title, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // AlertDialog sizes itself from its content's intrinsic width, and
+          // QrImageView is a LayoutBuilder, which can't report one: unsized,
+          // the dialog throws during layout and only its dimmed barrier
+          // shows. A fixed-size box answers the question for it.
+          SizedBox.square(
+            dimension: _qrSize,
+            child: QrImageView(
+              data: '$kAnimalTagPrefix$code',
+              size: _qrSize,
+              backgroundColor: Colors.white,
+              errorStateBuilder: (_, _) => Center(
+                child: Text('Couldn’t draw this QR code.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SelectableText(code, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text('Print or attach this code to the animal’s kennel or collar.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, _QrTagAction.remove),
+          child: Text('Remove', style: GoogleFonts.zain(color: AppColors.error, fontWeight: FontWeight.w600)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _QrTagAction.regenerate),
+          child: Text('New Code', style: GoogleFonts.zain(color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Close', style: GoogleFonts.zain(color: AppColors.textPrimary, fontWeight: FontWeight.w700)),
+        ),
+      ],
     );
   }
 }

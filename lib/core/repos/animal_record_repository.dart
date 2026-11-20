@@ -461,9 +461,7 @@ class AnimalRecordRepository {
     String? actorEmail,
   }) async {
     if (existing != null && existing.isNotEmpty) return existing;
-    final rng = math.Random.secure();
-    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    final tag = List.generate(8, (_) => alphabet[rng.nextInt(alphabet.length)]).join();
+    final tag = _newQrTag();
     await _animalDoc(animalId).update({'qrTagId': tag, 'updatedAt': FieldValue.serverTimestamp()});
     await _addManagementLog(
       animalId: animalId,
@@ -472,8 +470,65 @@ class AnimalRecordRepository {
       actorId: actorId,
       actorName: actorName,
       actorEmail: actorEmail,
+      newValues: {'qrTagId': tag},
     );
     return tag;
+  }
+
+  /// Replaces the animal's QR tag with a new code and returns it. Scans
+  /// resolve by `qrTagId` (animal_tag_scan.dart), so tags printed with the
+  /// old code stop opening this animal ("No animal record uses this QR tag").
+  Future<String> regenerateQrTag({
+    required String animalId,
+    required String? previous,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
+    final tag = _newQrTag();
+    await _animalDoc(animalId).update({'qrTagId': tag, 'updatedAt': FieldValue.serverTimestamp()});
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'qrRegenerated',
+      action: 'QR tag replaced',
+      details: 'Tags printed with the old code no longer open this animal.',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      previousValues: {'qrTagId': ?previous},
+      newValues: {'qrTagId': tag},
+    );
+    return tag;
+  }
+
+  /// Removes the animal's QR tag. Printed tags with that code stop opening
+  /// it; the old code stays in the management log.
+  Future<void> removeQrTag({
+    required String animalId,
+    required String? previous,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
+    await _animalDoc(animalId).update({'qrTagId': FieldValue.delete(), 'updatedAt': FieldValue.serverTimestamp()});
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: 'qrRemoved',
+      action: 'QR tag removed',
+      details: 'Tags printed with this code no longer open this animal.',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      previousValues: {'qrTagId': ?previous},
+    );
+  }
+
+  /// Random 8-character code (P3-23), so it can't be guessed from the
+  /// animal id. No look-alike characters (0/O, 1/I).
+  static String _newQrTag() {
+    final rng = math.Random.secure();
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return List.generate(8, (_) => alphabet[rng.nextInt(alphabet.length)]).join();
   }
 
   /// Hides or shows the animal on public adoption listings (P2-12).

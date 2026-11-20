@@ -1,6 +1,26 @@
 # Handoff
 
-_Latest: one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Animal QR tags: Show/Add fixed, New Code and Remove (2026-11-20, app only, not checked on a device)
+
+- **Cause:** Animal record → Management → **Show QR Tag** / **Add QR Tag** stayed on a dimmed screen on every build. The QR was shown in an `AlertDialog`, which sizes itself from its content's intrinsic width, and `QrImageView` (qr_flutter 4.1.0) is a `LayoutBuilder`, which can't report one. Layout threw "LayoutBuilder does not support returning intrinsic dimensions", and in release builds only the dialog's barrier was painted. Add QR's write was saved; only the dialog failed. Firestore rules, the scanner and the CameraX/ML Kit bump in `android/app/build.gradle.kts` weren't involved.
+- **Fix** (`lib/features/admin/animals/widgets/animal_management_tab.dart`): the QR sits in a fixed 220×220 box inside a new `_QrTagDialog`. Saving shows "Saving QR tag…" on the tile, with a 20 s timeout and clear messages for no connection, permission denied and other errors, instead of a silent wait.
+- **New Code / Remove** (in the QR dialog, each behind a confirmation): `AnimalRecordRepository.regenerateQrTag` writes a new random code and `removeQrTag` deletes `qrTagId`. Both log the old code in View Logs (`qrRegenerated` / `qrRemoved`, `previousValues.qrTagId`). Scans resolve by `qrTagId` (`animal_tag_scan.dart`) and `syncPublicAnimal` replaces the public copy, so tags already printed with the old code show "No animal record uses this QR tag". The confirmations say so and tell staff to reprint. Same people as Add QR (records staff of the owning organization); no rules change. Collar tags (`users/{uid}/collarTags`) are separate and unchanged.
+
+### Deploy
+- App build only.
+
+### Checks run
+- `flutter analyze` on the changed files: no issues.
+- A throwaway widget test (not kept) reproduced the LayoutBuilder exception with the old layout; the sized version rendered.
+- `rules-tests`: 188/188 with JDK 21 (1 new: "the owning organization's records staff add, replace and remove QR tags").
+
+### Check on a device
+- Animal without a tag → Add QR Tag: the QR and code show at once; the tile then reads Show QR Tag.
+- Show QR Tag → New Code → Replace Code: a new code shows; scanning the old printout says "No animal record uses this QR tag"; the new one opens the animal.
+- Show QR Tag → Remove → Remove Code: "QR tag removed." and the tile reads Add QR Tag. View Logs lists all three events.
+- Airplane mode → Add QR Tag: after 20 s, the connection message shows instead of a dimmed screen.
 
 ## One mobile number, one email per account (2026-11-20, not deployed, not checked on a device)
 

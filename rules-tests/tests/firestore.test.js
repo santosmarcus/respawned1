@@ -472,6 +472,22 @@ describe('animals', () => {
     await assertFails(as('staffB').doc('animals/animalA/vaccinations/v1').set({ name: 'Rabies' }));
     await assertSucceeds(as('staffA').doc('animals/animalA/vaccinations/v1').set({ name: 'Rabies' }));
   });
+
+  // Animal Management > Add QR Tag / New Code / Remove
+  // (AnimalRecordRepository.ensureQrTag, regenerateQrTag, removeQrTag).
+  test("the owning organization's records staff add, replace and remove QR tags", async () => {
+    const log = (eventType) => ({ animalId: 'animalA', eventType, action: eventType, timestamp: FieldValue.serverTimestamp() });
+    await assertSucceeds(as('staffA').doc('animals/animalA').update({ qrTagId: 'ABCD2345', updatedAt: FieldValue.serverTimestamp() }));
+    await assertSucceeds(as('staffA').collection('animals/animalA/managementLogs').add(log('qrAssigned')));
+    await assertSucceeds(as('staffA').doc('animals/animalA').update({ qrTagId: 'WXYZ6789', updatedAt: FieldValue.serverTimestamp() }));
+    await assertSucceeds(as('staffA').collection('animals/animalA/managementLogs').add(log('qrRegenerated')));
+    await assertSucceeds(as('staffA').doc('animals/animalA').update({ qrTagId: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() }));
+    await assertSucceeds(as('staffA').collection('animals/animalA/managementLogs').add(log('qrRemoved')));
+    for (const uid of ['carerA', 'staffB', 'stranger']) {
+      await assertFails(as(uid).doc('animals/animalA').update({ qrTagId: 'ABCD2345' }));
+      await assertFails(as(uid).collection('animals/animalA/managementLogs').add(log('qrAssigned')));
+    }
+  });
 });
 
 describe('animal records and public profiles', () => {
