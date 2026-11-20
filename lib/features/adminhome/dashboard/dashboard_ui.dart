@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
+import 'package:respawnd1/features/adminhome/dashboard/dashboard_cache.dart';
 
 /// Shared building blocks for the operational dashboard. Styled from the
 /// existing ResPawnd tokens (AppColors, TiltWarp headings, Zain body) and
@@ -348,12 +349,46 @@ class RestrictedNotice extends StatelessWidget {
   }
 }
 
-class DashLoading extends StatelessWidget {
+/// While shown inside a [DashCardSlot], the card keeps its remembered height.
+class DashLoading extends StatefulWidget {
   final String? label;
   const DashLoading({super.key, this.label});
 
   @override
+  State<DashLoading> createState() => _DashLoadingState();
+}
+
+class _DashLoadingState extends State<DashLoading> {
+  void Function()? _unregister;
+  bool _registered = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_registered) {
+      _registered = true;
+      _unregister = DashCardSlot.register(context);
+    }
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _unregister ??= DashCardSlot.register(context);
+  }
+
+  // Deactivate, not dispose: it runs while the tree is rebuilt, before the
+  // card is laid out without this indicator.
+  @override
+  void deactivate() {
+    _unregister?.call();
+    _unregister = null;
+    super.deactivate();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final label = widget.label;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 14),
       child: Row(
@@ -364,7 +399,7 @@ class DashLoading extends StatelessWidget {
             height: 16,
             child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.greenrspwn),
           ),
-          if (label != null) ...[const SizedBox(width: 10), Text(label!, style: dashMuted())],
+          if (label != null) ...[const SizedBox(width: 10), Text(label, style: dashMuted())],
         ],
       ),
     );

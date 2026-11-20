@@ -14,6 +14,7 @@ import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart'
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/alert_claims.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_alerts.dart';
+import 'package:respawnd1/features/adminhome/dashboard/dashboard_cache.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
@@ -43,19 +44,20 @@ class TodayView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        KeyedSubtree(key: priorityKey, child: const PriorityActionsCard()),
+        // Each card keeps its last height while its data loads (DashCardSlot).
+        KeyedSubtree(key: priorityKey, child: const DashCardSlot(id: 'priority', child: PriorityActionsCard())),
         const SizedBox(height: 14),
-        const RescueReadinessCard(),
+        const DashCardSlot(id: 'readiness', child: RescueReadinessCard()),
         const SizedBox(height: 14),
-        const RescueSummaryCard(),
+        const DashCardSlot(id: 'rescue', child: RescueSummaryCard()),
         const SizedBox(height: 14),
-        const ShelterCareCard(),
+        const DashCardSlot(id: 'shelterCare', child: ShelterCareCard()),
         const SizedBox(height: 14),
-        const AdoptionSummaryCard(),
+        const DashCardSlot(id: 'adoption', child: AdoptionSummaryCard()),
         const SizedBox(height: 14),
-        const DonationsFundsCard(),
+        const DashCardSlot(id: 'funds', child: DonationsFundsCard()),
         const SizedBox(height: 14),
-        const EventsCard(),
+        const DashCardSlot(id: 'events', child: EventsCard()),
       ],
     );
   }
@@ -848,7 +850,7 @@ class DonationsFundsCard extends ConsumerWidget {
         child: StatusChip('Money managers', tone: ChipTone.ink, icon: Icons.lock),
       )
           : null,
-      child: canManageAsync.isLoading
+      child: !canManageAsync.hasValue && !canManageAsync.hasError
           ? const DashLoading()
           : (!canManage
           ? const RestrictedNotice(
@@ -978,7 +980,7 @@ class _FundsBody extends ConsumerWidget {
         }
         final shown = cats.values.where((c) => c.setAside > 0 || c.need > 0 || c.allocatedTotal > 0).toList()
           ..sort((a, b) => b.level.index.compareTo(a.level.index));
-        final loadingParts = [allocations, expenses, general].any((v) => v.isLoading && !v.hasError);
+        final loadingParts = [allocations, expenses, general].any((v) => !v.hasValue && !v.hasError);
         final failedParts = [
           if (allocations.hasError) 'allocations',
           if (expenses.hasError) 'case bills',
@@ -1097,7 +1099,7 @@ class _FundsBody extends ConsumerWidget {
                 ],
               ),
             const CardLabel('Needs refund review'),
-            if (donations.isLoading && !donations.hasError)
+            if (!donations.hasValue && !donations.hasError)
               const DashLoading(label: 'Loading donations…')
             else if (donations.hasError)
               DashError(what: 'donations', error: donations.error!)
@@ -1156,11 +1158,6 @@ class _FundsBody extends ConsumerWidget {
               runSpacing: 6,
               children: [
                 DashLinkButton(label: 'Donations', icon: Icons.volunteer_activism, onPressed: () => openDonationsAdmin(context)),
-                DashLinkButton(
-                  label: 'Expenses & receipts',
-                  icon: Icons.receipt_long,
-                  onPressed: () => openExpenseOversight(context),
-                ),
               ],
             ),
           ],

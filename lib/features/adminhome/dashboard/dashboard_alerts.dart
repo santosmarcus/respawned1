@@ -640,6 +640,6 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
 
   // A source that failed (even while being retried) isn't still loading.
   final loading = [review, assign, treatment, intake, fieldIssues, pendingApps, adoptedBucket]
-      .any((v) => v.isLoading && !v.hasError);
+      .any((v) => !v.hasValue && !v.hasError);
   return DashAlertsState(alerts: ordered, loading: loading, failedSources: failed);
 });

@@ -296,7 +296,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                     onTap: () => _openModule(context, (_) => const AdoptionApplicationReviewPage()),
                   ),
                   _DrawerItem(
-                    label: 'Donations & Sponsorships',
+                    label: 'Donations',
                     viewOnly: !(caps.canRunCampaigns || caps.canManageFinances),
                     selected: widget.active == AdminModule.donations,
                     onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),

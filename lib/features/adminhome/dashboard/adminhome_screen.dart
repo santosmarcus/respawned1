@@ -12,6 +12,7 @@ import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_view.dart';
 import 'package:respawnd1/features/adminhome/dashboard/admin_notifications.dart';
+import 'package:respawnd1/features/adminhome/dashboard/dashboard_cache.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 import 'package:respawnd1/features/adminhome/dashboard/independent_area_card.dart';
@@ -102,7 +103,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
         ),
       ),
-      body: SingleChildScrollView(
+      // Keeps the Today data loaded while module screens cover the
+      // dashboard and while the Analytics tab is open.
+      body: DashboardKeepAlive(
+        child: SingleChildScrollView(
         key: PageStorageKey('admin-dashboard-${_tab.name}'),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         child: Center(
@@ -137,6 +141,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             ),
           ),
         ),
+      ),
       ),
     );
   }

@@ -99,11 +99,6 @@ void openDonationsAdmin(BuildContext context) => _push(context, (_) => const Don
 
 void openFlaggedPayments(BuildContext context) => _push(context, (_) => const FlaggedPaymentsPage());
 
-/// Donation gaps 6 and 7: expenses awaiting approval and overdue receipts —
-/// the Approvals tab of Donations & Sponsorships, with its other tabs.
-void openExpenseOversight(BuildContext context) =>
-    _push(context, (_) => const DonationAdminHomeScreen(initialTab: DonationAdminTab.approvals));
-
 /// Donation gap 5: what the shelter has on hand.
 void openStock(BuildContext context) => _push(context, (_) => const StockPage());
 

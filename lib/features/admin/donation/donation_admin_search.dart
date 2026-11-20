@@ -118,7 +118,7 @@ class _DonationAdminSearchPageState extends ConsumerState<DonationAdminSearchPag
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AdminAppBar(
-        title: 'Donations & Sponsorships',
+        title: 'Donations',
         showDrawerButton: false,
         menuActions: [
           AdminMenuAction(

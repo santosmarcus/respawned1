@@ -22,7 +22,6 @@ import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'donation_admin_records.dart';
 import 'donation_admin_search.dart';
 import 'donation_admin_sheets.dart';
-import 'expense_oversight_page.dart';
 import 'general_expenses_page.dart';
 import 'refund_request_page.dart';
 
@@ -33,7 +32,6 @@ const _homeListLimit = 3;
 enum DonationAdminTab {
   campaigns('Campaigns'),
   inKind('In Kind'),
-  approvals('Approvals'),
   refunds('Refunds'),
   caseCosts('Case costs');
 
@@ -41,13 +39,12 @@ enum DonationAdminTab {
   final String label;
 }
 
-/// Admin Donations & Sponsorships: campaigns, in-kind stock, expense
-/// approvals, refund requests and every case's treatment costs, one tab each.
+/// Admin Donations: campaigns and sponsorships, in-kind stock, refund
+/// requests and every case's treatment costs, one tab each.
 class DonationAdminHomeScreen extends ConsumerStatefulWidget {
   const DonationAdminHomeScreen({super.key, this.initialTab = DonationAdminTab.campaigns});
 
-  /// The tab it opens on: Refunds from the dashboard's refund requests card,
-  /// Approvals from its "Expenses & receipts" link.
+  /// The tab it opens on: Refunds from the dashboard's refund requests card.
   final DonationAdminTab initialTab;
 
   @override
@@ -59,7 +56,6 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
       'listing to track funds, record offline donations, confirm in-kind items and review its history. Up to three '
       'ongoing listings show per section; View all lists every current and past one.\n\n'
       'In Kind: stock on hand. Received in-kind donations are added automatically.\n'
-      'Approvals: expenses waiting for a second financial admin, and overdue receipts.\n'
       'Refunds: donors\' refund requests to approve or decline.';
 
   late DonationAdminTab _tab = widget.initialTab;
@@ -98,7 +94,7 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
       backgroundColor: AppColors.background,
       drawer: const AdminDrawer(active: AdminModule.donations),
       appBar: AdminAppBar(
-        title: 'Donations & Sponsorships',
+        title: 'Donations',
         menuActions: [
           // A payment that isn't for a particular campaign goes to the
           // organization's General fund.
@@ -124,7 +120,7 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
             label: 'Help',
             icon: Icons.lightbulb_outline,
             onTap: () =>
-                showInfoDialog(context, title: 'Donations & Sponsorships', message: _helpText, closeLabel: 'Got it'),
+                showInfoDialog(context, title: 'Donations', message: _helpText, closeLabel: 'Got it'),
           ),
         ],
         bottom: AdminTabBar(
@@ -143,7 +139,6 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
         child: switch (_tab) {
           DonationAdminTab.campaigns => const _CampaignsTab(),
           DonationAdminTab.inKind => const StockTab(),
-          DonationAdminTab.approvals => const ExpenseOversightTab(),
           DonationAdminTab.refunds => const RefundRequestsTab(),
           DonationAdminTab.caseCosts => const CaseCostsTab(),
         },
