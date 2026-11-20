@@ -12,7 +12,6 @@ import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/adoption/adopter_adoption_route.dart';
-import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
@@ -186,6 +185,11 @@ class NotificationService {
     }
   }
 
+  /// The screen a notification's data opens, or null if it opens nothing.
+  /// Public so in-app notification lists (e.g. the admin's) route the same
+  /// way as a tapped push.
+  static Future<Widget?> pageFor(Map<String, dynamic> data) => _pageFor(data);
+
   static Future<Widget?> _pageFor(Map<String, dynamic> data) async {
     final type = data['type'] as String? ?? '';
     final db = FirebaseFirestore.instance;
@@ -263,12 +267,12 @@ class NotificationService {
           isOwner: true,
         );
 
-    // sendFollowUpReminders (functions/index.js): the adopter's
-    // post-adoption check-ins, or staff's post-adoption details.
+    // sendFollowUpReminders (functions/index.js): staff always get the
+    // admin Post-Adoption Details page, the adopter their own check-ins.
       case 'follow_up_reminder':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
-        return PostAdoptionMonitoringPage(adoptionId: adoptionId);
+        return postAdoptionPageForAdoption(adoptionId);
       case 'follow_up_overdue_staff':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;

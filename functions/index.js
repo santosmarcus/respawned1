@@ -353,18 +353,23 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
     .where('verificationStatus', '==', 'approved')
     .get();
 
-  const matched = orgsSnap.docs
-    .filter((d) => orgCoversPoint(d.data(), c.lat, c.lng))
+  const covering = orgsSnap.docs.filter((d) => orgCoversPoint(d.data(), c.lat, c.lng));
+  // An org admin can pause new reports (Organization Profile → "Accepting
+  // new rescue reports"); a paused org isn't tagged or notified.
+  const matched = covering
+    .filter((d) => d.get('acceptingCases') !== false)
     .map((d) => d.id);
+  const allPaused = covering.length > 0 && matched.length === 0;
 
   await caseRef.update({
     areaOrgIds: matched,
-    outsideServiceArea: matched.length === 0,
+    outsideServiceArea: covering.length === 0,
+    ...(allPaused ? {noOrgAccepting: true} : {}),
   });
 
   if (matched.length === 0) {
     await db.collection('adminAlerts').add({
-      type: 'outside_service_area',
+      type: allPaused ? 'no_org_accepting' : 'outside_service_area',
       caseId,
       lat: c.lat,
       lng: c.lng,
@@ -869,6 +874,7 @@ async function notifyStaff(uids, {title, body, data}) {
         isRead: false,
         type: data.type,
         caseId: data.caseId || null,
+        adoptionId: data.adoptionId || null,
       });
     } catch (e) {
       console.warn('[notifyStaff] in-app notification failed', uid, e.message);
@@ -1891,6 +1897,7 @@ exports.facebookConfirmPageSelection = facebook.facebookConfirmPageSelection;
 exports.facebookTestConnection = facebook.facebookTestConnection;
 exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
 exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
+exports.facebookPublishRecordPost = facebook.facebookPublishRecordPost;
 exports.facebookSetPublisher = facebook.facebookSetPublisher;
 
 // PayMongo donations & sponsorships — see functions/paymongo.js.
@@ -1908,10 +1915,16 @@ Object.assign(exports, require('./adoptions'));
 Object.assign(exports, require('./audit_logs'));
 // Member access (Admin/Staff and permissions) — see functions/org_members.js.
 Object.assign(exports, require('./org_members'));
+// Delete my account, and system admins disabling/removing users — see functions/account_deletion.js.
+Object.assign(exports, require('./account_deletion'));
+// One mobile number, one account — see functions/phone_accounts.js.
+Object.assign(exports, require('./phone_accounts'));
 // Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
+// Public web page for one animal (/animal/<id>), linked from Facebook posts — see functions/public_animal_page.js.
+exports.publicAnimalPage = require('./public_animal_page').publicAnimalPage;
 
 // ---- Organization verification review ------------------------------------
 //
