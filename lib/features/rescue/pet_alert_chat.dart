@@ -139,6 +139,11 @@ Future<String?> _ownMatchingReport(String uid, Map<String, dynamic> alert) async
   }
 }
 
+/// The Reunited button, from each side: the owner got their pet back,
+/// the finder returned it.
+String reunitedButtonLabel({required bool isOwner}) =>
+    isOwner ? 'I Got My Pet Back' : 'Returned to Owner';
+
 /// Asks for confirmation, then marks [reportIds] (each with every doc of
 /// its group) reunited with the owner, and the chat too when given.
 /// onPetAlertReunited (functions/pet_alerts.js) resolves the reports'
@@ -146,6 +151,7 @@ Future<String?> _ownMatchingReport(String uid, Map<String, dynamic> alert) async
 Future<bool> confirmAndMarkReunited(
     BuildContext context, {
       required List<String> reportIds,
+      required bool isOwner,
       String? chatId,
     }) async {
   final confirmed = await showDialog<bool>(
@@ -153,10 +159,11 @@ Future<bool> confirmAndMarkReunited(
     builder: (ctx) => AlertDialog(
       backgroundColor: AppColors.background,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Reunited with owner?',
+      title: Text(isOwner ? 'Got your pet back?' : 'Returned to its owner?',
           style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
       content: Text(
-        'Confirm that the pet is back with its owner. This closes the '
+        '${isOwner ? 'Confirm that your pet is back home with you.' : 'Confirm that you handed the pet back to its owner.'} '
+            'This closes the '
             'report${reportIds.length > 1 ? 's' : ''}, stops new match alerts and '
             'lets everyone who helped know.',
         style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
@@ -169,7 +176,7 @@ Future<bool> confirmAndMarkReunited(
         ),
         TextButton(
           onPressed: () => Navigator.pop(ctx, true),
-          child: Text('Yes, reunited',
+          child: Text(isOwner ? 'Yes, they\'re home' : 'Yes, returned',
               style: GoogleFonts.zain(
                   fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
         ),
@@ -219,7 +226,10 @@ Future<bool> confirmAndMarkReunited(
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ReunitedSuccessPage(alertId: ownReportId ?? reportIds.first),
+          builder: (_) => ReunitedSuccessPage(
+            alertId: ownReportId ?? reportIds.first,
+            isOwner: isOwner,
+          ),
         ),
       );
     }
@@ -587,12 +597,16 @@ class _MatchPanel extends StatelessWidget {
     final otherRole =
     petAlertRole(alertType: alertType, isReporter: !isReporter);
     final reunited = chat['reunitedAt'] != null;
+    final isOwner =
+        petAlertRole(alertType: alertType, isReporter: isReporter) == 'Owner';
 
     if (reunited) {
       return _panel(
         color: AppColors.greenrspwn.withValues(alpha: 0.35),
-        icon: Icons.favorite,
-        text: 'Reunited with owner. Thank you for helping!',
+        icon: isOwner ? Icons.home_outlined : Icons.favorite,
+        text: isOwner
+            ? 'Your pet is back home. Thank you for using ResPAWnd!'
+            : 'Returned to its owner. Thank you for helping!',
       );
     }
 
@@ -612,6 +626,7 @@ class _MatchPanel extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: () => confirmAndMarkReunited(
                 context,
+                isOwner: isOwner,
                 reportIds: [
                   chat['alertId'] as String,
                   if ((chat['linkedAlertId'] as String?)?.isNotEmpty == true)
@@ -621,7 +636,7 @@ class _MatchPanel extends StatelessWidget {
               ),
               icon: const Icon(Icons.favorite_outline,
                   size: 18, color: AppColors.textPrimary),
-              label: Text('Reunited with Owner',
+              label: Text(reunitedButtonLabel(isOwner: isOwner),
                   style: GoogleFonts.tiltWarp(
                       fontSize: 14, color: AppColors.textPrimary)),
               style: OutlinedButton.styleFrom(
@@ -1158,7 +1173,12 @@ class _ChatRow extends StatelessWidget {
 /// History.
 class ReunitedSuccessPage extends StatelessWidget {
   final String alertId;
-  const ReunitedSuccessPage({super.key, required this.alertId});
+
+  /// Whether the person seeing this is the pet's owner (else the finder).
+  /// Left out, it follows from the report: the person who filed a lost
+  /// report is the owner, and on a found report it's the other person.
+  final bool? isOwner;
+  const ReunitedSuccessPage({super.key, required this.alertId, this.isOwner});
 
   Future<void> _done(BuildContext context, Map<String, dynamic>? alert) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -1200,13 +1220,15 @@ class ReunitedSuccessPage extends StatelessWidget {
         final uid = FirebaseAuth.instance.currentUser?.uid;
         final isLost = (a?['type'] as String? ?? 'lost') == 'lost';
         final isReporter = uid != null && uid == a?['reporterId'];
+        final owner = isOwner ?? (isLost == isReporter);
         final name = (a?['petName'] as String?)?.trim().isNotEmpty == true
             ? a!['petName'] as String
-            : (isLost ? 'Your pet' : 'The pet');
-        final headline = isLost && isReporter
-            ? '$name is back home!'
+            : (owner ? 'Your pet' : 'The pet');
+        final title = owner ? 'Welcome Home!' : 'You Did It!';
+        final headline = owner
+            ? '$name is back home with you!'
             : '$name is back with its owner!';
-        final body = isLost && isReporter
+        final body = owner
             ? 'Thank you to everyone who kept an eye out and reached out. '
             'We\'re so happy your pet is home safe.'
             : 'Thank you for helping a lost pet get back to its family. '
@@ -1233,12 +1255,14 @@ class ReunitedSuccessPage extends StatelessWidget {
                                 color: AppColors.textPrimary.withValues(alpha: 0.2),
                                 width: 4),
                           ),
-                          child: const Icon(Icons.favorite,
-                              size: 46, color: AppColors.textPrimary),
+                          child: Icon(
+                              owner ? Icons.home_rounded : Icons.volunteer_activism,
+                              size: 46,
+                              color: AppColors.textPrimary),
                         ),
                         const SizedBox(height: 20),
                         Text(
-                          'Reunited!',
+                          title,
                           style: GoogleFonts.tiltWarp(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,

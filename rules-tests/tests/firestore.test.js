@@ -730,6 +730,9 @@ describe('adoptions', () => {
     await assertFails(as('adopter').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
     // Nor reset their missed-interview count.
     await assertFails(as('adopter').doc('adoptions/appA').update({ noShowCount: 0 }));
+    // Link ID Tag (post_adoption_page.dart) saves the adopter's collar tag.
+    await assertSucceeds(as('adopter').doc('adoptions/appA').update({ collarTagId: 'tag1' }));
+    await assertFails(as('stranger').doc('adoptions/appA').update({ collarTagId: 'tag1' }));
     await assertSucceeds(as('staffA').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
   });
 

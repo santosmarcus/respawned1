@@ -175,6 +175,21 @@ function hasReceivedResponse(c, communityReportsCount) {
   return false;
 }
 
+// How every push is delivered: high priority on the app's notification
+// channel (NotificationService.channelId) with sound, so Android shows it
+// as a heads-up banner even when the app is closed or the phone is idle,
+// and iOS plays a sound.
+const PUSH_DELIVERY = {
+  android: {
+    priority: 'high',
+    notification: {channelId: 'respawnd_alerts', sound: 'default'},
+  },
+  apns: {
+    headers: {'apns-priority': '10'},
+    payload: {aps: {sound: 'default'}},
+  },
+};
+
 async function notifyUser({uid, title, body, data}) {
   if (!uid) return false;
   const userDoc = await db.collection('users').doc(uid).get();
@@ -186,6 +201,7 @@ async function notifyUser({uid, title, body, data}) {
     token,
     notification: {title, body},
     data,
+    ...PUSH_DELIVERY,
   });
   return true;
 }
@@ -304,6 +320,7 @@ async function notifyNearbyUsers({
       tokens: list.slice(i, i + FCM_MULTICAST_LIMIT),
       notification: {title, body},
       data: toFcmData(data),
+      ...PUSH_DELIVERY,
     });
   }
 
@@ -411,6 +428,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
         body: 'A rescue report was filed inside your organization\'s coverage area. Tap to review it.',
       },
       data: toFcmData({type: 'new_case_service_area', caseId}),
+      ...PUSH_DELIVERY,
     });
   }
   return independentIds;

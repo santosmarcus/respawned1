@@ -278,6 +278,13 @@ module.exports = ({db, safeNotifyUser}) => {
     }
 
     const chats = await db.collection('petAlertChats').where('alertId', '==', alertId).get();
+    // People whose match was confirmed: the other side of the reunion.
+    const confirmedInquirers = new Set();
+    chats.forEach((c) => {
+      if (c.get('matchStatus') === 'confirmed' && c.get('inquirerId')) {
+        confirmedInquirers.add(c.get('inquirerId'));
+      }
+    });
     if (!chats.empty) {
       const batch = db.batch();
       chats.forEach((c) => {
@@ -303,9 +310,33 @@ module.exports = ({db, safeNotifyUser}) => {
     if (after.reunitedBy) recipients.delete(after.reunitedBy);
     if (recipients.size === 0) return;
 
+    // Each person hears it from their side: the owner that their pet is
+    // home, the finder that the pet they found is back with its owner, and
+    // anyone else who messaged that the pet they helped look for is home.
+    const name = (after.petName || '').toString().trim();
+    const species = (after.species || 'pet').toString().toLowerCase();
+    const roleOf = (uid) => {
+      if (uid === after.reporterId) return after.type === 'found' ? 'finder' : 'owner';
+      if (confirmedInquirers.has(uid)) return after.type === 'found' ? 'owner' : 'finder';
+      return 'helper';
+    };
+    const messages = {
+      owner: {
+        title: 'Your pet is back home',
+        body: `${name || `Your ${species}`} is marked reunited with you. We're so glad they're home safe!`,
+      },
+      finder: {
+        title: 'Returned to its owner',
+        body: `${name || `The ${species} you found`} is back with its owner. Thank you for helping them get home!`,
+      },
+      helper: {
+        title: 'Reunited with owner',
+        body: `${reportName(after).replace(/^a /, 'A ')} has been reunited with its owner. Thank you for helping!`,
+      },
+    };
+
     await Promise.all([...recipients].map((uid) => notify(uid, {
-      title: 'Reunited with owner',
-      body: `${reportName(after).replace(/^a /, 'A ')} has been reunited with its owner. Thank you for helping!`,
+      ...messages[roleOf(uid)],
       type: 'pet_alert_reunited',
       alertId,
     })));

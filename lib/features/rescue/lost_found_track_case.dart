@@ -134,6 +134,12 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
 
                       if (isReunited) ...[
                         _ReunitedBanner(
+                          // Who is looking: the owner who filed a lost
+                          // report, the finder who filed a found one, or
+                          // someone else.
+                          viewer: !isReporter
+                              ? null
+                              : (data['type'] == 'found' ? 'finder' : 'owner'),
                           reunitedAt:
                           (data['reunitedAt'] as Timestamp?)?.toDate(),
                         ),
@@ -190,6 +196,9 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                           alertType: data['type'] as String?,
                           footer: (confirmed) => _ReunitePrompt(
                             alertId: widget.alertId,
+                            // The person who filed it: the owner on a lost
+                            // report, the finder on a found one.
+                            isOwner: data['type'] != 'found',
                             confirmedChats: confirmed,
                             isClosed: isClosed,
                           ),
@@ -380,7 +389,10 @@ class _CaseRow extends StatelessWidget {
 /// Shown at the top of a report the owner or finder marked reunited.
 class _ReunitedBanner extends StatelessWidget {
   final DateTime? reunitedAt;
-  const _ReunitedBanner({this.reunitedAt});
+
+  /// 'owner', 'finder', or null for anyone else.
+  final String? viewer;
+  const _ReunitedBanner({this.reunitedAt, this.viewer});
 
   @override
   Widget build(BuildContext context) {
@@ -397,9 +409,12 @@ class _ReunitedBanner extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              reunitedAt != null
-                  ? 'Reunited with owner on ${formatDate(reunitedAt!)}'
-                  : 'Reunited with owner',
+              switch (viewer) {
+                'owner' => 'Back home with you',
+                'finder' => 'Returned to its owner',
+                _ => 'Reunited with owner',
+              } +
+                  (reunitedAt != null ? ' on ${formatDate(reunitedAt!)}' : ''),
               style: GoogleFonts.zain(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
@@ -905,9 +920,11 @@ class _ReunitePrompt extends StatelessWidget {
   final String alertId;
   final List<Map<String, dynamic>> confirmedChats;
   final bool isClosed;
+  final bool isOwner;
 
   const _ReunitePrompt({
     required this.alertId,
+    required this.isOwner,
     required this.confirmedChats,
     required this.isClosed,
   });
@@ -920,7 +937,7 @@ class _ReunitePrompt extends StatelessWidget {
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           'Once you confirm a right match in a chat and meet up, the '
-              'Reunited with Owner button appears here.',
+              '${reunitedButtonLabel(isOwner: isOwner)} button appears here.',
           style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
         ),
       );
@@ -930,6 +947,7 @@ class _ReunitePrompt extends StatelessWidget {
       child: OutlinedButton.icon(
         onPressed: () => confirmAndMarkReunited(
           context,
+          isOwner: isOwner,
           reportIds: [
             alertId,
             for (final c in confirmedChats)
@@ -943,7 +961,7 @@ class _ReunitePrompt extends StatelessWidget {
         icon: const Icon(Icons.favorite_outline,
             size: 18, color: AppColors.textPrimary),
         label: Text(
-          'Reunited with Owner',
+          reunitedButtonLabel(isOwner: isOwner),
           style: GoogleFonts.tiltWarp(
               fontSize: 15,
               fontWeight: FontWeight.bold,

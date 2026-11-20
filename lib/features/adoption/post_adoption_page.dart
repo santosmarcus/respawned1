@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
-import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
+import 'package:respawnd1/features/collartag/collar_tag_form_screen.dart';
 import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
@@ -458,6 +458,28 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             _DialogOptionButton(
+              icon: Icons.nfc,
+              label: _resolveCollarTagId(data) == null
+                  ? 'Link ID Tag'
+                  : 'Change Linked ID Tag',
+              onTap: () async {
+                Navigator.pop(dialogContext);
+                final linked = await _linkIdTag(
+                  context,
+                  adoptionId: adoptionId,
+                  animalName: animalName,
+                  data: data,
+                );
+                if (linked != null && !linked.created && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+                    'ID tag linked to $animalName.',
+                    kind: AppMessageKind.success,
+                  ));
+                }
+              },
+            ),
+            const SizedBox(height: 10),
+            _DialogOptionButton(
               icon: Icons.assignment_return_outlined,
               label: isReturnRequested
                   ? 'Return Already Requested'
@@ -497,25 +519,8 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
   // already verified), which is what distinguishes it from a "fresh",
   // unidentified lost/stray report filed through the general Rescue form. ----
 
-  // Single integration point for wiring in the animal-info-page → adoption
-  // listing tag mirroring later. Not implemented yet (set aside per
-  // requirements), but every read in this file goes through here so that
-  // whichever convention the mirroring lands on, only this method needs to
-  // change — nothing else in the report-lost flow does.
-  //
-  // Currently checked, in order:
-  //   1. Top-level 'collarTagId' on the adoption doc — the simplest form of
-  //      mirroring, written once when the animal's tag is linked.
-  //   2. 'personal.collarTagId' — nested alongside the other animal fields
-  //      already mirrored here (animalName, organizationName), in case the
-  //      mirror write-path follows that existing convention instead.
-  //
-  // Deferred / not yet implemented:
-  //   3. A live fallback lookup by animalId (e.g. reading
-  //      'animals/{animalId}.collarTagId' directly) for the window before
-  //      mirroring exists. Add it here — and only here — once the animal
-  //      document's field name/collection is finalized; this would make the
-  //      method async, so callers already `await` it in anticipation.
+  // The ID tag linked to this adoption: top-level 'collarTagId' (written by
+  // Link ID Tag, _linkIdTag), or 'personal.collarTagId' for older records.
   String? _resolveCollarTagId(Map<String, dynamic> data) {
     final direct = data['collarTagId'] as String?;
     if (direct != null && direct.isNotEmpty) return direct;
@@ -525,6 +530,114 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
     if (nested != null && nested.isNotEmpty) return nested;
 
     return null;
+  }
+
+  // ---- Link ID Tag: picks one of the adopter's registered collar tags, or
+  // creates one for the adopted pet, and saves it on the adoption
+  // (adoptions/{id}.collarTagId, read by _resolveCollarTagId). The tag gets
+  // linkedAdoptionId back. Returns null when nothing was linked; `created`
+  // is true for a new tag (the user is then on its ID card). ----
+  Future<({String tagId, bool created})?> _linkIdTag(
+      BuildContext context, {
+        required String adoptionId,
+        required String animalName,
+        required Map<String, dynamic> data,
+      }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _LinkTagSheet(
+        uid: uid,
+        animalName: animalName,
+        currentTagId: _resolveCollarTagId(data),
+      ),
+    );
+    if (picked == null || !context.mounted) return null;
+
+    String? tagId = picked;
+    var created = false;
+    if (picked == _LinkTagSheet.createNew) {
+      final prefill = await _tagPrefill(data, animalName);
+      if (!context.mounted) return null;
+      tagId = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CollarTagFormScreen(prefill: prefill),
+        ),
+      );
+      created = true;
+      if (tagId == null) return null;
+    }
+
+    try {
+      final db = FirebaseFirestore.instance;
+      await db.collection('adoptions').doc(adoptionId).update({
+        'collarTagId': tagId,
+        'collarTagLinkedAt': FieldValue.serverTimestamp(),
+      });
+      // The tag remembers the adoption too (both copies of it).
+      final link = {'linkedAdoptionId': adoptionId};
+      await Future.wait([
+        db.collection('collarTags').doc(tagId).set(link, SetOptions(merge: true)),
+        db.collection('users').doc(uid).collection('collarTags').doc(tagId)
+            .set(link, SetOptions(merge: true)),
+      ]).catchError((_) => <void>[]);
+      if (created && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+          'ID tag created and linked to $animalName. Use Mark as Lost on '
+              'the ID card if $animalName is missing.',
+          kind: AppMessageKind.success,
+        ));
+      }
+      return (tagId: tagId, created: created);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+          'Could not link the ID tag: $e',
+          kind: AppMessageKind.error,
+        ));
+      }
+      return null;
+    }
+  }
+
+  /// A new tag's starting details from the adopted animal's record.
+  Future<Map<String, dynamic>> _tagPrefill(
+      Map<String, dynamic> data, String animalName) async {
+    final personal = (data['personal'] as Map?) ?? {};
+    final out = <String, dynamic>{
+      'name': animalName,
+      'species': personal['species'],
+    };
+    final animalId = personal['animalRecordId'] as String?;
+    if (animalId == null || animalId.isEmpty) return out;
+    try {
+      final a = (await FirebaseFirestore.instance
+          .collection('animals')
+          .doc(animalId)
+          .get())
+          .data();
+      if (a == null) return out;
+      return {
+        ...out,
+        'species': a['species'] ?? personal['species'],
+        'breed': a['breed'],
+        'sex': a['sex'],
+        'description': a['description'],
+        'spayedNeutered': a['spayedNeutered'] == true,
+        'vaccinated': a['vaccinated'] == true,
+        'allergies': a['allergies'],
+      };
+    } catch (_) {
+      return out;
+    }
   }
 
   Future<void> _reportLostPet(
@@ -666,12 +779,11 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
               fontSize: 16, color: AppColors.textPrimary),
         ),
         content: Text(
-          '$animalName doesn\'t have a registered collar/NFC ID tag linked '
-              'to this adoption yet. Linking one gives the fastest path to '
-              'reunification if $animalName ever goes missing — anyone who '
-              'scans the tag can reach you directly.\n\nYou can still file '
-              'a basic lost report now, or link a tag first for the full '
-              'scan-and-chat reunification flow.',
+          '$animalName doesn\'t have a collar/NFC ID tag linked to this '
+              'adoption yet. Link one of your registered tags (or create one '
+              'now) for the fastest path home: anyone who scans the tag can '
+              'reach you directly.\n\nYou can still file a basic lost report '
+              'without a tag.',
           style:
           GoogleFonts.zain(fontSize: 13.5, color: AppColors.textSecondary),
         ),
@@ -695,13 +807,22 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                 style: GoogleFonts.zain(color: AppColors.textPrimary)),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(dialogContext);
-              Navigator.push(
+              final linked = await _linkIdTag(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const CollarTagHomeScreen(),
-                ),
+                adoptionId: adoptionId,
+                animalName: animalName,
+                data: data,
+              );
+              // A tag that already existed: carry on with the report. A
+              // new one opens its ID card, where Mark as Lost does the same.
+              if (linked == null || linked.created || !context.mounted) return;
+              _reportLostPet(
+                context,
+                adoptionId: adoptionId,
+                animalName: animalName,
+                data: {...data, 'collarTagId': linked.tagId},
               );
             },
             style: AppButtons.primary,
@@ -1009,6 +1130,144 @@ class _MoreOptionsButton extends StatelessWidget {
           ),
           child: const Icon(Icons.more_vert,
               size: 26, color: AppColors.textPrimary),
+        ),
+      ),
+    );
+  }
+}
+
+/// The adopter's registered collar tags to link to an adoption, plus
+/// "Create a new ID tag". Pops with the chosen tag's id, or [createNew].
+class _LinkTagSheet extends StatelessWidget {
+  static const createNew = '__create_new__';
+
+  final String uid;
+  final String animalName;
+  final String? currentTagId;
+
+  const _LinkTagSheet({
+    required this.uid,
+    required this.animalName,
+    required this.currentTagId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Link an ID tag to $animalName',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 16, color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              Text(
+                'Pick the collar tag $animalName wears, or create one.',
+                style: GoogleFonts.zain(
+                    fontSize: 13, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(uid)
+                      .collection('collarTags')
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.greenrspwn),
+                        ),
+                      );
+                    }
+                    final tags = snap.data!.docs
+                        .map((d) => CollarTagData.fromFirestore(d.data(), d.id))
+                        .toList();
+                    if (tags.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'You have no registered ID tags yet.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: AppColors.textSecondary),
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: tags.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        final t = tags[i];
+                        final linked = t.tagId == currentTagId;
+                        return ListTile(
+                          onTap: () => Navigator.pop(context, t.tagId),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(
+                              color: linked
+                                  ? AppColors.greenrspwn
+                                  : AppColors.slaterspwn,
+                              width: 1.5,
+                            ),
+                          ),
+                          leading: CircleAvatar(
+                            backgroundColor: AppColors.lavenderrspwn,
+                            backgroundImage: t.petImageUrl?.isNotEmpty == true
+                                ? NetworkImage(t.petImageUrl!)
+                                : null,
+                            child: t.petImageUrl?.isNotEmpty == true
+                                ? null
+                                : const Icon(Icons.pets,
+                                color: AppColors.textPrimary),
+                          ),
+                          title: Text(
+                            t.name.isEmpty ? 'Unnamed pet' : t.name,
+                            style: GoogleFonts.zain(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary),
+                          ),
+                          subtitle: Text(
+                            [
+                              if (t.breed.isNotEmpty) t.breed,
+                              if (t.status == 'lost') 'Reported lost',
+                            ].join(' · '),
+                            style: GoogleFonts.zain(
+                                fontSize: 12.5,
+                                color: AppColors.textSecondary),
+                          ),
+                          trailing: linked
+                              ? const Icon(Icons.check_circle,
+                              color: AppColors.greenrspwn)
+                              : null,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, createNew),
+                style: AppButtons.primary,
+                icon: const Icon(Icons.add, size: 18),
+                label: Text('Create a new ID tag for $animalName',
+                    style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
         ),
       ),
     );

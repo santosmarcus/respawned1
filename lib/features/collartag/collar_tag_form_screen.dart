@@ -17,9 +17,17 @@ import 'package:respawnd1/core/widgets/app_messages.dart';
 class CollarTagFormScreen extends StatefulWidget {
   final CollarTagData? existingTag;
 
+  /// For a new tag: pet details to start from (e.g. an adopted animal's
+  /// record). Keys: name, species ('Dog'/'Cat'), breed, sex ('M'/'F'),
+  /// colorMarkings, description, spayedNeutered, vaccinated, allergies.
+  /// Saving a new tag pops this screen with the new tag's id, so a caller
+  /// can link it (it then shows the tag's ID card in its place).
+  final Map<String, dynamic>? prefill;
+
   const CollarTagFormScreen({
     super.key,
     this.existingTag,
+    this.prefill,
   });
 
   @override
@@ -72,10 +80,32 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
     });
   }
 
+  /// Fills an empty new-tag form from [CollarTagFormScreen.prefill].
+  void _applyPrefill(Map<String, dynamic> p) {
+    String s(Object? v) => v == null ? '' : v.toString().trim();
+    _nameCtrl.text = s(p['name']);
+    _breedCtrl.text = s(p['breed']);
+    _colorCtrl.text = s(p['colorMarkings']);
+    _descCtrl.text = s(p['description']);
+    final species = s(p['species']).toLowerCase();
+    if (species == 'dog') _petType = 'Dog';
+    if (species == 'cat') _petType = 'Cat';
+    final sex = s(p['sex']).toUpperCase();
+    if (sex.startsWith('M')) _sex = 'M';
+    if (sex.startsWith('F')) _sex = 'F';
+    _spayedNeutered = p['spayedNeutered'] == true;
+    _vaccinated = p['vaccinated'] == true;
+    final allergies = s(p['allergies']);
+    if (allergies.toLowerCase() != 'none') _allergiesCtrl.text = allergies;
+  }
+
   @override
   void initState() {
     super.initState();
     _prefillOwner();
+    if (widget.existingTag == null && widget.prefill != null) {
+      _applyPrefill(widget.prefill!);
+    }
 
     final tag = widget.existingTag;
     if (tag != null) {
@@ -328,6 +358,8 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
               isNewlyCreated: !isEditing,
             ),
           ),
+          // Whoever opened the form gets the saved tag's id.
+          result: tagId,
         );
       }
     } catch (e) {
