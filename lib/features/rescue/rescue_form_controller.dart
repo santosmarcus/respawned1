@@ -407,8 +407,9 @@ class RescueFormController {
       }
     } else {
       final hasEmptySpecies = foundAnimals.any((a) => a.speciesText.isEmpty);
+      // No free-text condition on the finder side: each animal's Health &
+      // Behavior Assessment (in its card) describes its condition.
       if (hasEmptySpecies ||
-          conditionController.text.trim().isEmpty ||
           animalStatus == null ||
           finderContactController.text.trim().isEmpty ||
           (finderNeedsRescue && selectedUrgency == null)) {

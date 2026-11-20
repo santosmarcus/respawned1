@@ -142,44 +142,7 @@ class RescueReportService {
     // whole workflow instead of losing all but one to a since-removed
     // per-animal-doc split.
     final animalsArray = [
-      for (final animal in validAnimals)
-        {
-          'species': animal.speciesText,
-          'breed': animal.breedText,
-          'sex': animal.sex,
-          'size': animal.size,
-          'colorMarkings': animal.colorController.text.trim(),
-          // Health & Behavior Assessment (spec) — per animal, never
-          // collapsed into a shared/first-animal value.
-          'bodyCondition': animal.bodyCondition,
-          'mobility': animal.mobility,
-          'alertness': animal.alertness,
-          'eyesNoseMouth': animal.eyesNoseMouth,
-          'skinAndCoat': animal.skinAndCoat,
-          'appetiteHydration': animal.appetiteHydration,
-          'behavior': animal.behavior.toList(),
-          // Not asked on Pet Surrender; drop any chips picked earlier
-          // under another rescue type.
-          'environmentSafety': form.isPetSurrenderType
-              ? <String>[]
-              : animal.environmentSafety.toList(),
-          'biteRisk': animal.biteRisk,
-          'escapeRisk': animal.escapeRisk,
-          // Injury, Illness, Neglect or Abuse — asked per animal.
-          if (form.asksVisibleSigns) ...{
-            'visibleSigns': animal.visibleSigns.toList(),
-            'needsMedical': animal.needsMedical,
-          },
-          // Pet Surrender — asked per animal inside its card.
-          if (form.isPetSurrenderType) ...{
-            'age': animal.ageController.text.trim(),
-            'stayDuration': animal.stayDurationController.text.trim(),
-            'acquisitionSource': animal.acquisitionSource,
-            'vaccination': animal.vaccination,
-            'spayNeuter': animal.spayNeuter,
-            'compatibility': animal.compatibility.toList(),
-          },
-        },
+      for (final animal in validAnimals) animalDetailsMap(form, animal),
     ];
 
     final surrenderReasonValue =
@@ -383,7 +346,10 @@ class RescueReportService {
           'reporterPhone': form.finderContactController.text.trim(),
           'animalType': form.foundAnimals.first.speciesText,
           'rescueType': 'Lost Pet',
-          'condition': form.conditionController.text.trim(),
+          // The finder form has no free-text condition: staff get the
+          // first animal's Health & Behavior Assessment as a summary, and
+          // every animal's full answers on the linked petAlerts docs.
+          'condition': animalHealthSummary(form.foundAnimals.first),
           'urgency': form.selectedUrgency,
           'address': form.addressController.text.trim().isEmpty
               ? pinnedAddress
@@ -414,14 +380,13 @@ class RescueReportService {
           'reporterId': uid,
           'reporterName': reporterName,
           'contactNumber': form.finderContactController.text.trim(),
-          'species': a.speciesText,
-          'breed': a.breedText,
-          'sex': a.sex,
-          'size': a.size,
-          'colorMarkings': a.colorController.text.trim(),
-          'describeCondition': form.conditionController.text.trim(),
+          // Everything from this animal's card: basic details, the Health
+          // & Behavior Assessment and the risk fields (shown on the report
+          // page and to staff of the linked case).
+          ...animalDetailsMap(form, a),
           'animalStatus': form.animalStatus,
           'needsRescue': form.finderNeedsRescue,
+          'urgency': form.finderNeedsRescue ? form.selectedUrgency : null,
           'linkedCaseId': linkedCaseId,
           'address': form.addressController.text.trim().isEmpty
               ? pinnedAddress
@@ -472,4 +437,66 @@ class RescueReportService {
       }
     }
   }
+}
+
+/// One animal's answers from its card on the form (basic details, the
+/// Health & Behavior Assessment and the risk fields), as saved on a rescue
+/// case's `animals[]` entry and on each found-pet `petAlerts` doc.
+Map<String, dynamic> animalDetailsMap(
+    RescueFormController form,
+    FoundAnimalEntry animal,
+    ) => {
+  'species': animal.speciesText,
+  'breed': animal.breedText,
+  'sex': animal.sex,
+  'size': animal.size,
+  'colorMarkings': animal.colorController.text.trim(),
+  // Health & Behavior Assessment (spec) — per animal, never
+  // collapsed into a shared/first-animal value.
+  'bodyCondition': animal.bodyCondition,
+  'mobility': animal.mobility,
+  'alertness': animal.alertness,
+  'eyesNoseMouth': animal.eyesNoseMouth,
+  'skinAndCoat': animal.skinAndCoat,
+  'appetiteHydration': animal.appetiteHydration,
+  'behavior': animal.behavior.toList(),
+  // Not asked on Pet Surrender; drop any chips picked earlier
+  // under another rescue type.
+  'environmentSafety': form.isPetSurrenderType
+      ? <String>[]
+      : animal.environmentSafety.toList(),
+  'biteRisk': animal.biteRisk,
+  'escapeRisk': animal.escapeRisk,
+  // Injury, Illness, Neglect or Abuse — asked per animal.
+  if (form.asksVisibleSigns) ...{
+    'visibleSigns': animal.visibleSigns.toList(),
+    'needsMedical': animal.needsMedical,
+  },
+  // Pet Surrender — asked per animal inside its card.
+  if (form.isPetSurrenderType) ...{
+    'age': animal.ageController.text.trim(),
+    'stayDuration': animal.stayDurationController.text.trim(),
+    'acquisitionSource': animal.acquisitionSource,
+    'vaccination': animal.vaccination,
+    'spayNeuter': animal.spayNeuter,
+    'compatibility': animal.compatibility.toList(),
+  },
+};
+
+/// The Health & Behavior Assessment as one line of text, e.g.
+/// "Body condition: Thin · Mobility: Limping · Behavior: Friendly", for
+/// the `condition` of the rescue case a finder opens (the finder form has
+/// no separate free-text condition).
+String animalHealthSummary(FoundAnimalEntry a) {
+  final parts = <String>[
+    if (a.bodyCondition != null) 'Body condition: ${a.bodyCondition}',
+    if (a.mobility != null) 'Mobility: ${a.mobility}',
+    if (a.alertness != null) 'Alertness: ${a.alertness}',
+    if (a.eyesNoseMouth != null) 'Eyes, nose, mouth: ${a.eyesNoseMouth}',
+    if (a.skinAndCoat != null) 'Skin and coat: ${a.skinAndCoat}',
+    if (a.appetiteHydration != null)
+      'Appetite and hydration: ${a.appetiteHydration}',
+    if (a.behavior.isNotEmpty) 'Behavior: ${a.behavior.join(', ')}',
+  ];
+  return parts.join(' · ');
 }

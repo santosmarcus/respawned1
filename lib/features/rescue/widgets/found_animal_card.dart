@@ -258,6 +258,9 @@ class FoundAnimalCard extends StatelessWidget {
               key: ValueKey(entry.sex),
               initialValue: entry.sex,
               isDense: true,
+              // Fit the column it's in (its widest option otherwise sets its
+              // width and overflows half-width rows on small phones).
+              isExpanded: true,
               decoration: const InputDecoration(
                 isDense: true,
                 hintText: 'Sex',
@@ -279,6 +282,9 @@ class FoundAnimalCard extends StatelessWidget {
               key: ValueKey(entry.size),
               initialValue: entry.size,
               isDense: true,
+              // Fit the column it's in (its widest option otherwise sets its
+              // width and overflows half-width rows on small phones).
+              isExpanded: true,
               decoration: const InputDecoration(
                 isDense: true,
                 hintText: 'Size',

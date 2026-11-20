@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/rescue/widgets/qr_scanner_page.dart';
+import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 
-/// "Scan for NFC or QR" button (with its info icon) on the report form.
+/// "Scan for NFC or QR" on the report form: a subsection header saying
+/// why to scan (the same style as the form's other headers), then the
+/// button.
 class ScanTagButton extends StatelessWidget {
   const ScanTagButton({super.key, required this.onPressed});
 
@@ -13,69 +15,56 @@ class ScanTagButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.zero,
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: onPressed,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.textPrimary,
-                side: const BorderSide(
-                  color: AppColors.textPrimary,
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                backgroundColor: AppColors.yellowrspwn,
-                padding: const EdgeInsets.symmetric(
-                  vertical: 12,
-                  horizontal: 16,
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const RescueSubsectionHeader(
+          'Scan for NFC or QR code',
+          subtitle: 'This animal may have an ID tag. Scan the NFC or QR code '
+              'to help identify the owner.',
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.textPrimary,
+              side: const BorderSide(
+                color: AppColors.textPrimary,
+                width: 1.5,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.qr_code_scanner, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Scan for NFC or QR',
-                        style: GoogleFonts.tiltWarp(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w400,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  GestureDetector(
-                    onTap: () => showScanInfo(context),
-                    child: const Icon(
-                      Icons.info_outline,
-                      size: 18,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ],
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              backgroundColor: AppColors.yellowrspwn,
+              padding: const EdgeInsets.symmetric(
+                vertical: 12,
+                horizontal: 16,
+              ),
+            ),
+            icon: const Icon(Icons.qr_code_scanner, size: 18),
+            label: Text(
+              'Scan for NFC or QR',
+              style: GoogleFonts.tiltWarp(
+                fontSize: 16,
+                fontWeight: FontWeight.w400,
+                color: AppColors.textPrimary,
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
 /// Bottom sheet offering QR or NFC scanning.
 void showScanOptionsSheet(
-  BuildContext context, {
-  required VoidCallback onScanQr,
-  required VoidCallback onScanNfc,
-}) {
+    BuildContext context, {
+      required VoidCallback onScanQr,
+      required VoidCallback onScanNfc,
+    }) {
   showModalBottomSheet(
     context: context,
     backgroundColor: AppColors.background,

@@ -223,6 +223,7 @@ class ReportMapEntry {
     final statusLabel = switch (status) {
       'verified' => 'Match verified — coordinating handover',
       'resolved' => 'Resolved',
+      'reunited' => 'Reunited with owner',
       _ => 'Searching for possible matches',
     };
 
@@ -329,6 +330,9 @@ List<ReportMapEntry> extractPublicLostPetAlerts(
     if (data['reporterId'] == currentUserId) continue;
     final status = (data['status'] as String? ?? 'open').toLowerCase();
     if (_kAlertDismissedStatuses.contains(status)) continue;
+    // The pet is home: no longer something for the public to look out for
+    // (the owner still sees it under My Reports).
+    if (status == 'reunited') continue;
     final groupId = data['groupId'] as String?;
     if (groupId != null && groupId.isNotEmpty && groupId != doc.id) continue;
 

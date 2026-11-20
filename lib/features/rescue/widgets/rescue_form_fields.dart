@@ -65,6 +65,9 @@ class SpeciesDropdown extends StatelessWidget {
       key: ValueKey(value),
       initialValue: value,
       isDense: true,
+      // Fit the column it's in (its widest option otherwise sets its
+      // width and overflows half-width rows on small phones).
+      isExpanded: true,
       decoration: InputDecoration(
         isDense: true,
         hintText: 'Select species',
@@ -115,6 +118,9 @@ class BreedDropdown extends StatelessWidget {
           key: ValueKey(validValue),
           initialValue: validValue,
           isDense: true,
+          // Fit the column it's in (its widest option otherwise sets its
+          // width and overflows half-width rows on small phones).
+          isExpanded: true,
           decoration: InputDecoration(
             isDense: true,
             hintText: species == null ? 'Select species first' : 'Select breed',
@@ -129,20 +135,20 @@ class BreedDropdown extends StatelessWidget {
           items: species == null
               ? const []
               : options
-                    .map(
-                      (b) => DropdownMenuItem(
-                        value: b,
-                        child: Text(
-                          b,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.zain(
-                            fontSize: 13,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
+              .map(
+                (b) => DropdownMenuItem(
+              value: b,
+              child: Text(
+                b,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          )
+              .toList(),
           onChanged: species == null ? null : onChanged,
         ),
         if (validValue == kOthersBreedLabel) ...[
@@ -160,12 +166,12 @@ class BreedDropdown extends StatelessWidget {
 /// [value] is what gets stored; it defaults to [label].
 class RescueRadioOption extends StatelessWidget {
   const RescueRadioOption(
-    this.label,
-    this.selected,
-    this.onSelect, {
-    super.key,
-    this.value,
-  });
+      this.label,
+      this.selected,
+      this.onSelect, {
+        super.key,
+        this.value,
+      });
 
   final String label;
   final String? selected;
@@ -347,8 +353,8 @@ class RescueUrgencyCard extends StatelessWidget {
           Expanded(
             child: Text(
               'Set automatically from the rescue type'
-              '${description == null ? '' : ' — $rescueType: ${description[0].toLowerCase()}${description.substring(1)}'}.'
-              ' Staff may update the animal\'s condition after the rescue.',
+                  '${description == null ? '' : ' — $rescueType: ${description[0].toLowerCase()}${description.substring(1)}'}.'
+                  ' Staff may update the animal\'s condition after the rescue.',
               style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
             ),
           ),
@@ -406,12 +412,12 @@ class RescuePickerField extends StatelessWidget {
 /// Underlined single-line text field used throughout the form.
 class RescueTextField extends StatelessWidget {
   const RescueTextField(
-    this.controller,
-    this.hint, {
-    super.key,
-    this.keyboardType,
-    this.inputFormatters,
-  });
+      this.controller,
+      this.hint, {
+        super.key,
+        this.keyboardType,
+        this.inputFormatters,
+      });
 
   final TextEditingController controller;
   final String hint;
@@ -511,8 +517,10 @@ class RescueToggleChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 34,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        // At least the old fixed height; a label too long for the row wraps
+        // onto a second line instead of overflowing on small phones.
+        constraints: const BoxConstraints(minHeight: 34),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: selected ? kRescueSelectedFill : Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -528,12 +536,15 @@ class RescueToggleChip extends StatelessWidget {
               const Icon(Icons.check, size: 14, color: AppColors.textPrimary),
               const SizedBox(width: 4),
             ],
-            Text(
-              label,
-              style: GoogleFonts.zain(
-                fontSize: 13,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: AppColors.textPrimary,
+            Flexible(
+              child: Text(
+                label,
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  height: 1.15,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: AppColors.textPrimary,
+                ),
               ),
             ),
           ],
@@ -586,7 +597,7 @@ class RiskDropdown extends StatelessWidget {
           initialValue: value,
           isDense: true,
           isExpanded:
-              true, // lets the selected-value Text shrink to fit instead of overflowing
+          true, // lets the selected-value Text shrink to fit instead of overflowing
           decoration: InputDecoration(
             isDense: true,
             hintText: hintText,

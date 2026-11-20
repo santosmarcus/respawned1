@@ -538,7 +538,7 @@ class _RescuePageState extends State<RescuePage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
               child: Text(
-                'Three short steps: where the animal is, photos, and what you saw. '
+                'Four short steps: where the animal is, the type of rescue, photos, and what you saw. '
                     'Our partner organizations review every report.',
                 style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
               ),
@@ -563,10 +563,56 @@ class _RescuePageState extends State<RescuePage> {
 
             const SizedBox(height: 14),
 
+            // Rescue type comes before the photos: it decides which details
+            // (and how many photos) the rest of the form asks for.
             RescueFormSection(
               step: 2,
+              title: 'Rescue type',
+              subtitle: 'What kind of help does the animal need?',
+              child: InkWell(
+                onTap: _pickRescueType,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: double.infinity,
+                  height: 48,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: kRescueFieldBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _form.selectedRescueType ?? 'Select rescue type',
+                          style: GoogleFonts.zain(
+                            fontSize: 15,
+                            color: _form.selectedRescueType == null
+                                ? AppColors.textSecondary
+                                : AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: AppColors.textPrimary,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            RescueFormSection(
+              step: 3,
               title: 'Photos and videos',
-              subtitle: 'Actual photos or videos of the animal. At least 2 are required.',
+              subtitle: _form.isLostPetType
+                  ? 'Actual photos or videos of the animal. At least 1 is required.'
+                  : 'Actual photos or videos of the animal. At least 2 are required.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -592,52 +638,12 @@ class _RescuePageState extends State<RescuePage> {
             const SizedBox(height: 14),
 
             RescueFormSection(
-              step: 3,
+              step: 4,
               title: 'Rescue details',
               subtitle: 'Tell us about the animal and its current condition.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Rescue Type
-                  RescueFieldLabel('Rescue type', required: true),
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: _pickRescueType,
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: double.infinity,
-                      height: 48,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kRescueFieldBorder),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _form.selectedRescueType ?? 'Select rescue type',
-                              style: GoogleFonts.zain(
-                                fontSize: 15,
-                                color: _form.selectedRescueType == null
-                                    ? AppColors.textSecondary
-                                    : AppColors.textPrimary,
-                              ),
-                            ),
-                          ),
-                          const Icon(
-                            Icons.keyboard_arrow_down,
-                            color: AppColors.textPrimary,
-                            size: 20,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
                   if (_form.isPetSurrenderType) ...[
                     SurrenderFields(form: _form, onChanged: _onFormChanged),
                   ] else if (!_form.isLostPetType) ...[

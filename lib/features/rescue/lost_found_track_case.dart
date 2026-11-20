@@ -1,18 +1,26 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/features/rescue/pet_alert_chat.dart';
+import 'package:respawnd1/features/rescue/widgets/case_report_details.dart';
 
 
 class LostFoundTrackCasePage extends StatefulWidget {
   final String alertId;
 
-  const LostFoundTrackCasePage({super.key, required this.alertId});
+  /// The viewer's own report they came from (a Possible Match card on it),
+  /// linked to the chat if they message about this report.
+  final String? fromAlertId;
+
+  const LostFoundTrackCasePage({
+    super.key,
+    required this.alertId,
+    this.fromAlertId,
+  });
 
   @override
   State<LostFoundTrackCasePage> createState() =>
@@ -20,99 +28,10 @@ class LostFoundTrackCasePage extends StatefulWidget {
 }
 
 class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
-  final _messageController = TextEditingController();
-  final _messageFocusNode = FocusNode();
-  bool _sending = false;
-
   DocumentReference<Map<String, dynamic>> get _alertRef => FirebaseFirestore
       .instance
       .collection('petAlerts')
       .doc(widget.alertId);
-
-  @override
-  void dispose() {
-    _messageController.dispose();
-    _messageFocusNode.dispose();
-    super.dispose();
-  }
-
-  Future<void> _sendMessage() async {
-    final text = _messageController.text.trim();
-    if (text.isEmpty || _sending) return;
-
-    setState(() => _sending = true);
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final userDoc =
-      await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      final name =
-      '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
-          .trim();
-
-      await _alertRef.collection('messages').add({
-        'senderId': uid,
-        'senderName': name.isEmpty ? 'User' : name,
-        'text': text,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-      _messageController.clear();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Could not send message: $e'),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
-  }
-
-  Future<void> _showContactSheet(
-      BuildContext context, {
-        required String title,
-        required String? phone,
-      }) async {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(title,
-            style: GoogleFonts.tiltWarp(
-                fontSize: 16, color: AppColors.textPrimary)),
-        content: Text(
-          (phone == null || phone.isEmpty)
-              ? 'No contact number on file yet. Use the Messages thread below instead.'
-              : phone,
-          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
-        ),
-        actions: [
-          if (phone != null && phone.isNotEmpty)
-            TextButton(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: phone));
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  appSnackBar('Number copied.'),
-                );
-              },
-              child: Text('Copy',
-                  style: GoogleFonts.zain(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-            ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _messageFocusNode.requestFocus();
-            },
-            child: Text('Message instead',
-                style: GoogleFonts.zain(color: AppColors.textSecondary)),
-          ),
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -142,6 +61,9 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
           final isLost = (data['type'] as String? ?? 'lost') == 'lost';
           final uid = FirebaseAuth.instance.currentUser?.uid;
           final isReporter = uid != null && uid == data['reporterId'];
+          final status = (data['status'] as String? ?? 'open').toLowerCase();
+          final isReunited = status == 'reunited';
+          final isClosed = isReunited || status == 'resolved';
           final photoUrls = List<String>.from(data['photoUrls'] ?? []);
 
           final title = (data['petName'] as String?)?.trim().isNotEmpty == true
@@ -190,6 +112,14 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                       ),
                       const SizedBox(height: 18),
 
+                      if (isReunited) ...[
+                        _ReunitedBanner(
+                          reunitedAt:
+                          (data['reunitedAt'] as Timestamp?)?.toDate(),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
                       _CaseRow(
                         label: isLost ? 'Last Seen' : 'Location Found',
                         value: (data['address'] as String?)?.trim().isNotEmpty ==
@@ -199,49 +129,10 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                       ),
                       const SizedBox(height: 10),
 
-                      Padding(
-                        padding: const EdgeInsets.only(left: 14),
-                        child: Column(
-                          children: [
-                            _CaseRow(
-                                label: 'Species',
-                                value: data['species'] as String?),
-                            _CaseRow(
-                                label: 'Breed',
-                                value: data['breed'] as String?),
-                            _CaseRow(label: 'Sex', value: data['sex'] as String?),
-                            _CaseRow(
-                                label: 'Color/Markings',
-                                value: data['colorMarkings'] as String?),
-                            _CaseRow(
-                                label: 'Size',
-                                value: data['size'] as String?),
-                            if (isLost)
-                              _CaseRow(
-                                  label: 'Temperament',
-                                  value: data['temperament'] as String?),
-                            if (!isLost) ...[
-                              _CaseRow(
-                                  label: 'Describe Condition',
-                                  value: data['describeCondition'] as String?),
-                              _CaseRow(
-                                  label: 'Right now, the animal is',
-                                  value: data['animalStatus'] as String?),
-                            ],
-                          ],
-                        ),
-                      ),
-
-                      if (isLost) ...[
-                        const SizedBox(height: 4),
-                        _CaseRow(
-                          label: 'Reward',
-                          value: formatRewardDisplay(
-                            offerReward: data['offerReward'],
-                            rewardAmount: data['rewardAmount'],
-                          ),
-                        ),
-                      ],
+                      if (isLost)
+                        _LostPetDetails(data: data)
+                      else
+                        _FoundPetDetails(alertId: widget.alertId, data: data),
 
                       const SizedBox(height: 16),
                       const Divider(color: AppColors.slaterspwn),
@@ -256,33 +147,12 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                       _PossibleMatchesSection(
                         alertId: widget.alertId,
                         isLost: isLost,
+                        isReporter: isReporter,
                       ),
 
                       const SizedBox(height: 16),
                       const Divider(color: AppColors.slaterspwn),
                       const SizedBox(height: 12),
-
-                      if (!isReporter) ...[
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () => _showContactSheet(
-                              context,
-                              title: isLost ? 'Contact Owner' : 'Contact Finder',
-                              phone: data['contactNumber'] as String?,
-                            ),
-                            style: AppButtons.primary,
-                            child: Text(
-                              isLost ? 'Contact Owner' : 'Contact Finder',
-                              style: GoogleFonts.tiltWarp(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textPrimary),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
 
                       Text('Messages',
                           style: GoogleFonts.zain(
@@ -291,65 +161,32 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
                               color: AppColors.textPrimary)),
                       const SizedBox(height: 10),
 
-                      SizedBox(
-                        height: 220,
-                        child: _MessagesList(alertId: widget.alertId),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Message input
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _messageController,
-                              focusNode: _messageFocusNode,
-                              decoration: InputDecoration(
-                                hintText: 'Type a message',
-                                hintStyle: GoogleFonts.zain(
-                                    fontSize: 13,
-                                    color: AppColors.textSecondary),
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 10),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(50),
-                                  borderSide: const BorderSide(
-                                      color: AppColors.slaterspwn),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(50),
-                                  borderSide: const BorderSide(
-                                      color: AppColors.textPrimary),
-                                ),
-                                filled: true,
-                                fillColor: Colors.white,
-                              ),
-                              onSubmitted: (_) => _sendMessage(),
-                            ),
+                      // The person who filed the report sees one private
+                      // chat per person who messaged; everyone else gets a
+                      // button to message them (marketplace style).
+                      if (isReporter)
+                        PetAlertChatList(
+                          alertId: widget.alertId,
+                          alertType: data['type'] as String?,
+                          footer: (confirmed) => _ReunitePrompt(
+                            alertId: widget.alertId,
+                            confirmedChats: confirmed,
+                            isClosed: isClosed,
                           ),
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: _sending ? null : _sendMessage,
-                            child: Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: const BoxDecoration(
-                                color: AppColors.yellowrspwn,
-                                shape: BoxShape.circle,
-                              ),
-                              child: _sending
-                                  ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppColors.textPrimary),
-                              )
-                                  : const Icon(Icons.send,
-                                  size: 18, color: AppColors.textPrimary),
-                            ),
-                          ),
-                        ],
+                        )
+                      else
+                        _InquirerChatEntry(
+                          alertId: widget.alertId,
+                          alert: data,
+                          fromAlertId: widget.fromAlertId,
+                          isClosed: isClosed,
+                        ),
+
+                      // Messages from before chats were private, if any.
+                      _LegacyMessages(
+                        alertId: widget.alertId,
+                        reporterId: data['reporterId'] as String?,
+                        alertType: data['type'] as String?,
                       ),
                     ],
                   ),
@@ -520,10 +357,181 @@ class _CaseRow extends StatelessWidget {
   }
 }
 
+/// Shown at the top of a report the owner or finder marked reunited.
+class _ReunitedBanner extends StatelessWidget {
+  final DateTime? reunitedAt;
+  const _ReunitedBanner({this.reunitedAt});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.greenrspwn.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.favorite, size: 20, color: AppColors.textPrimary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              reunitedAt != null
+                  ? 'Reunited with owner on ${formatDate(reunitedAt!)}'
+                  : 'Reunited with owner',
+              style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Everything the owner entered on the lost-pet form.
+class _LostPetDetails extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _LostPetDetails({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final lastSeenDate = (data['lastSeenDate'] as Timestamp?)?.toDate();
+    final lastSeenTime = (data['lastSeenTime'] as String?)?.trim() ?? '';
+    final lastSeen = lastSeenDate == null
+        ? null
+        : lastSeenTime.isEmpty
+        ? formatDate(lastSeenDate)
+        : '${formatDate(lastSeenDate)} · $lastSeenTime';
+    final size = (data['size'] as String?)?.trim() ?? '';
+    final tagId = (data['scannedTagId'] as String?)?.trim() ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 14),
+          child: Column(
+            children: [
+              _CaseRow(label: 'Pet Name', value: data['petName'] as String?),
+              _CaseRow(label: 'Species', value: data['species'] as String?),
+              _CaseRow(label: 'Breed', value: data['breed'] as String?),
+              _CaseRow(label: 'Sex', value: data['sex'] as String?),
+              if (size.isNotEmpty) _CaseRow(label: 'Size', value: size),
+              _CaseRow(
+                  label: 'Color/Markings',
+                  value: data['colorMarkings'] as String?),
+              _CaseRow(label: 'Date/Time Last Seen', value: lastSeen),
+              _CaseRow(
+                  label: 'Temperament',
+                  value: data['temperament'] as String?),
+              if (tagId.isNotEmpty) _CaseRow(label: 'ID Tag', value: tagId),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        _CaseRow(
+          label: 'Reward',
+          value: formatRewardDisplay(
+            offerReward: data['offerReward'],
+            rewardAmount: data['rewardAmount'],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Everything the finder entered: each animal's card (basic details,
+/// Health & Behavior Assessment, risk) and the report-wide answers. A
+/// found report with several animals is one petAlerts doc per animal
+/// sharing this report's id as their groupId.
+class _FoundPetDetails extends StatelessWidget {
+  final String alertId;
+  final Map<String, dynamic> data;
+  const _FoundPetDetails({required this.alertId, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final needsRescue = data['needsRescue'] == true;
+    final tagId = (data['scannedTagId'] as String?)?.trim() ?? '';
+    // Reports from before the finder form lost its free-text condition.
+    final oldCondition = (data['describeCondition'] as String?)?.trim() ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('petAlerts')
+              .where('groupId', isEqualTo: alertId)
+              .snapshots(),
+          builder: (context, snap) {
+            final docs = <QueryDocumentSnapshot<Map<String, dynamic>>>[
+              ...?snap.data?.docs,
+            ];
+            docs.sort((a, b) {
+              final ta = a.data()['createdAt'] as Timestamp?;
+              final tb = b.data()['createdAt'] as Timestamp?;
+              return (ta ?? Timestamp(0, 0)).compareTo(tb ?? Timestamp(0, 0));
+            });
+            final animals = <Map<String, dynamic>>[
+              if (docs.isEmpty) data else for (final d in docs) d.data(),
+            ];
+            return Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.slaterspwn),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    animals.length == 1 ? 'Animal details' : 'Animals found',
+                    style: GoogleFonts.zain(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 8),
+                  AnimalDetailsList(animals: animals),
+                ],
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        if (oldCondition.isNotEmpty)
+          _CaseRow(label: 'Condition', value: oldCondition),
+        _CaseRow(
+            label: 'Right now, the animal is',
+            value: data['animalStatus'] as String?),
+        _CaseRow(
+            label: 'Needs pickup or medical help',
+            value: needsRescue ? 'Yes' : 'No'),
+        if (needsRescue)
+          _CaseRow(label: 'Urgency', value: data['urgency'] as String?),
+        if (tagId.isNotEmpty) _CaseRow(label: 'ID Tag', value: tagId),
+      ],
+    );
+  }
+}
+
 class _PossibleMatchesSection extends StatelessWidget {
   final String alertId;
   final bool isLost;
-  const _PossibleMatchesSection({required this.alertId, required this.isLost});
+  final bool isReporter;
+  const _PossibleMatchesSection({
+    required this.alertId,
+    required this.isLost,
+    required this.isReporter,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -575,6 +583,9 @@ class _PossibleMatchesSection extends StatelessWidget {
             final status = m['status'] as String? ?? 'pending_review';
             return _MatchCard(
               counterpartId: counterpartId,
+              // Messaging from the counterpart links the viewer's own
+              // report to the chat (only when this report is theirs).
+              fromAlertId: isReporter ? alertId : null,
               status: status,
               species: m['species'] as String? ?? '',
               score: (m['score'] as num?)?.round(),
@@ -591,6 +602,7 @@ class _PossibleMatchesSection extends StatelessWidget {
 
 class _MatchCard extends StatelessWidget {
   final String? counterpartId;
+  final String? fromAlertId;
   final String status;
   final String species;
   final int? score;
@@ -598,6 +610,7 @@ class _MatchCard extends StatelessWidget {
 
   const _MatchCard({
     required this.counterpartId,
+    this.fromAlertId,
     required this.status,
     required this.species,
     this.score,
@@ -666,8 +679,10 @@ class _MatchCard extends StatelessWidget {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) =>
-                    LostFoundTrackCasePage(alertId: counterpartId!),
+                builder: (_) => LostFoundTrackCasePage(
+                  alertId: counterpartId!,
+                  fromAlertId: fromAlertId,
+                ),
               ),
             );
           },
@@ -742,10 +757,160 @@ class _MatchCard extends StatelessWidget {
   }
 }
 
-/// Live messages thread for this alert (petAlerts/{alertId}/messages).
-class _MessagesList extends StatelessWidget {
+/// For someone who didn't file the report: a button to message the person
+/// who did, or their existing chat with its match status.
+class _InquirerChatEntry extends StatelessWidget {
   final String alertId;
-  const _MessagesList({required this.alertId});
+  final Map<String, dynamic> alert;
+  final String? fromAlertId;
+  final bool isClosed;
+
+  const _InquirerChatEntry({
+    required this.alertId,
+    required this.alert,
+    required this.fromAlertId,
+    required this.isClosed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    final reporterRole = petAlertRole(
+      alertType: alert['type'] as String?,
+      isReporter: true,
+    );
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('petAlertChats')
+          .doc(petAlertChatId(alertId, uid))
+          .snapshots(),
+      builder: (context, snap) {
+        final chat = snap.data?.data();
+        if (chat == null && isClosed) {
+          return Text(
+            'This report is closed.',
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+          );
+        }
+        final status = chat?['matchStatus'] as String? ?? 'pending';
+        final statusText = chat == null
+            ? null
+            : chat['reunitedAt'] != null
+            ? 'Reunited with owner'
+            : switch (status) {
+          'confirmed' => 'Right match confirmed',
+          'rejected' => 'Marked as not a match',
+          _ => 'Waiting for the ${reporterRole.toLowerCase()} to confirm the match',
+        };
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (statusText != null) ...[
+              Text(statusText,
+                  style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+            ],
+            ElevatedButton.icon(
+              onPressed: () => openPetAlertChat(
+                context,
+                alertId: alertId,
+                alert: alert,
+                fromAlertId: fromAlertId,
+              ),
+              style: AppButtons.primary,
+              icon: const Icon(Icons.chat_bubble_outline,
+                  size: 18, color: AppColors.textPrimary),
+              label: Text(
+                chat == null ? 'Message the $reporterRole' : 'Open chat',
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Under the report owner's chats: the Reunited with Owner button once a
+/// match is confirmed in one of them, or a hint until then.
+class _ReunitePrompt extends StatelessWidget {
+  final String alertId;
+  final List<Map<String, dynamic>> confirmedChats;
+  final bool isClosed;
+
+  const _ReunitePrompt({
+    required this.alertId,
+    required this.confirmedChats,
+    required this.isClosed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isClosed) return const SizedBox.shrink();
+    if (confirmedChats.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          'Once you confirm a right match in a chat and meet up, the '
+              'Reunited with Owner button appears here.',
+          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: OutlinedButton.icon(
+        onPressed: () => confirmAndMarkReunited(
+          context,
+          reportIds: [
+            alertId,
+            for (final c in confirmedChats)
+              if ((c['linkedAlertId'] as String?)?.isNotEmpty == true)
+                c['linkedAlertId'] as String,
+          ],
+          chatId: confirmedChats.length == 1
+              ? confirmedChats.first['id'] as String?
+              : null,
+        ),
+        icon: const Icon(Icons.favorite_outline,
+            size: 18, color: AppColors.textPrimary),
+        label: Text(
+          'Reunited with Owner',
+          style: GoogleFonts.tiltWarp(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary),
+        ),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          side: const BorderSide(color: AppColors.textPrimary),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+        ),
+      ),
+    );
+  }
+}
+
+/// The public thread every report used to have
+/// (petAlerts/{alertId}/messages), read-only now that messaging is a
+/// private chat. Hidden when the report has no such messages.
+class _LegacyMessages extends StatelessWidget {
+  final String alertId;
+  final String? reporterId;
+  final String? alertType;
+  const _LegacyMessages({
+    required this.alertId,
+    required this.reporterId,
+    required this.alertType,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -758,67 +923,71 @@ class _MessagesList extends StatelessWidget {
           .orderBy('timestamp')
           .snapshots(),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2)));
-        }
-        final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return Center(
-            child: Text('No messages for now.',
+        final docs = snap.data?.docs ?? const [];
+        if (docs.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 16),
+            Text('Earlier public messages',
                 style: GoogleFonts.zain(
-                    fontSize: 13, color: AppColors.textSecondary)),
-          );
-        }
-        return ListView.builder(
-          reverse: true,
-          itemCount: docs.length,
-          itemBuilder: (context, i) {
-            final msg = docs[docs.length - 1 - i].data();
-            final fromMe = msg['senderId'] == uid;
-            final ts = msg['timestamp'] as Timestamp?;
-            final timeLabel = ts != null
-                ? formatDateTime(ts.toDate())
-                : '';
-            return Align(
-              alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,
-              child: Container(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                constraints: BoxConstraints(
-                    maxWidth: MediaQuery.of(context).size.width * 0.7),
-                decoration: BoxDecoration(
-                  color: fromMe
-                      ? AppColors.yellowrspwn
-                      : AppColors.tearspwn.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!fromMe)
-                      Text(msg['senderName'] as String? ?? 'User',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary)),
+            const SizedBox(height: 6),
+            for (final d in docs)
+              Builder(builder: (context) {
+                final msg = d.data();
+                final senderId = msg['senderId'] as String?;
+                final role = petAlertRole(
+                  alertType: alertType,
+                  isReporter: senderId == reporterId,
+                );
+                final fromMe = senderId == uid;
+                final ts = msg['timestamp'] as Timestamp?;
+                return Align(
+                  alignment:
+                  fromMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.7),
+                    decoration: BoxDecoration(
+                      color: fromMe
+                          ? AppColors.yellowrspwn
+                          : AppColors.tearspwn.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          fromMe
+                              ? 'You · $role'
+                              : petAlertSenderLabel(
+                              msg['senderName'] as String?, role),
                           style: GoogleFonts.zain(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary)),
-                    Text(msg['text'] as String? ?? '',
-                        style: GoogleFonts.zain(
-                            fontSize: 13, color: AppColors.textPrimary)),
-                    const SizedBox(height: 2),
-                    Text(timeLabel,
-                        style: GoogleFonts.zain(
-                            fontSize: 10, color: AppColors.textSecondary)),
-                  ],
-                ),
-              ),
-            );
-          },
+                              color: AppColors.textPrimary),
+                        ),
+                        Text(msg['text'] as String? ?? '',
+                            style: GoogleFonts.zain(
+                                fontSize: 13, color: AppColors.textPrimary)),
+                        if (ts != null)
+                          Text(formatDateTime(ts.toDate()),
+                              style: GoogleFonts.zain(
+                                  fontSize: 10,
+                                  color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+          ],
         );
       },
     );

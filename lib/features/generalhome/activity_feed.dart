@@ -214,6 +214,7 @@ class ActivityFeed extends StatelessWidget {
                   final statusLabel = switch (status) {
                     'verified' => 'Match verified — coordinating handover',
                     'resolved' => 'Resolved',
+                    'reunited' => 'Reunited with owner',
                     _ => kind == 'lost'
                         ? 'Searching for possible matches'
                         : 'Checking against open lost pet alerts',

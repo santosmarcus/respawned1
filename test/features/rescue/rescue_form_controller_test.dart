@@ -78,8 +78,9 @@ void main() {
       final form = _form()..isOwner = false;
       _addPhoto(form, 0);
       form.foundAnimals.first.species = kCatSpecies;
+      // No free-text condition on the finder side (the animal card's
+      // Health & Behavior Assessment covers it).
       form
-        ..conditionController.text = 'Scared'
         ..animalStatus = 'With me, I can hold it for now'
         ..finderContactController.text = '+639171234567';
       expect(form.validateLostPetReport(), isNull);

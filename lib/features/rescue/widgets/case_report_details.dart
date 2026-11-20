@@ -301,7 +301,7 @@ class _AnimalsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final animals = data['animals'] as List?;
     if (animals != null && animals.isNotEmpty) {
-      return _AnimalList(
+      return AnimalDetailsList(
         animals: [
           for (final a in animals)
             {
@@ -321,7 +321,7 @@ class _AnimalsSection extends StatelessWidget {
     final legacy = _fromCaseFields(data);
     final groupId = data['groupId'] as String?;
     if (groupId == null || groupId.isEmpty) {
-      return _AnimalList(animals: [legacy], isSurrender: isSurrender);
+      return AnimalDetailsList(animals: [legacy], isSurrender: isSurrender);
     }
     return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
       future: FirebaseFirestore.instance
@@ -330,7 +330,7 @@ class _AnimalsSection extends StatelessWidget {
           .get(),
       builder: (context, snapshot) {
         final docs = snapshot.data?.docs ?? const [];
-        return _AnimalList(
+        return AnimalDetailsList(
           animals: docs.length <= 1
               ? [legacy]
               : [for (final d in docs) _fromCaseFields(d.data())],
@@ -353,8 +353,15 @@ class _AnimalsSection extends StatelessWidget {
 
 /// "No. of Animals" plus one block per animal: shown inline for a single
 /// animal, or as collapsed cards when there are two or more.
-class _AnimalList extends StatelessWidget {
-  const _AnimalList({required this.animals, required this.isSurrender});
+/// Each animal's details, health, behavior and risk (one animal shows its
+/// rows directly; two or more show as collapsed cards). Public so the
+/// lost/found report page shows a found animal exactly as staff see it.
+class AnimalDetailsList extends StatelessWidget {
+  const AnimalDetailsList({
+    super.key,
+    required this.animals,
+    this.isSurrender = false,
+  });
 
   final List<Map<String, dynamic>> animals;
   final bool isSurrender;
@@ -464,8 +471,10 @@ class _LostPetSection extends StatelessWidget {
           .where('linkedCaseId', isEqualTo: caseId)
           .get(),
       builder: (context, snapshot) {
-        final alerts = [
-          for (final d in snapshot.data?.docs ?? const []) d.data(),
+        final alerts = <Map<String, dynamic>>[
+          for (final d in snapshot.data?.docs ??
+              const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+            d.data(),
         ];
         if (alerts.isEmpty) {
           return CaseDetailRow('Species', data['animalType']);
@@ -473,19 +482,11 @@ class _LostPetSection extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _AnimalList(
-              animals: [
-                for (final a in alerts)
-                  {
-                    'species': a['species'],
-                    'breed': a['breed'],
-                    'sex': a['sex'],
-                    'size': a['size'],
-                    'colorMarkings': a['colorMarkings'],
-                  },
-              ],
-              isSurrender: false,
-            ),
+            // The whole petAlerts doc per animal: basic details plus the
+            // Health & Behavior Assessment and risk fields the finder
+            // answered (reports from before those were saved show only the
+            // basic details).
+            AnimalDetailsList(animals: alerts),
             CaseDetailRow('Animal Status', alerts.first['animalStatus']),
           ],
         );

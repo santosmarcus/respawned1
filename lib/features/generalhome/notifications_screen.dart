@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/services/notification_service.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -56,6 +57,16 @@ const Map<String, String> _kDonationNotifLabels = {
   // sendFollowUpReminders (kPostAdoptionNotifTypes).
   'follow_up_reminder': 'Post-Adoption',
   'follow_up_overdue_staff': 'Post-Adoption',
+  // Lost/found pet reports (functions/pet_matching.js, pet_alerts.js);
+  // open the report (NotificationService.pageFor).
+  'pet_match': 'Lost & Found',
+  'pet_alert_message': 'Lost & Found',
+  'pet_alert_reunited': 'Lost & Found',
+  'pet_alert_chat': 'Lost & Found',
+  // Community Adoption post-adoption (functions/index.js); opens the
+  // post-adoption page.
+  'community_adoption_checkin': 'Community Adoption',
+  'community_post_adoption_update': 'Community Adoption',
 };
 
 /// Notification types whose tap opens Profile → Certificates.
@@ -1022,13 +1033,32 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         } catch (_) {}
         return;
       }
+      if (_kCertificateNotifTypes.contains(item.sourceType)) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const CertificatesPage()),
+        );
+        return;
+      }
+      // Anything the push handler knows how to open (lost/found reports,
+      // rescue cases, organization review, ...) opens the same screen here.
+      // Only notifications with nowhere else to go fall back to the
+      // donation history — Lost & Found ones used to land there.
+      final data = item.data;
+      if (data != null) {
+        try {
+          final page = await NotificationService.pageFor(data);
+          if (!mounted) return;
+          if (page != null) {
+            Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+            return;
+          }
+        } catch (_) {}
+      }
+      if (!mounted) return;
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => _kCertificateNotifTypes.contains(item.sourceType)
-              ? const CertificatesPage()
-              : const HistoryPage(initialTab: 2),
-        ),
+        MaterialPageRoute(builder: (_) => const HistoryPage(initialTab: 2)),
       );
       return;
     }

@@ -96,7 +96,7 @@ class LostPetFields extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'A registered ID tag was found on scan — the owner will be '
-                    'notified directly instead of a manual match.',
+                        'notified directly instead of a manual match.',
                     style: GoogleFonts.zain(
                       fontSize: 12,
                       color: AppColors.textPrimary,
@@ -263,6 +263,9 @@ class OwnerFields extends StatelessWidget {
                     key: ValueKey(form.lostSex),
                     initialValue: form.lostSex,
                     isDense: true,
+                    // Fit the column it's in (its widest option otherwise sets its
+                    // width and overflows half-width rows on small phones).
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       isDense: true,
                       border: UnderlineInputBorder(
@@ -342,17 +345,17 @@ class OwnerFields extends StatelessWidget {
         RescueRadioOption(
           'Friendly, approachable',
           form.temperament,
-          (val) => _set(() => form.temperament = val),
+              (val) => _set(() => form.temperament = val),
         ),
         RescueRadioOption(
           'Nervous, may run',
           form.temperament,
-          (val) => _set(() => form.temperament = val),
+              (val) => _set(() => form.temperament = val),
         ),
         RescueRadioOption(
           'Can be defensive / bite risk',
           form.temperament,
-          (val) => _set(() => form.temperament = val),
+              (val) => _set(() => form.temperament = val),
         ),
         const SizedBox(height: 20),
         Row(
@@ -441,32 +444,30 @@ class FinderFields extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Found more than one? Add each animal below — they will be tracked '
-          'together as one case.',
+              'together as one case.',
           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 10),
+        // Each animal's condition is described by the Health & Behavior
+        // Assessment in its card — no separate condition box here.
         FoundAnimalList(animals: form.foundAnimals, onChanged: onChanged),
-        const SizedBox(height: 12),
-        RescueFieldLabel('Describe Condition', required: true),
-        const SizedBox(height: 6),
-        RescueTextField(form.conditionController, 'Calm, scared, injured…'),
         const SizedBox(height: 20),
         RescueFieldLabel('Right now, the animal is', required: true),
         const SizedBox(height: 8),
         RescueRadioOption(
           'With me, I can hold it for now',
           form.animalStatus,
-          (val) => _set(() => form.animalStatus = val),
+              (val) => _set(() => form.animalStatus = val),
         ),
         RescueRadioOption(
           "Still roaming, can't approach it",
           form.animalStatus,
-          (val) => _set(() => form.animalStatus = val),
+              (val) => _set(() => form.animalStatus = val),
         ),
         RescueRadioOption(
           'Already brought to a vet/shelter',
           form.animalStatus,
-          (val) => _set(() => form.animalStatus = val),
+              (val) => _set(() => form.animalStatus = val),
         ),
         const SizedBox(height: 16),
         Container(
@@ -502,17 +503,17 @@ class FinderFields extends StatelessWidget {
           RescueRadioOption(
             'Low',
             form.selectedUrgency,
-            (val) => _set(() => form.selectedUrgency = val),
+                (val) => _set(() => form.selectedUrgency = val),
           ),
           RescueRadioOption(
             'Medium',
             form.selectedUrgency,
-            (val) => _set(() => form.selectedUrgency = val),
+                (val) => _set(() => form.selectedUrgency = val),
           ),
           RescueRadioOption(
             'Critical',
             form.selectedUrgency,
-            (val) => _set(() => form.selectedUrgency = val),
+                (val) => _set(() => form.selectedUrgency = val),
           ),
         ],
         const SizedBox(height: 20),

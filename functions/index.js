@@ -2427,6 +2427,7 @@ exports.sendCommunityAdoptionCheckIns = onSchedule({schedule: '30 9 * * *', time
         isRead: false,
         type: 'community_adoption_checkin',
         caseId: c.caseId || null,
+        checkInId: doc.id,
       });
       await safeNotifyUser({
         uid: c.adopterId,
@@ -2453,3 +2454,75 @@ Object.assign(exports, require('./dashboard_ops')({
 // Scores new lost/found reports against open ones and saves possibleMatches.
 // See functions/pet_matching.js and functions/pet_match_rules.js.
 Object.assign(exports, require('./pet_matching')({db, safeNotifyUser}));
+
+// ---- Lost/found pet messages and reunions --------------------------------
+// Notifies the report owner and thread participants of new messages, and
+// resolves matches when a report is marked reunited. See functions/pet_alerts.js.
+Object.assign(exports, require('./pet_alerts')({db, safeNotifyUser}));
+
+// ---- Community Adoption post-adoption updates ----------------------------
+// Tell the reporter who rehomed the animal (communityAdoptions/{id}
+// .rehomedById) when the adopter sends a post-adoption update in the first
+// two weeks (communityAdoptionCheckIns/{id}/updates, from
+// CommunityPostAdoptionUpdateForm in post_adoption_page.dart) or answers the
+// 2-week check-in. In-app + push, {type: 'community_post_adoption_update',
+// communityAdoptionId}, which open the post-adoption page.
+
+const COMMUNITY_NOTE_PREVIEW_CHARS = 120;
+
+function communityNotePreview(text) {
+  const t = (text || '').toString().replace(/\s+/g, ' ').trim();
+  return t.length > COMMUNITY_NOTE_PREVIEW_CHARS ? `${t.slice(0, COMMUNITY_NOTE_PREVIEW_CHARS - 1)}…` : t;
+}
+
+async function notifyCommunityRehomer(adoptionId, {title, body}) {
+  const snap = await db.collection('communityAdoptions').doc(adoptionId).get();
+  if (!snap.exists) return;
+  const a = snap.data();
+  const to = a.rehomedById;
+  if (!to || to === a.adopterId) return;
+  const data = {type: 'community_post_adoption_update', communityAdoptionId: adoptionId};
+  try {
+    await db.collection('users').doc(to).collection('notifications').add({
+      title,
+      message: body,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      isRead: false,
+      ...data,
+      caseId: a.sourceCaseId || null,
+    });
+  } catch (e) {
+    console.warn('[communityPostAdoption] in-app notification failed', to, e.message);
+  }
+  await safeNotifyUser({uid: to, title, body, data});
+}
+
+exports.notifyCommunityPostAdoptionUpdate = onDocumentCreated(
+  'communityAdoptionCheckIns/{adoptionId}/updates/{updateId}',
+  async (event) => {
+    const u = event.data && event.data.data();
+    if (!u || u.kind === 'checkin') return; // the check-in is announced below
+    const {adoptionId} = event.params;
+    const a = (await db.collection('communityAdoptions').doc(adoptionId).get()).data();
+    const name = (a && (a.name || a.species)) || 'the animal you rehomed';
+    await notifyCommunityRehomer(adoptionId, {
+      title: `New update on ${name}`,
+      body: communityNotePreview(u.notes || u.note) ||
+        (u.howIsPetDoing ? `Doing: ${u.howIsPetDoing}` : 'The adopter sent an update.'),
+    });
+  },
+);
+
+exports.notifyCommunityCheckInSubmitted = onDocumentUpdated(
+  'communityAdoptionCheckIns/{adoptionId}',
+  async (event) => {
+    const before = event.data && event.data.before.data();
+    const after = event.data && event.data.after.data();
+    if (!before || !after) return;
+    if (before.status === 'submitted' || after.status !== 'submitted') return;
+    await notifyCommunityRehomer(event.params.adoptionId, {
+      title: `2-week check-in: ${after.animalName || 'your rehomed animal'}`,
+      body: communityNotePreview(after.note) || 'The adopter sent their check-in.',
+    });
+  },
+);

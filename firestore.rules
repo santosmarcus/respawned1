@@ -1716,23 +1716,60 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ---- Community Adoption check-ins (Adoption gap 10) ---------------------
-    // Written by the backend (scheduleCommunityAdoptionCheckIn). The adopter
-    // answers once, with a photo and a note; staff of the organizations in
-    // the area read them (queries filter on organizationIds).
-    match /communityAdoptionCheckIns/{checkInId} {
-      allow read: if signedIn() && (
-        resource.data.get('adopterId', '') == request.auth.uid ||
-        isPlatformStaff() ||
-        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && myStaffWith(readKeys()))
-      );
-      allow update: if signedIn() &&
-        resource.data.get('adopterId', '') == request.auth.uid &&
-        resource.data.get('status', '') == 'requested' &&
-        changedOnly(['status', 'photoUrl', 'note', 'submittedAt']) &&
-        request.resource.data.status == 'submitted';
-      allow create, delete: if false;
-    }
+        match /communityAdoptionCheckIns/{checkInId} {
+          // The reporter who rehomed the animal (communityAdoptions/{id} shares
+          // the check-in's id) sees the adopter's check-in and updates too.
+          function isRehomer() {
+            return get(/databases/$(database)/documents/communityAdoptions/$(checkInId))
+              .data.get('rehomedById', '') == request.auth.uid;
+          }
+
+          function canReadCheckIn(data) {
+            return signedIn() && (
+              data.get('adopterId', '') == request.auth.uid ||
+              isPlatformStaff() ||
+              (myOrgId() != '' && myOrgId() in data.get('organizationIds', []) && myStaffWith(readKeys())) ||
+              isRehomer()
+            );
+          }
+
+          allow read: if canReadCheckIn(resource.data);
+          allow update: if signedIn() &&
+            resource.data.get('adopterId', '') == request.auth.uid &&
+            resource.data.get('status', '') == 'requested' &&
+            changedOnly(['status', 'photoUrl', 'note', 'submittedAt']) &&
+            request.resource.data.status == 'submitted';
+          allow create, delete: if false;
+
+          // Post-adoption updates (CommunityPostAdoptionUpdateForm in
+          // lib/features/adoption/post_adoption_page.dart, the same questions as a
+          // shelter follow-up): the adopter sends them as often as they like
+          // until the 2-week check-in is due, then answers the check-in once it
+          // is requested (kind 'checkin'). Read like the check-in.
+          match /updates/{updateId} {
+            function checkIn() {
+              return get(/databases/$(database)/documents/communityAdoptionCheckIns/$(checkInId)).data;
+            }
+            allow read: if canReadCheckIn(checkIn());
+            allow create: if signedIn() &&
+              checkIn().get('adopterId', '') == request.auth.uid &&
+              request.resource.data.authorId == request.auth.uid &&
+              request.resource.data.keys().hasOnly([
+                'authorId', 'kind', 'howIsPetDoing', 'healthConcerns', 'healthConcernsOther',
+                'vaccinated', 'images', 'notes', 'createdAt'
+              ]) &&
+              request.resource.data.kind in ['update', 'checkin'] &&
+              request.resource.data.images is list &&
+              request.resource.data.images.size() >= 1 &&
+              request.resource.data.images.size() <= 5 &&
+              request.resource.data.get('notes', '') is string &&
+              request.resource.data.get('notes', '').size() <= 1000 &&
+              (request.resource.data.kind == 'checkin'
+                ? checkIn().get('status', '') == 'requested'
+                : request.time < checkIn().dueAt);
+            allow update, delete: if false;
+          }
+        }
 
     // ---- Community Adoption requests -----------------------------------------
     // community_adoption_request_repository.dart. Someone interested in a
@@ -1839,6 +1876,57 @@ service cloud.firestore {
         changedOnly(['status', 'reviewedBy', 'reviewedAt']) &&
         request.resource.data.status in ['pending_review', 'verified', 'resolved', 'rejected'];
     }
+
+        // Private chat between the person who filed a lost/found report and
+        // someone messaging them about it (lib/features/rescue/pet_alert_chat.dart,
+        // functions/pet_alerts.js). ID: {alertId}_{inquirerId}. Only the two of
+        // them can read it. The person who filed the report decides whether it
+        // is the right match; either of them can record the reunion. Last-message
+        // previews and decision notes are written by Cloud Functions.
+        match /petAlertChats/{chatId} {
+          function isChatParty(data) {
+            return signedIn() &&
+              (request.auth.uid == data.reporterId || request.auth.uid == data.inquirerId);
+          }
+
+          // A chat that doesn't exist yet can be read (the app checks whether
+          // you already have one before starting it).
+          allow read: if signedIn() && (resource == null || isChatParty(resource.data));
+
+          allow create: if signedIn() &&
+            request.resource.data.inquirerId == request.auth.uid &&
+            chatId == request.resource.data.alertId + '_' + request.auth.uid &&
+            request.resource.data.reporterId ==
+              get(/databases/$(database)/documents/petAlerts/$(request.resource.data.alertId)).data.reporterId &&
+            request.resource.data.reporterId != request.auth.uid &&
+            request.resource.data.matchStatus == 'pending';
+
+          allow update: if isChatParty(resource.data) &&
+            changedOnly(['matchStatus', 'matchDecidedAt', 'matchDecidedBy', 'reunitedAt', 'reunitedBy']) &&
+            (request.resource.data.matchStatus == resource.data.matchStatus ||
+              (request.auth.uid == resource.data.reporterId &&
+                request.resource.data.matchStatus in ['pending', 'confirmed', 'rejected'])) &&
+            // The reunion can only be recorded once the match is confirmed.
+            (request.resource.data.get('reunitedAt', null) == resource.data.get('reunitedAt', null) ||
+              resource.data.matchStatus == 'confirmed');
+
+          allow delete: if false;
+
+          match /messages/{messageId} {
+            function chat() {
+              return get(/databases/$(database)/documents/petAlertChats/$(chatId)).data;
+            }
+            allow read: if isChatParty(chat());
+            allow create: if isChatParty(chat()) &&
+              request.resource.data.senderId == request.auth.uid &&
+              request.resource.data.get('kind', 'text') == 'text' &&
+              request.resource.data.text is string &&
+              request.resource.data.text.size() > 0 &&
+              request.resource.data.text.size() <= 2000;
+            allow update, delete: if false;
+          }
+        }
+
 
     // ---- Everything else ---------------------------------------------------
     // Any signed-in user, except the collections with their own blocks above.

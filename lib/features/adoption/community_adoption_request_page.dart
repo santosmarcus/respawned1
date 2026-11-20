@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +8,7 @@ import 'package:respawnd1/core/models/adoption/community_adoption_request.dart';
 import 'package:respawnd1/core/repos/community_adoption_request_repository.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/adoption/community_adoption_terms.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 
 /// One adopter's request for a Community Adoption listing, shared by both
 /// sides: the reporter who listed the animal and the interested adopter.
@@ -229,6 +231,17 @@ class _RequestBodyState extends State<_RequestBody> {
                   }),
                 ),
               ],
+              // After the adoption: the adopter's post-adoption updates and
+              // 2-week check-in, for the reporter who rehomed the animal(s)
+              // and the adopter alike.
+              if (r.status == CommunityRequestStatus.completed)
+                for (final adoptionId in r.communityAdoptionIds) ...[
+                  const SizedBox(height: 20),
+                  _AdoptionUpdates(
+                    adoptionId: adoptionId,
+                    showName: r.communityAdoptionIds.length > 1,
+                  ),
+                ],
               const SizedBox(height: 16),
               Text(
                 'Messages with $otherName',
@@ -809,4 +822,81 @@ void openCommunityAdoptionRequest(BuildContext context, String requestId) {
       builder: (_) => CommunityAdoptionRequestPage(requestId: requestId),
     ),
   );
+}
+
+/// One adopted animal's post-adoption monitoring, as a card that opens the
+/// same post-adoption page the adopter uses (read-only for the reporter).
+class _AdoptionUpdates extends StatelessWidget {
+  final String adoptionId;
+  final bool showName;
+  const _AdoptionUpdates({required this.adoptionId, required this.showName});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: communityAdoptionsRef.doc(adoptionId).snapshots(),
+      builder: (context, snap) {
+        final a = snap.data?.data();
+        if (a == null) return const SizedBox.shrink();
+        final name = communityAnimalName(a, fallback: 'the animal');
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: communityCheckInsRef.doc(adoptionId).collection('updates').snapshots(),
+          builder: (context, updatesSnap) {
+            final count = updatesSnap.data?.docs.length ?? 0;
+            return GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CommunityPostAdoptionPage(adoptionId: adoptionId),
+                ),
+              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: AppColors.slaterspwn,
+                      blurRadius: 1,
+                      offset: Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.pets, color: AppColors.greenrspwn),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            showName ? 'Post-Adoption · $name' : 'Post-Adoption',
+                            style: GoogleFonts.tiltWarp(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            count == 0
+                                ? 'No updates yet'
+                                : '$count update${count == 1 ? '' : 's'} from the adopter',
+                            style: GoogleFonts.zain(
+                                fontSize: 12, color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 }

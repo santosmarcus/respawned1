@@ -12,12 +12,14 @@ import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/adoption/adopter_adoption_route.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
 import 'package:respawnd1/features/pettransporter/rescue_request.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
+import 'package:respawnd1/features/rescue/pet_alert_chat.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 
 /// Shows push notifications while the app is open, and opens the right
@@ -247,10 +249,49 @@ class NotificationService {
         if (caseId == null || caseId.isEmpty) return null;
         return TransitProgressPage(caseId: caseId);
 
+    // Community Adoption post-adoption (sendCommunityAdoptionCheckIns and
+    // notifyCommunityPostAdoptionUpdate in functions/index.js): the
+    // adopter's 2-week check-in is due, or the reporter who rehomed the
+    // animal got an update — both open the post-adoption page.
+      case 'community_adoption_checkin':
+      case 'community_post_adoption_update':
+        var adoptionId =
+        (data['checkInId'] ?? data['communityAdoptionId']) as String?;
+        if (adoptionId == null || adoptionId.isEmpty) {
+          // In-app notifications from before they carried the id.
+          final caseId = data['caseId'] as String?;
+          if (caseId == null || caseId.isEmpty) return null;
+          final found = await db
+              .collection('communityAdoptionCheckIns')
+              .where('adopterId',
+              isEqualTo: FirebaseAuth.instance.currentUser!.uid)
+              .where('caseId', isEqualTo: caseId)
+              .limit(1)
+              .get();
+          if (found.docs.isEmpty) return null;
+          adoptionId = found.docs.first.id;
+        }
+        return CommunityPostAdoptionPage(adoptionId: adoptionId);
+
+    // functions/pet_alerts.js: a private chat message about a lost/found
+    // report, or the match decision in it — open that chat.
+      case 'pet_alert_chat':
+        final chatId = data['chatId'] as String?;
+        if (chatId != null && chatId.isNotEmpty) {
+          return PetAlertChatPage(chatId: chatId);
+        }
+        final chatAlertId = data['alertId'] as String?;
+        if (chatAlertId == null || chatAlertId.isEmpty) return null;
+        return LostFoundTrackCasePage(alertId: chatAlertId);
+
       case 'pet_alert_nearby':
       // scorePetAlertMatches (functions/pet_matching.js): a strong match for
       // the owner's lost pet — open their report's Possible Matches.
       case 'pet_match':
+      // functions/pet_alerts.js: a new message on a lost/found report's
+      // thread, or the report was marked reunited with its owner.
+      case 'pet_alert_message':
+      case 'pet_alert_reunited':
         final alertId = data['alertId'] as String?;
         if (alertId == null || alertId.isEmpty) return null;
         return LostFoundTrackCasePage(alertId: alertId);
