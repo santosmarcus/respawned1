@@ -23,6 +23,7 @@ class HealthBehaviorAssessment extends StatelessWidget {
     this.isSurrender = false,
     this.rescueType,
     this.showEnvironmentSafety = true,
+    this.isOwnedPet = false,
   });
 
   final FoundAnimalEntry entry;
@@ -41,6 +42,16 @@ class HealthBehaviorAssessment extends StatelessWidget {
   /// False on the lost-pet owner's form: Environment and Safety describes
   /// where the animal is now, which the owner doesn't know.
   final bool showEnvironmentSafety;
+
+  /// True on the lost-pet owner's form: Behavior lists how an owned pet
+  /// usually acts (kOwnedPetBehaviorOptions) instead of how a stray behaves
+  /// on the street, and the prompts speak to the owner.
+  final bool isOwnedPet;
+
+  List<String> get _behaviorOptions =>
+      isOwnedPet ? kOwnedPetBehaviorOptions : kBehaviorOptions;
+  Map<String, Set<String>> get _behaviorConflicts =>
+      isOwnedPet ? kOwnedPetBehaviorConflicts : kBehaviorConflicts;
 
   List<String>? get _signOptions => visibleSignsOptionsFor(rescueType);
 
@@ -77,9 +88,11 @@ class HealthBehaviorAssessment extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const RescueSubsectionHeader(
+        RescueSubsectionHeader(
           'Health assessment',
-          subtitle: 'Select what you observed. Choose "Not sure / Not assessed" if you could not check.',
+          subtitle: isOwnedPet
+              ? 'How your pet was when it went missing. Choose "Not sure / Not assessed" if you don\'t know.'
+              : 'Select what you observed. Choose "Not sure / Not assessed" if you could not check.',
         ),
         const SizedBox(height: 8),
         AssessmentDropdown(
@@ -188,13 +201,18 @@ class HealthBehaviorAssessment extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        const RescueSubsectionHeader('Behavior', subtitle: 'Select all that apply.'),
+        RescueSubsectionHeader(
+          'Behavior',
+          subtitle: isOwnedPet
+              ? 'How your pet usually acts. Select all that apply.'
+              : 'Select all that apply.',
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final option in kBehaviorOptions)
+            for (final option in _behaviorOptions)
               RescueToggleChip(
                 label: option,
                 selected: entry.behavior.contains(option),
@@ -206,10 +224,10 @@ class HealthBehaviorAssessment extends StatelessWidget {
                     // Deselect anything this option conflicts with, in
                     // both directions — 'Calm' clears 'Aggressive' and
                     // vice versa.
-                    final conflicts = kBehaviorConflicts[option] ?? const {};
+                    final conflicts = _behaviorConflicts[option] ?? const {};
                     entry.behavior.removeWhere((b) => conflicts.contains(b));
                     for (final other in List.of(entry.behavior)) {
-                      if ((kBehaviorConflicts[other] ?? const {}).contains(
+                      if ((_behaviorConflicts[other] ?? const {}).contains(
                         option,
                       )) {
                         entry.behavior.remove(other);

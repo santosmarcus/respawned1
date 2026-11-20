@@ -296,16 +296,23 @@ class NotificationService {
         if (alertId == null || alertId.isEmpty) return null;
         return LostFoundTrackCasePage(alertId: alertId);
 
+    // Collar tag scan chats (functions/index.js): the owner hears about a
+    // scan, the finder that the owner opened the chat, and either side
+    // about a new message. Each opens that chat, as owner or finder.
       case 'tag_scanned':
+      case 'tag_chat_enabled':
+      case 'tag_chat_message':
         final tagId = data['tagId'] as String?;
         final sessionId = data['sessionId'] as String?;
         if (tagId == null || sessionId == null) return null;
         final tag = await db.collection('collarTags').doc(tagId).get();
+        final ownerId = tag.data()?['ownerId'] as String?;
         return PetFoundChatScreen(
           tagId: tagId,
           sessionId: sessionId,
           petName: tag.data()?['name'] as String? ?? 'Your pet',
-          isOwner: true,
+          isOwner: ownerId != null &&
+              ownerId == FirebaseAuth.instance.currentUser?.uid,
         );
 
     // sendFollowUpReminders (functions/index.js): staff always get the

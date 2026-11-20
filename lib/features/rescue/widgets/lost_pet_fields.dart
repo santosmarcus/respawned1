@@ -370,6 +370,7 @@ class OwnerFields extends StatelessWidget {
                 entry: form.lostAnimal,
                 onChanged: onChanged,
                 showEnvironmentSafety: false,
+                isOwnedPet: true,
               ),
               const SizedBox(height: 16),
               const RescueSubsectionHeader(

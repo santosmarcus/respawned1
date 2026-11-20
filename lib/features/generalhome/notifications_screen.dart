@@ -63,6 +63,10 @@ const Map<String, String> _kDonationNotifLabels = {
   'pet_alert_message': 'Lost & Found',
   'pet_alert_reunited': 'Lost & Found',
   'pet_alert_chat': 'Lost & Found',
+  // Collar tag scan chats (functions/index.js); open the chat.
+  'tag_scanned': 'Collar Tag',
+  'tag_chat_enabled': 'Collar Tag',
+  'tag_chat_message': 'Collar Tag',
   // Community Adoption post-adoption (functions/index.js); opens the
   // post-adoption page.
   'community_adoption_checkin': 'Community Adoption',
@@ -815,21 +819,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   List<_NotifItem> get _allItems {
     final all = <_NotifItem>[
-    ..._caseStatusItems,
-    ..._listingItems,
-    ..._listerRequestItems,
-    ..._adopterRequestItems,
-    for (final list in _requestMessageItems.values) ...list,
-    ..._willingAdopterCaseItems,
-    ..._adoptionStatusItems,
-    ..._donationItems,
-    ..._nearbyCaseItems,
-    for (final list in _messageItemsByCase.values) ...list,
-    for (final list in _communityReportItemsByCase.values) ...list,
-    for (final list in _nearbyCommunityReportItemsByCase.values) ...list,
-    for (final list in _checkinItemsByAdoption.values) ...list,
-    for (final item in _dueItemsByAdoption.values)
-    ?item,
+      ..._caseStatusItems,
+      ..._listingItems,
+      ..._listerRequestItems,
+      ..._adopterRequestItems,
+      for (final list in _requestMessageItems.values) ...list,
+      ..._willingAdopterCaseItems,
+      ..._adoptionStatusItems,
+      ..._donationItems,
+      ..._nearbyCaseItems,
+      for (final list in _messageItemsByCase.values) ...list,
+      for (final list in _communityReportItemsByCase.values) ...list,
+      for (final list in _nearbyCommunityReportItemsByCase.values) ...list,
+      for (final list in _checkinItemsByAdoption.values) ...list,
+      for (final item in _dueItemsByAdoption.values)
+        ?item,
     ];
     all.removeWhere((item) => _dismissedIds.contains(item.id));
     final deduped = <String, _NotifItem>{for (final item in all) item.id: item};

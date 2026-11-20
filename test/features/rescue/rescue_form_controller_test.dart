@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
@@ -400,6 +401,24 @@ void main() {
 
       form.linkedCollarTag = null;
       expect(form.validateLostPetReport(), 'Please add at least 1 photo.');
+    });
+  });
+
+  group('owned-pet behavior', () {
+    test('the owner form asks how the pet usually acts, not stray behavior', () {
+      expect(kOwnedPetBehaviorOptions, contains('Comes when called'));
+      expect(kOwnedPetBehaviorOptions, isNot(contains('Protecting young')));
+      expect(kOwnedPetBehaviorOptions, isNot(contains('Hard to approach')));
+    });
+
+    test('conflicting choices exclude each other both ways', () {
+      kOwnedPetBehaviorConflicts.forEach((option, others) {
+        expect(kOwnedPetBehaviorOptions, contains(option));
+        for (final other in others) {
+          expect(kOwnedPetBehaviorConflicts[other], contains(option),
+              reason: '$other should also clear $option');
+        }
+      });
     });
   });
 }

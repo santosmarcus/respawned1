@@ -69,6 +69,33 @@ const Map<String, Set<String>> kBehaviorConflicts = {
   'Distress/Anxious': {'Calm'},
 };
 
+/// Behavior of an owned pet, as its owner knows it — asked on the lost-pet
+/// owner form instead of [kBehaviorOptions] (which describes a stray as
+/// seen on the street). Tells a finder how to approach and identify the pet.
+const List<String> kOwnedPetBehaviorOptions = [
+  'Friendly with strangers',
+  'Shy or wary of strangers',
+  'Comes when called',
+  'Answers to its name',
+  'May run if approached',
+  'Scared of loud noises',
+  'Comes for food or treats',
+  'Good with other animals',
+  'Not good with other animals',
+  'Good with children',
+  'May bite or scratch when scared',
+];
+
+/// Same idea as [kBehaviorConflicts], for [kOwnedPetBehaviorOptions].
+const Map<String, Set<String>> kOwnedPetBehaviorConflicts = {
+  'Friendly with strangers': {'Shy or wary of strangers'},
+  'Shy or wary of strangers': {'Friendly with strangers'},
+  'Comes when called': {'May run if approached'},
+  'May run if approached': {'Comes when called'},
+  'Good with other animals': {'Not good with other animals'},
+  'Not good with other animals': {'Good with other animals'},
+};
+
 /// Single-select.
 const List<String> kEyesNoseMouthOptions = [
   'Clear and no discharge',

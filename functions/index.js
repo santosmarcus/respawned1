@@ -747,13 +747,35 @@ exports.notifyPetAlertNearby = onDocumentCreated(
 // Collar tag scans: the owner hears about every scan of their lost pet;
 // people nearby are alerted only when a scan opens a new rescue session
 // (re-scans don't re-alert the neighbourhood).
+// A collar tag chat notice for the owner or the finder: an in-app item
+// (users/{uid}/notifications) plus a push, both carrying {type, tagId,
+// sessionId} so a tap opens the chat (NotificationService._pageFor).
+// Finders scanning on the web page (anonymous, no profile) have neither.
+async function notifyTagChatParty(uid, {title, body, data}) {
+  if (!uid) return;
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return;
+  try {
+    await db.collection('users').doc(uid).collection('notifications').add({
+      title,
+      message: body,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      isRead: false,
+      ...data,
+    });
+  } catch (e) {
+    console.warn('[collarTag] in-app notification failed', uid, e.message);
+  }
+  await safeNotifyUser({uid, title, body, data});
+}
+
 async function notifyTagScan({tagId, tagData, sessionId, scannerUid, lat, lng, address, isNewSession}) {
   const petName = tagData.name || 'Your pet';
   const ownerId = tagData.ownerId;
 
   if (ownerId && ownerId !== scannerUid) {
-    await safeNotifyUser({
-      uid: ownerId,
+    // In the owner's notifications list too, not only as a push.
+    await notifyTagChatParty(ownerId, {
       title: `${petName} was just scanned!`,
       body: address
         ? `Someone scanned ${petName}'s tag near ${address}. Tap to open the chat.`
@@ -776,6 +798,60 @@ async function notifyTagScan({tagId, tagData, sessionId, scannerUid, lat, lng, a
     });
   }
 }
+
+// The owner opened a scan chat (chatEnabledByOwner false -> true): the
+// finder who scanned the tag is told they can message the owner now.
+exports.notifyTagChatEnabled = onDocumentUpdated('rescueSessions/{sessionId}', async (event) => {
+  const before = event.data && event.data.before.data();
+  const after = event.data && event.data.after.data();
+  if (!before || !after) return;
+  if (before.chatEnabledByOwner === true || after.chatEnabledByOwner !== true) return;
+  if (!after.finderId || after.status === 'resolved') return;
+  const tagSnap = await db.collection('collarTags').doc(after.tagId).get();
+  const petName = (tagSnap.exists && tagSnap.get('name')) || 'the pet';
+  await notifyTagChatParty(after.finderId, {
+    title: `${petName}'s owner opened the chat`,
+    body: `You can now message ${petName}'s owner about where you found them.`,
+    data: {type: 'tag_chat_enabled', tagId: after.tagId, sessionId: event.params.sessionId},
+  });
+});
+
+// A message in a scan chat: the other person is told (the finder when the
+// owner writes, the owner when the finder writes).
+exports.notifyTagChatMessage = onDocumentCreated(
+  'rescueSessions/{sessionId}/messages/{messageId}',
+  async (event) => {
+    const msg = event.data && event.data.data();
+    if (!msg) return;
+    const {sessionId} = event.params;
+    const sessionSnap = await db.collection('rescueSessions').doc(sessionId).get();
+    if (!sessionSnap.exists) return;
+    const session = sessionSnap.data();
+    const tagSnap = await db.collection('collarTags').doc(session.tagId).get();
+    const tag = tagSnap.exists ? tagSnap.data() : {};
+    const ownerId = session.ownerId || tag.ownerId || null;
+    const petName = tag.name || 'your pet';
+    const text = (msg.text || '').toString().replace(/\s+/g, ' ').trim();
+    const preview = text.length > 120 ? `${text.slice(0, 119)}…` : text;
+
+    if (msg.sender === 'finder') {
+      if (!ownerId || ownerId === msg.senderId) return;
+      const who = (session.finderName || '').toString().trim() || 'The person who found ' + petName;
+      await notifyTagChatParty(ownerId, {
+        title: `${who} sent a message`,
+        body: preview || `New message about ${petName}.`,
+        data: {type: 'tag_chat_message', tagId: session.tagId, sessionId},
+      });
+    } else if (msg.sender === 'owner') {
+      if (!session.finderId || session.finderId === msg.senderId) return;
+      await notifyTagChatParty(session.finderId, {
+        title: `${tag.name || 'The pet'}'s owner replied`,
+        body: preview || 'New message from the owner.',
+        data: {type: 'tag_chat_message', tagId: session.tagId, sessionId},
+      });
+    }
+  },
+);
 
 // ---- Pet transporter notifications ----------------------------------------
 //
