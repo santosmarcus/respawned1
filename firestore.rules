@@ -746,10 +746,18 @@ service cloud.firestore {
         );
       }
 
+      // One number, one account: a profile's phone is the number verified
+      // by SMS on this account (Firebase Auth keeps a verified number on a
+      // single account), or empty. Older profiles keep what they have.
+      function phoneOk(data) {
+        return data.get('phone', '') in ['', request.auth.token.get('phone_number', '')];
+      }
+
       // volunteerStats (attendance counts and badges) is written only by the
       // syncVolunteerStats function (functions/volunteer_stats.js).
       function selfFieldsOk(data) {
         return data.get('role', '') in selfRoles() &&
+          phoneOk(data) &&
           !('volunteerStats' in data) &&
           !('transportStatus' in data) &&
           !data.keys().hasAny(['disabled', 'disabledAt', 'disabledBy', 'disabledReason']) &&
@@ -761,6 +769,7 @@ service cloud.firestore {
       function selfUpdateOk() {
         let data = request.resource.data;
         return (!changedAny(['role']) || data.get('role', '') in selfRoles()) &&
+          (!changedAny(['phone']) || phoneOk(data)) &&
           !changedAny(['volunteerStats', 'transportStatus', 'disabled', 'disabledAt', 'disabledBy', 'disabledReason']) &&
           (!changedAny(['isVerified']) || data.get('isVerified', false) == false) &&
           (!changedAny(['transporterVerificationStatus']) || data.get('transporterVerificationStatus', '') == 'pending') &&

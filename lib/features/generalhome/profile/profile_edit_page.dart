@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
+import 'package:respawnd1/core/widgets/phone_verification_sheet.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 
@@ -167,6 +168,13 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       _snack('This account signs in with Google, so its email is managed by Google.');
       return;
     }
+    // Phone sign-in accounts with no email sign-in yet, or one not confirmed
+    // yet (so a mistyped address can be corrected).
+    final hasPassword = user.providerData.any((p) => p.providerId == 'password');
+    if (!hasPassword || (AuthService.hasUnconfirmedEmail(user) && (user.phoneNumber ?? '').isNotEmpty)) {
+      await _addEmailSignIn(user);
+      return;
+    }
     await _updateField(
       title: 'Update Email Address',
       currentValue: _email,
@@ -180,6 +188,108 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
         await _sendEmailChange(newValue);
       },
     );
+  }
+
+  bool get _emailUnconfirmed {
+    final user = FirebaseAuth.instance.currentUser;
+    return user != null && AuthService.hasUnconfirmedEmail(user) && user.email == _email;
+  }
+
+  /// Adds an email and password to a phone sign-in account, so it can sign
+  /// in with either. Firebase Auth refuses an email another account uses;
+  /// the address is confirmed by the link sent to it.
+  Future<void> _addEmailSignIn(User user) async {
+    final emailCtrl = TextEditingController(text: user.email ?? '');
+    final passwordCtrl = TextEditingController();
+    String? error;
+    var busy = false;
+    var obscure = true;
+    final added = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) {
+          Future<void> submit() async {
+            final email = emailCtrl.text.trim();
+            final invalid = AppValidators.email(email) ?? AppValidators.password(passwordCtrl.text);
+            if (invalid != null) return setDialog(() => error = invalid);
+            setDialog(() {
+              busy = true;
+              error = null;
+            });
+            try {
+              final auth = AuthService();
+              final sameUnconfirmed = AuthService.hasUnconfirmedEmail(user) &&
+                  (user.email ?? '').toLowerCase() == email.toLowerCase();
+              await auth.addEmailSignIn(email: email, password: passwordCtrl.text);
+              if (sameUnconfirmed) await auth.sendEmailVerification();
+              if (ctx.mounted) Navigator.pop(ctx, email);
+            } catch (e) {
+              setDialog(() {
+                busy = false;
+                error = AuthService.emailErrorMessage(e);
+              });
+            }
+          }
+
+          return AlertDialog(
+            backgroundColor: AppColors.background,
+            title: Text('Add Email Address',
+                style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Sign in with your email as well as your number. '
+                    'One email can only be used by one account.',
+                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  autofocus: true,
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                  decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'Email address'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: passwordCtrl,
+                  obscureText: obscure,
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    hintText: 'Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                      onPressed: () => setDialog(() => obscure = !obscure),
+                    ),
+                  ),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(error!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.error)),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy ? null : () => Navigator.pop(ctx),
+                child: Text('Cancel', style: GoogleFonts.zain(color: AppColors.textSecondary)),
+              ),
+              TextButton(
+                onPressed: busy ? null : submit,
+                child: Text(busy ? 'Adding…' : 'Add',
+                    style: GoogleFonts.zain(color: AppColors.textPrimary, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    emailCtrl.dispose();
+    passwordCtrl.dispose();
+    if (added == null) return;
+    if (mounted) setState(() => _email = added);
+    _snack('We sent a link to $added. Open it to confirm your email.');
   }
 
   Future<void> _sendEmailChange(String newEmail, {bool reauthenticated = false}) async {
@@ -250,21 +360,30 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     }
   }
 
+  /// One number, one account: a new number is verified by SMS and added to
+  /// this account in Firebase Auth (refused if another account has it), so
+  /// signing in with it opens this account. Phone sign-in accounts change
+  /// the number they sign in with.
   Future<void> _updateMobile() async {
-    await _updateField(
-      title: 'Update Mobile Number',
-      currentValue: _mobile,
-      keyboardType: TextInputType.phone,
-      onConfirm: (newValue) async {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid == null) return;
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .set({'phone': newValue}, SetOptions(merge: true));
-        if (mounted) setState(() => _mobile = newValue);
-      },
+    final digits = _mobile.replaceAll(RegExp(r'\D'), '');
+    final local = digits.length >= 10 ? digits.substring(digits.length - 10) : '';
+    final verified = await showPhoneVerificationSheet(
+      context,
+      initialLocal: local.startsWith('9') ? local : '',
     );
+    if (verified == null) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'phone': verified}, SetOptions(merge: true));
+      if (mounted) setState(() => _mobile = verified);
+      _snack('Mobile number verified and saved.');
+    } catch (_) {
+      _snack('Your number was verified but could not be saved. Please try again.', error: true);
+    }
   }
 
   Future<void> _save() async {
@@ -392,7 +511,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
             const SizedBox(height: 14),
             _ContactDetailRow(
               label: 'Email Address',
-              value: _email.isEmpty ? 'Not set' : _email,
+              value: _email.isEmpty
+                  ? 'Not set'
+                  : _emailUnconfirmed
+                      ? '$_email (not confirmed)'
+                      : _email,
               onUpdate: _updateEmail,
             ),
             const SizedBox(height: 14),

@@ -291,6 +291,27 @@ describe('system admin console', () => {
   });
 });
 
+describe('one mobile number, one account', () => {
+  const withPhone = (uid, phone) => env.authenticatedContext(uid, { phone_number: phone }).firestore();
+
+  test('a profile can only list the number verified on the account', async () => {
+    await assertSucceeds(withPhone('stranger', '+639171234567').doc('users/stranger').update({ phone: '+639171234567' }));
+    await assertFails(withPhone('stranger', '+639171234567').doc('users/stranger').update({ phone: '+639189999999' }));
+    await assertFails(as('reporter').doc('users/reporter').update({ phone: '+639171234567' }));
+    await assertSucceeds(as('reporter').doc('users/reporter').update({ phone: '' }));
+  });
+
+  test('onboarding saves only the verified number', async () => {
+    const profile = { uid: 'fresh', role: 'general', isVerified: false };
+    await assertFails(as('fresh').doc('users/fresh').set({ ...profile, phone: '+639171234567' }));
+    await assertSucceeds(withPhone('fresh', '+639171234567').doc('users/fresh').set({ ...profile, phone: '+639171234567' }));
+  });
+
+  test('other profile changes still work without a verified number', async () => {
+    await assertSucceeds(as('reporter').doc('users/reporter').update({ displayName: 'R' }));
+  });
+});
+
 describe('referral share links', () => {
   test('no client reads or writes them, staff and platform admins included', async () => {
     await env.withSecurityRulesDisabled((ctx) =>

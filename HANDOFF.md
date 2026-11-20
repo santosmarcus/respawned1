@@ -1,6 +1,35 @@
 # Handoff
 
-_Latest: one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## One mobile number, one email per account (2026-11-20, not deployed, not checked on a device)
+
+- **Email:** Firebase Auth already keeps an email on one account (sign-up fails with "email already in use"; Google sign-in with the same email joins the same account while Authentication → Settings → *User account linking* stays on "Link accounts that use the same email").
+- **Phone sign-ups add an email:** Your Details also asks phone sign-ups for an email and password and adds them to the account (`AuthService.addEmailSignIn` → `linkWithCredential`), then shows the confirm-email screen until the link is opened. An email another account uses is refused ("This email already has a ResPAWnd account…"). Every new account can then sign in with either its email or its number.
+- **Existing phone accounts:** Profile → Email Address → Update opens **Add Email Address** (email + password, same check), and the row shows "(not confirmed)" until the link is opened. The app-wide confirm-email gate (`AuthService.needsEmailVerification`) no longer holds accounts that also sign in with a verified number, so a mistyped address can be corrected there instead of locking the person out; Your Details still waits for new phone sign-ups to confirm.
+- **Mobile number:** the number typed in **Your Details** used to be saved without checking, so the same person could sign up by email and later sign in with that number and get a second account. Now:
+  - Your Details sends an SMS code and adds the verified number to the account (`AuthService.addVerifiedPhone` → `updatePhoneNumber`). Signing in with that number later opens the same account. A number another account already has is refused: "This number already has a ResPAWnd account. Log out and sign in with your number instead…". After phone sign-in the number is filled in and locked.
+  - Profile → Update Mobile Number uses the same code check (`lib/core/widgets/phone_verification_sheet.dart`); phone sign-in accounts change the number they sign in with.
+  - Older profiles list numbers nobody verified. `checkSignUpPhone` (`functions/phone_accounts.js`) runs after a new sign-up verifies a number: if a finished account already lists it, a phone-only sign-up is removed (it has no data yet) and an email/Google sign-up loses the number; the message names that account's masked email (e.g. `ma***@gmail.com`) so the person signs in there. Existing accounts keep a number they verify.
+  - firestore.rules: a profile's `phone` can only be set to the number verified on the account (`request.auth.token.phone_number`) or emptied. Existing values stay until changed.
+
+### Deploy, in this order
+1. `firebase deploy --only functions:checkSignUpPhone`
+2. Ship the app build.
+3. `firebase deploy --only firestore:rules`, only once people have the new build: older builds save the typed number at onboarding, which the new rule refuses.
+
+### Checks run
+- `functions`: `npm test` 94/94 (6 new in `phone_account_rules.test.js`).
+- `rules-tests`: 187/187 with JDK 21 (3 new under "one mobile number, one account").
+- `flutter analyze` on the changed files: no issues.
+
+### Check on a device
+- Email sign-up → Your Details → number → code → finish. Log out, sign in with that number: the same account opens.
+- Second email sign-up with the same number: refused at the code step.
+- Phone sign-up → Your Details asks email and password → confirm the link → finish. Log out, sign in with that email and password: the same account opens. An email already in use is refused.
+- Existing phone-only account → Profile → Email Address → Update → add email and password: the row shows "(not confirmed)" until the link is opened; then email sign-in opens the same account.
+- Phone sign-in with a number an older account lists (unverified): told to sign in with `xx***@…`, and no new account is left behind.
+- Profile → Update Mobile Number with a number another account has: refused; with a new number: saved.
 
 ## One default Staff set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed, not checked on a device)
 

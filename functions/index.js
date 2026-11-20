@@ -1917,6 +1917,8 @@ Object.assign(exports, require('./audit_logs'));
 Object.assign(exports, require('./org_members'));
 // Delete my account, and system admins disabling/removing users — see functions/account_deletion.js.
 Object.assign(exports, require('./account_deletion'));
+// One mobile number, one account — see functions/phone_accounts.js.
+Object.assign(exports, require('./phone_accounts'));
 // Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
