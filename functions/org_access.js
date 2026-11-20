@@ -2,17 +2,19 @@
 //
 // Two roles. Admins (and the organization's owner) can do everything. Staff
 // can do what their `permissions` allow (organizations/{orgId}/members/{uid}),
-// set by an Admin through setMemberAccess (functions/org_members.js) from a
-// preset or ticked one by one. The permission and preset lists live in
+// set by an Admin through setMemberAccess (functions/org_members.js): the
+// default Staff set, plus or minus boxes ticked one by one (money
+// permissions are never in the default). The permission and default lists live in
 // org_permissions.json, shared with the app and copied into firestore.rules.
 //
 // Members docs written before permissions existed still work (legacy
 // fallback, the same in firestore.rules and the app):
 //   role 'admin'                → every permission
 //   `permissions` present       → that list
-//   role 'carer'                → Animal care
-//   any other staff / no doc    → Full staff (+ facebookPublish when the old
-//                                 facebookPublisher flag is set)
+//   any other staff / no doc    → the default Staff set (+ facebookPublish
+//                                 when the old facebookPublisher flag is set);
+//                                 role 'carer' too, since carers were merged
+//                                 into Staff
 // An account acts for the organization its users/{uid}.organizationId points
 // at, as firestore.rules does; a membership elsewhere grants nothing.
 
@@ -60,8 +62,7 @@ function memberPermissions(member) {
     if (known.includes('financeManage') && !known.includes('financeView')) known.push('financeView');
     return PERMISSIONS.filter((k) => known.includes(k));
   }
-  if (m.role === 'carer') return [...PRESETS[LEGACY.carer]];
-  const base = [...PRESETS[LEGACY.staff]];
+  const base = [...PRESETS[m.role === 'carer' ? LEGACY.carer : LEGACY.staff]];
   if (m.facebookPublisher === true) base.push('facebookPublish');
   return PERMISSIONS.filter((k) => base.includes(k));
 }

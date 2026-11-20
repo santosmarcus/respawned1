@@ -12,13 +12,18 @@ import 'package:respawnd1/features/admin/animals/widgets/care_updates_section.da
 import 'package:respawnd1/features/care/care_rounds_widgets.dart';
 import 'package:respawnd1/features/account/account_page.dart';
 
-/// Home for organization members with the `carer` role. Carers give care and
-/// record doses; they don't get the admin shell (cases, records, adoptions,
-/// finance). firestore.rules enforces the same split.
+/// The care-tasks screen: today's rounds and each animal's doses and care
+/// updates. Carers were merged into Staff, so any member with daily care
+/// opens it from the admin drawer ([fromAdminShell]); it is still the home
+/// screen of Staff whose only permission is daily care.
 class CarerHomeScreen extends ConsumerWidget {
-  const CarerHomeScreen({super.key, required this.organizationId});
+  const CarerHomeScreen({super.key, required this.organizationId, this.fromAdminShell = false});
 
   final String organizationId;
+
+  /// Opened from the admin drawer: a back button instead of Account and
+  /// Log out, which the drawer already has.
+  final bool fromAdminShell;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -27,8 +32,10 @@ class CarerHomeScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
+        foregroundColor: AppColors.textPrimary,
+        automaticallyImplyLeading: fromAdminShell,
         title: Text('Care tasks', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
-        actions: [
+        actions: fromAdminShell ? null : [
           IconButton(
             tooltip: 'Account',
             icon: const Icon(Icons.account_circle_outlined, color: AppColors.textPrimary),

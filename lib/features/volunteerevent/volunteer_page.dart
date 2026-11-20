@@ -7,17 +7,15 @@ import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'event_detail_page.dart';
-import 'volunteer_application_screen.dart';
 
 export 'package:respawnd1/core/models/volunteer/volunteer_event.dart' show VolunteerEvent;
 
-// VolunteerPage
+/// The home screen's Events page: every organization's volunteer events.
+/// Signing up for an event makes the user an event volunteer for it; the
+/// organization's own rescue volunteers (external `rescue_volunteer`
+/// accounts) are a separate thing managed on the admin side.
 class VolunteerPage extends StatefulWidget {
-  /// Opened from the home screen's Events card: titled "Events", without
-  /// the volunteer-application banner.
-  final bool eventsOnly;
-
-  const VolunteerPage({super.key, this.eventsOnly = false});
+  const VolunteerPage({super.key});
 
   @override
   State<VolunteerPage> createState() => _VolunteerPageState();
@@ -204,7 +202,7 @@ class _VolunteerPageState extends State<VolunteerPage> {
         automaticallyImplyLeading: true,
         centerTitle: true,
         title: Text(
-          widget.eventsOnly ? 'Events' : 'Volunteer',
+          'Events',
           style: GoogleFonts.tiltWarp(
             fontSize: 28,
             fontWeight: FontWeight.bold,
@@ -230,11 +228,6 @@ class _VolunteerPageState extends State<VolunteerPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
-
-            if (!widget.eventsOnly) ...[
-              const VolunteerApplicationBanner(),
-              const SizedBox(height: 12),
-            ],
 
             // Search bar
             Row(

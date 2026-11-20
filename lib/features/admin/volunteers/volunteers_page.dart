@@ -131,8 +131,8 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
     if (picked != null) setState(() => _sort = picked);
   }
 
-  String get _title => widget.transporters ? 'Transporters' : 'Volunteers';
-  String get _noun => widget.transporters ? 'transporters' : 'volunteers';
+  String get _title => widget.transporters ? 'Transporters' : 'Rescue Volunteers';
+  String get _noun => widget.transporters ? 'transporters' : 'rescue volunteers';
 
   @override
   Widget build(BuildContext context) {

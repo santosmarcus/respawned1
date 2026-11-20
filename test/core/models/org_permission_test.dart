@@ -8,12 +8,22 @@ import 'package:respawnd1/core/repos/org_membership_service.dart';
 
 void main() {
   group('presets', () {
-    test('match exactly; anything else is Custom', () {
-      expect(OrgPreset.matching({...OrgPreset.treasurer.permissions}), OrgPreset.treasurer);
-      expect(OrgPreset.matching({OrgPermission.care}), OrgPreset.animalCare);
-      expect(OrgPreset.matching({OrgPermission.care, OrgPermission.rescue}), OrgPreset.custom);
+    test('one default set without money; anything else is Custom', () {
+      expect(OrgPreset.choices, [OrgPreset.staff]);
+      expect(OrgPreset.matching({...OrgPreset.staff.permissions}), OrgPreset.staff);
+      expect(OrgPreset.matching({...OrgPreset.staff.permissions, OrgPermission.financeView}), OrgPreset.custom);
+      expect(OrgPreset.matching({OrgPermission.care}), OrgPreset.custom);
       expect(OrgPreset.matching({}), OrgPreset.custom);
-      expect(OrgPreset.choices, isNot(contains(OrgPreset.custom)));
+      for (final money in OrgPermission.values.where((p) => p.group == OrgPermissionGroup.money)) {
+        expect(OrgPreset.staff.permissions, isNot(contains(money)));
+      }
+      expect(OrgPreset.staff.permissions, isNot(contains(OrgPermission.facebookPublish)));
+    });
+
+    test('staff titles', () {
+      expect(staffTitle(OrgPreset.staff), 'Staff');
+      expect(staffTitle(null), 'Staff');
+      expect(staffTitle(OrgPreset.custom), 'Staff · Custom access');
     });
 
     test('normalize adds View donations to Manage money', () {
@@ -31,10 +41,10 @@ void main() {
       expect(staffPermissionsFrom({'role': 'carer', 'permissions': ['adoptions', 'nope']}), {OrgPermission.adoptions});
     });
 
-    test('carer is Animal care; other Staff and no doc are Full staff', () {
-      expect(staffPermissionsFrom({'role': 'carer'}), OrgPreset.animalCare.permissions);
-      expect(staffPermissionsFrom({'role': 'staff'}), OrgPreset.fullStaff.permissions);
-      expect(staffPermissionsFrom(null), OrgPreset.fullStaff.permissions);
+    test('former carers, other Staff and no doc get the default set', () {
+      expect(staffPermissionsFrom({'role': 'carer'}), OrgPreset.staff.permissions);
+      expect(staffPermissionsFrom({'role': 'staff'}), OrgPreset.staff.permissions);
+      expect(staffPermissionsFrom(null), OrgPreset.staff.permissions);
     });
 
     test('the old Facebook flag adds posting', () {
@@ -43,17 +53,17 @@ void main() {
   });
 
   group('OrgMembership.fromMemberData', () {
-    test('Staff with a preset', () {
+    test('Staff with money ticked by hand is Custom', () {
       final m = OrgMembership.fromMemberData('o', {'role': 'staff', 'permissions': ['campaigns', 'financeView', 'financeManage', 'insights']});
       expect(m.role, OrgRole.staff);
-      expect(m.preset, OrgPreset.treasurer);
+      expect(m.preset, OrgPreset.custom);
     });
 
     test('legacy carer reads as Staff, raw role kept', () {
       final m = OrgMembership.fromMemberData('o', {'role': 'carer', 'status': 'active'});
       expect(m.role, OrgRole.staff);
       expect(m.rawRole, 'carer');
-      expect(m.preset, OrgPreset.animalCare);
+      expect(m.preset, OrgPreset.staff);
     });
 
     test('Admins have everything and no preset', () {
@@ -72,7 +82,7 @@ void main() {
       expect(Set<String>.from(presets[p.name] as List), p.permissions.map((x) => x.key).toSet(), reason: p.name);
     }
     final legacy = json['legacy'] as Map<String, dynamic>;
-    expect(legacy['carer'], OrgPreset.animalCare.name);
-    expect(legacy['staff'], OrgPreset.fullStaff.name);
+    expect(legacy['carer'], OrgPreset.staff.name);
+    expect(legacy['staff'], OrgPreset.staff.name);
   });
 }

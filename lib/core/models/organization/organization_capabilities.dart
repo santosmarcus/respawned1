@@ -78,8 +78,14 @@ class OrganizationCapabilities {
   bool get canManageFacebookConnection => isActive && isAdmin;
   bool get canPublishToFacebook => has(OrgPermission.facebookPublish);
 
-  /// Staff whose only permission is daily care: they get the care-tasks
-  /// screen instead of the admin shell.
+  /// The care-tasks screen (doses, care updates, rounds) from the admin
+  /// shell: any Staff with daily care, which the default set includes —
+  /// carers were merged into Staff.
+  bool get canOpenCareTasks => has(OrgPermission.care);
+
+  /// Staff whose only permission is daily care (an Admin can still untick
+  /// everything else): they get the care-tasks screen instead of the admin
+  /// shell.
   bool get isCareOnly =>
       isActive && !isAdmin && permissions.length == 1 && permissions.contains(OrgPermission.care);
 
@@ -89,7 +95,7 @@ class OrganizationCapabilities {
 
 /// Capabilities from an organization's owner id and the account's members
 /// doc (null when it has none). Pure, shared by the service and tests:
-/// owner → Admin; no members doc (a legacy linked account) → Full staff;
+/// owner → Admin; no members doc (a legacy linked account) → default Staff;
 /// inactive → none; role 'admin' → Admin; anything else → Staff with
 /// [staffPermissionsFrom].
 OrganizationCapabilities capabilitiesFrom({

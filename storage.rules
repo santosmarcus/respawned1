@@ -20,7 +20,7 @@ rules_version = '2';
 // Because of the limit, Storage can't also read organizations/{orgId}: the
 // organization's approval is enforced by firestore.rules on the records
 // that point at these files, not here. Accounts linked to an organization
-// with no members doc (the legacy Full staff fallback in firestore.rules)
+// with no members doc (the legacy default Staff fallback in firestore.rules)
 // get no Storage staff access; give them a members doc.
 //
 // Downloads in the app go through tokenized download URLs, which bypass
@@ -62,14 +62,13 @@ service firebase.storage {
       return !(m.get('status', 'active') in ['inactive', 'removed', 'disabled']);
     }
 
-    function fullStaffPerms() {
-      return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'];
+    function defaultStaffPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'volunteers', 'insights'];
     }
 
     function permsOf(m) {
       return m.get('permissions',
-        m.get('role', '') == 'carer' ? ['care'] :
-          (m.get('facebookPublisher', false) == true ? fullStaffPerms().concat(['facebookPublish']) : fullStaffPerms()));
+        m.get('facebookPublisher', false) == true ? defaultStaffPerms().concat(['facebookPublish']) : defaultStaffPerms());
     }
 
     // Active member of `orgId` that is an Admin or has any of `keys`.

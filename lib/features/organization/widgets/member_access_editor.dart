@@ -17,10 +17,11 @@ class MemberAccess {
   OrgPreset get preset => role == OrgRole.admin ? OrgPreset.custom : OrgPreset.matching(permissions);
 }
 
-/// Admin or Staff, and for Staff a preset to start from plus the permission
-/// boxes. Changing any box shows "Custom"; picking Custom clears the boxes. Ticking Manage money also ticks
-/// (and locks) View donations & funds. Used when inviting and when an Admin
-/// edits a member (staff_members_page.dart).
+/// Admin or Staff, and for Staff the permission boxes, starting from the one
+/// default Staff set ([OrgPreset.staff]). Money permissions and Facebook
+/// posting are never in the default; an Admin ticks them here. Ticking
+/// Manage money also ticks (and locks) View donations & funds. Used when
+/// inviting and when an Admin edits a member (staff_members_page.dart).
 class MemberAccessEditor extends StatefulWidget {
   const MemberAccessEditor({super.key, required this.initial, required this.onChanged, this.roleLocked = false});
 
@@ -37,7 +38,7 @@ class MemberAccessEditor extends StatefulWidget {
 class _MemberAccessEditorState extends State<MemberAccessEditor> {
   late OrgRole _role = widget.initial.role;
   late Set<OrgPermission> _perms = widget.initial.role == OrgRole.admin
-      ? {...OrgPreset.fullStaff.permissions}
+      ? {...OrgPreset.staff.permissions}
       : normalizePermissions(widget.initial.permissions);
 
   void _emit() => widget.onChanged(MemberAccess(_role, {..._perms}));
@@ -47,10 +48,9 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
     _emit();
   }
 
-  /// A named preset ticks its boxes; Custom starts from none ticked.
-  void _setPreset(OrgPreset? p) {
-    if (p == null) return;
-    setState(() => _perms = {...p.permissions});
+  /// Back to the default Staff set (no money permissions).
+  void _resetToDefault() {
+    setState(() => _perms = {...OrgPreset.staff.permissions});
     _emit();
   }
 
@@ -70,7 +70,7 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
   @override
   Widget build(BuildContext context) {
     final label = GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-    final preset = OrgPreset.matching(_perms);
+    final isDefault = OrgPreset.matching(_perms) == OrgPreset.staff;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -103,23 +103,28 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
         ),
         if (_role == OrgRole.staff) ...[
           const SizedBox(height: 14),
-          Text('Preset', style: label),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<OrgPreset>(
-            key: ValueKey(preset),
-            initialValue: preset,
-            isExpanded: true,
-            decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
-            items: [
-              for (final p in OrgPreset.values)
-                DropdownMenuItem(
-                  value: p,
-                  child: Text(p == OrgPreset.custom ? 'Custom (tick below)' : p.label),
+          Row(
+            children: [
+              Expanded(
+                child: Text(isDefault ? 'Default staff permissions' : 'Custom permissions',
+                    key: const ValueKey('access-summary'), style: label),
+              ),
+              if (!isDefault)
+                TextButton(
+                  key: const ValueKey('reset-default'),
+                  onPressed: _resetToDefault,
+                  child: Text('Reset to default',
+                      style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                 ),
             ],
-            onChanged: _setPreset,
           ),
-          const SizedBox(height: 8),
+          Text(
+            'Every Staff member starts with rescue, animal records, daily care (the care-tasks screen), adoptions, '
+            'events and volunteers, and analytics. Tick Money permissions or Facebook posting by hand for the '
+            'people who handle them.',
+            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 4),
           for (final group in OrgPermissionGroup.values) ...[
             Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 2),

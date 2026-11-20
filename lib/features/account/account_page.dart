@@ -115,7 +115,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                     ? null
                     : caps.isAdmin
                         ? 'Admin'
-                        : 'Staff · ${(caps.preset ?? OrgPreset.custom).label}';
+                        : staffTitle(caps.preset);
                 return ListView(
                   padding: const EdgeInsets.all(16),
                   children: [

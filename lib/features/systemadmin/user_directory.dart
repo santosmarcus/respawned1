@@ -14,7 +14,7 @@ const String kSystemAdminRole = 'system_admin';
 enum AccountGroup {
   organization('Organization'),
   transporters('Transporters'),
-  volunteers('Volunteers'),
+  volunteers('Rescue volunteers'),
   general('General'),
   admins('Admins');
 
@@ -153,7 +153,7 @@ class OrgRosterEntry {
 
   String get roleLabel {
     if (isOwner) return 'Owner · ${OrgRole.admin.label}';
-    if (role == OrgRole.staff) return 'Staff · ${preset?.label ?? OrgPreset.fullStaff.label}';
+    if (role == OrgRole.staff) return staffTitle(preset);
     return role?.memberTitle ?? 'Linked account';
   }
 }
@@ -189,7 +189,7 @@ List<OrgRosterEntry> buildOrgRoster({
     if (e.isOwner) return 0;
     return switch (e.role) {
       OrgRole.admin => 1,
-      OrgRole.staff => e.preset == OrgPreset.animalCare ? 3 : 2,
+      OrgRole.staff => 2,
       null => 4,
     };
   }

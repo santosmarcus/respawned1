@@ -22,6 +22,7 @@ import 'package:respawnd1/features/organization/organization_profile_edit_page.d
 import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/account/account_page.dart';
+import 'package:respawnd1/features/carer/carer_home_screen.dart';
 
 /// The full set of admin root modules the drawer can open, in the required
 /// order — the single source of truth for labels/ordering/highlighting so
@@ -29,7 +30,7 @@ import 'package:respawnd1/features/account/account_page.dart';
 /// `shelterResources` removed — it was a permanent no-op placeholder with
 /// no destination page at all; shelter-capacity now lives in Organization
 /// Profile. `audit` added for the new Audit module.
-enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit, organizationReview, members }
+enum AdminModule { dashboard, rescue, adoptions, donations, records, careTasks, events, volunteers, transporters, collarTags, audit, organizationReview, members }
 
 /// Pops back to AdminHomeScreen (the app's first/root route) before pushing
 /// the requested module — every drawer module item uses this so switching
@@ -208,7 +209,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
         ? (platform ? 'Platform staff' : 'Staff')
         : caps.isAdmin
             ? 'Admin'
-            : 'Staff · ${(caps.preset ?? OrgPreset.custom).label}';
+            : staffTitle(caps.preset);
     return Drawer(
       backgroundColor: AppColors.textPrimary,
       child: SafeArea(
@@ -257,10 +258,13 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
             const Divider(color: Colors.white24),
 
             // Menu items — order matches the project's required admin menu
-            // order: Dashboard, Rescue, Adoptions, Donations, Records,
-            // Events, Volunteers, Transporters, Collar Tags, Audit.
-            // Volunteers opens VolunteersPage (role == 'rescue_volunteer'
-            // directory), Transporters opens the same page over
+            // order: Dashboard, Rescue, Adoptions, Donations, Records, Care
+            // Tasks, Events, Collar Tags, Audit, then Rescue Volunteers and
+            // Transporters. Care Tasks is the care-tasks screen (carers were
+            // merged into Staff). Events covers event volunteers (people who
+            // sign up for an event); Rescue Volunteers opens VolunteersPage,
+            // the external rescue volunteers (role == 'rescue_volunteer'
+            // accounts). Transporters opens the same page over
             // 'pet_transporter' accounts, Events opens AdminEventsPage.
             // Shelter Resources was removed entirely — it
             // was a permanent no-op with no destination page; shelter
@@ -303,6 +307,15 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                     selected: widget.active == AdminModule.records,
                     onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
                   ),
+                  if (caps.canOpenCareTasks && orgId != null)
+                    _DrawerItem(
+                      label: 'Care Tasks',
+                      selected: widget.active == AdminModule.careTasks,
+                      onTap: () => _openModule(
+                        context,
+                        (_) => CarerHomeScreen(organizationId: orgId, fromAdminShell: true),
+                      ),
+                    ),
                   _DrawerItem(
                     label: 'Events',
                     viewOnly: !can(caps.canManageVolunteers),
@@ -340,7 +353,7 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                       onTap: () => _openModule(context, (_) => StaffMembersPage(organizationId: orgId)),
                     ),
                   _DrawerItem(
-                    label: 'Volunteers',
+                    label: 'Rescue Volunteers',
                     viewOnly: !can(caps.canManageVolunteers),
                     selected: widget.active == AdminModule.volunteers,
                     onTap: () => _openModule(context, (_) => const VolunteersPage()),

@@ -125,8 +125,8 @@ class AdminEventDetailPage extends ConsumerWidget {
               _info(
                 Icons.people_outline,
                 event.capacity == null
-                    ? '${event.goingCount} signed up · no limit'
-                    : '${event.goingCount} of ${event.capacity} spots taken',
+                    ? '${event.goingCount} event volunteers · no limit'
+                    : '${event.goingCount} of ${event.capacity} volunteer spots taken',
               ),
               const SizedBox(height: 12),
               Text(event.description,
@@ -134,7 +134,7 @@ class AdminEventDetailPage extends ConsumerWidget {
               const SizedBox(height: 20),
               const Divider(height: 1),
               const SizedBox(height: 16),
-              Text('Sign-ups', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+              Text('Event volunteers', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
               const SizedBox(height: 8),
               _RegistrationsList(event: event),
             ],

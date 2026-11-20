@@ -154,7 +154,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     final result = await showMemberAccessSheet(
       context,
       title: 'Invite Staff Member',
-      initial: MemberAccess(OrgRole.staff, {...OrgPreset.fullStaff.permissions}),
+      initial: MemberAccess(OrgRole.staff, {...OrgPreset.staff.permissions}),
       confirmLabel: 'Send Invitation',
       askEmail: true,
       allowPhone: true,
@@ -636,7 +636,7 @@ class _MemberRow extends StatelessWidget {
         ? 'Owner · Organization Admin'
         : isAdmin
             ? OrgRole.admin.memberTitle
-            : 'Staff · ${(membership.preset ?? OrgPreset.custom).label}';
+            : staffTitle(membership.preset);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

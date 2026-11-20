@@ -84,16 +84,16 @@ void main() {
       usersById: users,
     );
 
-    test('owner first, then admins, staff, carers, linked accounts, inactive last', () {
-      expect(roster.map((e) => e.uid), ['owner', 'staff', 'ghost', 'carer', 'linked', 'gone']);
+    test('owner first, then admins, staff (former carers included), linked accounts, inactive last', () {
+      expect(roster.map((e) => e.uid), ['owner', 'carer', 'staff', 'ghost', 'linked', 'gone']);
     });
 
     test('labels the role there', () {
       final byUid = {for (final e in roster) e.uid: e};
       expect(byUid['owner']!.roleLabel, 'Owner · Admin');
-      // A legacy carer reads as Staff with the Animal care preset.
+      // A legacy carer reads as Staff with the default set (carers were merged into Staff).
       expect(byUid['carer']!.role, OrgRole.staff);
-      expect(byUid['carer']!.roleLabel, 'Staff · Animal care');
+      expect(byUid['carer']!.roleLabel, 'Staff');
       expect(byUid['linked']!.roleLabel, 'Linked account');
       expect(byUid['gone']!.inactive, isTrue);
       // A members doc with no profile is still listed.

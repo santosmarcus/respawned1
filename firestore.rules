@@ -150,10 +150,12 @@ service cloud.firestore {
     // (functions/org_permissions_sync.test.js keeps them in step).
     //
     // Members docs from before permissions keep working (same fallback as
-    // functions/org_access.js and the app): role 'carer' is Animal care, any
-    // other Staff is Full staff (+ Facebook posting with the old
+    // functions/org_access.js and the app): any Staff without a permissions
+    // list, including the old role 'carer' (carers were merged into Staff),
+    // gets the default Staff set (+ Facebook posting with the old
     // facebookPublisher flag), and an account linked through
-    // users.organizationId with no members doc is Full staff.
+    // users.organizationId with no members doc gets the default Staff set.
+    // Money permissions are never in the default; an Admin ticks them.
     //
     // An account acts only for the organization users/{uid}.organizationId
     // points at. That check comes first so everyone else stops before any
@@ -164,8 +166,8 @@ service cloud.firestore {
       return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'financeManage', 'volunteers', 'insights', 'facebookPublish'];
     }
 
-    function fullStaffPerms() {
-      return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'];
+    function defaultStaffPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'volunteers', 'insights'];
     }
 
     // Everything that works in the admin shell; daily care (and Facebook
@@ -190,8 +192,7 @@ service cloud.firestore {
 
     function permsOf(m) {
       return m.get('permissions',
-        m.get('role', '') == 'carer' ? ['care'] :
-          (m.get('facebookPublisher', false) == true ? fullStaffPerms().concat(['facebookPublish']) : fullStaffPerms()));
+        m.get('facebookPublisher', false) == true ? defaultStaffPerms().concat(['facebookPublish']) : defaultStaffPerms());
     }
 
     function memberHasAny(orgId, keys) {
@@ -199,7 +200,7 @@ service cloud.firestore {
       let org = get(orgPath(orgId)).data;
       return org.get('verificationStatus', 'approved') == 'approved' && (
         org.get('ownerId', '') == request.auth.uid ||
-        (!exists(mp) && fullStaffPerms().hasAny(keys)) ||
+        (!exists(mp) && defaultStaffPerms().hasAny(keys)) ||
         (exists(mp) &&
           !(get(mp).data.get('status', 'active') in inactiveStatuses()) &&
           (get(mp).data.get('role', '') == 'admin' || permsOf(get(mp).data).hasAny(keys)))

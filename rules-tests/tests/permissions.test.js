@@ -167,12 +167,13 @@ describe('fallbacks', () => {
     await assertSucceeds(as('noPermsA').doc('users/noPermsA').get());
   });
 
-  test('legacy staff act as Full staff, legacy carers as Animal care', async () => {
-    await assertSucceeds(as('staffA').doc('cases/ownedA').update({ note: 'legacy' }));
-    await assertSucceeds(as('staffA').doc('donations/d1').get());
-    await assertFails(as('staffA').doc('donationPayments/p1').get());
-    await assertSucceeds(as('carerA').doc('animals/a1/medicationDoses/d9').set({ givenBy: 'carerA' }));
-    await assertFails(as('carerA').doc('cases/ownedA').get());
+  test('legacy staff and legacy carers both get the default Staff set, without money', async () => {
+    for (const uid of ['legacyStaffA', 'legacyCarerA']) {
+      await assertSucceeds(as(uid).doc('cases/ownedA').update({ note: 'legacy' }));
+      await assertSucceeds(as(uid).doc('animals/a1/medicationDoses/d9').set({ givenBy: uid }));
+      await assertFails(as(uid).doc('donations/d1').get());
+      await assertFails(as(uid).doc('donationPayments/p1').get());
+    }
   });
 });
 

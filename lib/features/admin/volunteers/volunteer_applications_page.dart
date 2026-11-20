@@ -22,8 +22,8 @@ class VolunteerApplicationsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final repo = VolunteerApplicationRepository();
     return ApplicationReviewPage<VolunteerApplication>(
-      title: 'Volunteer Applications',
-      noun: 'volunteer applications',
+      title: 'Rescue Volunteer Applications',
+      noun: 'rescue volunteer applications',
       watch: (t) => repo.watchByStatus(_status(t)),
       summarize: (app) => ApplicationSummary(
         name: app.name,

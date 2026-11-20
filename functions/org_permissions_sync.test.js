@@ -19,17 +19,21 @@ const storageRules = fs.readFileSync(path.join(__dirname, '..', 'storage.rules')
 
 test('firestore.rules permission lists match org_permissions.json', () => {
   assert.deepStrictEqual(listIn(firestoreRules, 'allPermKeys'), DEF.permissions);
-  assert.deepStrictEqual(listIn(firestoreRules, 'fullStaffPerms'), DEF.presets.fullStaff);
+  assert.deepStrictEqual(listIn(firestoreRules, 'defaultStaffPerms'), DEF.presets.staff);
   // Everything but daily care and Facebook posting.
   assert.deepStrictEqual(listIn(firestoreRules, 'opsKeys'),
     DEF.permissions.filter((k) => !['care', 'facebookPublish'].includes(k)));
 });
 
-test('storage.rules Full staff list matches org_permissions.json', () => {
-  assert.deepStrictEqual(listIn(storageRules, 'fullStaffPerms'), DEF.presets.fullStaff);
+test('storage.rules default Staff list matches org_permissions.json', () => {
+  assert.deepStrictEqual(listIn(storageRules, 'defaultStaffPerms'), DEF.presets.staff);
 });
 
-test('the legacy presets exist', () => {
-  assert.deepStrictEqual(DEF.presets[DEF.legacy.carer], ['care']);
-  assert.ok(DEF.presets[DEF.legacy.staff]);
+test('one default Staff set, without money permissions, for staff and former carers', () => {
+  assert.deepStrictEqual(Object.keys(DEF.presets), ['staff']);
+  assert.strictEqual(DEF.legacy.carer, 'staff');
+  assert.strictEqual(DEF.legacy.staff, 'staff');
+  for (const money of ['campaigns', 'financeView', 'financeManage', 'facebookPublish']) {
+    assert.ok(!DEF.presets.staff.includes(money), `${money} must be ticked by hand`);
+  }
 });

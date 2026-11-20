@@ -163,21 +163,11 @@ class HomeTab extends StatelessWidget {
                         },
                       ),
                       _QuickActionCard(
-                        label: 'Volunteer',
-                        color: AppColors.yellowrspwn,
-                        onTap: (){
-                          Navigator.push(context, MaterialPageRoute(
-                            builder: (context) => VolunteerPage(),
-                          ),
-                          );
-                        },
-                      ),
-                      _QuickActionCard(
                         label: 'Events',
                         color: AppColors.lavenderrspwn,
                         onTap: (){
                           Navigator.push(context, MaterialPageRoute(
-                            builder: (context) => const VolunteerPage(eventsOnly: true),
+                            builder: (context) => const VolunteerPage(),
                           ),
                           );
                         },

@@ -88,9 +88,9 @@ class OrganizationInvitation {
   /// One key per invitee, for de-duplicating lists.
   String get contactKey => isPhoneInvite ? 'phone:$normalizedPhone' : 'email:$normalizedEmail';
 
-  /// "Organization Admin" or "Staff · Treasurer".
+  /// "Organization Admin", "Staff" or "Staff · Custom access".
   String get accessLabel =>
-      role == OrgRole.admin ? OrgRole.admin.memberTitle : 'Staff · ${(preset ?? OrgPreset.custom).label}';
+      role == OrgRole.admin ? OrgRole.admin.memberTitle : staffTitle(preset);
 
   factory OrganizationInvitation.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
