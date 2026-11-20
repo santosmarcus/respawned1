@@ -39,10 +39,18 @@ Future<void> switchToAccount(BuildContext context, KnownAccount? account) async 
 }
 
 /// Account details, the other accounts signed in on this device (Switch
-/// account), log out and delete account. Opened from the admin drawer and
-/// the care-tasks screen.
+/// account), log out and delete account. The same page for every account
+/// type: opened from the admin drawer, the care-tasks screen, the general
+/// and transporter/volunteer profiles, the system admin menu and the
+/// organization sign-up screens.
+///
+/// [returnToDashboard]: back closes every screen above the app's first one
+/// (the admin drawer opens modules on top of each other). Off, back just
+/// closes this page, returning to the profile that opened it.
 class AccountPage extends ConsumerStatefulWidget {
-  const AccountPage({super.key});
+  const AccountPage({super.key, this.returnToDashboard = true});
+
+  final bool returnToDashboard;
 
   @override
   ConsumerState<AccountPage> createState() => _AccountPageState();
@@ -72,11 +80,11 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     final user = FirebaseAuth.instance.currentUser;
     final caps = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value ?? OrganizationCapabilities.none;
     final orgName = ref.watch(currentOrganizationHeaderProvider).asData?.value?.name;
-    // Back (the arrow or the system gesture) always returns to the
-    // dashboard, the app's first screen.
+    // Back (the arrow or the system gesture) returns to the dashboard, the
+    // app's first screen, unless this page was opened from a profile.
     void backToDashboard() => Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
     return PopScope(
-      canPop: false,
+      canPop: !widget.returnToDashboard,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) backToDashboard();
       },
@@ -86,9 +94,9 @@ class _AccountPageState extends ConsumerState<AccountPage> {
         backgroundColor: AppColors.textPrimary,
         foregroundColor: AppColors.background,
         leading: IconButton(
-          tooltip: 'Back to dashboard',
+          tooltip: widget.returnToDashboard ? 'Back to dashboard' : 'Back',
           icon: const Icon(Icons.arrow_back, color: AppColors.background),
-          onPressed: backToDashboard,
+          onPressed: widget.returnToDashboard ? backToDashboard : () => Navigator.of(context).maybePop(),
         ),
         title: Text('Account', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.background)),
       ),
@@ -234,6 +242,24 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     if (providers.contains('phone')) return 'Mobile number (SMS code)';
     return 'Other';
   }
+}
+
+/// Opens [AccountPage] (details, Switch account, Log out) from a screen's
+/// app bar. [color] matches the app bar's foreground.
+class AccountButton extends StatelessWidget {
+  const AccountButton({super.key, this.color = AppColors.textPrimary, this.returnToDashboard = false});
+
+  final Color color;
+  final bool returnToDashboard;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: 'Account',
+        icon: Icon(Icons.account_circle_outlined, color: color),
+        onPressed: () => Navigator.of(context, rootNavigator: true).push(
+          MaterialPageRoute(builder: (_) => AccountPage(returnToDashboard: returnToDashboard)),
+        ),
+      );
 }
 
 class _Card extends StatelessWidget {

@@ -11,6 +11,7 @@ import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/pettransporter/transporter_success_screen.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 class _VehicleTypeOption {
   final String type;
@@ -228,6 +229,7 @@ class _TransporterVerificationScreenState
               : (canGoBack ? () => Navigator.pop(context) : _confirmSignOut),
         ),
         centerTitle: true,
+        actions: const [AccountButton()],
         title: Text('Identity Verification',
             style: GoogleFonts.tiltWarp(
                 fontSize: 20,

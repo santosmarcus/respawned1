@@ -14,6 +14,7 @@ import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 /// Step 2 of the Organization signup flow (spec §4) — reuses the same
 /// image_picker + Firebase Storage stack the pet-transporter verification
@@ -64,8 +65,9 @@ class OrganizationSignupDetails {
   final ClinicSearchResult pin;
 }
 
-/// Log out from a signup screen (they have no other way out when opened
-/// as the first screen). Unsubmitted details and photos are discarded.
+/// Account (switch account) and Log out on a signup screen (they have no
+/// other way out when opened as the first screen). Unsubmitted details and
+/// photos are discarded.
 class SignupLogOutButton extends StatelessWidget {
   const SignupLogOutButton({super.key});
 
@@ -86,9 +88,15 @@ class SignupLogOutButton extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => TextButton(
-        onPressed: () => _logOut(context),
-        child: Text('Log out', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.background)),
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const AccountButton(color: AppColors.background),
+          TextButton(
+            onPressed: () => _logOut(context),
+            child: Text('Log out', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.background)),
+          ),
+        ],
       );
 }
 

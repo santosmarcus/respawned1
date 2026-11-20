@@ -16,6 +16,7 @@ import 'package:respawnd1/features/generalhome/profile/communications_setting_pa
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/volunteer_badges.dart';
 import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -226,6 +227,13 @@ class _UserProfileState extends State<UserProfile> {
                 children: [
                   _SectionLabel(label: 'Settings'),
                   _SectionLabel(label: 'My Account'),
+                  _ProfileTile(
+                    label: 'Account and switch account',
+                    onTap: () {
+                      Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const AccountPage(returnToDashboard: false)));
+                    },
+                  ),
                   _ProfileTile(
                     label: 'Edit account',
                     onTap: () {

@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 import 'package:respawnd1/features/admin/organizations/organization_review_page.dart';
 import 'package:respawnd1/features/admin/volunteers/transporter_applications_page.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteer_applications_page.dart';
@@ -85,7 +86,15 @@ class _SystemAdminHomeScreenState extends State<SystemAdminHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final menu = [AdminMenuAction(label: 'Log out', icon: Icons.logout, onTap: _signOut)];
+    final menu = [
+      AdminMenuAction(
+        label: 'Account',
+        icon: Icons.account_circle_outlined,
+        onTap: () => Navigator.of(context, rootNavigator: true)
+            .push(MaterialPageRoute(builder: (_) => const AccountPage(returnToDashboard: false))),
+      ),
+      AdminMenuAction(label: 'Log out', icon: Icons.logout, onTap: _signOut),
+    ];
     return Scaffold(
       backgroundColor: AppColors.background,
       body: IndexedStack(

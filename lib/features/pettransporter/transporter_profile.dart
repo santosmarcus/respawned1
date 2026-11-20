@@ -12,6 +12,7 @@ import 'package:respawnd1/core/utils/transporter_trip_stats.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 class TransporterProfile extends StatelessWidget {
   const TransporterProfile({super.key});
@@ -221,6 +222,18 @@ class TransporterProfile extends StatelessWidget {
                   const SizedBox(height: 10),
                   _InfoCard(
                     children: [
+                      _MenuRow(
+                        icon: Icons.account_circle_outlined,
+                        label: 'Account and switch account',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const AccountPage(returnToDashboard: false)),
+                          );
+                        },
+                      ),
+                      const Divider(height: 20),
                       _MenuRow(
                         icon: Icons.notifications_outlined,
                         label: 'Notifications',

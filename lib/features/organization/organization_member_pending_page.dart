@@ -8,6 +8,7 @@ import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/main.dart';
 import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 /// Landing page for the "Organization Member" signup path (Organization
 /// Invitations spec §7/§8) — a simplified account with no org-creation/
@@ -64,6 +65,7 @@ class _OrganizationMemberPendingPageState extends State<OrganizationMemberPendin
             backgroundColor: AppColors.textPrimary,
             title: Text('Organization', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
             actions: [
+              const AccountButton(color: AppColors.background),
               IconButton(
                 icon: const Icon(Icons.people_outline, color: AppColors.background),
                 tooltip: 'Staff Members',
