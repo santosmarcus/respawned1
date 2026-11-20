@@ -285,11 +285,15 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
         isSelected ? Icons.check_circle : Icons.local_hospital_outlined,
         color: isSelected ? AppColors.greenrspwn : (isExcluded ? AppColors.textSecondary : AppColors.textPrimary),
       ),
-      title: Text(clinic.name, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
+      title: Text(clinic.name,
+          maxLines: 2, overflow: TextOverflow.ellipsis, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(clinic.address, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          Text(clinic.address,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
           Wrap(
             spacing: 8,
             children: [
@@ -327,13 +331,18 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
             // routed through _selectResult/onTap. Disabled (not hidden, so
             // the row stays a consistent width) when Places returned no
             // phone number for this clinic — never launches an empty tel:.
+            // Two 44px buttons fit the 88px slot (default 48px ones overflowed).
             IconButton(
+              constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+              padding: EdgeInsets.zero,
               icon: const Icon(Icons.call_outlined),
               color: (clinic.phone?.trim().isNotEmpty ?? false) ? AppColors.textPrimary : AppColors.slaterspwn,
               tooltip: (clinic.phone?.trim().isNotEmpty ?? false) ? 'Call ${clinic.name}' : 'Phone number unavailable',
               onPressed: (clinic.phone?.trim().isNotEmpty ?? false) ? () => _callClinic(context, clinic.phone!) : null,
             ),
             IconButton(
+                    constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+                    padding: EdgeInsets.zero,
                     icon: Icon(
                       isSaved ? Icons.bookmark : Icons.bookmark_border,
                       color: isSaved ? AppColors.yellowrspwn : AppColors.textSecondary,

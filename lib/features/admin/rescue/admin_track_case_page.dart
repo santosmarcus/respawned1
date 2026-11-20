@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -245,14 +247,24 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     if (_isProceedingToTreatment) return; // guard against double-tap
     setState(() => _isProceedingToTreatment = true);
 
-    final caseRef = FirebaseFirestore.instance
-        .collection('cases')
-        .doc(widget.caseId);
     final expectedStatus =
         RescueStatus.treatment.firestoreValue; // 'in_treatment'
+    // The app-wide messenger, still there after this page is replaced.
+    final messenger = ScaffoldMessenger.of(context);
+    final assignment = ref
+        .read(currentAssignmentProvider(widget.caseId))
+        .asData
+        ?.value;
+    final repo = ref.read(rescueCaseRepositoryProvider);
 
     try {
-      await RescueCaseStore(FirebaseFirestore.instance).recordAction(
+      // Firestore applies the write on the phone at once; the future only
+      // completes when the server confirms it, which on a slow connection
+      // left this button spinning while the case had already moved (the
+      // Treatment tab showed it). Wait briefly so an outright rejection
+      // (e.g. permissions) still keeps the admin here, then move on and
+      // report a late failure instead of blocking on it.
+      final write = RescueCaseStore(FirebaseFirestore.instance).recordAction(
         caseId: widget.caseId,
         action: 'treatment_started',
         statusLine: 'The animal has reached the clinic. Animal is now in treatment.',
@@ -263,37 +275,29 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
           'dateAdmitted': Timestamp.now(),
         },
       );
-
-      // Don't navigate optimistically — re-read the doc and only proceed
-      // once the write has actually landed with the expected status. A
-      // stale local snapshot or a write that silently didn't apply would
-      // otherwise still open Treatment Details on a case that Rescue
-      // Reports/Rescue Details still see as 'ongoing'.
-      final freshSnap = await caseRef.get();
-      final freshStatus = freshSnap.data()?['status'] as String?;
-      if (freshStatus != expectedStatus) {
-        throw StateError(
-          'Case status did not update as expected (got "$freshStatus").',
-        );
+      var confirmed = false;
+      try {
+        await write.timeout(const Duration(seconds: 2));
+        confirmed = true;
+      } on TimeoutException {
+        write.catchError((Object e) {
+          messenger.showSnackBar(
+            appSnackBar('Could not move this case to treatment: $e', kind: AppMessageKind.error),
+          );
+        });
       }
 
       // Frees the accepted transporter (demo or real) back to "Available"
       // — activeAssignmentsByRiderProvider derives each transporter's chip
       // from their single most-recent assignment, so marking this one
-      // 'completed' is what clears their Busy state elsewhere. Only done
-      // once the treatment transition itself is confirmed, never before.
-      final assignment = ref
-          .read(currentAssignmentProvider(widget.caseId))
-          .asData
-          ?.value;
+      // 'completed' is what clears their Busy state elsewhere. Sent after
+      // the treatment write (Firestore keeps the order) and not awaited.
       if (assignment != null &&
           assignment.status == TransportAssignmentStatus.accepted) {
-        await ref
-            .read(rescueCaseRepositoryProvider)
-            .completeAssignment(
-          caseId: widget.caseId,
-          assignmentId: assignment.id,
-        );
+        final complete = repo.completeAssignment(caseId: widget.caseId, assignmentId: assignment.id);
+        (confirmed ? complete : write.then((_) => complete)).catchError((Object e) {
+          debugPrint('Could not complete assignment ${assignment.id}: $e');
+        });
       }
 
       if (mounted) {

@@ -252,10 +252,14 @@ class TransportAssignmentRepository {
     // transaction (not inside it) so the transaction itself only reads the
     // case and its current offer — one fewer sequential round trip, and a
     // transaction retry doesn't re-read the transporter.
-    final riderSnap = isDemo ? null : await _store.users.doc(riderId).get();
+    // Started now and awaited inside the transaction, so it runs alongside
+    // the case read instead of before it. ignore() only stops an early
+    // failure being reported as unhandled; the await below still throws it.
+    final riderRead = isDemo ? null : (_store.users.doc(riderId).get()..ignore());
 
     await _store.db.runTransaction((tx) async {
       final caseSnap = await tx.get(caseRef);
+      final riderSnap = await riderRead;
       if (riderSnap != null) {
         final riderData = riderSnap.data();
         final online = riderData?['online'] as bool? ?? false;
@@ -525,8 +529,10 @@ class TransportAssignmentRepository {
         .doc(assignmentId);
     try {
       await _store.db.runTransaction((tx) async {
-        final snap = await tx.get(assignmentRef);
-        final caseSnap = await tx.get(caseRef);
+        // Both reads together (still before any write).
+        final reads = await Future.wait([tx.get(assignmentRef), tx.get(caseRef)]);
+        final snap = reads[0];
+        final caseSnap = reads[1];
         if (!snap.exists || snap.data()?['status'] != 'pending') return;
         final now = Timestamp.now();
         tx.update(assignmentRef, {

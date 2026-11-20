@@ -680,7 +680,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     final overflow = <CaseAction>[];
     final export = CaseAction('Export transfer details', () => _exportTransfer(c), icon: Icons.ios_share);
     final reassignClinic = CaseAction(
-      c.vetClinicName == null ? 'Assign Clinic' : 'Reassign Clinic (${c.vetClinicName})',
+      // No clinic name: the button stays the same size as its primary
+      // (e.g. Track Case). The clinic shows on the case details.
+      c.vetClinicName == null ? 'Assign Clinic' : 'Reassign Clinic',
           () => _openClinicSheet(c, offerAssignRider: false),
       icon: Icons.local_hospital_outlined,
     );

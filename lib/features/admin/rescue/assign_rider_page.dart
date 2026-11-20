@@ -391,6 +391,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   final Set<String> _reconcilingAssignmentIds = {};
   bool _cancellingOffer = false;
 
+  /// Shown as the pending offer while [_sendOffer] is still saving it
+  /// (id empty until the server answers).
+  TransportAssignment? _optimisticOffer;
+
+  /// An offer being cancelled: hidden at once instead of after the server.
+  String? _optimisticCancelledId;
+
   void _reconcileIfStale(TransportAssignment assignment) {
     if (!assignment.isStalePending) return;
     if (_reconcilingAssignmentIds.contains(assignment.id)) return;
@@ -414,24 +421,27 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           destructive: true);
       if (confirmed != true || !mounted) return;
     }
-    setState(() => _cancellingOffer = true);
+    // Back to the transporter list at once; the cancel is a server
+    // transaction and is undone here if it fails.
+    setState(() {
+      _cancellingOffer = true;
+      _optimisticOffer = null;
+      _optimisticCancelledId = assignment.id;
+      _dismissedOutcomeId = assignment.id;
+      _selectedRiderUid = null;
+    });
+    if (toAnother) {
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Offer cancelled. Choose another transporter.'));
+    }
     try {
       await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
         caseId: widget.caseId,
         assignmentId: assignment.id,
         reason: toAnother ? 'Sent to another transporter' : 'Cancelled by organization while waiting',
       );
-      if (mounted) {
-        setState(() {
-          _dismissedOutcomeId = assignment.id;
-          _selectedRiderUid = null;
-        });
-        if (toAnother) {
-          ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Offer cancelled. Choose another transporter.'));
-        }
-      }
     } catch (e) {
       if (mounted) {
+        setState(() => _optimisticCancelledId = null);
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Could not cancel this offer: $e', kind: AppMessageKind.error),
         );
@@ -491,14 +501,17 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
               const SizedBox(height: 14),
               ElevatedButton.icon(
-                onPressed: _cancellingOffer ? null : () => _cancelExistingOffer(assignment, toAnother: true),
+                // Disabled for the moment the offer is still being saved.
+                onPressed: _cancellingOffer || assignment.id.isEmpty
+                    ? null
+                    : () => _cancelExistingOffer(assignment, toAnother: true),
                 style: AppButtons.primary,
                 icon: const Icon(Icons.swap_horiz, size: 18),
                 label: Text('Send to Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
               ),
               const SizedBox(height: 8),
               OutlinedButton(
-                onPressed: _cancellingOffer ? null : () => _cancelExistingOffer(assignment),
+                onPressed: _cancellingOffer || assignment.id.isEmpty ? null : () => _cancelExistingOffer(assignment),
                 style: AppButtons.dangerOutline,
                 child: _cancellingOffer
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -841,7 +854,25 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// Reassign Transporter), after the admin confirms.
   Future<void> _sendOffer(_RiderVm rider, {bool allowReassign = false}) async {
     if (_isAssigning) return;
-    setState(() => _isAssigning = true);
+    // Shown straight away; the offer is a server transaction, and waiting
+    // for it plus the live update made the panel appear seconds later.
+    final offeredAt = DateTime.now();
+    TransportAssignment placeholder(String id) => TransportAssignment(
+          id: id,
+          caseId: widget.caseId,
+          riderId: rider.uid,
+          riderName: rider.name,
+          riderType: rider.type,
+          status: TransportAssignmentStatus.pending,
+          offeredAt: offeredAt,
+          isDemo: rider.isDemo,
+          vehicle: rider.vehicle,
+          plate: rider.plate,
+        );
+    setState(() {
+      _isAssigning = true;
+      _optimisticOffer = placeholder('');
+    });
     try {
       final assignmentId = await ref.read(rescueCaseRepositoryProvider).createAssignmentOffer(
         caseId: widget.caseId,
@@ -860,10 +891,15 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       setState(() {
         _sentAssignmentId = assignmentId;
         _selectedRiderUid = null;
+        // Now cancellable, even before the live update arrives.
+        _optimisticOffer = placeholder(assignmentId);
       });
     } on ActiveAssignmentConflictException catch (e) {
       if (!mounted) return;
-      setState(() => _isAssigning = false);
+      setState(() {
+        _isAssigning = false;
+        _optimisticOffer = null;
+      });
       if (e.status == TransportAssignmentStatus.accepted) {
         final replace = await showConfirmActionDialog(
           context,
@@ -882,6 +918,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     } catch (e, st) {
       debugPrint('Assign transporter failed: $e\n$st');
       if (mounted) {
+        setState(() => _optimisticOffer = null);
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
           'Could not send the offer to ${rider.name}.',
           kind: AppMessageKind.error,
@@ -1042,10 +1079,17 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // let the rider list/Next button be reachable while that's true — only
     // View Pending / Cancel Offer are available until it resolves.
     final currentAssignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
-    final blockingOffer =
-    currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.pending
-        ? currentAssignment
+    // The offer just sent stands in until the live one arrives.
+    final optimistic = _optimisticOffer != null &&
+            (_sentAssignmentId == null || currentAssignment?.id != _sentAssignmentId)
+        ? _optimisticOffer
         : null;
+    final blockingOffer = optimistic ??
+        (currentAssignment != null &&
+                currentAssignment.status == TransportAssignmentStatus.pending &&
+                currentAssignment.id != _optimisticCancelledId
+            ? currentAssignment
+            : null);
     if (blockingOffer != null) {
       if (blockingOffer.isStalePending) {
         _reconcileIfStale(blockingOffer);

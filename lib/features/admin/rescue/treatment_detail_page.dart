@@ -756,10 +756,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             ),
             const SizedBox(height: 8),
 
-            if (logsAsync.isLoading && logs.isEmpty)
+            // Spinner only before the first answer: Riverpod 3 also reports
+            // a retry after an error as loading, which used to spin forever
+            // on a case with no logs.
+            if (!logsAsync.hasValue && !logsAsync.hasError)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(child: CircularProgressIndicator()),
+              )
+            else if (!logsAsync.hasValue)
+              Text(
+                'Could not load treatment logs. ${logsAsync.error}',
+                style: GoogleFonts.zain(fontSize: 13, color: AppColors.error),
               )
             else if (logs.isEmpty)
               Text(
