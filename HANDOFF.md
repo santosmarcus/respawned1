@@ -1,8 +1,8 @@
 # Handoff
 
-_Latest: independent rescuers (2026-11-20, not deployed, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
 
-## Independent rescuers (2026-11-20, not deployed, not checked on a device)
+## Independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device)
 
 One person or a small team who rescues like a small organization. They are an `organizations/{id}` doc with `kind: 'independent'`, so cases, animal records, members and rules work as they do for shelters, with these limits. Picks up the volunteer work that was deferred.
 
@@ -66,6 +66,9 @@ One person or a small team who rescues like a small organization. They are an `o
    - `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions`.
 3. App build.
 4. `firebase deploy --only firestore:rules`. This only adds access for existing builds, apart from `claimOk`, which older builds never trip, because they accept unowned cases only.
+
+**Deployed 2026-11-20 (commit `335b3b5`, rebased on `0873df0` pet matching):** `firestore:indexes`, all 102 functions (8 created: the six above, `scorePetAlertMatches` from the pet-matching commits, and `checkSignUpPhone`; some updates hit the per-minute quota and went through on the CLI's retry), then `firestore:rules`.
+- **Side effect:** these rules include the phone rule from "One mobile number, one email per account" below, which was meant to wait for the new app build: older builds that save a typed number at onboarding are now refused. Ship the app build soon, or relax that rule until then.
 
 ### Checks run
 - `flutter analyze lib`: the 17 issues already there, none in changed files.
