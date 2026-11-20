@@ -63,7 +63,35 @@ function gcpProjectId() {
 // at least create+addVersion+access+delete on this project) — a `defineSecret`-only
 // deployment does NOT include this broader permission automatically.
 
+// The runtime service account can't use Secret Manager: say so instead of
+// the callable's bare "internal" error.
+function secretAccessError(e) {
+  if (e && e.code === 7 /* PERMISSION_DENIED */) {
+    console.error('[facebook] Secret Manager refused the runtime service account', e.message);
+    return new HttpsError(
+        'failed-precondition',
+        'The server is not allowed to store Facebook connections yet. Ask the project admin to give the ' +
+        'Cloud Functions service account the Secret Manager Admin role.',
+        {facebookErrorCode: 'server-setup'},
+    );
+  }
+  return e;
+}
+
+/// Runs a Secret Manager operation, turning a permission error into [secretAccessError].
+async function withSecretAccess(op) {
+  try {
+    return await op();
+  } catch (e) {
+    throw secretAccessError(e);
+  }
+}
+
 async function writeDynamicSecret(secretId, value) {
+  return withSecretAccess(() => writeDynamicSecretUnchecked(secretId, value));
+}
+
+async function writeDynamicSecretUnchecked(secretId, value) {
   const client = secretClient();
   const parent = `projects/${gcpProjectId()}`;
   const secretPath = `${parent}/secrets/${secretId}`;
@@ -99,6 +127,10 @@ async function writeDynamicSecret(secretId, value) {
 }
 
 async function readDynamicSecret(secretId) {
+  return withSecretAccess(() => readDynamicSecretUnchecked(secretId));
+}
+
+async function readDynamicSecretUnchecked(secretId) {
   const client = secretClient();
   const name = `projects/${gcpProjectId()}/secrets/${secretId}/versions/latest`;
   try {
@@ -111,6 +143,10 @@ async function readDynamicSecret(secretId) {
 }
 
 async function deleteDynamicSecret(secretId) {
+  return withSecretAccess(() => deleteDynamicSecretUnchecked(secretId));
+}
+
+async function deleteDynamicSecretUnchecked(secretId) {
   const client = secretClient();
   const name = `projects/${gcpProjectId()}/secrets/${secretId}`;
   try {
