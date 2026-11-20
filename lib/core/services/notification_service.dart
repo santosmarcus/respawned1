@@ -12,6 +12,7 @@ import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/adoption/adopter_adoption_route.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
@@ -185,11 +186,6 @@ class NotificationService {
     }
   }
 
-  /// The screen a notification's data opens, or null if it opens nothing.
-  /// Public so in-app notification lists (e.g. the admin's) route the same
-  /// way as a tapped push.
-  static Future<Widget?> pageFor(Map<String, dynamic> data) => _pageFor(data);
-
   static Future<Widget?> _pageFor(Map<String, dynamic> data) async {
     final type = data['type'] as String? ?? '';
     final db = FirebaseFirestore.instance;
@@ -248,6 +244,9 @@ class NotificationService {
         return TransitProgressPage(caseId: caseId);
 
       case 'pet_alert_nearby':
+      // scorePetAlertMatches (functions/pet_matching.js): a strong match for
+      // the owner's lost pet — open their report's Possible Matches.
+      case 'pet_match':
         final alertId = data['alertId'] as String?;
         if (alertId == null || alertId.isEmpty) return null;
         return LostFoundTrackCasePage(alertId: alertId);
@@ -264,12 +263,12 @@ class NotificationService {
           isOwner: true,
         );
 
-    // sendFollowUpReminders (functions/index.js): staff always get the
-    // admin Post-Adoption Details page, the adopter their own check-ins.
+    // sendFollowUpReminders (functions/index.js): the adopter's
+    // post-adoption check-ins, or staff's post-adoption details.
       case 'follow_up_reminder':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
-        return postAdoptionPageForAdoption(adoptionId);
+        return PostAdoptionMonitoringPage(adoptionId: adoptionId);
       case 'follow_up_overdue_staff':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;

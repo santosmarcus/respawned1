@@ -5,20 +5,19 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
-import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 /// Per-slot upload progress callback: [progress] is 0..1 while uploading
 /// and null once that slot has finished.
 typedef MediaUploadProgress = void Function(int slot, double? progress);
 
 /// Firestore / Storage writes for the Report a Stray form. Moved verbatim
-/// from the page: same collections (`users`, `cases`, `petAlerts`,
-/// `possibleMatches`), same document fields, same write order and same
-/// Storage paths. Validation happens before these are called; any
+/// from the page: same collections (`users`, `cases`, `petAlerts`),
+/// same document fields, same write order and same Storage paths.
+/// Lost/found matches are scored server-side (scorePetAlertMatches in
+/// functions/pet_matching.js), not here. Validation happens before these are called; any
 /// exception propagates to the page, which shows it as before.
 class RescueReportService {
   RescueReportService({FirebaseFirestore? firestore})
@@ -26,27 +25,22 @@ class RescueReportService {
 
   final FirebaseFirestore _db;
 
-  /// Uploads every non-empty media slot to `<folder>/<id>/media_<i>.<ext>`.
-  /// [folder] is `cases` for rescue cases and `petAlerts` for lost/found
-  /// pet alerts; storage.rules checks the matching Firestore doc's
-  /// reporter, so the two must never be mixed.
+  /// Uploads every non-empty media slot to `cases/<caseId>/media_<i>.<ext>`.
   Future<({List<String> photoUrls, List<String> videoUrls})> uploadMedia(
       List<RescueMediaItem?> mediaFiles,
       String caseId, {
         required MediaUploadProgress onProgress,
-        String folder = 'cases',
       }) async {
-    // Every slot uploads at the same time (they used to go one after
-    // another, so a report with several photos and a video waited for each
-    // in turn). Results are collected per slot so the URL order still
-    // follows the slots.
-    Future<(bool, String)?> uploadSlot(int i) async {
+    final photoUrls = <String>[];
+    final videoUrls = <String>[];
+
+    for (int i = 0; i < mediaFiles.length; i++) {
       final item = mediaFiles[i];
-      if (item == null) return null;
+      if (item == null) continue;
 
       final ext = item.isVideo ? 'mp4' : 'jpg';
       final ref = FirebaseStorage.instance.ref().child(
-        '$folder/$caseId/media_$i.$ext',
+        'cases/$caseId/media_$i.$ext',
       );
 
       final task = ref.putFile(
@@ -57,57 +51,25 @@ class RescueReportService {
       );
 
       // Track upload progress for slot
-      final progressSub = task.snapshotEvents.listen((snap) {
+      task.snapshotEvents.listen((snap) {
         onProgress(
           i,
           snap.bytesTransferred / (snap.totalBytes == 0 ? 1 : snap.totalBytes),
         );
-      }, onError: (_) {});
+      });
 
-      try {
-        await task;
-      } finally {
-        await progressSub.cancel();
-      }
+      await task;
       final url = await ref.getDownloadURL();
+      if (item.isVideo) {
+        videoUrls.add(url);
+      } else {
+        photoUrls.add(url);
+      }
+
       onProgress(i, null);
-      return (item.isVideo, url);
-    }
-
-    final results = await Future.wait([
-      for (int i = 0; i < mediaFiles.length; i++) uploadSlot(i),
-    ]);
-
-    final photoUrls = <String>[];
-    final videoUrls = <String>[];
-    for (final r in results) {
-      if (r == null) continue;
-      (r.$1 ? videoUrls : photoUrls).add(r.$2);
     }
 
     return (photoUrls: photoUrls, videoUrls: videoUrls);
-  }
-
-  /// Uploads Pet Surrender vet record photos to
-  /// `cases/<caseId>/vet_record_<i>.jpg` and returns their download URLs.
-  Future<List<String>> uploadVetRecords(
-      List<XFile> photos,
-      String caseId,
-      ) async {
-    // In parallel, in order (Future.wait keeps the list order).
-    return Future.wait([
-      for (var i = 0; i < photos.length; i++)
-        () async {
-          final ref = FirebaseStorage.instance.ref().child(
-            'cases/$caseId/vet_record_$i.jpg',
-          );
-          await ref.putFile(
-            File(photos[i].path),
-            SettableMetadata(contentType: 'image/jpeg'),
-          );
-          return ref.getDownloadURL();
-        }(),
-    ]);
   }
 
   /// Creates the rescue / surrender case (one doc for every animal), then
@@ -157,27 +119,9 @@ class RescueReportService {
           'skinAndCoat': animal.skinAndCoat,
           'appetiteHydration': animal.appetiteHydration,
           'behavior': animal.behavior.toList(),
-          // Not asked on Pet Surrender; drop any chips picked earlier
-          // under another rescue type.
-          'environmentSafety': form.isPetSurrenderType
-              ? <String>[]
-              : animal.environmentSafety.toList(),
+          'environmentSafety': animal.environmentSafety.toList(),
           'biteRisk': animal.biteRisk,
           'escapeRisk': animal.escapeRisk,
-          // Injury, Illness, Neglect or Abuse — asked per animal.
-          if (form.asksVisibleSigns) ...{
-            'visibleSigns': animal.visibleSigns.toList(),
-            'needsMedical': animal.needsMedical,
-          },
-          // Pet Surrender — asked per animal inside its card.
-          if (form.isPetSurrenderType) ...{
-            'age': animal.ageController.text.trim(),
-            'stayDuration': animal.stayDurationController.text.trim(),
-            'acquisitionSource': animal.acquisitionSource,
-            'vaccination': animal.vaccination,
-            'spayNeuter': animal.spayNeuter,
-            'compatibility': animal.compatibility.toList(),
-          },
         },
     ];
 
@@ -229,49 +173,15 @@ class RescueReportService {
     'witnessPhone': form.witnessNumberController.text.trim(),
     if (!form.isPetSurrenderType) 'interestedToAdopt': form.adoptionChoice,
     // Pet Surrender's own question set — see SurrenderFields.
+    if (form.isPetSurrenderType)
+    'surrenderDuration': form.surrenderDurationController.text.trim(),
+    if (form.isPetSurrenderType)
+    'surrenderAge': form.surrenderAgeController.text.trim(),
     if (form.isPetSurrenderType) 'surrenderReason': surrenderReasonValue,
     if (form.isPetSurrenderType && form.surrenderNeedsExplanation)
     'surrenderExplanation': form.surrenderExplanationController.text.trim(),
     if (form.isPetSurrenderType)
-    'surrenderTimeline': form.surrenderTimeline,
-    // Neglect or Abuse follow-up answers — see NeglectAbuseFields.
-    if (form.isNeglectAbuseType) 'neglectAbuse': {
-    'observed': [
-    for (final o in form.neglectObserved)
-    o == kNeglectObservedOther
-    ? 'Other: ${form.neglectObservedOtherController.text.trim()}'
-        : o,
-    ],
-    'happeningNow': form.neglectHappeningNow,
-    'ownerKnown': form.neglectOwnerKnown,
-    if (form.neglectOwnerKnown == 'Yes')
-    'ownerDetails': form.neglectOwnerDetailsController.text.trim(),
-    'frequency': form.neglectFrequency,
-    'reportedToAuthorities': form.neglectReportedToAuthorities,
-    if (form.neglectReportedToAuthorities == 'Yes')
-    'reportReference':
-    form.neglectReportReferenceController.text.trim(),
-    'willingWitness': form.neglectWillingWitness,
-    },
-    // Abandonment follow-up answers — see AbandonmentFields.
-    if (form.isAbandonmentType) 'abandonment': {
-    'duration': form.abandonmentDuration,
-    'location': form.abandonmentLocation == kAbandonmentLocationOther
-    ? 'Other: ${form.abandonmentLocationOtherController.text.trim()}'
-        : form.abandonmentLocation,
-    'hasFoodWater': form.abandonmentFoodWater,
-    if (form.asksAbandonmentCanProvideFood)
-    'canProvideFoodWater': form.abandonmentCanProvideFood,
-    'witness': form.abandonmentWitness,
-    'witnessDetails':
-    form.abandonmentWitnessDetailsController.text.trim(),
-    'belongingsLeft': form.abandonmentBelongings,
-    if (form.abandonmentBelongings == 'Yes')
-    'belongingsDetails':
-    form.abandonmentBelongingsDetailsController.text.trim(),
-    },
-    // The reporter accepted the truthfulness declaration (rescue_page).
-    'truthfulnessDeclaredAt': Timestamp.now(),
+    'petAcquisitionSource': form.petAcquisitionSource,
     'scannedTagId': form.scannedTagId,
     'status': 'pending',
     'statusHistory': [
@@ -288,27 +198,15 @@ class RescueReportService {
     });
 
     final primaryCaseId = docRef.id;
-    // Media and vet records upload side by side.
-    final mediaFuture = uploadMedia(
-      form.mediaFiles,
-      primaryCaseId,
-      onProgress: onProgress,
+    final media = await uploadMedia(
+    form.mediaFiles,
+    primaryCaseId,
+    onProgress: onProgress,
     );
-    final vetFuture = form.isPetSurrenderType
-        ? uploadVetRecords(form.vetRecordPhotos, primaryCaseId)
-        : Future.value(const <String>[]);
-    // Future.wait listens to both at once, so a failure in either one
-    // surfaces here instead of as an unhandled error.
-    final uploaded = await Future.wait<Object>([mediaFuture, vetFuture]);
-    final media = uploaded[0] as ({List<String> photoUrls, List<String> videoUrls});
-    final vetRecordUrls = uploaded[1] as List<String>;
-    if (media.photoUrls.isNotEmpty ||
-    media.videoUrls.isNotEmpty ||
-    vetRecordUrls.isNotEmpty) {
+    if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
     await casesCollection.doc(primaryCaseId).update({
     'photoUrls': media.photoUrls,
     'videoUrls': media.videoUrls,
-    if (vetRecordUrls.isNotEmpty) 'vetRecordUrls': vetRecordUrls,
     });
     }
 
@@ -316,9 +214,10 @@ class RescueReportService {
   }
 
   /// Creates the lost/found pet alert(s), optional linked rescue case,
-  /// uploads media, and records possible matches. Returns how many
-  /// possible matches were found (shown in the confirmation dialog).
-  Future<int> submitLostPetReport({
+  /// and uploads media. Creating a petAlerts doc triggers
+  /// scorePetAlertMatches (functions/pet_matching.js), which scores it
+  /// against open reports and writes `possibleMatches`.
+  Future<void> submitLostPetReport({
     required RescueFormController form,
     required LatLng location,
     required String pinnedAddress,
@@ -436,21 +335,16 @@ class RescueReportService {
         createdDocIds.add(docRef.id);
       }
       // Backfill groupId on every doc in the group (first doc included).
-      await Future.wait([
-        for (final id in createdDocIds)
-          alertsCollection.doc(id).update({'groupId': groupId}),
-      ]);
+      for (final id in createdDocIds) {
+        await alertsCollection.doc(id).update({'groupId': groupId});
+      }
     }
 
-    // Media is shared across the whole group (same sighting/animal(s)),
-    // stored under the group's first alert, whose reporter is this user.
-    // (It used to go to cases/lostpet_<id>, which storage.rules refuses
-    // because no case doc has that id.)
+    // Media is shared across the whole group (same sighting/animal(s)).
     final media = await uploadMedia(
       form.mediaFiles,
-      groupId!,
+      'lostpet_$groupId',
       onProgress: onProgress,
-      folder: 'petAlerts',
     );
     if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
       for (final id in createdDocIds) {
@@ -469,40 +363,5 @@ class RescueReportService {
         });
       }
     }
-
-    final oppositeType = form.isOwner == true ? 'found' : 'lost';
-    final firstSpecies = form.isOwner == true
-        ? form.selectedAnimalType
-        : form.foundAnimals.first.speciesText;
-    final candidates = await alertsCollection
-        .where('type', isEqualTo: oppositeType)
-        .where('status', isEqualTo: 'open')
-        .where('species', isEqualTo: firstSpecies)
-        .limit(20)
-        .get();
-
-    for (final candidate in candidates.docs) {
-      final lostAlertId = form.isOwner == true ? groupId : candidate.id;
-      final foundAlertId = form.isOwner == true ? candidate.id : groupId;
-      final lostReporterId = form.isOwner == true
-          ? uid
-          : candidate['reporterId'];
-      final foundReporterId = form.isOwner == true
-          ? candidate['reporterId']
-          : uid;
-
-      await _db.collection('possibleMatches').add({
-        'lostAlertId': lostAlertId,
-        'foundAlertId': foundAlertId,
-        'lostReporterId': lostReporterId,
-        'foundReporterId': foundReporterId,
-        'species': firstSpecies,
-        'status': 'pending_review',
-        'createdAt': Timestamp.now(),
-        'serverCreatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-
-    return candidates.docs.length;
   }
 }

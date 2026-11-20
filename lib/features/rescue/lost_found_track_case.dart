@@ -545,14 +545,23 @@ class _PossibleMatchesSection extends StatelessWidget {
           );
         }
 
-        final docs = List.of(snap.data?.docs ?? const []);
+        // Staff-rejected matches are hidden from reporters.
+        final docs = (snap.data?.docs ?? const [])
+            .where((d) => d.data()['status'] != 'rejected')
+            .toList();
         if (docs.isEmpty) {
           return Text('No matches for now.',
               style: GoogleFonts.zain(
                   fontSize: 13, color: AppColors.textSecondary));
         }
 
+        // Best match first (score from scorePetAlertMatches,
+        // functions/pet_matching.js); newest first on ties and for older
+        // matches saved before scoring existed.
         docs.sort((a, b) {
+          final sa = (a.data()['score'] as num?) ?? -1;
+          final sb = (b.data()['score'] as num?) ?? -1;
+          if (sa != sb) return sb.compareTo(sa);
           final ta = a.data()['createdAt'] as Timestamp?;
           final tb = b.data()['createdAt'] as Timestamp?;
           return (tb ?? Timestamp(0, 0)).compareTo(ta ?? Timestamp(0, 0));
@@ -568,6 +577,10 @@ class _PossibleMatchesSection extends StatelessWidget {
               counterpartId: counterpartId,
               status: status,
               species: m['species'] as String? ?? '',
+              score: (m['score'] as num?)?.round(),
+              breakdown: m['breakdown'] is Map
+                  ? Map<String, dynamic>.from(m['breakdown'] as Map)
+                  : null,
             );
           }).toList(),
         );
@@ -580,22 +593,50 @@ class _MatchCard extends StatelessWidget {
   final String? counterpartId;
   final String status;
   final String species;
+  final int? score;
+  final Map<String, dynamic>? breakdown;
 
   const _MatchCard({
     required this.counterpartId,
     required this.status,
     required this.species,
+    this.score,
+    this.breakdown,
   });
+
+  /// Short "why it matched" line, e.g. "2.1 km away · same breed ·
+  /// found 1 day after last seen". Empty for unscored (older) matches.
+  String get _reasons {
+    final b = breakdown;
+    if (b == null) return '';
+    final parts = <String>[];
+    final km = b['distanceKm'] as num?;
+    if (km != null) {
+      parts.add(km < 1 ? 'under 1 km away' : '${km.toStringAsFixed(1)} km away');
+    }
+    if (b['breed'] == 20) parts.add('same breed');
+    if (b['sex'] == 10) parts.add('same sex');
+    if ((b['color'] as num? ?? 0) >= 12) parts.add('similar markings');
+    final days = (b['dayGap'] as num?)?.round();
+    if (days != null) {
+      parts.add(days <= 0
+          ? 'found the same day'
+          : 'found $days day${days == 1 ? '' : 's'} after last seen');
+    }
+    return parts.join(' · ');
+  }
 
   String get _statusLabel => switch (status) {
     'verified' => 'Match verified',
     'resolved' => 'Resolved',
+    _ when score != null => '$score% match',
     _ => 'Pending review',
   };
 
   Color get _statusColor => switch (status) {
     'verified' => AppColors.greenrspwn,
     'resolved' => AppColors.slaterspwn,
+    _ when score != null && score! >= 70 => AppColors.greenrspwn,
     _ => AppColors.yellowrspwn,
   };
 
@@ -618,6 +659,7 @@ class _MatchCard extends StatelessWidget {
             ? '${counterpart!['breed']} · $species'
             : species;
         final address = counterpart?['address'] as String? ?? '';
+        final reasons = _reasons;
 
         return GestureDetector(
           onTap: () {
@@ -665,6 +707,12 @@ class _MatchCard extends StatelessWidget {
                       if (address.isNotEmpty)
                         Text(address,
                             maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.zain(
+                                fontSize: 11, color: AppColors.textSecondary)),
+                      if (reasons.isNotEmpty)
+                        Text(reasons,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.zain(
                                 fontSize: 11, color: AppColors.textSecondary)),
