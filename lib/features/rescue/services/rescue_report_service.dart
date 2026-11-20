@@ -313,7 +313,17 @@ class RescueReportService {
         'breed': form.lostBreedText,
         'sex': form.lostSex,
         'colorMarkings': form.lostColorController.text.trim(),
-        'temperament': form.temperament,
+        // The pet's Health & Behavior Assessment and Bite Risk (same
+        // fields as a found animal's, so the report page and matches can
+        // show them side by side).
+        'bodyCondition': form.lostAnimal.bodyCondition,
+        'mobility': form.lostAnimal.mobility,
+        'alertness': form.lostAnimal.alertness,
+        'eyesNoseMouth': form.lostAnimal.eyesNoseMouth,
+        'skinAndCoat': form.lostAnimal.skinAndCoat,
+        'appetiteHydration': form.lostAnimal.appetiteHydration,
+        'behavior': form.lostAnimal.behavior.toList(),
+        'biteRisk': form.lostAnimal.biteRisk,
         'offerReward': form.offerReward,
         'rewardAmount': form.offerReward
             ? form.rewardAmountController.text.trim()

@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/widgets/found_animal_card.dart';
+import 'package:respawnd1/features/rescue/widgets/health_behavior_assessment.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/rescue/widgets/owner_toggle.dart';
@@ -340,22 +342,42 @@ class OwnerFields extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        RescueFieldLabel('Temperament', required: false),
-        const SizedBox(height: 8),
-        RescueRadioOption(
-          'Friendly, approachable',
-          form.temperament,
-              (val) => _set(() => form.temperament = val),
-        ),
-        RescueRadioOption(
-          'Nervous, may run',
-          form.temperament,
-              (val) => _set(() => form.temperament = val),
-        ),
-        RescueRadioOption(
-          'Can be defensive / bite risk',
-          form.temperament,
-              (val) => _set(() => form.temperament = val),
+        // The pet's health, behavior and bite risk, with the same choices
+        // a finder answers for the animal they found, so the two reports
+        // can be compared. Environment and Safety is left out: it's about
+        // where the animal is now, which the owner doesn't know.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFAF9F5),
+            border: Border.all(color: kRescueFieldBorder),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              HealthBehaviorAssessment(
+                entry: form.lostAnimal,
+                onChanged: onChanged,
+                showEnvironmentSafety: false,
+              ),
+              const SizedBox(height: 16),
+              const RescueSubsectionHeader(
+                'Risk assessment',
+                subtitle: 'Helps finders approach your pet safely. Choose '
+                    'Unknown if you are not sure.',
+              ),
+              const SizedBox(height: 8),
+              RiskDropdown(
+                label: 'Bite Risk',
+                hintText: 'Select',
+                value: form.lostAnimal.biteRisk,
+                options: kBiteRiskLevels,
+                onChanged: (v) => _set(() => form.lostAnimal.biteRisk = v),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 20),
         Row(

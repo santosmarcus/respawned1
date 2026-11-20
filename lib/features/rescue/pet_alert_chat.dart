@@ -6,7 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
 
 // Lost/found report chats, marketplace style: anyone who messages the
@@ -179,23 +181,32 @@ Future<bool> confirmAndMarkReunited(
   try {
     final uid = FirebaseAuth.instance.currentUser!.uid;
     final db = FirebaseFirestore.instance;
-    final ids = <String>{};
+    // Every doc of each report's group, with who filed it: the user's own
+    // report is marked acknowledged right away (they see the success page
+    // now), the other person's shows it the next time they open theirs.
+    final reporterOf = <String, String?>{};
+    String? ownReportId;
     for (final reportId in reportIds) {
-      ids.add(reportId);
+      final head = await db.collection('petAlerts').doc(reportId).get();
+      final reporterId = head.data()?['reporterId'] as String?;
+      reporterOf[reportId] = reporterId;
+      if (reporterId == uid) ownReportId ??= reportId;
       final group = await db
           .collection('petAlerts')
           .where('groupId', isEqualTo: reportId)
           .get();
-      ids.addAll(group.docs.map((d) => d.id));
+      for (final d in group.docs) {
+        reporterOf[d.id] = d.data()['reporterId'] as String?;
+      }
     }
     final batch = db.batch();
-    final fields = {
-      'status': 'reunited',
-      'reunitedAt': FieldValue.serverTimestamp(),
-      'reunitedBy': uid,
-    };
-    for (final id in ids) {
-      batch.update(db.collection('petAlerts').doc(id), fields);
+    for (final entry in reporterOf.entries) {
+      batch.update(db.collection('petAlerts').doc(entry.key), {
+        'status': 'reunited',
+        'reunitedAt': FieldValue.serverTimestamp(),
+        'reunitedBy': uid,
+        if (entry.value == uid) 'reporterAcknowledgedReunion': true,
+      });
     }
     if (chatId != null) {
       batch.update(db.collection('petAlertChats').doc(chatId), {
@@ -205,8 +216,11 @@ Future<bool> confirmAndMarkReunited(
     }
     await batch.commit();
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        appSnackBar('Marked as reunited with owner.'),
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReunitedSuccessPage(alertId: ownReportId ?? reportIds.first),
+        ),
       );
     }
     return true;
@@ -246,6 +260,12 @@ class _PetAlertChatPageState extends State<PetAlertChatPage> {
   Future<void> _send(Map<String, dynamic> chat) async {
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
+    if (await _sendText(chat, text)) _controller.clear();
+  }
+
+  /// Posts [text] as the current user. Returns whether it was sent.
+  Future<bool> _sendText(Map<String, dynamic> chat, String text) async {
+    if (_sending) return false;
     setState(() => _sending = true);
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
@@ -260,16 +280,40 @@ class _PetAlertChatPageState extends State<PetAlertChatPage> {
         'text': text,
         'timestamp': FieldValue.serverTimestamp(),
       });
-      _controller.clear();
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Could not send message: $e'),
         );
       }
+      return false;
     } finally {
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  /// The person who messaged met up and it isn't the pet: they tell the
+  /// person who filed the report, who makes the call ("Not the right pet").
+  Future<void> _flagNotThePet(Map<String, dynamic> chat) async {
+    final reporterRole = petAlertRole(
+      alertType: chat['alertType'] as String?,
+      isReporter: true,
+    ).toLowerCase();
+    final ok = await showConfirmActionDialog(
+      context,
+      title: "Not the right pet?",
+      message: 'We\'ll let the $reporterRole know you met and this isn\'t the '
+          'pet. They can then mark it as not a match, and the report stays '
+          'open for other people.',
+      confirmLabel: 'Let them know',
+    );
+    if (!ok || !mounted) return;
+    await _sendText(
+      chat,
+      'We met up and this isn\'t the right pet. Please mark it as not a match '
+          'so the report stays open for others.',
+    );
   }
 
   Future<void> _decide(String status) async {
@@ -359,6 +403,7 @@ class _PetAlertChatPageState extends State<PetAlertChatPage> {
                     isReporter: isReporter,
                     deciding: _deciding,
                     onDecide: _decide,
+                    onNotThePet: () => _flagNotThePet(chat),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -502,13 +547,36 @@ class _MatchPanel extends StatelessWidget {
   final bool deciding;
   final ValueChanged<String> onDecide;
 
+  /// For the person who messaged: tell the one who filed the report that
+  /// they met and it isn't the pet.
+  final VoidCallback onNotThePet;
+
   const _MatchPanel({
     required this.chat,
     required this.chatId,
     required this.isReporter,
     required this.deciding,
     required this.onDecide,
+    required this.onNotThePet,
   });
+
+  /// After meeting, the person who filed the report found it isn't the
+  /// pet: the match goes back to "not a match" (onPetAlertChatDecision in
+  /// functions/pet_alerts.js posts a note, tells the other person and
+  /// unlinks the two reports). The contact number and the Reunited button
+  /// go away; the report stays open for other people.
+  Future<void> _notTheRightPet(BuildContext context) async {
+    final ok = await showConfirmActionDialog(
+      context,
+      title: 'Not the right pet?',
+      message: 'This marks the match as not a match. Your contact number is '
+          'hidden from them again, and your report stays open so others can '
+          'still reach you.',
+      confirmLabel: 'Not a match',
+      destructive: true,
+    );
+    if (ok) onDecide('rejected');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -561,6 +629,21 @@ class _MatchPanel extends StatelessWidget {
                 side: const BorderSide(color: AppColors.textPrimary),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(30)),
+              ),
+            ),
+            // Met up and it turned out to be a different animal.
+            Align(
+              alignment: Alignment.center,
+              child: TextButton(
+                onPressed: deciding
+                    ? null
+                    : (isReporter ? () => _notTheRightPet(context) : onNotThePet),
+                child: Text(
+                  isReporter ? 'Not the right pet' : "This isn't the pet",
+                  style: GoogleFonts.zain(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textSecondary),
+                ),
               ),
             ),
           ],
@@ -1063,6 +1146,139 @@ class _ChatRow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The success page after a lost/found pet is reunited with its owner,
+/// shown to whoever marked it right away and, the first time they open it
+/// afterwards, to the person who filed the report (LostFoundTrackCasePage).
+/// Done records that the person who filed it has seen it
+/// (reporterAcknowledgedReunion), which moves the report from Activity to
+/// History.
+class ReunitedSuccessPage extends StatelessWidget {
+  final String alertId;
+  const ReunitedSuccessPage({super.key, required this.alertId});
+
+  Future<void> _done(BuildContext context, Map<String, dynamic>? alert) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && alert?['reporterId'] == uid &&
+        alert?['reporterAcknowledgedReunion'] != true) {
+      try {
+        final db = FirebaseFirestore.instance;
+        final group = await db
+            .collection('petAlerts')
+            .where('groupId', isEqualTo: alertId)
+            .get();
+        final batch = db.batch();
+        for (final id in {alertId, ...group.docs.map((d) => d.id)}) {
+          batch.update(db.collection('petAlerts').doc(id),
+              {'reporterAcknowledgedReunion': true});
+        }
+        await batch.commit();
+      } catch (_) {
+        // Non-fatal: the report just stays in Activity a little longer.
+      }
+    }
+    if (!context.mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+          (route) => false,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('petAlerts')
+          .doc(alertId)
+          .snapshots(),
+      builder: (context, snap) {
+        final a = snap.data?.data();
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        final isLost = (a?['type'] as String? ?? 'lost') == 'lost';
+        final isReporter = uid != null && uid == a?['reporterId'];
+        final name = (a?['petName'] as String?)?.trim().isNotEmpty == true
+            ? a!['petName'] as String
+            : (isLost ? 'Your pet' : 'The pet');
+        final headline = isLost && isReporter
+            ? '$name is back home!'
+            : '$name is back with its owner!';
+        final body = isLost && isReporter
+            ? 'Thank you to everyone who kept an eye out and reached out. '
+            'We\'re so happy your pet is home safe.'
+            : 'Thank you for helping a lost pet get back to its family. '
+            'Your kindness made this reunion possible.';
+
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 100,
+                          height: 100,
+                          decoration: BoxDecoration(
+                            color: AppColors.lavenderrspwn,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: AppColors.textPrimary.withValues(alpha: 0.2),
+                                width: 4),
+                          ),
+                          child: const Icon(Icons.favorite,
+                              size: 46, color: AppColors.textPrimary),
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          'Reunited!',
+                          style: GoogleFonts.tiltWarp(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          headline,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.zain(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '$body This report is now closed — you can find it '
+                              'any time in your History.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => _done(context, a),
+                    style: AppButtons.primary.copyWith(
+                        fixedSize: WidgetStatePropertyAll(
+                            Size(MediaQuery.of(context).size.width * 0.55, 50))),
+                    child: Text('Done',
+                        style: Theme.of(context).textTheme.headlineLarge),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

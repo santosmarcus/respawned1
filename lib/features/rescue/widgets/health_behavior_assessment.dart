@@ -22,6 +22,7 @@ class HealthBehaviorAssessment extends StatelessWidget {
     required this.onChanged,
     this.isSurrender = false,
     this.rescueType,
+    this.showEnvironmentSafety = true,
   });
 
   final FoundAnimalEntry entry;
@@ -36,6 +37,10 @@ class HealthBehaviorAssessment extends StatelessWidget {
   /// (choices per type), the living-condition choices in Environment and
   /// Safety, and the medical-attention question.
   final String? rescueType;
+
+  /// False on the lost-pet owner's form: Environment and Safety describes
+  /// where the animal is now, which the owner doesn't know.
+  final bool showEnvironmentSafety;
 
   List<String>? get _signOptions => visibleSignsOptionsFor(rescueType);
 
@@ -238,7 +243,7 @@ class HealthBehaviorAssessment extends StatelessWidget {
                 ),
             ],
           ),
-        ] else ...[
+        ] else if (showEnvironmentSafety) ...[
           const SizedBox(height: 16),
           EnvironmentSafetySection(
             entry: entry,

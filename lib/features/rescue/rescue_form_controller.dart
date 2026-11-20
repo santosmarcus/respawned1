@@ -175,8 +175,14 @@ class RescueFormController {
   final TextEditingController rewardAmountController = TextEditingController();
   final TextEditingController ownerContactController = TextEditingController();
   String? lostSex;
+  /// Old reports only: the owner form's former Temperament question, now
+  /// covered by [lostAnimal]'s Behavior and Bite Risk.
   String? temperament;
   bool offerReward = false;
+
+  /// The lost pet's Health & Behavior Assessment and Bite Risk, as the
+  /// owner knows them (same fields and choices as a found animal's card).
+  final FoundAnimalEntry lostAnimal = FoundAnimalEntry();
 
   String get lostBreedText {
     if (lostBreed == null) return '';
@@ -448,5 +454,6 @@ class RescueFormController {
     for (final a in foundAnimals) {
       a.dispose();
     }
+    lostAnimal.dispose();
   }
 }

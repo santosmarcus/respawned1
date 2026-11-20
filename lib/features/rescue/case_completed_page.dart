@@ -4,6 +4,35 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
 
+/// Every animal of a Community-Adoption-eligible report was adopted
+/// (CommunityAdoptionRepository.adopt closes the case once all are
+/// claimed). Its status is 'closed' like a case whose animal passed away,
+/// so this is what tells the two apart.
+bool isCommunityAdoptedCase(Map<String, dynamic> data) {
+  final s = (data['status'] as String? ?? '').toLowerCase();
+  if (s != 'closed') return false;
+  final ids = data['communityAdoptionIds'];
+  final claimed = data['claimedAnimalIndexes'];
+  return (ids is List && ids.isNotEmpty) || (claimed is List && claimed.isNotEmpty);
+}
+
+/// A Pet Surrender the organization finished taking in.
+bool isCompletedSurrenderCase(Map<String, dynamic> data) {
+  final s = (data['status'] as String? ?? '').toLowerCase();
+  return data['rescueType'] == 'Pet Surrender' && s.contains('completed');
+}
+
+/// The title the success page, the case summary and History use for a
+/// finished report.
+String finishedCaseTitle(Map<String, dynamic> data) {
+  final s = (data['status'] as String? ?? '').toLowerCase();
+  if (isCommunityAdoptedCase(data)) return 'Adopted';
+  if (isCompletedSurrenderCase(data)) return 'Surrender Completed';
+  if (s == 'rejected') return 'Report Reviewed';
+  if (s == 'closed' || s.contains('ended')) return 'Case Closed';
+  return 'Case Completed';
+}
+
 class CaseCompletedPage extends StatelessWidget {
   final String caseId;
   final Map<String, dynamic> caseData;
@@ -23,6 +52,9 @@ class CaseCompletedPage extends StatelessWidget {
     final s = (caseData['status'] as String? ?? '').toLowerCase();
     return s == 'rejected';
   }
+
+  bool get _isCommunityAdopted => isCommunityAdoptedCase(caseData);
+  bool get _isSurrender => isCompletedSurrenderCase(caseData);
 
   String? get _rejectionReasonLabel {
     final name = caseData['rejectionReason'] as String?;
@@ -77,7 +109,11 @@ class CaseCompletedPage extends StatelessWidget {
                     const SizedBox(height: 20),
 
                     Text(
-                      _isRejected
+                      _isCommunityAdopted
+                          ? 'Adopted!'
+                          : _isSurrender
+                          ? 'Surrender Completed!'
+                          : _isRejected
                           ? 'Report Reviewed'
                           : (_isClosed ? 'Case Closed' : 'Case Completed!'),
                       style: GoogleFonts.tiltWarp(
@@ -89,10 +125,14 @@ class CaseCompletedPage extends StatelessWidget {
                     const SizedBox(height: 12),
 
                     Text(
-                      _isRejected
+                      _isCommunityAdopted
+                          ? 'Every animal from your report found a home through Community Adoption. Thank you for caring for them and finding them a family!'
+                          : _isSurrender
+                          ? 'Your pet is now in the care of our partner organization. Thank you for trusting them and for choosing a safe, responsible surrender.'
+                          : _isRejected
                           ? (_rejectionReasonLabel != null
-                            ? 'Thank you for reporting this case! The team reviewd it and determined it does not require rescue intervention at this time. Reason: $_rejectionReasonLabel'
-                            : 'No reason was provided for this rejection.')
+                          ? 'Thank you for reporting this case! The team reviewd it and determined it does not require rescue intervention at this time. Reason: $_rejectionReasonLabel'
+                          : 'No reason was provided for this rejection.')
                           : (_isClosed
                           ? 'With heavy hearts, we share that this animal passed away despite everyone\'s rescue efforts.'
                           : 'The animal is now in treatment and in the care of our partner organization. Thank you for your compassion and for helping make this rescue possible.'),
@@ -106,7 +146,11 @@ class CaseCompletedPage extends StatelessWidget {
                     const SizedBox(height: 8),
 
                     Text(
-                      _isRejected
+                      _isCommunityAdopted
+                          ? 'The adopters will share post-adoption updates for the first two weeks. You can find this report and the updates any time in your History.'
+                          : _isSurrender
+                          ? 'The organization will look after your pet and work on finding it a new home. You can find this report any time in your History.'
+                          : _isRejected
                           ? 'You can review the reason and full details any time from your report history.'
                           : (_isClosed
                           ? 'We\'re grateful for your compassion and support, which gave this animal a chance at care, comfort, and dignity in its final moments. Thank you for helping make this rescue possible — we hope you\'ll continue supporting future efforts.'

@@ -137,9 +137,13 @@ module.exports = ({db, safeNotifyUser}) => {
     const chatRef = db.collection('petAlertChats').doc(chatId);
 
     const reporterRole = roleIn(after, after.reporterId).toLowerCase();
+    // Confirmed, then after meeting it turned out to be a different animal.
+    const undone = before.matchStatus === 'confirmed' && decision === 'rejected';
     const note = decision === 'confirmed'
       ? `The ${reporterRole} confirmed this is the right match. Arrange a time and place to meet, then tap Reunited with Owner once the pet is back home.`
-      : `The ${reporterRole} marked this as not a match.`;
+      : undone
+        ? `The ${reporterRole} found this isn't the right pet after all and marked it as not a match. The report stays open.`
+        : `The ${reporterRole} marked this as not a match.`;
     await chatRef.collection('messages').add({
       kind: 'system',
       text: note,
@@ -170,7 +174,9 @@ module.exports = ({db, safeNotifyUser}) => {
       title: decision === 'confirmed' ? "It's a match!" : 'Not a match',
       body: decision === 'confirmed'
         ? `The ${reporterRole} confirmed you're the right match. Open the chat to arrange the handover.`
-        : `The ${reporterRole} doesn't think this is the right match. Thank you for reaching out.`,
+        : undone
+          ? `The ${reporterRole} found this isn't the right pet after all. Thank you for meeting up and helping.`
+          : `The ${reporterRole} doesn't think this is the right match. Thank you for reaching out.`,
       type: 'pet_alert_chat',
       alertId: after.alertId,
       chatId,

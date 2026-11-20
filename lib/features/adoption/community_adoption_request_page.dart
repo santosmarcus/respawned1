@@ -200,31 +200,14 @@ class _RequestBodyState extends State<_RequestBody> {
                       fullName: name,
                     );
                     if (done && mounted) {
-                      await showDialog<void>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          backgroundColor: AppColors.background,
-                          title: Text(
-                            'Adoption Complete',
-                            style: GoogleFonts.tiltWarp(fontSize: 16),
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CommunityAdoptionSuccessPage(
+                            animalsLabel: r.animalsLabel,
+                            plural: r.animalIndexes.length > 1,
+                            isLister: _isLister,
                           ),
-                          content: Text(
-                            'Both of you have signed. ${r.animalsLabel} '
-                                '${r.animalIndexes.length > 1 ? 'are' : 'is'} now adopted '
-                                'through Community Adoption. Use the chat to arrange the handover.',
-                            style: GoogleFonts.zain(fontSize: 14),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx),
-                              child: Text(
-                                'OK',
-                                style: GoogleFonts.zain(
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
                       );
                     }
@@ -897,6 +880,101 @@ class _AdoptionUpdates extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+/// The success page when both have signed the community adoption agreement.
+/// The adoption then lives in History (Adoption for the adopter; Rescue for
+/// the reporter once every animal of the report is adopted) and the
+/// adopter's post-adoption updates under Post Adoption on Home. Done goes
+/// back to the request, where the chat is for arranging the handover.
+class CommunityAdoptionSuccessPage extends StatelessWidget {
+  final String animalsLabel;
+  final bool plural;
+  final bool isLister;
+
+  const CommunityAdoptionSuccessPage({
+    super.key,
+    required this.animalsLabel,
+    required this.plural,
+    required this.isLister,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: AppColors.lavenderrspwn,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: AppColors.textPrimary.withValues(alpha: 0.2),
+                            width: 4),
+                      ),
+                      child: const Icon(Icons.diversity_1,
+                          size: 46, color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Adoption Complete!',
+                      style: GoogleFonts.tiltWarp(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Both of you have signed. $animalsLabel '
+                          '${plural ? 'are' : 'is'} now adopted through Community Adoption.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.zain(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      isLister
+                          ? 'Use the chat to arrange the handover. The adopter '
+                          'will share post-adoption updates for the first two '
+                          'weeks, and you can find this adoption any time in '
+                          'your History.'
+                          : 'Use the chat to arrange the handover. For the first '
+                          'two weeks, share updates under Post Adoption on Home. '
+                          'You can find this adoption any time in your History.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.zain(
+                          fontSize: 13, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: AppButtons.primary.copyWith(
+                    fixedSize: WidgetStatePropertyAll(
+                        Size(MediaQuery.of(context).size.width * 0.55, 50))),
+                child: Text('Done',
+                    style: Theme.of(context).textTheme.headlineLarge),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

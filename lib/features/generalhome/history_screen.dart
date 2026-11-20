@@ -6,13 +6,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
+import 'package:respawnd1/features/adoption/community_adoption_request_page.dart';
 import 'package:respawnd1/features/adoption/community_adoption_track_page.dart';
 import 'package:respawnd1/features/donation/donation_summary.dart' as ds;
 import 'package:respawnd1/features/donation/sponsorship_summary.dart' as ss;
 import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/features/donation/donation_summary_inkind.dart' as ik;
 import 'package:respawnd1/features/generalhome/history_provider.dart';
+import 'package:respawnd1/features/rescue/case_completed_page.dart';
 import 'package:respawnd1/features/rescue/case_summary_page.dart';
+import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'package:respawnd1/core/utils/currency.dart';
@@ -72,6 +75,31 @@ class _RescueHistoryTab extends StatelessWidget {
       );
     }
 
+    // The user's lost/found reports that are archived: reunited with the
+    // owner (or resolved), shown alongside finished rescue reports.
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('petAlerts')
+          .where('reporterId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, alertSnap) => _casesAndAlerts(context, uid, alertSnap),
+    );
+  }
+
+  Widget _casesAndAlerts(
+      BuildContext context,
+      String uid,
+      AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> alertSnap,
+      ) {
+    final alerts = (alertSnap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+        .where((d) {
+      final a = d.data();
+      final status = (a['status'] as String? ?? '').toLowerCase();
+      final groupId = a['groupId'] as String?;
+      return (status == 'reunited' || status == 'resolved') &&
+          (groupId == null || groupId.isEmpty || groupId == d.id);
+    }).toList();
+
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       // Scoped to this user's own reports only — never anyone else's.
       stream: FirebaseFirestore.instance
@@ -101,13 +129,25 @@ class _RescueHistoryTab extends StatelessWidget {
         })
             .toList();
 
-        docs.sort((a, b) {
-          final ta = a.data()['serverCreatedAt'] as Timestamp?;
-          final tb = b.data()['serverCreatedAt'] as Timestamp?;
-          return (tb ?? Timestamp(0, 0)).compareTo(ta ?? Timestamp(0, 0));
-        });
+        // Rescue reports and archived lost/found reports, newest first.
+        final entries = <({Timestamp at, Widget card})>[
+          for (final d in docs)
+            (
+            at: (d.data()['serverCreatedAt'] as Timestamp?) ??
+                (d.data()['createdAt'] as Timestamp?) ??
+                Timestamp(0, 0),
+            card: _RescueHistoryCard(caseId: d.id, data: d.data()),
+            ),
+          for (final a in alerts)
+            (
+            at: (a.data()['reunitedAt'] as Timestamp?) ??
+                (a.data()['createdAt'] as Timestamp?) ??
+                Timestamp(0, 0),
+            card: _LostFoundHistoryCard(alertId: a.id, data: a.data()),
+            ),
+        ]..sort((a, b) => b.at.compareTo(a.at));
 
-        if (docs.isEmpty) {
+        if (entries.isEmpty) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -120,12 +160,9 @@ class _RescueHistoryTab extends StatelessWidget {
 
         return ListView.separated(
           padding: const EdgeInsets.all(16),
-          itemCount: docs.length,
+          itemCount: entries.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (context, i) {
-            final doc = docs[i];
-            return _RescueHistoryCard(caseId: doc.id, data: doc.data());
-          },
+          itemBuilder: (context, i) => entries[i].card,
         );
       },
     );
@@ -163,6 +200,10 @@ class _RescueHistoryCard extends StatelessWidget {
     final s = (data['status'] as String? ?? 'pending');
     final lower = s.toLowerCase();
     if (lower == 'rejected') return 'Rejected';
+    // Adopted through Community Adoption, or a finished Pet Surrender.
+    if (isCommunityAdoptedCase(data) || isCompletedSurrenderCase(data)) {
+      return finishedCaseTitle(data);
+    }
     if (lower == 'closed' || lower.contains('ended')) return 'Case Closed';
     if (lower.contains('completed')) return 'Case Completed';
     if (lower == 'pending') return 'Pending';
@@ -195,7 +236,8 @@ class _RescueHistoryCard extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => _isRejected && _communityAdoptionEligible
+            builder: (_) => (_isRejected && _communityAdoptionEligible) ||
+                isCommunityAdoptedCase(data)
                 ? CommunityAdoptionTrackPage(caseId: caseId)
                 : (_isFinal || _isRejected)
                 ? CaseSummaryPage(
@@ -331,6 +373,124 @@ class _RescueHistoryCard extends StatelessWidget {
   }
 }
 
+/// A lost/found report reunited with its owner, archived from Activity.
+class _LostFoundHistoryCard extends StatelessWidget {
+  final String alertId;
+  final Map<String, dynamic> data;
+  const _LostFoundHistoryCard({required this.alertId, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final isLost = (data['type'] as String? ?? 'lost') == 'lost';
+    final reunited = (data['status'] as String? ?? '').toLowerCase() == 'reunited';
+    final photoUrls = List<String>.from(data['photoUrls'] ?? const []);
+    final name = (data['petName'] as String?)?.trim() ?? '';
+    final title = name.isNotEmpty
+        ? name
+        : '${isLost ? 'Lost' : 'Found'} Pet Report #${alertId.substring(0, 7).toUpperCase()}';
+    final when = (data['reunitedAt'] as Timestamp?) ?? (data['createdAt'] as Timestamp?);
+
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => LostFoundTrackCasePage(alertId: alertId)),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.slaterspwn,
+              blurRadius: 1,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: photoUrls.isNotEmpty
+                  ? Image.network(
+                photoUrls.first,
+                width: 64,
+                height: 64,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => _thumb(),
+              )
+                  : _thumb(),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    const Icon(Icons.access_time, size: 14, color: AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(_formatTimestamp(when),
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.location_on_outlined, size: 14, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          (data['address'] as String?) ?? '-',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    Icon(reunited ? Icons.favorite : Icons.info_outline,
+                        size: 14, color: reunited ? AppColors.greenrspwn : AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      reunited
+                          ? '${isLost ? 'Lost' : 'Found'} Pet · Reunited with owner'
+                          : '${isLost ? 'Lost' : 'Found'} Pet · Resolved',
+                      style: GoogleFonts.zain(
+                          fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _thumb() => Container(
+    width: 64,
+    height: 64,
+    color: AppColors.slaterspwn,
+    child: const Icon(Icons.pets, color: AppColors.textSecondary),
+  );
+}
+
 class _MessageCountRow extends StatelessWidget {
   final String caseId;
   const _MessageCountRow({required this.caseId});
@@ -364,7 +524,9 @@ class _MessageCountRow extends StatelessWidget {
 }
 
 
-// Adoption — withdrawn applications only.
+// Adoption — withdrawn applications, and the Community Adoptions the user
+// completed (archived here once both signed the agreement; their
+// post-adoption updates stay under Post Adoption on Home).
 class _AdoptionWithdrawnTab extends StatelessWidget {
   const _AdoptionWithdrawnTab();
 
@@ -377,6 +539,25 @@ class _AdoptionWithdrawnTab extends StatelessWidget {
             style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
       );
     }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('communityAdoptionRequests')
+          .where('adopterId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, communitySnap) => _withCommunity(context, uid, communitySnap),
+    );
+  }
+
+  Widget _withCommunity(
+      BuildContext context,
+      String uid,
+      AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> communitySnap,
+      ) {
+    final community = (communitySnap.data?.docs ??
+        const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+        .where((d) => (d.data()['status'] as String? ?? '') == 'completed')
+        .toList();
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
@@ -399,17 +580,41 @@ class _AdoptionWithdrawnTab extends StatelessWidget {
             .where((d) => (d.data()['status'] as String? ?? '').toLowerCase() == 'withdrawn')
             .toList();
 
-        docs.sort((a, b) {
-          final ta = a.data()['createdAt'] as Timestamp?;
-          final tb = b.data()['createdAt'] as Timestamp?;
-          return (tb ?? Timestamp(0, 0)).compareTo(ta ?? Timestamp(0, 0));
-        });
+        final entries = <({Timestamp at, Widget card})>[
+          for (final d in docs)
+            (
+            at: (d.data()['createdAt'] as Timestamp?) ?? Timestamp(0, 0),
+            card: _SimpleHistoryCard(
+              title: (((d.data()['personal'] as Map?) ?? {})['animalName'] as String?) ??
+                  'Adoption Application',
+              dateLabel: _formatTimestamp(d.data()['createdAt'] as Timestamp?),
+              statusLabel: 'Withdrawn',
+              icon: Icons.favorite_border,
+            ),
+            ),
+          for (final r in community)
+            (
+            at: (r.data()['completedAt'] as Timestamp?) ??
+                (r.data()['createdAt'] as Timestamp?) ??
+                Timestamp(0, 0),
+            card: GestureDetector(
+              onTap: () => openCommunityAdoptionRequest(context, r.id),
+              child: _SimpleHistoryCard(
+                title: _communityAdoptionTitle(r.data()),
+                dateLabel: _formatTimestamp(
+                    (r.data()['completedAt'] as Timestamp?) ?? (r.data()['createdAt'] as Timestamp?)),
+                statusLabel: 'Adopted · Community Adoption',
+                icon: Icons.diversity_1_outlined,
+              ),
+            ),
+            ),
+        ]..sort((a, b) => b.at.compareTo(a.at));
 
-        if (docs.isEmpty) {
+        if (entries.isEmpty) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text('No withdrawn adoption applications.',
+              child: Text('No adoption history yet.',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
             ),
@@ -418,19 +623,9 @@ class _AdoptionWithdrawnTab extends StatelessWidget {
 
         return ListView.separated(
           padding: const EdgeInsets.all(16),
-          itemCount: docs.length,
+          itemCount: entries.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (context, i) {
-            final data = docs[i].data();
-            final personal = (data['personal'] as Map?) ?? {};
-            final ts = data['createdAt'] as Timestamp?;
-            return _SimpleHistoryCard(
-              title: (personal['animalName'] as String?) ?? 'Adoption Application',
-              dateLabel: _formatTimestamp(ts),
-              statusLabel: 'Withdrawn',
-              icon: Icons.favorite_border,
-            );
-          },
+          itemBuilder: (context, i) => entries[i].card,
         );
       },
     );
@@ -774,6 +969,12 @@ class _VolunteerHistoryTab extends StatelessWidget {
       },
     );
   }
+}
+
+/// "Bantay, Mingming" for a completed Community Adoption request.
+String _communityAdoptionTitle(Map<String, dynamic> request) {
+  final labels = (request['animalLabels'] as List?)?.whereType<String>().join(', ') ?? '';
+  return labels.isEmpty ? 'Community Adoption' : labels;
 }
 
 String _formatTimestamp(Timestamp? ts) {

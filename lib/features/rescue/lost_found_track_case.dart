@@ -28,6 +28,8 @@ class LostFoundTrackCasePage extends StatefulWidget {
 }
 
 class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
+  bool _openedSuccess = false;
+
   DocumentReference<Map<String, dynamic>> get _alertRef => FirebaseFirestore
       .instance
       .collection('petAlerts')
@@ -63,6 +65,24 @@ class _LostFoundTrackCasePageState extends State<LostFoundTrackCasePage> {
           final isReporter = uid != null && uid == data['reporterId'];
           final status = (data['status'] as String? ?? 'open').toLowerCase();
           final isReunited = status == 'reunited';
+
+          // Reunited by the other person: the one who filed the report sees
+          // the success page once (Done there archives it to History).
+          if (isReporter &&
+              isReunited &&
+              data['reporterAcknowledgedReunion'] != true &&
+              !_openedSuccess) {
+            _openedSuccess = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!context.mounted) return;
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ReunitedSuccessPage(alertId: widget.alertId),
+                ),
+              );
+            });
+          }
           final isClosed = isReunited || status == 'resolved';
           final photoUrls = List<String>.from(data['photoUrls'] ?? []);
 
@@ -408,6 +428,13 @@ class _LostPetDetails extends StatelessWidget {
         : '${formatDate(lastSeenDate)} · $lastSeenTime';
     final size = (data['size'] as String?)?.trim() ?? '';
     final tagId = (data['scannedTagId'] as String?)?.trim() ?? '';
+    // Reports from before the form asked Behavior and Bite Risk.
+    final temperament = (data['temperament'] as String?)?.trim() ?? '';
+    final behavior = (data['behavior'] as List?)?.whereType<String>().toList() ?? const <String>[];
+    final hasHealth = [
+      'bodyCondition', 'mobility', 'alertness', 'eyesNoseMouth',
+      'skinAndCoat', 'appetiteHydration', 'biteRisk',
+    ].any((k) => (data[k] as String?)?.isNotEmpty == true) || behavior.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -425,13 +452,46 @@ class _LostPetDetails extends StatelessWidget {
                   label: 'Color/Markings',
                   value: data['colorMarkings'] as String?),
               _CaseRow(label: 'Date/Time Last Seen', value: lastSeen),
-              _CaseRow(
-                  label: 'Temperament',
-                  value: data['temperament'] as String?),
+              if (temperament.isNotEmpty)
+                _CaseRow(label: 'Temperament', value: temperament),
               if (tagId.isNotEmpty) _CaseRow(label: 'ID Tag', value: tagId),
             ],
           ),
         ),
+        // The owner's Health & Behavior Assessment and Bite Risk, laid out
+        // like a found animal's card so the two can be compared.
+        if (hasHealth) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.slaterspwn),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Health & behavior',
+                    style: GoogleFonts.zain(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 8),
+                CaseDetailRow.optional('Body Condition', data['bodyCondition']),
+                CaseDetailRow.optional('Mobility', data['mobility']),
+                CaseDetailRow.optional('Alertness', data['alertness']),
+                CaseDetailRow.optional('Eyes, Nose, Mouth', data['eyesNoseMouth']),
+                CaseDetailRow.optional('Skin and Coat', data['skinAndCoat']),
+                CaseDetailRow.optional('Appetite and Hydration', data['appetiteHydration']),
+                CaseDetailRow.optional('Behavior', behavior.isEmpty ? null : behavior.join(', ')),
+                CaseDetailRow.optional('Bite Risk', data['biteRisk']),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         const SizedBox(height: 4),
         _CaseRow(
           label: 'Reward',

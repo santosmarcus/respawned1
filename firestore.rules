@@ -1940,7 +1940,7 @@ service cloud.firestore {
         'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
         'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns',
         'communityAdoptionRequests',
-        'referralShares', 'possibleMatches'
+        'referralShares', 'possibleMatches', 'petAlertChats'
       ]);
     }
   }
