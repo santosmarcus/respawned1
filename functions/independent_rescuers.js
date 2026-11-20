@@ -83,7 +83,7 @@ module.exports = ({notifyStaff, orgStaffUids}) => {
     const me = await db.collection('users').doc(uid).get();
     const role = me.exists ? me.get('role') : '';
     if (!['system_admin', 'admin', 'ngo_staff'].includes(role)) {
-      throw new HttpsError('permission-denied', 'Only a system admin can change an independent rescuer\'s limits.');
+      throw new HttpsError('permission-denied', 'Only a system admin can change a rescue volunteer\'s limits.');
     }
     const d = request.data || {};
     const organizationId = typeof d.organizationId === 'string' ? d.organizationId.trim() : '';
@@ -96,7 +96,7 @@ module.exports = ({notifyStaff, orgStaffUids}) => {
     const before = await db.runTransaction(async (tx) => {
       const snap = await tx.get(orgRef);
       if (!snap.exists || !isIndependent(snap.data())) {
-        throw new HttpsError('failed-precondition', 'That is not an independent rescuer.');
+        throw new HttpsError('failed-precondition', 'That is not a rescue volunteer.');
       }
       tx.update(orgRef, {...plan.update, updatedAt: FieldValue.serverTimestamp()});
       return snap.data();

@@ -16,8 +16,9 @@ import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/systemadmin/user_directory.dart';
 
 /// The system admin's directory of every account: each organization's people
-/// with their role there, and the other account types (transporters,
-/// volunteers, general users, admins). From an account's details the system
+/// with their role there (shelters under Organization, rescue volunteers'
+/// teams under Rescue volunteers), and the other account types
+/// (transporters, general users, admins). From an account's details the system
 /// admin can disable (suspend sign-in) or remove it (deleteMyAccount's
 /// cleanup, server-side). Organization admins still manage their own members'
 /// access, and organization staff verify transporters.
@@ -54,50 +55,79 @@ class _SystemUsersPageState extends State<SystemUsersPage> {
   Widget build(BuildContext context) {
     return StreamBuilder<List<DirectoryUser>>(
       stream: _users,
-      builder: (context, snap) {
-        final users = snap.data ?? const <DirectoryUser>[];
-        int count(AccountGroup g) => users.where((u) => groupOf(u) == g).length;
-        final group = AccountGroup.values[_tab];
-        return Scaffold(
-          backgroundColor: AppColors.background,
-          appBar: AdminAppBar(
-            title: 'Users',
-            showLeading: false,
-            menuActions: widget.menuActions,
-            bottom: AdminTabBar(
-              tabs: [
-                for (final g in AccountGroup.values)
-                  AdminTab(g.label, count: snap.hasData && g != AccountGroup.organization ? count(g) : null),
-              ],
-              selectedIndex: _tab,
-              onSelected: (i) => setState(() => _tab = i),
-            ),
+      builder: (context, snap) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _orgs,
+        builder: (context, orgSnap) => _page(snap, orgSnap),
+      ),
+    );
+  }
+
+  Widget _page(AsyncSnapshot<List<DirectoryUser>> snap, AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> orgSnap) {
+    final users = snap.data ?? const <DirectoryUser>[];
+    final orgs = (orgSnap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]).toList()
+      ..sort((a, b) => ((a.data()['name'] as String?) ?? '').compareTo((b.data()['name'] as String?) ?? ''));
+    // Rescue volunteers' teams are organizations with kind 'independent';
+    // they are listed under the volunteers tab, not Organization.
+    final volunteerOrgIds = {for (final o in orgs) if (o.data()['kind'] == 'independent') o.id};
+    int count(AccountGroup g) => users.where((u) => groupOf(u, volunteerOrgIds: volunteerOrgIds) == g).length;
+    final group = AccountGroup.values[_tab];
+    final teamTab = group == AccountGroup.organization || group == AccountGroup.volunteers;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AdminAppBar(
+        title: 'Users',
+        showLeading: false,
+        menuActions: widget.menuActions,
+        bottom: AdminTabBar(
+          tabs: [
+            for (final g in AccountGroup.values)
+              AdminTab(g.label,
+                  count: snap.hasData && orgSnap.hasData && g != AccountGroup.organization ? count(g) : null),
+          ],
+          selectedIndex: _tab,
+          onSelected: (i) => setState(() => _tab = i),
+        ),
+      ),
+      body: Column(
+        children: [
+          AdminSearchBar(
+            controller: _search,
+            hintText: 'Search name, email or phone…',
+            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
           ),
-          body: Column(
-            children: [
-              AdminSearchBar(
-                controller: _search,
-                hintText: 'Search name, email or phone…',
-                onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-              ),
-              Expanded(
-                child: AdminTabSwipe(
-                  index: _tab,
-                  count: AccountGroup.values.length,
-                  onSelected: (i) => setState(() => _tab = i),
-                  child: snap.hasError
-                      ? const AdminListMessage('Could not load users.')
-                      : !snap.hasData
+          Expanded(
+            child: AdminTabSwipe(
+              index: _tab,
+              count: AccountGroup.values.length,
+              onSelected: (i) => setState(() => _tab = i),
+              child: snap.hasError
+                  ? const AdminListMessage('Could not load users.')
+                  : teamTab && orgSnap.hasError
+                      ? const AdminListMessage('Could not load organizations.')
+                      : !snap.hasData || (teamTab && !orgSnap.hasData)
                           ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
                           : group == AccountGroup.organization
-                              ? _organizationsView(users)
-                              : _groupView(users, group),
-                ),
-              ),
-            ],
+                              ? _teamsView(
+                                  users,
+                                  orgs.where((o) => !volunteerOrgIds.contains(o.id)).toList(),
+                                  group: group,
+                                  empty: 'No organizations yet.',
+                                )
+                              : group == AccountGroup.volunteers
+                                  ? _teamsView(
+                                      users,
+                                      orgs.where((o) => volunteerOrgIds.contains(o.id)).toList(),
+                                      group: group,
+                                      empty: 'No rescue volunteers yet.',
+                                      older: users
+                                          .where((u) => u.role == 'rescue_volunteer' && u.matches(_query))
+                                          .toList(),
+                                    )
+                                  : _groupView(users, group),
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -127,30 +157,38 @@ class _SystemUsersPageState extends State<SystemUsersPage> {
     );
   }
 
-  Widget _organizationsView(List<DirectoryUser> users) {
+  /// Shelters (Organization tab) or rescue volunteers' teams (volunteers
+  /// tab), each with its roster; then sign-ups not on a team yet, and on the
+  /// volunteers tab the [older] 'rescue_volunteer' accounts.
+  Widget _teamsView(
+    List<DirectoryUser> users,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> orgs, {
+    required AccountGroup group,
+    required String empty,
+    List<DirectoryUser> older = const [],
+  }) {
     final byId = {for (final u in users) u.uid: u};
-    final unlinked = unlinkedOrganizationAccounts(users).where((u) => u.matches(_query)).toList();
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _orgs,
-      builder: (context, snap) {
-        if (snap.hasError) return const AdminListMessage('Could not load organizations.');
-        if (!snap.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
-        final orgs = snap.data!.docs.toList()
-          ..sort((a, b) => ((a.data()['name'] as String?) ?? '').compareTo((b.data()['name'] as String?) ?? ''));
-        if (orgs.isEmpty && unlinked.isEmpty) return const AdminListMessage('No organizations yet.');
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            for (final org in orgs)
-              _OrganizationSection(db: _db, org: org, usersById: byId, query: _query),
-            if (unlinked.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _SectionTitle('Not on an organization yet', subtitle: '${unlinked.length}'),
-              for (final u in unlinked) _UserTile(user: u),
-            ],
-          ],
-        );
-      },
+    final unlinked = unlinkedOrganizationAccounts(users, group: group).where((u) => u.matches(_query)).toList();
+    if (orgs.isEmpty && unlinked.isEmpty && older.isEmpty) return AdminListMessage(empty);
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        for (final org in orgs) _OrganizationSection(db: _db, org: org, usersById: byId, query: _query),
+        if (unlinked.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _SectionTitle(
+            group == AccountGroup.volunteers ? 'Sign-up not finished' : 'Not on an organization yet',
+            subtitle: '${unlinked.length}',
+          ),
+          for (final u in unlinked) _UserTile(user: u),
+        ],
+        if (older.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _SectionTitle('Older volunteer accounts', subtitle: '${older.length}'),
+          const _Note('From the old volunteer sign-up, which is no longer offered.'),
+          for (final u in older) _UserTile(user: u),
+        ],
+      ],
     );
   }
 }
@@ -202,7 +240,9 @@ class _OrganizationSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _SectionTitle(
-                name == null || name.isEmpty ? 'Unnamed organization' : name,
+                name == null || name.isEmpty
+                    ? (d['kind'] == 'independent' ? 'Unnamed rescue volunteer' : 'Unnamed organization')
+                    : name,
                 subtitle: snap.hasData
                     ? [
                         if (d['kind'] == 'independent') _independentSummary(d),
@@ -232,12 +272,11 @@ class _OrganizationSection extends StatelessWidget {
   }
 }
 
-/// "Independent rescuer · 1/3 cases · 2/5 animals" (kept by
+/// A rescue volunteer's load: "1/3 cases · 2/5 animals" (kept by
 /// functions/independent_rescuers.js), plus "Paused" when they are.
 String _independentSummary(Map<String, dynamic> d) {
   int n(String k, int fallback) => (d[k] as num?)?.toInt() ?? fallback;
   return [
-    'Independent rescuer',
     '${n('activeCaseCount', 0)}/${n('maxActiveCases', IndependentRescuer.maxActiveCases)} cases',
     '${n('animalsInCareCount', 0)}/${n('maxAnimalsInCare', IndependentRescuer.maxAnimalsInCare)} animals',
     if (d['acceptingCases'] == false) 'Paused',

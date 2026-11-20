@@ -13,10 +13,14 @@ import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 
-/// Platform staff's queue of organizations that submitted their
-/// verification documents. Decisions are only possible while an
-/// organization is "Under review"; they run in the reviewOrganization
-/// callable, which also notifies the owner.
+/// The queue of sign-ups that submitted their verification documents.
+/// Decisions are only possible while a sign-up is "Under review"; they run
+/// in the reviewOrganization callable, which also notifies the owner.
+///
+/// [kind] picks which sign-ups: shelters (Organization approvals: platform
+/// staff and system admins) or rescue volunteers (kind 'independent',
+/// reviewed from Volunteers by platform staff, system admins and
+/// organization staff with the Volunteers permission).
 ///
 /// Pushed from the admin drawer (back arrow), or a tab of the system admin
 /// console ([showBackButton] false, with the console's [menuActions]).
@@ -24,14 +28,21 @@ class OrganizationReviewPage extends StatefulWidget {
   const OrganizationReviewPage({
     super.key,
     this.repository,
+    this.kind = OrgKind.shelter,
     this.showBackButton = true,
     this.title = 'Organization approvals',
+    this.canSetLimits = true,
     this.menuActions = const [],
   });
 
   final OrganizationRepository? repository;
+  final OrgKind kind;
   final bool showBackButton;
   final String title;
+
+  /// Show "Modules & limits" on approved rescue volunteers (the
+  /// setIndependentLimits callable: platform staff and system admins only).
+  final bool canSetLimits;
   final List<AdminMenuAction> menuActions;
 
   @override
@@ -57,8 +68,13 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
     super.dispose();
   }
 
+  bool get _volunteers => widget.kind == OrgKind.independent;
+
+  /// 'organization' or 'rescue volunteer', for messages.
+  String get _noun => _volunteers ? 'rescue volunteer' : 'organization';
+
   Future<void> _decide(OrganizationReviewItem org, OrgVerificationStatus decision) async {
-    final name = org.name.isEmpty ? 'this organization' : org.name;
+    final name = org.name.isEmpty ? 'this $_noun' : org.name;
     String? note;
     switch (decision) {
       case OrgVerificationStatus.approved:
@@ -67,7 +83,7 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
           title: 'Approve $name?',
           message: org.kind == OrgKind.independent
               ? 'They get rescue, animal records and daily care, and nearby cases open to them after shelters '
-                  'have had first look. You can turn on more modules from Approved.'
+                  'have had first look.${widget.canSetLimits ? ' You can turn on more modules from Approved.' : ''}'
               : 'Its staff get the admin tools, and it starts receiving cases in its service areas.',
           confirmLabel: 'Approve',
         );
@@ -103,9 +119,9 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
       await _repo.review(organizationId: org.id, decision: decision, note: note?.trim());
       messenger.showSnackBar(appSnackBar(
         switch (decision) {
-          OrgVerificationStatus.approved => 'Organization approved.',
+          OrgVerificationStatus.approved => _volunteers ? 'Rescue volunteer approved.' : 'Organization approved.',
           OrgVerificationStatus.requiresChanges => 'Changes requested.',
-          _ => 'Organization rejected.',
+          _ => _volunteers ? 'Application rejected.' : 'Organization rejected.',
         },
         kind: AppMessageKind.success,
       ));
@@ -120,7 +136,7 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
         name: org.name,
         phone: org.phone,
         lines: [
-          if (org.kind == OrgKind.independent) ('Type', 'Independent rescuer'),
+          if (org.kind == OrgKind.independent) ('Type', 'Rescue volunteer'),
           ('Email', org.email),
           (org.kind == OrgKind.independent ? 'Area' : 'Location', org.location),
           ('Reviewed by', org.reviewedByName),
@@ -161,7 +177,7 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
 
   /// Approved independent rescuers: modules, team size and capacity.
   bool _canSetLimits(OrganizationReviewItem org) =>
-      org.kind == OrgKind.independent && org.status == OrgVerificationStatus.approved;
+      widget.canSetLimits && org.kind == OrgKind.independent && org.status == OrgVerificationStatus.approved;
 
   bool _matches(OrganizationReviewItem org) {
     if (_query.isEmpty) return true;
@@ -202,17 +218,18 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
               onSelected: (i) => setState(() => _tab = i),
               child: StreamBuilder<List<OrganizationReviewItem>>(
                 key: ValueKey(status),
-                stream: _repo.streamForReview(status),
+                stream: _repo.streamForReview(status, kind: widget.kind),
                 builder: (context, snap) {
-                  if (snap.hasError) return const AdminListMessage('Could not load organizations.');
+                  if (snap.hasError) return AdminListMessage('Could not load ${_volunteers ? 'applications' : 'organizations'}.');
                   if (!snap.hasData) {
                     return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
                   }
                   final items = snap.data!.where(_matches).toList();
                   if (items.isEmpty) {
+                    final plural = _volunteers ? 'rescue volunteers' : 'organizations';
                     return AdminListMessage(_query.isEmpty
-                        ? 'No organizations ${label.toLowerCase()}.'
-                        : 'No organizations match your search.');
+                        ? 'No $plural ${label.toLowerCase()}.'
+                        : 'No $plural match your search.');
                   }
                   return ListView.separated(
                     padding: const EdgeInsets.all(16),

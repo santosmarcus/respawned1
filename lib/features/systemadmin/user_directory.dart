@@ -10,7 +10,9 @@ import 'package:respawnd1/core/models/rescue/org_role.dart';
 const String kSystemAdminRole = 'system_admin';
 
 /// The tabs of the system admin's user directory. [organization] is built from
-/// each organization's members; the others group accounts by type.
+/// each shelter's members and [volunteers] from each rescue volunteer's team
+/// (organizations with kind 'independent'); the others group accounts by
+/// type.
 enum AccountGroup {
   organization('Organization'),
   transporters('Transporters'),
@@ -32,6 +34,7 @@ class DirectoryUser {
     this.role = '',
     this.organizationId = '',
     this.transporterStatus = '',
+    this.signupKind = '',
     this.createdAt,
     this.photoUrl,
     this.disabled = false,
@@ -47,6 +50,10 @@ class DirectoryUser {
   /// `transporterVerificationStatus`: pending / approved / rejected, or ''
   /// before the transporter submits their documents.
   final String transporterStatus;
+
+  /// `signupKind`: 'independent' when they signed up as a rescue volunteer
+  /// (role 'organization', team created with kind 'independent').
+  final String signupKind;
   final DateTime? createdAt;
   final String? photoUrl;
 
@@ -71,6 +78,7 @@ class DirectoryUser {
       role: str('role'),
       organizationId: str('organizationId'),
       transporterStatus: str('transporterVerificationStatus'),
+      signupKind: str('signupKind'),
       createdAt: created is Timestamp ? created.toDate() : null,
       photoUrl: photo.startsWith('http') ? photo : null,
       disabled: d['disabled'] == true,
@@ -80,8 +88,12 @@ class DirectoryUser {
   factory DirectoryUser.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) =>
       DirectoryUser.fromMap(doc.id, doc.data() ?? const {});
 
+  /// Signed up as a rescue volunteer (their team is an organization with
+  /// kind 'independent').
+  bool get isRescueVolunteerSignup => role == 'organization' && signupKind == 'independent';
+
   /// What kind of account this is, in words.
-  String get accountTypeLabel => accountTypeLabelOf(role);
+  String get accountTypeLabel => isRescueVolunteerSignup ? 'Rescue volunteer' : accountTypeLabelOf(role);
 
   bool matches(String query) {
     if (query.isEmpty) return true;
@@ -96,7 +108,8 @@ class DirectoryUser {
 String accountTypeLabelOf(String role) => switch (role) {
       'general' => 'General user',
       'pet_transporter' => 'Pet transporter',
-      'rescue_volunteer' => 'Rescue volunteer',
+      // The old transporter-like volunteer role; no longer offered at sign-up.
+      'rescue_volunteer' => 'Volunteer (older account)',
       'organization' => 'Organization owner',
       'organization_member' => 'Organization member',
       'admin' => 'Platform admin',
@@ -107,12 +120,17 @@ String accountTypeLabelOf(String role) => switch (role) {
     };
 
 /// Which account-type tab a user is listed under. Organization accounts
-/// (owner and member roles) are listed under their organization instead, so
-/// they map to [AccountGroup.organization].
-AccountGroup groupOf(DirectoryUser u) => switch (u.role) {
+/// (owner and member roles) are listed under their organization instead:
+/// [AccountGroup.volunteers] when it is a rescue volunteer's team (one of
+/// [volunteerOrgIds], or not created yet after a rescue volunteer sign-up),
+/// else [AccountGroup.organization].
+AccountGroup groupOf(DirectoryUser u, {Set<String> volunteerOrgIds = const {}}) => switch (u.role) {
       'pet_transporter' => AccountGroup.transporters,
       'rescue_volunteer' => AccountGroup.volunteers,
-      'organization' || 'organization_member' => AccountGroup.organization,
+      'organization' || 'organization_member' => volunteerOrgIds.contains(u.organizationId) ||
+              (u.organizationId.isEmpty && u.isRescueVolunteerSignup)
+          ? AccountGroup.volunteers
+          : AccountGroup.organization,
       'admin' || 'ngo_staff' || kSystemAdminRole => AccountGroup.admins,
       _ => AccountGroup.general,
     };
@@ -206,8 +224,16 @@ List<OrgRosterEntry> buildOrgRoster({
 
 /// Organization accounts not on any organization yet: an owner whose draft
 /// organization was never created, or a member still waiting for an
-/// invitation.
-List<DirectoryUser> unlinkedOrganizationAccounts(Iterable<DirectoryUser> users) => users
-    .where((u) => groupOf(u) == AccountGroup.organization && u.organizationId.isEmpty)
-    .toList()
-  ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+/// invitation. [group] [AccountGroup.volunteers] gives the rescue volunteer
+/// sign-ups among them instead.
+List<DirectoryUser> unlinkedOrganizationAccounts(
+  Iterable<DirectoryUser> users, {
+  AccountGroup group = AccountGroup.organization,
+}) =>
+    users
+        .where((u) =>
+            u.organizationId.isEmpty &&
+            const ['organization', 'organization_member'].contains(u.role) &&
+            groupOf(u) == group)
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));

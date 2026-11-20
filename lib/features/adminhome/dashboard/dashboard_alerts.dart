@@ -487,11 +487,11 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
       DashAlert(
         severity: DashSeverity.info,
         icon: Icons.groups_outlined,
-        title: '${plural(helpers.length, 'volunteer application')} to review',
+        title: '${plural(helpers.length, 'rescue volunteer application')} to review',
         status: 'Pending',
         subject: helpers.length == 1 && helpers.first.name.isNotEmpty ? helpers.first.name : null,
         timing: oldest == null ? null : 'Oldest submitted ${elapsedSince(oldest)}',
-        action: 'Review availability and experience, then approve or decline',
+        action: 'Check their documents and area, then approve, ask for changes or decline',
         area: AlertArea.people,
         key: 'people:volunteers',
         button: 'Review',

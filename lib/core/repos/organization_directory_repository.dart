@@ -87,6 +87,17 @@ class OrganizationDirectoryRepository {
     return out;
   }
 
+  /// Every approved rescue volunteer (kind 'independent'), by name: the
+  /// Rescue Volunteers directory.
+  Stream<List<RescueVolunteerListing>> watchRescueVolunteers() {
+    return _organizations
+        .where('kind', isEqualTo: 'independent')
+        .where('verificationStatus', isEqualTo: 'approved')
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => RescueVolunteerListing.fromOrg(d.id, d.data())).toList()
+          ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
+  }
+
   /// Resolves the Intake flow's destination, in priority order: an
   /// org-specific saved shelter location (`organizations/{orgId}.shelterName`
   /// + `shelterAddress`/`shelterPlaceId`/`shelterLat`/`shelterLng`, written
@@ -252,4 +263,69 @@ class IndependentCandidate {
 
   String get room => '${maxActiveCases - activeCases} case slot(s) · '
       '${maxAnimalsInCare - animalsInCare} animal space(s)';
+}
+
+/// One approved rescue volunteer (an organizations doc with kind
+/// 'independent') in the Rescue Volunteers directory.
+class RescueVolunteerListing {
+  const RescueVolunteerListing({
+    required this.id,
+    required this.name,
+    this.area = '',
+    this.phone = '',
+    this.avatarUrl,
+    this.activeCases = 0,
+    this.maxActiveCases = IndependentRescuer.maxActiveCases,
+    this.animalsInCare = 0,
+    this.maxAnimalsInCare = IndependentRescuer.maxAnimalsInCare,
+    this.memberCount = 1,
+    this.accepting = true,
+  });
+
+  factory RescueVolunteerListing.fromOrg(String id, Map<String, dynamic> d) {
+    String str(String k) => d[k] is String ? (d[k] as String).trim() : '';
+    int n(String k, int fallback) => (d[k] as num?)?.toInt() ?? fallback;
+    final avatar = str('avatarUrl');
+    return RescueVolunteerListing(
+      id: id,
+      name: str('name').isEmpty ? 'Unnamed rescue volunteer' : str('name'),
+      area: str('location'),
+      phone: str('phone').isNotEmpty ? str('phone') : str('contactNumber'),
+      avatarUrl: avatar.startsWith('http') ? avatar : null,
+      activeCases: n('activeCaseCount', 0),
+      maxActiveCases: n('maxActiveCases', IndependentRescuer.maxActiveCases),
+      animalsInCare: n('animalsInCareCount', 0),
+      maxAnimalsInCare: n('maxAnimalsInCare', IndependentRescuer.maxAnimalsInCare),
+      memberCount: n('memberCount', 1),
+      accepting: d['acceptingCases'] != false,
+    );
+  }
+
+  final String id;
+  final String name;
+  final String area;
+  final String phone;
+  final String? avatarUrl;
+  final int activeCases;
+  final int maxActiveCases;
+  final int animalsInCare;
+  final int maxAnimalsInCare;
+  final int memberCount;
+  final bool accepting;
+
+  /// Paused, at the case limit or full; null when they can take a case.
+  String? get unavailableReason {
+    if (!accepting) return 'Paused';
+    if (activeCases >= maxActiveCases) return 'At case limit';
+    if (animalsInCare >= maxAnimalsInCare) return 'Full';
+    return null;
+  }
+
+  bool get isAvailable => unavailableReason == null;
+
+  bool matches(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return name.toLowerCase().contains(q) || area.toLowerCase().contains(q) || phone.contains(q);
+  }
 }

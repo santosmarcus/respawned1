@@ -533,14 +533,10 @@ class TopMetricsRow extends ConsumerWidget {
     final activeAnimalCount =
         allLoaded ? activeTabs.fold<int>(0, (acc, a) => acc + a.value!.fold<int>(0, (s, c) => s + c.animalCount)) : null;
 
-    // Active Volunteers — no distinct active/inactive account field exists
-    // for rescue_volunteer users (confirmed by inspection); the only real
-    // presence signal already used elsewhere (Volunteers page itself) is
-    // PetTransporter.isOnline (online + seen within the last 5 minutes).
-    // Reported honestly as "online now" rather than implying a broader
-    // "active" concept the data can't actually support.
-    final volunteersAsync = ref.watch(rescueVolunteersProvider);
-    final onlineVolunteers = volunteersAsync.value?.where((v) => v.isOnline).length;
+    // Active Volunteers — approved rescue volunteers (kind 'independent'),
+    // and how many are taking cases now (not paused, under their limits).
+    final volunteersAsync = ref.watch(approvedRescueVolunteersProvider);
+    final onlineVolunteers = volunteersAsync.value?.where((v) => v.isAvailable).length;
     final totalVolunteers = volunteersAsync.value?.length;
 
     return Row(
@@ -561,8 +557,8 @@ class TopMetricsRow extends ConsumerWidget {
         const SizedBox(width: 10),
         _CompactMetricCard(
           title: 'Active Volunteers',
-          primary: onlineVolunteers == null ? '—' : '$onlineVolunteers online',
-          secondary: totalVolunteers == null ? 'True active-state requires additional data' : '$totalVolunteers registered',
+          primary: onlineVolunteers == null ? '—' : '$onlineVolunteers taking cases',
+          secondary: totalVolunteers == null ? null : '$totalVolunteers approved',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VolunteersPage())),
         ),
       ],

@@ -93,7 +93,7 @@ function planLimitsChange(input) {
   if (d.enabledPermissions !== undefined) {
     if (!Array.isArray(d.enabledPermissions)) return {error: 'enabledPermissions must be a list.'};
     const bad = d.enabledPermissions.filter((k) => !INDEPENDENT.allowed.includes(k));
-    if (bad.length) return {error: `Not available to independent rescuers: ${bad.join(', ')}.`};
+    if (bad.length) return {error: `Not available to rescue volunteers: ${bad.join(', ')}.`};
     for (const required of ['rescue']) {
       if (!d.enabledPermissions.includes(required)) return {error: 'Rescue cases can\'t be turned off.'};
     }

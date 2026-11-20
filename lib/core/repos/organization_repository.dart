@@ -505,9 +505,15 @@ class OrganizationRepository {
 
   /// Organizations in one verification state, oldest submission first so
   /// the longest-waiting is reviewed first. Platform staff's review queue.
-  Stream<List<OrganizationReviewItem>> streamForReview(OrgVerificationStatus status) {
+  /// Sign-ups with [status], oldest first. [kind] keeps only shelters or only
+  /// rescue volunteers (kind 'independent'); filtered here, since shelters
+  /// usually have no `kind` field.
+  Stream<List<OrganizationReviewItem>> streamForReview(OrgVerificationStatus status, {OrgKind? kind}) {
     return _organizations.where('verificationStatus', isEqualTo: status.name).snapshots().map((snap) {
-      final items = snap.docs.map(OrganizationReviewItem.fromFirestore).toList();
+      final items = snap.docs
+          .map(OrganizationReviewItem.fromFirestore)
+          .where((o) => kind == null || o.kind == kind)
+          .toList();
       final far = DateTime.fromMillisecondsSinceEpoch(0);
       items.sort((a, b) => (a.submittedAt ?? far).compareTo(b.submittedAt ?? far));
       return items;

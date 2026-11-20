@@ -105,7 +105,8 @@ final pendingOrganizationReviewCountProvider = StreamProvider.autoDispose<int>((
       .collection('organizations')
       .where('verificationStatus', isEqualTo: 'pending')
       .snapshots()
-      .map((s) => s.size);
+      // Rescue volunteers (kind 'independent') are reviewed from Volunteers.
+      .map((s) => s.docs.where((d) => d.data()['kind'] != 'independent').length);
 });
 
 /// Which organization the signed-in account is linked to — reuses
@@ -228,6 +229,12 @@ final petTransportersProvider = StreamProvider<List<PetTransporter>>((ref) {
 /// directory page.
 final rescueVolunteersProvider = StreamProvider<List<PetTransporter>>((ref) {
   return ref.watch(rescueCaseRepositoryProvider).streamRescueVolunteers();
+});
+
+/// Approved rescue volunteers (organizations with kind 'independent'): the
+/// Rescue Volunteers directory and the dashboard's volunteer count.
+final approvedRescueVolunteersProvider = StreamProvider.autoDispose<List<RescueVolunteerListing>>((ref) {
+  return OrganizationDirectoryRepository().watchRescueVolunteers();
 });
 
 /// Chronological treatment history for a case (subcollection, with legacy

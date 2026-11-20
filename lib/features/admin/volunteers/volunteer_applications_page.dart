@@ -1,49 +1,40 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:respawnd1/core/models/volunteer/volunteer_application.dart';
-import 'package:respawnd1/core/repos/volunteer_application_repository.dart';
-import 'package:respawnd1/features/admin/volunteers/application_review.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
+import 'package:respawnd1/features/admin/organizations/organization_review_page.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 
-/// Staff review of general volunteer applications (paper 1.4.5).
-class VolunteerApplicationsPage extends StatelessWidget {
-  const VolunteerApplicationsPage({super.key, this.showBackButton = true, this.menuActions = const []});
+/// Rescue volunteer applications: people who signed up as a rescue volunteer
+/// (an organizations doc with kind 'independent') and submitted their
+/// documents. Organization staff with the Volunteers permission, platform
+/// staff and system admins approve, reject or ask for changes
+/// (the reviewOrganization callable).
+///
+/// [canSetLimits]: whether approved rescue volunteers show "Modules &
+/// limits" (setIndependentLimits); null = only for platform staff.
+class VolunteerApplicationsPage extends ConsumerWidget {
+  const VolunteerApplicationsPage({
+    super.key,
+    this.showBackButton = true,
+    this.canSetLimits,
+    this.menuActions = const [],
+  });
 
   final bool showBackButton;
+  final bool? canSetLimits;
   final List<AdminMenuAction> menuActions;
 
-  static VolunteerApplicationStatus _status(ApplicationTab t) => switch (t) {
-        ApplicationTab.pending => VolunteerApplicationStatus.pending,
-        ApplicationTab.approved => VolunteerApplicationStatus.approved,
-        ApplicationTab.rejected => VolunteerApplicationStatus.rejected,
-      };
-
   @override
-  Widget build(BuildContext context) {
-    final repo = VolunteerApplicationRepository();
-    return ApplicationReviewPage<VolunteerApplication>(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final limits = canSetLimits ?? (ref.watch(isPlatformStaffProvider).asData?.value ?? false);
+    return OrganizationReviewPage(
+      kind: OrgKind.independent,
       title: 'Rescue Volunteer Applications',
-      noun: 'rescue volunteer applications',
-      watch: (t) => repo.watchByStatus(_status(t)),
-      summarize: (app) => ApplicationSummary(
-        name: app.name,
-        phone: app.phone,
-        lines: [
-          ('Helps with', app.categories.map((c) => c.label).join(', ')),
-          ('Available', app.availability),
-          ('Area', app.serviceArea),
-          ('Experience', app.experience),
-        ],
-        submittedAt: app.submittedAt,
-        reviewedAt: app.status == VolunteerApplicationStatus.pending ? null : app.reviewedAt,
-        reviewNote: app.reviewNote,
-      ),
-      approveMessage: (app) => '${app.name.isEmpty ? 'This applicant' : app.name} becomes an approved volunteer '
-          'for the activities they applied for.',
       showBackButton: showBackButton,
+      canSetLimits: limits,
       menuActions: menuActions,
-      save: (app, approve, reviewer, note) =>
-          repo.review(uid: app.uid, approve: approve, reviewerUid: reviewer, note: note),
     );
   }
 }

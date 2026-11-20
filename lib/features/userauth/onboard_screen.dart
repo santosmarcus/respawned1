@@ -54,18 +54,10 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
     ),
     _UserTypeOption(
       role: _independentRescuer,
-      title: 'Independent Rescuer',
+      title: 'Rescue Volunteer',
       description:
       'Rescue on your own or with a small team: take nearby cases and referrals, keep animal records, '
           'transport rescues yourself and rehome them. Reviewed before you start.',
-      color: AppColors.greenrspwn,
-    ),
-    _UserTypeOption(
-      role: 'rescue_volunteer',
-      title: 'Rescue Volunteer',
-      description:
-      'Help organizations on the road: carry rescues to clinics and check on reports. '
-          'To take and keep cases yourself, choose Independent Rescuer.',
       color: AppColors.greenrspwn,
     ),
     _UserTypeOption(
@@ -128,7 +120,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
         // HomeScreen here but ServiceScreen on restart — an inconsistency).
         Widget nextPage;
 
-        if (_selectedRole == 'pet_transporter' || _selectedRole == 'rescue_volunteer') {
+        if (_selectedRole == 'pet_transporter') {
           Navigator.push(
             context,
             MaterialPageRoute(

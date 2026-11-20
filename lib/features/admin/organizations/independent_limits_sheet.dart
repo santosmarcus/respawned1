@@ -156,7 +156,7 @@ class _IndependentLimitsSheetState extends State<_IndependentLimitsSheet> {
                       subtitle: Text(p.description, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                     ),
                   Text(
-                    'Fundraising, donations, events and Facebook posting are never available to independent rescuers.',
+                    'Fundraising, donations, events and Facebook posting are never available to rescue volunteers.',
                     style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                   ),
                   const Divider(height: 24),

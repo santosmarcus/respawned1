@@ -2014,7 +2014,7 @@ class _CaseSummaryCard extends StatelessWidget {
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                 // An independent rescuer took the case (never their address).
                 if (data['ownerKind'] == 'independent')
-                  Text('Handled by an independent rescuer',
+                  Text('Handled by a rescue volunteer',
                       style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
               ],
             ),

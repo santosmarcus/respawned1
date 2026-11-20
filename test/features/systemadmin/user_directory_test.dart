@@ -45,6 +45,24 @@ void main() {
     expect(accountTypeLabelOf(kSystemAdminRole), 'System admin');
   });
 
+  test('rescue volunteers\' teams land in the volunteers tab, not Organization', () {
+    const ids = {'vol1'};
+    expect(groupOf(user('a', role: 'organization', org: 'vol1'), volunteerOrgIds: ids), AccountGroup.volunteers);
+    expect(groupOf(user('a', role: 'organization_member', org: 'vol1'), volunteerOrgIds: ids), AccountGroup.volunteers);
+    expect(groupOf(user('a', role: 'organization', org: 'shelter1'), volunteerOrgIds: ids), AccountGroup.organization);
+    // Signed up as a rescue volunteer, team not created yet.
+    const signup = DirectoryUser(uid: 's', name: 'Sol', role: 'organization', signupKind: 'independent');
+    expect(groupOf(signup), AccountGroup.volunteers);
+    expect(signup.accountTypeLabel, 'Rescue volunteer');
+    expect(unlinkedOrganizationAccounts([signup, user('o', role: 'organization')]).map((u) => u.uid), ['o']);
+    expect(
+      unlinkedOrganizationAccounts([signup, user('o', role: 'organization')], group: AccountGroup.volunteers)
+          .map((u) => u.uid),
+      ['s'],
+    );
+    expect(DirectoryUser.fromMap('x', {'role': 'organization', 'signupKind': 'independent'}).isRescueVolunteerSignup, isTrue);
+  });
+
   test('transporter status labels', () {
     expect(transporterStatusLabel('approved'), 'Verified');
     expect(transporterStatusLabel('pending'), 'Waiting for organization review');

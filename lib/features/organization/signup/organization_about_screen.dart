@@ -259,7 +259,7 @@ class _OrganizationAboutScreenState extends State<OrganizationAboutScreen> {
                     const SizedBox(height: 6),
                     Text(
                         _independent
-                            ? 'Independent rescuers take nearby cases and referrals, keep animal records and can '
+                            ? 'Rescue volunteers take nearby cases and referrals, keep animal records and can '
                                 'transport rescues themselves. A system admin reviews this before you start.'
                             : 'This information is reviewed as part of verification.',
                         style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),

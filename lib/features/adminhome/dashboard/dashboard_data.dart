@@ -14,10 +14,10 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_application.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
-import 'package:respawnd1/core/models/volunteer/volunteer_application.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/repos/transporter_application_repository.dart';
-import 'package:respawnd1/core/repos/volunteer_application_repository.dart';
+import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
@@ -342,8 +342,14 @@ final closedCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((
 
 // ─── People: volunteer and transporter applications ─────────────────────
 
-final pendingVolunteerApplicationsProvider = StreamProvider.autoDispose<List<VolunteerApplication>>((ref) {
-  return VolunteerApplicationRepository().watchByStatus(VolunteerApplicationStatus.pending);
+/// Rescue volunteer sign-ups (kind 'independent') waiting for review, for
+/// the people who can decide them: staff with the Volunteers permission
+/// (never a rescue volunteer's own team) and platform staff.
+final pendingVolunteerApplicationsProvider = StreamProvider.autoDispose<List<OrganizationReviewItem>>((ref) {
+  final canReview = (ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canManageVolunteers ?? false) ||
+      (ref.watch(isPlatformStaffProvider).asData?.value ?? false);
+  if (!canReview) return Stream.value(const <OrganizationReviewItem>[]);
+  return OrganizationRepository().streamForReview(OrgVerificationStatus.pending, kind: OrgKind.independent);
 });
 
 final pendingTransporterApplicationsProvider = StreamProvider.autoDispose<List<TransporterApplication>>((ref) {

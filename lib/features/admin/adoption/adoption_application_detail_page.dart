@@ -1465,7 +1465,7 @@ class _ActionsSection extends ConsumerWidget {
           hint: booked
               ? null
               : interviewOptional
-                  ? 'The interview is optional for independent rescuers. Accept now, or wait for the applicant to book one.'
+                  ? 'The interview is optional for rescue volunteers. Accept now, or wait for the applicant to book one.'
                   : 'Waiting for the applicant to book an interview.',
           primaryLabel: 'Confirm Interview',
           onPrimary: (busy || !booked) ? null : onConfirmInterview,

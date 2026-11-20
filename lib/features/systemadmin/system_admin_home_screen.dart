@@ -16,11 +16,13 @@ import 'package:respawnd1/features/systemadmin/system_users_page.dart';
 
 /// Home of a system admin (`users/{uid}.role == 'system_admin'`, set in the
 /// Firebase console):
-///  - Organizations: approve, reject or ask for changes on organization
-///    sign-ups waiting for verification (the reviewOrganization callable).
-///  - Volunteers / Transporters: approve or reject volunteer and pet
-///    transporter applications (organization staff with the Volunteers
-///    permission can too).
+///  - Organizations: approve, reject or ask for changes on shelter sign-ups
+///    waiting for verification (the reviewOrganization callable).
+///  - Volunteers: the same for rescue volunteers (organizations with kind
+///    'independent'), plus their modules and limits once approved.
+///  - Transporters: approve or reject pet transporter applications.
+///  Organization staff with the Volunteers permission can review rescue
+///  volunteers and transporters too.
 ///  - Users: a read-only directory of every account, by organization and by
 ///    account type.
 /// The console has no access to cases, animals, medical records or finances
@@ -39,25 +41,29 @@ class _SystemAdminHomeScreenState extends State<SystemAdminHomeScreen> {
   int _pendingOrgs = 0;
   int _pendingVolunteers = 0;
   int _pendingTransporters = 0;
-  final List<StreamSubscription<int>> _subs = [];
+  final List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _subs = [];
 
   @override
   void initState() {
     super.initState();
-    void watch(String collection, String field, void Function(int) set) {
+    void watch(String collection, String field, void Function(QuerySnapshot<Map<String, dynamic>>) set) {
       _subs.add(FirebaseFirestore.instance
           .collection(collection)
           .where(field, isEqualTo: 'pending')
           .snapshots()
-          .map((s) => s.size)
-          .listen((n) {
-        if (mounted) setState(() => set(n));
+          .listen((s) {
+        if (mounted) setState(() => set(s));
       }, onError: (Object e) => debugPrint('[SystemAdmin] $collection count failed: $e')));
     }
 
-    watch('organizations', 'verificationStatus', (n) => _pendingOrgs = n);
-    watch('volunteerApplications', 'status', (n) => _pendingVolunteers = n);
-    watch('transporterApplications', 'status', (n) => _pendingTransporters = n);
+    // One query for both tabs: rescue volunteers are organizations with
+    // kind 'independent'.
+    watch('organizations', 'verificationStatus', (s) {
+      final volunteers = s.docs.where((d) => d.data()['kind'] == 'independent').length;
+      _pendingVolunteers = volunteers;
+      _pendingOrgs = s.size - volunteers;
+    });
+    watch('transporterApplications', 'status', (s) => _pendingTransporters = s.size);
   }
 
   @override
@@ -101,7 +107,7 @@ class _SystemAdminHomeScreenState extends State<SystemAdminHomeScreen> {
         index: _index,
         children: [
           OrganizationReviewPage(title: 'Organization approvals', showBackButton: false, menuActions: menu),
-          VolunteerApplicationsPage(showBackButton: false, menuActions: menu),
+          VolunteerApplicationsPage(showBackButton: false, canSetLimits: true, menuActions: menu),
           TransporterApplicationsPage(showBackButton: false, menuActions: menu),
           SystemUsersPage(menuActions: menu),
         ],

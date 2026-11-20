@@ -69,8 +69,8 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
       organization: animal.independentRescuerName == null
           ? 'ResPAWnd Partner'
           : animal.independentRescuerName!.isEmpty
-              ? 'Independent rescuer'
-              : 'Independent rescuer · ${animal.independentRescuerName}',
+              ? 'Rescue volunteer'
+              : 'Rescue volunteer · ${animal.independentRescuerName}',
       orgSubtitle: animal.independentRescuerName == null
           ? 'Verified rescue organization'
           : 'Verified by ResPAWnd. Fosters at home with a small team.',

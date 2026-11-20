@@ -133,7 +133,7 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
           ),
           Text(
             limited
-                ? 'Your team has only the modules turned on for independent rescuers. A system admin can turn on more.'
+                ? 'Your team has only the modules turned on for rescue volunteers. A system admin can turn on more.'
                 : 'Every Staff member starts with rescue, animal records, daily care (the care-tasks screen), adoptions, '
                     'events and volunteers, and analytics. Tick Money permissions or Facebook posting by hand for the '
                     'people who handle them.',

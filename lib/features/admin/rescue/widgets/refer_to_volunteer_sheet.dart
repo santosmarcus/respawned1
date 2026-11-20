@@ -125,7 +125,7 @@ class _ReferToVolunteerBodyState extends State<_ReferToVolunteerBody> {
             const SizedBox(height: 14),
             Text('Refer to Rescue Volunteer', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
             const SizedBox(height: 4),
-            Text('Verified independent rescuers whose area covers this case.',
+            Text('Verified rescue volunteers whose area covers this case.',
                 style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
             const SizedBox(height: 10),
             Expanded(
@@ -146,7 +146,7 @@ class _ReferToVolunteerBodyState extends State<_ReferToVolunteerBody> {
                         child: Text(
                           widget.rescueCase.lat == null
                               ? 'This case has no map location, so no rescuer can be matched.'
-                              : 'No independent rescuer covers this location yet.',
+                              : 'No rescue volunteer covers this location yet.',
                           textAlign: TextAlign.center,
                           style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
                         ),

@@ -5,7 +5,7 @@ const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
-const {orgMemberUids, requireOrgPermission, isIndependent} = require('./org_access');
+const {orgMemberUids, requireOrgPermission, isIndependent, effectiveAccess} = require('./org_access');
 const independentRules = require('./independent_rescuer_rules');
 const db = admin.firestore();
 
@@ -2035,9 +2035,11 @@ exports.publicAnimalPage = require('./public_animal_page').publicAnimalPage;
 // Platform staff (users/{uid}.role 'admin' or 'ngo_staff') and system admins
 // ('system_admin', the approvals console) approve, reject or
 // ask for changes on an organization that submitted its documents
-// (verificationStatus 'pending'). firestore.rules blocks every client from
-// setting these fields, so each decision goes through here, is logged to
-// auditLogs, and reaches the owner as a push and an in-app notification.
+// (verificationStatus 'pending'). Rescue volunteers (kind 'independent') can
+// also be decided by organization staff with the Volunteers permission at an
+// approved shelter. firestore.rules blocks every client from setting these
+// fields, so each decision goes through here, is logged to auditLogs, and
+// reaches the owner as a push and an in-app notification.
 const ORG_REVIEW_DECISIONS = {
   approved: {
     title: 'Organization approved',
@@ -2053,12 +2055,44 @@ const ORG_REVIEW_DECISIONS = {
   },
 };
 
+// The same decisions, worded for a rescue volunteer.
+const VOLUNTEER_REVIEW_DECISIONS = {
+  approved: {
+    title: 'Rescue volunteer approved',
+    body: () => 'You\'re approved as a rescue volunteer. You can now take nearby cases.',
+  },
+  rejected: {
+    title: 'Rescue volunteer application not approved',
+    body: () => 'Your rescue volunteer application was not approved. Open the app to see why.',
+  },
+  requiresChanges: {
+    title: 'Changes needed',
+    body: () => 'Your rescue volunteer application needs changes to its documents before it can be approved.',
+  },
+};
+
+/// The organization an account reviews rescue volunteers for: an approved
+/// shelter where it holds the Volunteers permission. Null otherwise.
+async function volunteerReviewerOrg(uid, userData) {
+  const orgId = typeof userData.organizationId === 'string' ? userData.organizationId : '';
+  if (!orgId) return null;
+  const orgRef = db.collection('organizations').doc(orgId);
+  const [org, member] = await Promise.all([orgRef.get(), orgRef.collection('members').doc(uid).get()]);
+  if (!org.exists || isIndependent(org.data())) return null;
+  const access = effectiveAccess({
+    uid, orgId, org: org.data(), member: member.exists ? member.data() : null, userOrgId: orgId,
+  });
+  return access.active && access.has('volunteers') ? {id: orgId, name: org.get('name') || ''} : null;
+}
+
 exports.reviewOrganization = onCall(async (request) => {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const reviewer = await db.collection('users').doc(uid).get();
   const reviewerData = reviewer.exists ? reviewer.data() : {};
-  if (!['admin', 'ngo_staff', 'system_admin'].includes(reviewerData.role)) {
+  const platformReviewer = ['admin', 'ngo_staff', 'system_admin'].includes(reviewerData.role);
+  const reviewerOrg = platformReviewer ? null : await volunteerReviewerOrg(uid, reviewerData);
+  if (!platformReviewer && !reviewerOrg) {
     throw new HttpsError('permission-denied', 'Only platform staff can review organizations.');
   }
 
@@ -2077,12 +2111,16 @@ exports.reviewOrganization = onCall(async (request) => {
   }
   if (note.length > 1000) throw new HttpsError('invalid-argument', 'Keep the note under 1,000 characters.');
 
-  const reviewerName = reviewerData.name || reviewerData.fullName || reviewerData.email || 'Platform staff';
+  const personName = reviewerData.name || reviewerData.fullName || reviewerData.email || 'Platform staff';
+  const reviewerName = reviewerOrg && reviewerOrg.name ? `${personName} (${reviewerOrg.name})` : personName;
   const orgRef = db.collection('organizations').doc(organizationId);
   const org = await db.runTransaction(async (tx) => {
     const snap = await tx.get(orgRef);
     if (!snap.exists) throw new HttpsError('not-found', 'Organization not found.');
     const data = snap.data();
+    if (!platformReviewer && !isIndependent(data)) {
+      throw new HttpsError('permission-denied', 'Only platform staff can review organizations.');
+    }
     if (data.verificationStatus !== 'pending') {
       throw new HttpsError('failed-precondition', 'This organization is not waiting for review.');
     }
@@ -2105,6 +2143,7 @@ exports.reviewOrganization = onCall(async (request) => {
       actorId: uid,
       actorName: reviewerName,
       organizationId,
+      ...(reviewerOrg ? {reviewerOrganizationId: reviewerOrg.id} : {}),
       targetType: 'Organization',
       targetId: organizationId,
       previousValues: {verificationStatus: 'pending'},
@@ -2117,7 +2156,7 @@ exports.reviewOrganization = onCall(async (request) => {
 
   const ownerId = org.ownerId;
   if (ownerId) {
-    const copy = ORG_REVIEW_DECISIONS[decision];
+    const copy = (isIndependent(org) ? VOLUNTEER_REVIEW_DECISIONS : ORG_REVIEW_DECISIONS)[decision];
     const body = copy.body(name);
     try {
       await db.collection('users').doc(ownerId).collection('notifications').add({
